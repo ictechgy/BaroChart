@@ -10,7 +10,7 @@ const params = {period:5, atrPeriod:4, fast:3, slow:7, signal:3, conversion:3,
 const channels = {
  sma:['value'], ema:['value'], wma:['value'], rsi:['value'], atr:['value'],
  macd:['macd','signal','histogram'], bollinger:['middle','upper','lower'],
- donchian:['middle','upper','lower'], stochastic:['k','d'], roc:['value'],
+ donchian:['middle','upper','lower'], aroon:['up','down','oscillator'], stochastic:['k','d'], roc:['value'],
  williamsR:['value'], cci:['value'], obv:['value'], vwap:['value'], mfi:['value'],
  cmf:['value'], adx:['adx','plusDI','minusDI'], dema:['value'], tema:['value'],
  hma:['value'], keltner:['middle','upper','lower'], supertrend:['value','direction'],
@@ -87,8 +87,8 @@ function corpus(factor) {
 }
 
 for (const [label, factor] of [['mixed',1], ['tiny-price',1e-12], ['flat-zero-volume',0]]) {
- test(`compaction restarts all 33 visible, hidden and unbound builtins against a fresh ${label} suffix`, t => {
-  assert.equal(studies.length, 33);
+ test(`compaction restarts all 34 visible, hidden and unbound builtins against a fresh ${label} suffix`, t => {
+  assert.equal(studies.length, 34);
   assert.deepEqual([...builtinIndicators.keys()].sort(), Object.keys(channels).sort(), 'every current builtin is covered');
   const input = corpus(factor), rows = input.slice(-45).map(row => ({...row}));
   const f = fixture(input, studies, true); t.after(() => f.model.dispose());

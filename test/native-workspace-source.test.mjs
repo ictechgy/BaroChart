@@ -111,8 +111,8 @@ function freshOracle(t, f) {
   return vectors(model);
 }
 
-test('source lazily measures all 33 raw builtin checkpoint histories without get or recalculation', t => {
-  const names = [...builtinIndicators.keys()]; assert.equal(names.length, 33);
+test('source lazily measures all 34 raw builtin checkpoint histories without get or recalculation', t => {
+  const names = [...builtinIndicators.keys()]; assert.equal(names.length, 34);
   const f = fixture(t, {n: 513, names}), listeners = [...f.store.listeners], entries = [...f.model.indicators.entries.values()];
   // Deliberately leave the caches dirty: admission is accounting, not source calculation.
   const last = f.store.at(512); f.store.update(512, {...last, close: last.high});

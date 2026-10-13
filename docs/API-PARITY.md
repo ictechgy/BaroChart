@@ -25,7 +25,7 @@
 | 패널·축 | `addPanel(options)`, `setPanel(id, patch)` | weight/linear/log/percent/inverted/range/base/precision | 공유 layout 기존 tests, host range/precision 설정 |
 | 독립 가격축 | `addAxis(options)`, `setAxis(id,patch)`, `removeAxis(id)` | 패널 내 축 ID/좌우/scale/range/base/precision/tickFormat/visible/width, 일반 시리즈 axisId | Node·웹 Canvas/GPU·JSCore·QuickJS fixture; 세부 계약은 INDEPENDENT-AXES.md |
 | 시리즈 | `addSeries(options)`, `setSeries(id,patch)`, `setSeriesValues(id,values)`, `removeSeries(id)` | 5종, 출력/패널/색/굵기/visible/offset; 순서 유지·데이터 바인딩 불변의 캐시 보존 | Node atomic patch, 웹/native 명시 출력·스타일·삭제 |
-| 내장 지표 | `addIndicator(id,name,params)`, `removeIndicator(id)` | 동일33종 계산; add는 `{outputs,plotOffsets}`만 반환하고 자동 plot 안 함 | 기존33종 수치/parity; 새 facade 대표 RSI/Supertrend |
+| 내장 지표 | `addIndicator(id,name,params)`, `removeIndicator(id)` | 동일34종 계산; add는 `{outputs,plotOffsets}`만 반환하고 자동 plot 안 함 | 기존33종 수치/parity; 새 facade 대표 RSI/Supertrend |
 | 지표 값 조회 | `indicatorValues(id,output?)` | 원본 정렬 배열, warm-up/NaN은 JSON `null` | 웹 batch parity, Swift·QuickJS custom 값 |
 | 사용자 지표 | 웹 `registerIndicator(name,factory)` / `registerIndicatorSource(name,source)` | native는 신뢰하는 JS factory 표현식 등록, 최대64KiB | Node·JSCore·QuickJS의 동일 `close*2` custom 계산 |
 | 도형 CRUD | `addDrawing`, `editDrawing`, `deleteDrawing`, `selectDrawing` | 기존14종, 잠금/핸들/시간·가격 anchor; panel 존재 검사 | 공유14종 tests; host text 잠금/편집/저장, 기존 native channel/freehand gesture |
@@ -107,7 +107,7 @@ engine.command("fit");
 * 외부 종목은 기준 UTC에 정렬된 일반 시리즈 값입니다. 별도 OHLCV 저장소·자동 합집합 시간축·기업행동/환율·자동 재정렬은 제공하지 않습니다. `crosshairValues`는 새 layout/range 조회를 수행하며 cached hover의 무계산 경로와 비용이 다릅니다.
 * native JSON scene은 copy/encode/decode 경계입니다. GPU는 웹 WebGL2 경로이며 별도 native Metal/Vulkan/WebGPU renderer는 없습니다.
 * 완전한 문자 shaping·같은 OS font·동일 AA/joins, native 접근성 데이터 표, 모든 font의 동일 glyph layout, 전체 chart snapshot, framework adapter, 자동 데이터 provider는 제공하지 않습니다.
-* macOS/iOS 데모 toolbar는 일부 도구만 표시하고 Android toolbar는14종을 모두 표시합니다. 모든 native 도구는 setTool로 호출 가능합니다. 실제 시스템 입력과 직접 controller 호출의 최신 구분은 CYCLE10-VALIDATION.md에 있습니다. 실기기·다른 Android ABI/최소 OS 실제 실행과 장시간 lifecycle은 여전히 미검증입니다. 공통33/14 코드가 같은 runtime에 있다고 해서 모든 도구/지표의 모바일 입력·픽셀을 각각 실측했다고 계산하지 않습니다.
+* macOS/iOS 데모 toolbar는 일부 도구만 표시하고 Android toolbar는14종을 모두 표시합니다. 모든 native 도구는 setTool로 호출 가능합니다. 실제 시스템 입력과 직접 controller 호출의 최신 구분은 CYCLE10-VALIDATION.md에 있습니다. 실기기·다른 Android ABI/최소 OS 실제 실행과 장시간 lifecycle은 여전히 미검증입니다. 공통34/14 코드가 같은 runtime에 있다고 해서 모든 도구/지표의 모바일 입력·픽셀을 각각 실측했다고 계산하지 않습니다.
 
 이 범위에는 새 플랫폼 선택이나 계정 접근 권한이 필요하지 않았습니다. 실기기/추가 ABI 검증은 실제 기기와 해당 빌드·서명 환경이 있어야 진행할 수 있습니다.
 

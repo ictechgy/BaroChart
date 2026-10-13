@@ -76,6 +76,14 @@ add('bollinger', ({period: p = 20, deviation = 2} = {}) => {period(p); if (!Numb
   if (count < p) return [NaN, NaN, NaN]; const d = deviation * Math.sqrt(Math.max(0, s.m2) / p); return [s.mean, s.mean + d, s.mean - d];
 });});
 add('donchian', ({period: p = 20} = {}) => {period(p); return definition(['middle', 'upper', 'lower'], {}, (s, b, i) => {const h = extreme(s, 'h', b.high, p, i, true), l = extreme(s, 'l', b.low, p, i, false); return [(h + l) / 2, h, l];});});
+// Aroon period counts prior intervals, so the current-inclusive window has p+1
+// bars. Monotonic queues retain the latest index when extrema tie (including ±0).
+add('aroon', ({period: p = 25} = {}) => {period(p); return definition(['up', 'down', 'oscillator'], {}, (s, b, i) => {
+  extreme(s, 'h', b.high, p + 1, i, true); extreme(s, 'l', b.low, p + 1, i, false);
+  if (i < p) return [NaN, NaN, NaN];
+  const up = 100 * (p - (i - s.h.a[s.h.head][0])) / p, down = 100 * (p - (i - s.l.a[s.l.head][0])) / p;
+  return [up, down, up - down];
+});});
 add('stochastic', ({period: p = 14, smoothK = 3, smoothD = 3} = {}) => {period(p); period(smoothK); period(smoothD); return definition(['k', 'd'], {}, (s, b, i) => {const h = extreme(s, 'h', b.high, p, i, true), l = extreme(s, 'l', b.low, p, i, false), raw = !Number.isFinite(h) ? NaN : h === l ? 50 : 100 * (b.close - l) / (h - l), k = roll(s, 'k', raw, smoothK); return [k, roll(s, 'd', k, smoothD)];});});
 add('roc', ({period: p = 12} = {}) => {period(p); return definition(['value'], {a: [], head: 0}, (s, b) => {let result = NaN; if (s.a.length === p) {const old = s.a[s.head]; result = old === 0 ? NaN : (b.close / old - 1) * 100; s.a[s.head] = b.close; s.head = (s.head + 1) % p;} else s.a.push(b.close); return [result];});});
 add('williamsR', ({period: p = 14} = {}) => {period(p); return definition(['value'], {}, (s, b, i) => {const h = extreme(s, 'h', b.high, p, i, true), l = extreme(s, 'l', b.low, p, i, false); return [!Number.isFinite(h) ? NaN : h === l ? -50 : -100 * (h - b.close) / (h - l)];});});

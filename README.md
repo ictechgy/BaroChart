@@ -9,7 +9,7 @@ Financial charts built around your own data: a DOM-free Float64 core, Canvas and
 ## What you can build
 
 - Candlestick, OHLC, line, area and histogram charts with multiple panels, independent price axes, pan/zoom and streaming updates.
-- Studies using **33 built-in indicators**, including SMA, EMA, RSI, MACD, Bollinger Bands, ATR, Ichimoku and session-aware VWAP. Numerical seeds, warm-up and undefined values have [documented contracts](docs/INDICATORS.md).
+- Studies using **34 built-in indicators**, including SMA, EMA, RSI, MACD, Bollinger Bands, ATR, Ichimoku and session-aware VWAP. Numerical seeds, warm-up and undefined values have [documented contracts](docs/INDICATORS.md).
 - Annotations using **14 drawing tools**, with time/price anchors, selection, editing, locking and undo/redo.
 - Data-driven views with historical corrections, ordered ingestion batches, screen-independent queries and explicit session-based OHLCV resampling.
 - Portable chart configuration, drawings and study settings, with explicit dataset ownership and validation.

@@ -97,7 +97,7 @@ function checkpointInitialEquals(value, expected) {
   const keys = Object.keys(expected); return Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key) && checkpointInitialEquals(value[key], expected[key]));
 }
 const checkpointInitialStates = {
-  sma:{},ema:{},wma:{},rsi:{previous:NaN},atr:{previous:NaN},macd:{},bollinger:{mean:0,m2:0,a:[],head:0},donchian:{},stochastic:{},roc:{a:[],head:0},williamsR:{},cci:{},
+  sma:{},ema:{},wma:{},rsi:{previous:NaN},atr:{previous:NaN},macd:{},bollinger:{mean:0,m2:0,a:[],head:0},donchian:{},aroon:{},stochastic:{},roc:{a:[],head:0},williamsR:{},cci:{},
   obv:{previous:NaN,value:0},vwap:{session:NaN,pv:0,v:0},mfi:{previous:NaN},cmf:{},adx:{previous:null},dema:{},tema:{},hma:{},keltner:{previous:NaN},
   supertrend:{previous:NaN,upper:NaN,lower:NaN,direction:1},ichimoku:{},trix:{previous:NaN},ppo:{},stochRSI:{previous:NaN,valid:0},adl:{value:0},chaikin:{value:0},forceIndex:{previous:NaN},volumeOscillator:{},vortex:{previous:null},
   pivots:{session:NaN,high:NaN,low:NaN,close:NaN,levels:[NaN,NaN,NaN,NaN,NaN]},parabolicSAR:{previous:null,older:null,sar:NaN,ep:NaN,af:.02,direction:1}
@@ -107,6 +107,7 @@ export function validateCheckpointState(name, params, state, index) {
   if(indicatorModule(name))return validateModuleCheckpoint(name,params,state,index);
   if(name==='vwap'||name==='pivots'){const validated=validateSessionCheckpoint(name,params,state,index);if(validated!==null)return validated;}
   if (!Object.hasOwn(checkpointInitialStates, name)) checkpointFail('builtin name');
+  if(name==='aroon')checkpointInteger(params.period===undefined?25:params.period,1,10000);
   if (index === 0) { const initial = name === 'parabolicSAR' ? {...checkpointInitialStates[name], af: params.step ?? .02} : checkpointInitialStates[name]; checkpointRecord(state,Object.keys(initial)); if (!checkpointInitialEquals(state, initial)) checkpointFail('initial state'); return state; }
   const p = (fallback = 20) => checkpointPeriod(params, 'period', fallback);
   const check = (allowed, required = allowed) => checkpointRecord(state, allowed, required);
@@ -123,6 +124,7 @@ export function validateCheckpointState(name, params, state, index) {
     case 'macd': case 'ppo': check(['f','l','s']); smooth('f',checkpointPeriod(params,'fast',12)); smooth('l',checkpointPeriod(params,'slow',26)); smooth('s',checkpointPeriod(params,'signal',9)); break;
     case 'bollinger': check(['mean','m2','a','head']); number('mean'); number('m2'); checkpointRing({a:state.a,head:state.head},p(),index,false); break;
     case 'donchian': case 'williamsR': check(['h','l']); queue('h',p(name==='williamsR'?14:20),true); queue('l',p(name==='williamsR'?14:20),false); break;
+    case 'aroon': check(['h','l']); queue('h',p(25)+1,true); queue('l',p(25)+1,false); if(state.h.a.at(-1)[0]!==index-1||state.l.a.at(-1)[0]!==index-1||state.h.a.at(-1)[1]<state.l.a.at(-1)[1])checkpointFail('Aroon latest bar'); break;
     case 'stochastic': check(['h','l','k','d']); queue('h',p(14),true); queue('l',p(14),false); roll('k',checkpointPeriod(params,'smoothK',3)); roll('d',checkpointPeriod(params,'smoothD',3)); break;
     case 'roc': check(['a','head']); checkpointRing(state,p(12),index,false); break;
     case 'cci': check(['tp']); roll('tp',p()); break;

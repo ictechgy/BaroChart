@@ -2,7 +2,7 @@
 
 0.2.11의 세션 VWAP·pivots·기준 시점 조회는 [SESSION-STUDIES.md](SESSION-STUDIES.md), 정적 사용자 모듈·지표 저장/병합은 [INDICATOR-MODULES.md](INDICATOR-MODULES.md)를 참고하세요. 아래 과거 실행 수와 새 검증 수를 합산하지 않습니다.
 
-지표는 축약된 화면 봉이 아니라 **전체 원본 OHLCV**로 계산합니다. 조회한 화면 범위·DPR은 결과에 영향을 주지 않습니다. 33종 built-in factory와 사용자 stateful factory를 제공합니다.
+지표는 축약된 화면 봉이 아니라 **전체 원본 OHLCV**로 계산합니다. 조회한 화면 범위·DPR은 결과에 영향을 주지 않습니다. 34종 built-in factory와 사용자 stateful factory를 제공합니다.
 
 0-based index, period=p입니다. p는 1..10,000 정수입니다. NaN은 warm-up 또는 정의되지 않은 값이며 렌더러는 해당 출력점을 생략합니다. 원본 입력 NaN/Infinity는 저장소에서 거부하므로 gap을 건너뛰어 seed를 잇는 동작은 없습니다.
 
@@ -16,6 +16,7 @@
 | MACD | fast=12, slow=26, signal=9; 각 EMA는 SMA seed | MACD slow−1, signal/hist slow+signal−2 |
 | Bollinger | p=20, deviation=2; mean ± deviation×**population** stddev | p−1; flat stddev=0; 제거/추가 Welford |
 | Donchian | p=20, rolling high/low, middle 평균 | p−1; 단조 queue |
+| Aroon | p=25 prior intervals; 현재 포함 p+1봉의 최신 고/저점 나이로 up/down=100(p−age)/p, oscillator=up−down | p; 동률은 최신 index, flat up/down100·oscillator0 |
 | Stochastic | p=14, smoothK=3, smoothD=3; K=100(C−L)/(H−L), SMA K/D | K p+smoothK−2; D p+smoothK+smoothD−3; H=L → 50 |
 | ROC | p=12, (C/C[i−p]−1)×100 | p; 과거 C=0 → NaN |
 | Williams %R | p=14, −100(H−C)/(H−L) | p−1; H=L → −50 |
@@ -49,3 +50,22 @@ append/current replacement/역사 correction은 변경 위치의 checkpoint 이�
 검증: 기존17종 mixed/tiny/flat 독립 수치46,800개와 추가16종28,800개 출력 위치/warm-up을 검사합니다. 6봉 단조 수열의 해석적 fixture도 유지하고, 33종 모두 seed=123의 550봉에서 255/256 경계 append, 마지막/첫/중간 봉 수정, reset/empty, flat/0 volume, custom output 오류를 검사합니다. 상용·TA-Lib과 모든 입력에 대해 bitwise 동등성을 확인한 것은 아닙니다. 구현 규약이 다른 EMA seed/ATR 초기값을 사용하는 제품과 warm-up 값이 다를 수 있습니다.
 
 Supertrend/SAR seed와 reversal 규약은 위 표의 구현 선택입니다. VWAP뿐 아니라 pivots도 UTC/sessionMs이며 거래소 open 기반 경계는 custom factory로 주입하세요. Ichimoku의 positive/negative plot offset은 hindsight 표시를 포함하며 미래 가격을 예측한 출력이 아닙니다.
+
+## Aroon 추가 규약
+
+`aroon`은 `up`, `down`, `oscillator`를 반환합니다. `period`(기본25, 정수1..10000)는 과거 interval 수이므로 현재를 포함한 window는 `period+1`봉입니다. 최초 finite 출력은 0-based index `period`이며, 그 전 세 출력은 NaN입니다. 동률 extrema(±0 포함)는 최신 봉을 선택합니다. 시간 gap은 경과 밀리초가 아닌 저장된 봉 개수로 셉니다. 원본 OHLCV NaN/Infinity는 기존 BarStore 계약대로 거부합니다. up/down은0..100, oscillator는−100..100입니다. 이는 매수/매도 권고나 타제품 모든 설정과의 parity 보장이 아닙니다.
+
+수식 설명은 [TradingView 공식 Aroon 설명](https://www.tradingview.com/support/solutions/43000501801-aroon-indicator/)을 참고했으며 외부 구현 코드는 사용하지 않았습니다. window 포함 범위·동률·warmup은 위의 명시적 계약과 독립 raw-bar scan oracle로 검증합니다. 단조 queue는 amortized O(1) step, O(period) state이며 기존 checkpoint canonicalization으로 만료 prefix를 버립니다. 큰 period의 checkpoint/worker/native restore는 기존 byte 예산에 따라 거부될 수 있습니다. compaction의 studyHistory restart는 축약 suffix에서 warmup을 다시 시작합니다.
+
+```js
+api.addIndicator('trend-age', 'aroon', {period: 25});
+api.addPanel({id: 'aroon', weight: 1, range: [-100, 100]});
+for (const output of ['up', 'down', 'oscillator']) {
+  api.addSeries({id: `aroon-${output}`, type: 'line', panel: 'aroon',
+    indicator: 'trend-age', output});
+}
+```
+
+Aroon 추가 검증은 독립 전체-window scan과 incremental append/update/correction/prepend/reset, 실제 Node Worker의 params/workspace 복원, compact restart, native bundle VM/독립 QuickJS 경로를 분리합니다. 이 실행 결과가 Swift/JSC 또는 Android/JNI SDK·기기 검증을 대신하지는 않습니다.
+
+검증 범위와 실행 결과: [Aroon validation](AROON-VALIDATION.md).

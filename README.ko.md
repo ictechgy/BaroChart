@@ -9,7 +9,7 @@
 ## 주요 기능
 
 - 캔들, OHLC, 선, 영역, 히스토그램 시리즈와 다중 패널, 독립 가격축, 이동·확대·실시간 갱신
-- SMA, EMA, RSI, MACD, Bollinger Bands, ATR, Ichimoku, 세션 기반 VWAP 등을 포함한 **33종 기본 지표**
+- SMA, EMA, RSI, MACD, Bollinger Bands, ATR, Ichimoku, 세션 기반 VWAP 등을 포함한 **34종 기본 지표**
 - 시간·가격 앵커를 사용하는 **14종 그리기 도구**, 선택·편집·잠금·undo/redo
 - 과거 봉 수정, 순서가 있는 수집 배치, 화면과 독립적인 데이터 조회, 세션 기준 OHLCV 리샘플링
 - 데이터 소유권과 검증 규칙을 명시한 차트 구성·도형·지표 설정 저장

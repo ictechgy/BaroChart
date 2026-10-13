@@ -189,8 +189,8 @@ test('native target restores canonical saved configuration, exact fractional/off
   assert.notEqual(shared.disposed, true); unchanged(f, before);
 });
 
-test('all 33 builtins match independent fresh calculation after restore, tail update, append and historical corrections', t => {
-  const names = [...builtinIndicators.keys()]; assert.equal(names.length, 33);
+test('all 34 builtins match independent fresh calculation after restore, tail update, append and historical corrections', t => {
+  const names = [...builtinIndicators.keys()]; assert.equal(names.length, 34);
   const f = fixture(t, {n: 1024, names}), before = sourceState(f), {p, model} = restore(t, f);
   const row = i => Object.fromEntries(FIELDS.map(k => [k, f.columns[k][i]]));
   compareFresh(model, 'initial'); accounting(p, model);
