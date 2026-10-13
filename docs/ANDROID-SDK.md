@@ -1,5 +1,9 @@
 # Android AAR와 Kotlin 소비 앱
 
+The thin `deleteDrawings` method forwards explicit IDs using the ordinary checked
+command and existing mutation notification. See [atomic group deletion](DRAWING-DELETE.md)
+for undo, failure and current platform-verification limits.
+
 The new `translateDrawings` facade forwards explicit IDs and raw time/price deltas.
 It validates the core `changed` count (0..128): zero skips host revision/notification,
 positive changes notify once. See [drawing translation](DRAWING-TRANSLATION.md).
@@ -242,3 +246,5 @@ against compile-only Android/JSON signatures. **The new API has not been compile
 with Android SDK, linked/executed through JNI, packaged into a validated new AAR,
 or run on a device.** Preserved AAR artifacts predate this method. The documented
 native SDK build/runtime workflow above remains required before app deployment.
+
+Portable batch style patches use `setDrawingsStyle` with a checked zero-change notification policy. See [Atomic drawing style patches](DRAWING-STYLE.md) for the four keys, one-undo budget, and current runtime validation limits.

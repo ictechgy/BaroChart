@@ -111,3 +111,8 @@ api.dataAt({index:0},{asOfIndex:'today'});
  new CanvasChart(document.body,new ChartModel(),{dataExplorer:{readout:'text',live}});
  void selectedTime;
 }
+const styleReceipt=api.setDrawingsStyle(['text'],{color:'#abc',fill:'#def',width:2,font:'24px monospace'});styleReceipt.changed.toFixed();styleReceipt.invalidationFailed.valueOf();
+// @ts-expect-error batch style does not accept lock or coordinate changes
+api.setDrawingsStyle(['text'],{locked:true});
+// @ts-expect-error explicit null is not a batch style reset
+api.setDrawingsStyle(['text'],{fill:null});

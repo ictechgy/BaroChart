@@ -2208,22 +2208,26 @@ function translationFrozen(d){for(const p of d.points)Object.freeze(p);Object.fr
 function translateDrawings(api,ids,options){return drawingGroupEdit(api,ids,options,false);}
 /** Mixed and orphan bindings may be removed without querying live metadata. */
 function deleteDrawings(api,ids){return drawingGroupEdit(api,ids,null,true);}
-function drawingGroupEdit(api,ids,options,remove){
+/** Partial portable style patch; mixed/orphan bindings require no live lookup. */
+function setDrawingsStyle(api,ids,patch){return drawingGroupEdit(api,ids,patch,false,true);}
+function drawingGroupEdit(api,ids,options,remove,styleEdit=false){
+ const metadata=!(remove||styleEdit);
  const guards=[],a=translationCapture(api,['model','controller','invalidate'],guards),model=a.model;
- const m=translationCapture(model,remove?['disposed','drawings']:['disposed','drawings','panels','axes','series'],guards);
+ const m=translationCapture(model,!metadata?['disposed','drawings']:['disposed','drawings','panels','axes','series'],guards);
  if(m.disposed)throw new Error('Chart disposed');if(!(m.drawings instanceof DrawingStore))throw new TypeError('Drawing group edit managed store required');
  const d=m.drawings,s=translationCapture(d,['items','undoStack','redoStack','selected','serial','transaction','maxDrawings','maxPoints','maxDocumentChars','historyLimit','historyBytes','retainedHistoryBytes'],guards,['items','undoStack','redoStack']);
  const retained=Object.getOwnPropertyDescriptor(d,'retainedHistoryBytes');if(retained&&!retained.writable||!retained&&!Object.isExtensible(d))throw new TypeError('Drawing group edit writable history accounting required');
  const c=a.controller?translationCapture(a.controller,['model','gesture'],guards):null;
  if(c&&c.model!==model)throw new Error('Drawing group edit controller owner mismatch');if(s.transaction||c?.gesture)throw new Error('Drawing group edit requires no active gesture or transaction');
  const items=translationCapturedList(s.items,RESOURCE_LIMITS.maxDrawings,guards),undo=translationCapturedList(s.undoStack,10000,guards),redo=translationCapturedList(s.redoStack,10000,guards);
- const panels=remove?null:translationCapturedList(m.panels,RESOURCE_LIMITS.maxPanels,guards).map(p=>translationCapture(p,['id'],guards));
- const axes=remove?null:translationCapturedList(m.axes,RESOURCE_LIMITS.maxAxes,guards).map(p=>translationCapture(p,['id','panel'],guards));
- const series=remove?null:translationCapturedList(m.series,RESOURCE_LIMITS.maxSeries,guards).map(p=>translationCapture(p,['id','panel','axisId'],guards));
- const keys=translationList(ids,128),o=remove?null:translationRecord(options,['deltaTimeMs','deltaPrice']);
+ const panels=!metadata?null:translationCapturedList(m.panels,RESOURCE_LIMITS.maxPanels,guards).map(p=>translationCapture(p,['id'],guards));
+ const axes=!metadata?null:translationCapturedList(m.axes,RESOURCE_LIMITS.maxAxes,guards).map(p=>translationCapture(p,['id','panel'],guards));
+ const series=!metadata?null:translationCapturedList(m.series,RESOURCE_LIMITS.maxSeries,guards).map(p=>translationCapture(p,['id','panel','axisId'],guards));
+ const keys=translationList(ids,128),o=remove?null:translationRecord(options,styleEdit?['color','fill','width','font']:['deltaTimeMs','deltaPrice']);
  if(!keys.length)throw new RangeError('Drawing group edit requires 1..128 ids');
  const selected=new Set();for(const id of keys){identifier(id,'Drawing id');if(selected.has(id))throw new TypeError('Duplicate drawing id');selected.add(id);}
- if(!remove&&(!Number.isFinite(o.deltaTimeMs)||!Number.isFinite(o.deltaPrice)))throw new TypeError('Finite deltaTimeMs and deltaPrice required');
+ if(!remove&&!styleEdit&&(!Number.isFinite(o.deltaTimeMs)||!Number.isFinite(o.deltaPrice)))throw new TypeError('Finite deltaTimeMs and deltaPrice required');
+ let patch=null;if(styleEdit){const fields=Object.keys(o);if(!fields.length||fields.some(key=>o[key]===undefined||o[key]===null))throw new TypeError('Drawing style nonempty defined patch required');patch=portableStyle(o,['color','fill']);if(Object.hasOwn(patch,'width')&&(!Number.isFinite(patch.width)||patch.width<.1||patch.width>50))throw new RangeError('Stroke width');}
  for(const [key,max,min] of [['maxDrawings',10000,0],['maxPoints',2097152,0],['maxDocumentChars',RESOURCE_LIMITS.maxDocumentChars,0],['historyLimit',10000,1],['historyBytes',RESOURCE_LIMITS.maxHistoryBytes,0]])if(!Number.isSafeInteger(s[key])||s[key]<min||s[key]>max)throw new RangeError('Drawing group edit history/resource limit');
  const copies=new Map(),weights=new Map(),copy=value=>{let result=copies.get(value);if(!result){result=translationDrawing(value);copies.set(value,result);weights.set(value,2*translationChars(result));}return result;};
  let next=items.slice();const seen=new Set(),clearSelected=remove&&selected.has(s.selected);
@@ -2235,6 +2239,7 @@ function drawingGroupEdit(api,ids,options,remove){
   if(!selected.has(before.id))continue;
   if(before.locked)throw new Error('Drawing is locked');
   if(remove){next[i]=null;changed++;continue;}
+  if(styleEdit){const previous=before.style??{},different=Object.keys(patch).some(key=>!Object.hasOwn(previous,key)||!Object.is(previous[key],patch[key]));if(different){const candidate={...before,points:translationSlot(items[i],'points'),style:{...previous,...patch}};validateDrawing(candidate);next[i]=translationFrozen(candidate);changed++;}continue;}
   const b=[before.panel,before.axisId??null,before.seriesId??null];if(binding&&b.some((v,j)=>v!==binding[j]))throw new Error('Drawing group edit requires identical panel/axis/series binding');binding=b;
   if(!panels.some(p=>p.id===b[0])||b[1]!==null&&!axes.some(p=>p.id===b[1]&&p.panel===b[0])||b[2]!==null&&!series.some(p=>p.id===b[2]&&p.panel===b[0]&&(p.axisId??null)===b[1]))throw new Error('Missing or mismatched drawing binding');
   let moved=false;const anchors=before.points.map(p=>{const time=o.deltaTimeMs===0?p.time:p.time+o.deltaTimeMs,price=o.deltaPrice===0?p.price:p.price+o.deltaPrice;if(time!==p.time||price!==p.price)moved=true;return {time,price};});
@@ -2269,7 +2274,7 @@ function values(input) {
  return Float64Array.from(input,x=>x===null?NaN:x);
 }
 function columns(input) {return Object.fromEntries(FIELDS.map(key=>[key,values(input?.[key])]));}
-const COMMANDS=new Set(['compactData','setData','setColumns','applyDataEvent','applyDataEvents','configureDataIngestion','enqueueDataEvents','drainDataEvents','pauseDataIngestion','resumeDataIngestion','cancelDataEvents','dataIngestionStats','saveDataIngestion','loadDataIngestion','addPanel','setPanel','addAxis','setAxis','removeAxis','setDrawingTarget','crosshairValues','dataAt','addSeries','setSeries','setSeriesValues','removeSeries','addIndicator','setIndicatorParams','removeIndicator','indicatorValues','indicatorValueAt','registerIndicatorModule','saveStudies','loadStudies','addDrawing','editDrawing','translateDrawings','deleteDrawings','deleteDrawing','selectDrawing','saveDrawings','loadDrawings','undo','redo','setTool','setText','setTheme','setSymbol','setVisibleRange','fit','zoom','pan','inspect']);
+const COMMANDS=new Set(['compactData','setData','setColumns','applyDataEvent','applyDataEvents','configureDataIngestion','enqueueDataEvents','drainDataEvents','pauseDataIngestion','resumeDataIngestion','cancelDataEvents','dataIngestionStats','saveDataIngestion','loadDataIngestion','addPanel','setPanel','addAxis','setAxis','removeAxis','setDrawingTarget','crosshairValues','dataAt','addSeries','setSeries','setSeriesValues','removeSeries','addIndicator','setIndicatorParams','removeIndicator','indicatorValues','indicatorValueAt','registerIndicatorModule','saveStudies','loadStudies','addDrawing','editDrawing','translateDrawings','setDrawingsStyle','deleteDrawings','deleteDrawing','selectDrawing','saveDrawings','loadDrawings','undo','redo','setTool','setText','setTheme','setSymbol','setVisibleRange','fit','zoom','pan','inspect']);
 
 /** Shared web/JavaScriptCore/QuickJS facade. JSON arguments retain Double values.
  * Factories passed as source are trusted application code, never market data.
@@ -2278,7 +2283,7 @@ class ChartAPI {
  constructor(model,{controller=null,invalidate=()=>{}}={}) {this.model=model;this.controller=controller;this.invalidate=invalidate;}
  dispatch(operation,args=[]) {
   if(!COMMANDS.has(operation)||!Array.isArray(args))throw new TypeError('Unknown chart command or argument list');
-  const arity={compactData:1,setData:1,setColumns:2,applyDataEvent:1,applyDataEvents:1,configureDataIngestion:1,enqueueDataEvents:1,drainDataEvents:1,pauseDataIngestion:0,resumeDataIngestion:0,cancelDataEvents:0,dataIngestionStats:0,saveDataIngestion:0,loadDataIngestion:1,addPanel:1,setPanel:2,addAxis:1,setAxis:2,removeAxis:1,setDrawingTarget:1,crosshairValues:2,dataAt:2,addSeries:1,setSeries:2,setSeriesValues:2,removeSeries:1,addIndicator:3,setIndicatorParams:2,removeIndicator:1,indicatorValues:2,indicatorValueAt:4,registerIndicatorModule:2,saveStudies:0,loadStudies:1,addDrawing:1,editDrawing:2,translateDrawings:2,deleteDrawings:1,deleteDrawing:1,selectDrawing:1,saveDrawings:0,loadDrawings:1,undo:0,redo:0,setTool:1,setText:1,setTheme:1,setSymbol:1,setVisibleRange:2,fit:0,zoom:2,pan:1,inspect:0};if(args.length>arity[operation])throw new TypeError('Chart command argument count');
+  const arity={compactData:1,setData:1,setColumns:2,applyDataEvent:1,applyDataEvents:1,configureDataIngestion:1,enqueueDataEvents:1,drainDataEvents:1,pauseDataIngestion:0,resumeDataIngestion:0,cancelDataEvents:0,dataIngestionStats:0,saveDataIngestion:0,loadDataIngestion:1,addPanel:1,setPanel:2,addAxis:1,setAxis:2,removeAxis:1,setDrawingTarget:1,crosshairValues:2,dataAt:2,addSeries:1,setSeries:2,setSeriesValues:2,removeSeries:1,addIndicator:3,setIndicatorParams:2,removeIndicator:1,indicatorValues:2,indicatorValueAt:4,registerIndicatorModule:2,saveStudies:0,loadStudies:1,addDrawing:1,editDrawing:2,translateDrawings:2,setDrawingsStyle:2,deleteDrawings:1,deleteDrawing:1,selectDrawing:1,saveDrawings:0,loadDrawings:1,undo:0,redo:0,setTool:1,setText:1,setTheme:1,setSymbol:1,setVisibleRange:2,fit:0,zoom:2,pan:1,inspect:0};if(args.length>arity[operation])throw new TypeError('Chart command argument count');
   return this[operation](...args)??null;
  }
  changed(result) {this.invalidate();return result;}
@@ -2391,6 +2396,7 @@ class ChartAPI {
  drawingOptions(options) {optionRecord(options,['id','type','panel','points','style','text','locked','axisId','seriesId'],'Drawing');if(options.style)optionRecord(options.style,['color','fill','width','font'],'Drawing style');const next={...options,...(options.style?{style:style(options.style,['color','fill'])}:{})};if(next.seriesId!=null&&next.axisId===undefined){const s=this.model.series.find(s=>s.id===next.seriesId);if(s)next.axisId=s.axisId??null;}return next;}
  drawingMutationContext(){const d=this.model.drawings,interactive=!!this.controller?.gesture;return {items:interactive&&d.transaction?d.transaction:d.items,beforeMutation:interactive?()=>this.controller.cancel({notify:false}):null};}
  addDrawing(options) {const next={panel:'price',...this.drawingOptions(options)};this.model.validateDrawingBinding(next);return this.changed(this.model.drawings.add(next,this.drawingMutationContext()));}
+ setDrawingsStyle(ids,patch){return setDrawingsStyle(this,ids,patch);}
  deleteDrawings(ids){return deleteDrawings(this,ids);}
  translateDrawings(ids,options){return translateDrawings(this,ids,options);}
  editDrawing(id,patch) {const context=this.drawingMutationContext(),previous=context.items.find(d=>d.id===id);if(!previous)throw new Error('Missing committed drawing');const next=this.drawingOptions(patch);this.model.validateDrawingBinding({...previous,...next});this.model.drawings.edit(id,next,context);return this.changed();}

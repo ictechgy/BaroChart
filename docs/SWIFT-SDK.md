@@ -1,5 +1,9 @@
 # SwiftPM SDK 소비 경로
 
+The thin `deleteDrawings` method forwards explicit IDs using the ordinary checked
+command and existing mutation notification. See [atomic group deletion](DRAWING-DELETE.md)
+for undo, failure and current platform-verification limits.
+
 The new `translateDrawings` facade forwards explicit IDs and raw time/price deltas.
 It validates the core `changed` count (0..128): zero skips host revision/notification,
 positive changes notify once. See [drawing translation](DRAWING-TRANSLATION.md).
@@ -151,3 +155,5 @@ baseline 증거: `/tmp/aster-cycle10-swift-baseline/matrix`의 mac logs/report�
 검증은 기능·실제 simulator input·view weak release·owner cleanup 경계입니다. SwiftPM 배포 서비스·실기기·최소 OS 실제 실행·Swift6 strict concurrency mode·physical FPS·장시간 누수 부재를 인증하지 않습니다. source bundle 전후 hash가 다르면 runner는 검증 중 SDK가 바뀐 것으로 실패합니다.
 
 BaroChart는 Apache-2.0입니다. npm의 private 플래그는 실수로 registry에 게시하는 것을 막습니다. 최신 Swift 변경은 실제 컴파일·JSC 실행 검증이 남아 있으며 [공개 검증](PUBLIC-VALIDATION.md)을 확인하세요. Apple framework 조건과 Swift/Xcode 개발 도구 조건은 해당 플랫폼에 따릅니다. 코드 출처·QuickJS MIT·선택적 comparator의 분리는 [LICENSING.md](LICENSING.md)에 있습니다.
+
+Portable batch style patches use `setDrawingsStyle` with a checked zero-change notification policy. See [Atomic drawing style patches](DRAWING-STYLE.md) for the four keys, one-undo budget, and current runtime validation limits.

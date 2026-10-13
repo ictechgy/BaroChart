@@ -25,3 +25,7 @@ Cloud Linux/Node 24.19.0: **3,096 full-suite tests passed, 0 failed, 0 skipped**
 Standalone vendored QuickJS executed three fixed scenarios: fourteen-type deletion with exact undo identity; orphan deletion and nonwritable-selection atomicity; observer reentry/error with cleanup. Runtime, OOM and interruption cleanup all reported zero final tracked live bytes and allocation count. These counters do not establish a process RSS bound or browser/native SDK/device execution.
 
 The checkpoint also passed parsing of **388 ECMAScript modules** and strict TypeScript 5.9.3.
+
+## Thin native convenience methods
+
+Java `deleteDrawings(JSONArray)` and Swift `deleteDrawings(_:)` forward the explicit IDs through the ordinary checked command. Since a successful core deletion always changes at least one drawing, the existing generic host mutation notification remains sufficient; no count decoder or notification policy is changed. A conversion/transport error after execution does not imply rollback. Java consumer compilation uses test-only Android/JSON signatures; Swift wiring is source-checked only. Actual Android/JNI/Swift/JSC/device execution is still unverified.

@@ -1067,6 +1067,11 @@ public final class AsterEngine {
             let count=changed.toDouble()
             guard count.isFinite,count.rounded(.towardZero)==count,count>=0,count<=128 else {throw AsterError.invalidScene}
             if count>0 {notifyChanges()}
+        } else if operation == "setDrawingsStyle" {
+            guard result.isObject,let changed=result.forProperty("changed"),changed.isNumber else {throw AsterError.invalidScene}
+            let count=changed.toDouble()
+            guard count.isFinite,count.rounded(.towardZero)==count,count>=0,count<=128 else {throw AsterError.invalidScene}
+            if count>0 {notifyChanges()}
         } else if !["inspect", "indicatorValues", "indicatorValueAt", "saveStudies", "saveDrawings", "crosshairValues", "dataAt", "dataIngestionStats", "saveDataIngestion"].contains(operation) {
             notifyChanges()
         }
@@ -1196,6 +1201,15 @@ public final class AsterEngine {
         try ingestionCommand("translateDrawings",[ids,["deltaTimeMs":deltaTimeMs,"deltaPrice":deltaPrice]])
     }
     @discardableResult public func deleteDrawing(_ id: String) throws -> Bool {try command("deleteDrawing", [id]).toBool()}
+    /// Partial portable style merge, one core undo; zero stored changes do not notify.
+    /// Receipt conversion failure after execution does not imply rollback.
+    @discardableResult public func setDrawingsStyle(_ ids: [String], patch: [String: Any]) throws -> [String: Any] {
+        try ingestionCommand("setDrawingsStyle",[ids,patch])
+    }
+    /// Explicit group deletion, one core undo; empty/missing/locked IDs reject.
+    @discardableResult public func deleteDrawings(_ ids: [String]) throws -> [String: Any] {
+        try ingestionCommand("deleteDrawings",[ids])
+    }
     public func selectDrawing(_ id: String?) throws {try command("selectDrawing", [id as Any? ?? NSNull()])}
     public func setTheme(_ patch: [String: Any]) throws {try command("setTheme", [patch])}
     public func setSymbol(_ symbol: [String: Any]) throws {try command("setSymbol", [symbol])}

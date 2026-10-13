@@ -153,6 +153,9 @@ public final class AsterEngine implements AutoCloseable {
         }else if("translateDrawings".equals(operation)){
             if(!(result instanceof JSONObject))throw new JSONException("Drawing translation receipt object required");
             if(DrawingTranslationReceipt.changed(((JSONObject)result).get("changed")))notifyChanges();
+        }else if("setDrawingsStyle".equals(operation)){
+            if(!(result instanceof JSONObject))throw new JSONException("Drawing style receipt object required");
+            if(DrawingTranslationReceipt.changed(((JSONObject)result).get("changed")))notifyChanges();
         }else if(!operation.equals("inspect")&&!operation.equals("indicatorValues")&&!operation.equals("saveDrawings")&&!operation.equals("crosshairValues")&&!operation.equals("dataAt")&&!operation.equals("saveStudies")&&!operation.equals("indicatorValueAt")&&!operation.equals("dataIngestionStats")&&!operation.equals("saveDataIngestion"))notifyChanges();return result;
     }
     private void notifyChanges(){revision++;pendingNotifications++;if(notifying)return;notifying=true;observerErrors.clear();try{while(pendingNotifications>0){pendingNotifications--;for(Runnable observer:new java.util.ArrayList<>(observers)){try{observer.run();}catch(RuntimeException error){if(observerErrors.size()<32)observerErrors.add(error);try{if(onObserverError!=null)onObserverError.accept(error);}catch(RuntimeException reporting){if(observerErrors.size()<32)observerErrors.add(reporting);}}}}}finally{notifying=false;}}
@@ -179,6 +182,11 @@ public final class AsterEngine implements AutoCloseable {
         JSONObject options=new JSONObject().put("deltaTimeMs",deltaTimeMs).put("deltaPrice",deltaPrice);
         return (JSONObject)command("translateDrawings",ids,options);
     }
+    /** Partial portable style merge, one core undo; zero stored changes do not notify.
+     * Receipt/transport failure after execution does not imply rollback. */
+    public JSONObject setDrawingsStyle(JSONArray ids,JSONObject patch) throws JSONException {return (JSONObject)command("setDrawingsStyle",ids,patch);}
+    /** Explicit group deletion with one core undo. Empty/missing/locked IDs reject. */
+    public JSONObject deleteDrawings(JSONArray ids) throws JSONException {return (JSONObject)command("deleteDrawings",ids);}
     public JSONObject configureDataIngestion(JSONObject policy) throws JSONException {return (JSONObject)command("configureDataIngestion",policy);}
     public JSONObject enqueueDataEvents(JSONObject packet) throws JSONException {return (JSONObject)command("enqueueDataEvents",packet);}
     public JSONObject drainDataEvents() throws JSONException {return (JSONObject)command("drainDataEvents");}

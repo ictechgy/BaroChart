@@ -29,8 +29,14 @@ public final class WorkspaceConsumer {
     public static JSONObject translate(AsterEngine engine) throws JSONException {
         return engine.translateDrawings(new JSONArray(new String[]{"trend", "level"}), .5, 2.0);
     }
+    public static JSONObject delete(AsterEngine engine) throws JSONException {
+        return engine.deleteDrawings(new JSONArray(new String[]{"trend", "level"}));
+    }
     public static String cancelAndInspect(AsterEngine.WorkspaceJob job) {
         job.cancel();
         return job.cleanupPending() ? job.pendingFailure() : null;
+    }
+    public static JSONObject style(AsterEngine engine) throws JSONException {
+        return engine.setDrawingsStyle(new JSONArray(new String[]{"trend"}),new JSONObject().put("color","#abc"));
     }
 }

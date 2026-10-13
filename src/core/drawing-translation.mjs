@@ -1,6 +1,6 @@
 import {DrawingStore} from './drawings.mjs';
 import {validateDrawing} from './drawing-validation.mjs';
-import {identifier,RESOURCE_LIMITS} from './contracts.mjs';
+import {identifier,RESOURCE_LIMITS,portableStyle} from './contracts.mjs';
 
 const translationStringify=JSON.stringify,translationDefine=Object.defineProperty;
 function translationSlot(object,key,required=false){const d=Object.getOwnPropertyDescriptor(object,key);if(!d){if(required)throw new TypeError('Drawing group edit missing '+key);return undefined;}if(!Object.hasOwn(d,'value'))throw new TypeError('Drawing group edit own data properties required');return d.value;}
@@ -25,22 +25,26 @@ function translationFrozen(d){for(const p of d.points)Object.freeze(p);Object.fr
 export function translateDrawings(api,ids,options){return drawingGroupEdit(api,ids,options,false);}
 /** Mixed and orphan bindings may be removed without querying live metadata. */
 export function deleteDrawings(api,ids){return drawingGroupEdit(api,ids,null,true);}
-function drawingGroupEdit(api,ids,options,remove){
+/** Partial portable style patch; mixed/orphan bindings require no live lookup. */
+export function setDrawingsStyle(api,ids,patch){return drawingGroupEdit(api,ids,patch,false,true);}
+function drawingGroupEdit(api,ids,options,remove,styleEdit=false){
+ const metadata=!(remove||styleEdit);
  const guards=[],a=translationCapture(api,['model','controller','invalidate'],guards),model=a.model;
- const m=translationCapture(model,remove?['disposed','drawings']:['disposed','drawings','panels','axes','series'],guards);
+ const m=translationCapture(model,!metadata?['disposed','drawings']:['disposed','drawings','panels','axes','series'],guards);
  if(m.disposed)throw new Error('Chart disposed');if(!(m.drawings instanceof DrawingStore))throw new TypeError('Drawing group edit managed store required');
  const d=m.drawings,s=translationCapture(d,['items','undoStack','redoStack','selected','serial','transaction','maxDrawings','maxPoints','maxDocumentChars','historyLimit','historyBytes','retainedHistoryBytes'],guards,['items','undoStack','redoStack']);
  const retained=Object.getOwnPropertyDescriptor(d,'retainedHistoryBytes');if(retained&&!retained.writable||!retained&&!Object.isExtensible(d))throw new TypeError('Drawing group edit writable history accounting required');
  const c=a.controller?translationCapture(a.controller,['model','gesture'],guards):null;
  if(c&&c.model!==model)throw new Error('Drawing group edit controller owner mismatch');if(s.transaction||c?.gesture)throw new Error('Drawing group edit requires no active gesture or transaction');
  const items=translationCapturedList(s.items,RESOURCE_LIMITS.maxDrawings,guards),undo=translationCapturedList(s.undoStack,10000,guards),redo=translationCapturedList(s.redoStack,10000,guards);
- const panels=remove?null:translationCapturedList(m.panels,RESOURCE_LIMITS.maxPanels,guards).map(p=>translationCapture(p,['id'],guards));
- const axes=remove?null:translationCapturedList(m.axes,RESOURCE_LIMITS.maxAxes,guards).map(p=>translationCapture(p,['id','panel'],guards));
- const series=remove?null:translationCapturedList(m.series,RESOURCE_LIMITS.maxSeries,guards).map(p=>translationCapture(p,['id','panel','axisId'],guards));
- const keys=translationList(ids,128),o=remove?null:translationRecord(options,['deltaTimeMs','deltaPrice']);
+ const panels=!metadata?null:translationCapturedList(m.panels,RESOURCE_LIMITS.maxPanels,guards).map(p=>translationCapture(p,['id'],guards));
+ const axes=!metadata?null:translationCapturedList(m.axes,RESOURCE_LIMITS.maxAxes,guards).map(p=>translationCapture(p,['id','panel'],guards));
+ const series=!metadata?null:translationCapturedList(m.series,RESOURCE_LIMITS.maxSeries,guards).map(p=>translationCapture(p,['id','panel','axisId'],guards));
+ const keys=translationList(ids,128),o=remove?null:translationRecord(options,styleEdit?['color','fill','width','font']:['deltaTimeMs','deltaPrice']);
  if(!keys.length)throw new RangeError('Drawing group edit requires 1..128 ids');
  const selected=new Set();for(const id of keys){identifier(id,'Drawing id');if(selected.has(id))throw new TypeError('Duplicate drawing id');selected.add(id);}
- if(!remove&&(!Number.isFinite(o.deltaTimeMs)||!Number.isFinite(o.deltaPrice)))throw new TypeError('Finite deltaTimeMs and deltaPrice required');
+ if(!remove&&!styleEdit&&(!Number.isFinite(o.deltaTimeMs)||!Number.isFinite(o.deltaPrice)))throw new TypeError('Finite deltaTimeMs and deltaPrice required');
+ let patch=null;if(styleEdit){const fields=Object.keys(o);if(!fields.length||fields.some(key=>o[key]===undefined||o[key]===null))throw new TypeError('Drawing style nonempty defined patch required');patch=portableStyle(o,['color','fill']);if(Object.hasOwn(patch,'width')&&(!Number.isFinite(patch.width)||patch.width<.1||patch.width>50))throw new RangeError('Stroke width');}
  for(const [key,max,min] of [['maxDrawings',10000,0],['maxPoints',2097152,0],['maxDocumentChars',RESOURCE_LIMITS.maxDocumentChars,0],['historyLimit',10000,1],['historyBytes',RESOURCE_LIMITS.maxHistoryBytes,0]])if(!Number.isSafeInteger(s[key])||s[key]<min||s[key]>max)throw new RangeError('Drawing group edit history/resource limit');
  const copies=new Map(),weights=new Map(),copy=value=>{let result=copies.get(value);if(!result){result=translationDrawing(value);copies.set(value,result);weights.set(value,2*translationChars(result));}return result;};
  let next=items.slice();const seen=new Set(),clearSelected=remove&&selected.has(s.selected);
@@ -52,6 +56,7 @@ function drawingGroupEdit(api,ids,options,remove){
   if(!selected.has(before.id))continue;
   if(before.locked)throw new Error('Drawing is locked');
   if(remove){next[i]=null;changed++;continue;}
+  if(styleEdit){const previous=before.style??{},different=Object.keys(patch).some(key=>!Object.hasOwn(previous,key)||!Object.is(previous[key],patch[key]));if(different){const candidate={...before,points:translationSlot(items[i],'points'),style:{...previous,...patch}};validateDrawing(candidate);next[i]=translationFrozen(candidate);changed++;}continue;}
   const b=[before.panel,before.axisId??null,before.seriesId??null];if(binding&&b.some((v,j)=>v!==binding[j]))throw new Error('Drawing group edit requires identical panel/axis/series binding');binding=b;
   if(!panels.some(p=>p.id===b[0])||b[1]!==null&&!axes.some(p=>p.id===b[1]&&p.panel===b[0])||b[2]!==null&&!series.some(p=>p.id===b[2]&&p.panel===b[0]&&(p.axisId??null)===b[1]))throw new Error('Missing or mismatched drawing binding');
   let moved=false;const anchors=before.points.map(p=>{const time=o.deltaTimeMs===0?p.time:p.time+o.deltaTimeMs,price=o.deltaPrice===0?p.price:p.price+o.deltaPrice;if(time!==p.time||price!==p.price)moved=true;return {time,price};});

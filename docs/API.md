@@ -231,3 +231,7 @@ two-chart example and unverified browser/UI limits.
 `translateDrawings(ids, {deltaTimeMs, deltaPrice})` moves 1–128 explicit, unlocked drawings with one common panel/axis/series binding and one undo unit. It returns `{changed, invalidationFailed}`. All candidates and the full prior undo snapshot are validated before publication; active transactions/gestures reject. Zero or rounded-away changes preserve history and do not notify. See [raw-coordinate translation contract](DRAWING-TRANSLATION.md) for resource, failure, notification and precision rules. This core command does not add a multi-selection UI.
 
 `deleteDrawings(ids)` removes 1–128 unlocked drawings in one undo unit. Mixed and orphan bindings are allowed without live metadata or indicator queries. Missing/locked IDs, active gestures, malformed lists or insufficient undo budget reject the whole operation. It returns `{changed, invalidationFailed}`; see [atomic drawing deletion](DRAWING-DELETE.md).
+
+### Batch drawing styles
+
+See [Atomic drawing style patches](DRAWING-STYLE.md) for `setDrawingsStyle(ids, patch)`, four portable style keys, stored-change receipts and one-undo failure atomicity.
