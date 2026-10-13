@@ -65,6 +65,22 @@ function smooth(s, key, value, n, alpha) {
   else q.value += alpha * (value - q.value);
   return q.value;
 }
+// EMA-only recovery: preserve the shared smoother and legacy checkpoint shape.
+function emaRecover(s,key,value,n,alpha){
+ if(n===1&&Number.isFinite(value)){const q=s[key]??={count:0,sum:0,value:NaN};q.count=1;q.sum=0;q.value=value===0?0:value;return q.value;}
+ let q=s[key];
+ if(Number.isFinite(value)&&q&&(q.count<n?!Number.isFinite(q.sum):!Number.isFinite(q.value))){q.count=0;q.sum=0;q.value=NaN;}
+ const before=q&&q.count>=n?q.value:NaN,result=smooth(s,key,value,n,alpha);q=s[key];
+ if(!Number.isFinite(value))return result;
+ if(q.count>=n&&!Number.isFinite(result)&&Number.isFinite(before)){
+  const recovered=(1-alpha)*before+alpha*value;
+  if(Number.isFinite(recovered)){q.value=recovered;return recovered;}
+ }
+ if(q.count<n&&!Number.isFinite(q.sum)||q.count>=n&&!Number.isFinite(q.value)){
+  q.count=1;q.sum=value;q.value=n===1?value:NaN;return q.value;
+ }
+ return result;
+}
 function trueRange(b, previous) { return Number.isFinite(previous) ? Math.max(b.high - b.low, Math.abs(b.high - previous), Math.abs(b.low - previous)) : b.high - b.low; }
 // Monotonic queues give amortized O(1) rolling highs/lows. Snapshot compaction
 // also prevents stale queue storage from growing with the full data history.
@@ -93,7 +109,7 @@ export function isCanonicalBuiltinDefinition(name,def){
 }
 add('sma', ({period: p = 20, source = 'close'} = {}) => {period(p); return definition(['value'], {}, (s, b) => [smaRoll(s, 'r', b[source], p)]);});
 add('vwma', ({period:p=20}={})=>{period(p);return definition(['value'],{a:[],head:0,sums:[[0,0],[0,0],[0,0]],invalid:0,positive:0},(s,b,i)=>vwmaStep(s,b,i,p));});
-add('ema', ({period: p = 20, source = 'close'} = {}) => {period(p); return definition(['value'], {}, (s, b) => [smooth(s, 'e', b[source], p, 2 / (p + 1))]);});
+add('ema', ({period: p = 20, source = 'close'} = {}) => {period(p); return definition(['value'], {}, (s, b) => [emaRecover(s, 'e', b[source], p, 2 / (p + 1))]);});
 add('wma', ({period: p = 20} = {}) => {period(p); return definition(['value'], {}, (s, b) => { roll(s, 'r', b.close, p); const q = s.r; if (q.a.length < p) return [NaN]; let sum = 0; for (let j = 0; j < p; j++) sum += q.a[(q.head + j) % p] * (j + 1); return [sum / (p * (p + 1) / 2)]; });});
 add('rsi', ({period: p = 14} = {}) => {period(p); return definition(['value'], {previous: NaN}, (s, b) => {
   const delta = b.close - s.previous; s.previous = b.close; if (!Number.isFinite(delta)) return [NaN];

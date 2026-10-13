@@ -9,7 +9,7 @@
 | 지표 | 기본값·계산 | 최초 유효 출력 / 0분모 |
 |---|---|---|
 | SMA | close rolling mean, p=20; source 변경 가능 | p−1 |
-| EMA | p=20, SMA(p) seed, α=2/(p+1) | p−1; 첫 close로 seed하지 않음 |
+| EMA | p=20, SMA(p) seed, α=2/(p+1) | 정상 p−1; 첫 close seed 아님. overflow recovery는 아래 별도 규약 |
 | WMA | p=20, 오래된→최신 가중치 1..p | p−1; O(p) 계산 |
 | RSI | p=14, close 변화 gain/loss SMA seed, Wilder α=1/p | p; gain=loss=0 → 50, loss=0 → 100 |
 | ATR | p=14, 첫 TR=high−low, 이후 max(H−L, abs(H−prevC), abs(L−prevC)); SMA seed/Wilder | p−1 |
@@ -85,3 +85,5 @@ Aroon 추가 검증은 독립 전체-window scan과 incremental append/update/co
 검증 범위와 실행 결과: [VWMA validation](VWMA-VALIDATION.md).
 
 SMA의 overflow gap 및 finite-window 복구 규약: [SMA recovery](SMA-RECOVERY.md).
+
+EMA seed/recurrent overflow와 period1 복구: [EMA recovery](EMA-RECOVERY.md).

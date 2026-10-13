@@ -25,7 +25,7 @@ Independent source-window tests distinguish exact analytical cases, FIFO Float64
 
 Actual Node Workers test params and workspace roundtrip with an Infinity checkpoint at index 256 followed by finite values. Native bundle VM and standalone vendored QuickJS test native commands, raw-window oracle, prepared workspace checkpoint ownership, compaction restart and cleanup.
 
-Other extreme-value limitations remain. In particular, the existing EMA seed can overflow and remain NaN; this SMA-only change does not repair that seed or claim all other builtins recover from every finite-source intermediate overflow. Browser, Swift/JSC, Android/JNI and device execution remain unverified.
+Other extreme-value limitations remain. This SMA-only change does not repair other smoothers or claim all other builtins recover from every finite-source intermediate overflow. The subsequently added standalone EMA policy is documented separately in [EMA recovery](EMA-RECOVERY.md). Browser, Swift/JSC, Android/JNI and device execution remain unverified.
 
 ## Executed validation
 
