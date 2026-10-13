@@ -554,3 +554,5 @@ test('attach, page, selection, refresh, and batch edits do not query data or com
   check(f, 0); click(f, 'Delete selected');
   assert.equal(queries, 0); assert.equal(steps, 0); assert.equal(f.renderer.calls, 0); assert.equal(h.frames.size, 1);
 });
+
+test('each implicit label contains exactly one labelable control without nested labels',t=>{const h=fixture(t),f=h.create();f.attach();const labels=descendants(f.panelContainer).filter(n=>n.tagName==='LABEL');assert.ok(labels.length>=11);for(const label of labels){const children=descendants(label);assert.equal(children.filter(n=>['INPUT','BUTTON','SELECT','TEXTAREA','METER','OUTPUT','PROGRESS'].includes(n.tagName)).length,1);assert.equal(children.filter(n=>n.tagName==='LABEL').length,0);}for(const name of['color','fill','width','font']){const{enabled,input}=field(f,name);assert.equal(enabled.parentNode.tagName,'LABEL');assert.equal(input.parentNode.tagName,'LABEL');assert.notEqual(enabled.parentNode,input.parentNode);assert.match(input.parentNode.textContent,new RegExp(name+' value'));}});

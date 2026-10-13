@@ -37,3 +37,5 @@ The new focused suite passed **131/131**: 84 DOM-free controller tests and 47 re
 These checks do not run actual browser native checkbox defaults, focus event ordering, rendering, assistive technology or mobile SDK UI. Drawing lookup tests stop before RAF and make no dirty-redraw latency guarantee. Selection and listener cleanup assertions are structural, not a measured long-term heap/GC claim.
 
 For the subsequent metadata work reduction and all measured regressions/outliers, see [Drawing selection metadata cost](DRAWING-SELECTION-COST.md).
+
+The style controls now use separate sibling labels for each checkbox and value input. Each implicit label contains exactly one labelable control, following the [HTML label content model](https://html.spec.whatwg.org/multipage/forms.html#the-label-element). The prior shared label contained both inputs. Accessible names and keyboard order are preserved; the structural fake-DOM regression does not establish actual browser or assistive-technology behavior.
