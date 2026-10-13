@@ -24,6 +24,18 @@ function roll(s, key, value, n) {
   else { q.sum += value - q.a[q.head]; q.a[q.head] = value; q.head = (q.head + 1) % n; }
   return q.a.length === n ? q.sum / n : NaN;
 }
+// SMA alone recovers nonfinite sums without changing the shared rolling state
+// schema or normal-path addition order used by the other builtins.
+function smaRoll(s,key,value,n){
+ const previous=s[key],before=previous?.sum??0,expired=previous?.a.length===n?previous.a[previous.head]:0;
+ const result=roll(s,key,value,n);if(!Number.isFinite(value))return result;
+ const q=s[key];if(n===1){q.sum=value;return value;}
+ const scale=Math.max(Math.abs(before),Math.abs(expired),Math.abs(value),Math.abs(value-expired));
+ if(!Number.isFinite(q.sum)||scale>0&&Math.abs(q.sum)<=scale*Number.EPSILON*4*n){
+  let sum=0;for(let j=0;j<q.a.length;j++)sum+=q.a[(q.head+j)%q.a.length];q.sum=sum;
+ }
+ const mean=q.a.length===n?q.sum/n:NaN;return Number.isFinite(mean)?mean:NaN;
+}
 // Compensated rolling sums preserve small contributions when dominant bars leave.
 // Extreme magnitudes rebase in FIFO order; this is deliberately not scaled VWMA.
 function vwmaAccumulate(pair,value) {
@@ -79,7 +91,7 @@ export function isCanonicalBuiltinDefinition(name,def){
  if(!offsets||![Object.prototype,null].includes(Object.getPrototypeOf(offsets))||Reflect.ownKeys(offsets).length!==Object.keys(origin.offsets).length)return false;
  return Object.keys(origin.offsets).every(key=>Object.is(own(offsets,key),origin.offsets[key]));
 }
-add('sma', ({period: p = 20, source = 'close'} = {}) => {period(p); return definition(['value'], {}, (s, b) => [roll(s, 'r', b[source], p)]);});
+add('sma', ({period: p = 20, source = 'close'} = {}) => {period(p); return definition(['value'], {}, (s, b) => [smaRoll(s, 'r', b[source], p)]);});
 add('vwma', ({period:p=20}={})=>{period(p);return definition(['value'],{a:[],head:0,sums:[[0,0],[0,0],[0,0]],invalid:0,positive:0},(s,b,i)=>vwmaStep(s,b,i,p));});
 add('ema', ({period: p = 20, source = 'close'} = {}) => {period(p); return definition(['value'], {}, (s, b) => [smooth(s, 'e', b[source], p, 2 / (p + 1))]);});
 add('wma', ({period: p = 20} = {}) => {period(p); return definition(['value'], {}, (s, b) => { roll(s, 'r', b.close, p); const q = s.r; if (q.a.length < p) return [NaN]; let sum = 0; for (let j = 0; j < p; j++) sum += q.a[(q.head + j) % p] * (j + 1); return [sum / (p * (p + 1) / 2)]; });});

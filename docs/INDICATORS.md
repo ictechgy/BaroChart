@@ -83,3 +83,5 @@ Aroon 추가 검증은 독립 전체-window scan과 incremental append/update/co
 수식의 일반 정의는 [TradingView 공식 VWMA 설명](https://www.tradingview.com/support/solutions/43000592293-volume-weighted-moving-average-vwma/)을 참조했습니다. 위 warmup/overflow/복구와 부동소수 규약은 이 구현의 명시 계약이며 타제품 모든 값과의 parity 보장은 아닙니다.
 
 검증 범위와 실행 결과: [VWMA validation](VWMA-VALIDATION.md).
+
+SMA의 overflow gap 및 finite-window 복구 규약: [SMA recovery](SMA-RECOVERY.md).
