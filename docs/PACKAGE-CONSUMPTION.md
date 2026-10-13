@@ -6,6 +6,8 @@ The root and `/core`, `/canvas`, `/webgl`, `/worker`, `/worker-entry`, optional 
 
 `TSC_PATH=/path/to/typescript/lib/tsc.js npm run check:package` builds a local tarball, installs it offline in a temporary consumer and checks export/type/runtime contracts. It does not publish or require React.
 
+The command creates the ignored `artifacts/` directory when needed and writes `artifacts/npm-package-verification.json`. To select a different report location, use `npm run check:package -- /path/to/reports/package.json`; missing parent directories are created recursively. Filesystem permission/path errors are propagated, and the selected report file may be overwritten. Temporary package installation stays outside the repository.
+
 The larger `scripts/test-package-consumers.mjs` matrix additionally needs pinned development bundlers and optional React versions. Network installation occurs only with its explicit `--allow-network` flag. Old baseline archives are optional external inputs, not included in this public repository. Their original `aster-financial-charts` package name is retained by the isolated baseline consumer.
 
 <!-- package-footprint:start -->

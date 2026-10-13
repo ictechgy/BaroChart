@@ -6,6 +6,7 @@ import {tmpdir} from 'node:os';
 import {dirname,join,resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
+import {writePackageVerificationReport} from './package-report.mjs';
 const root=resolve(import.meta.dirname,'..'),scratch=await mkdtemp(join(tmpdir(),'aster-npm-verify-'));
 const cache=join(scratch,'cache'),consumer=join(scratch,'consumer');await mkdir(consumer);
 const run=(executable,args,cwd=root)=>{const r=spawnSync(executable,args,{cwd,encoding:'utf8',maxBuffer:16*1024*1024});if(r.status!==0)throw new Error(`${executable} ${args[0]} failed:\n${r.stdout}${r.stderr}`);return r.stdout;};
@@ -62,4 +63,4 @@ assert.throws(()=>feedAPI.enqueueDataEvents({streamId:'package:A',generation:4,f
 feedModel.dispose();restoreFeedModel.dispose();assert.equal(feedStore.listeners.size,0);assert.equal(restoreFeedStore.listeners.size,0);
 const result={version:pkg.version,packageName:pkg.name,bytes:packed.size,unpackedBytes:packed.unpackedSize,files:names.length,sha256:createHash('sha256').update(await readFile(tarball)).digest('hex'),entries,consumerTypes:'TypeScript '+ts.version+' strict NodeNext and DOM-free core ES2022 including ingestion contract passed',runtimeSmoke:'512 OHLCV/core/scene/drawing, exact module/as-of/calendar5/study roundtrip, owned packet/special-number restore/single-publication batch/sequence error and listener cleanup passed',private:true,license:pkg.license,productionDependencies:0,reactInstalled:false,network:'offline; no publication',scope:'Local npm tarball installation and ESM/type export contract; optional React entry is tested separately by test-package-consumers.mjs; browser/native execution measured separately'};
 result.tarball=tarball; // Copy these exact verified bytes for the local deliverable.
-const output=resolve(process.argv[2]??join(root,'artifacts/npm-package-verification.json'));await writeFile(output,JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result,null,2));
+const output=resolve(process.argv[2]??join(root,'artifacts/npm-package-verification.json'));await writePackageVerificationReport(output,result);console.log(JSON.stringify(result,null,2));
