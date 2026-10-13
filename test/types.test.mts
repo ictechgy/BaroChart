@@ -116,3 +116,9 @@ const styleReceipt=api.setDrawingsStyle(['text'],{color:'#abc',fill:'#def',width
 api.setDrawingsStyle(['text'],{locked:true});
 // @ts-expect-error explicit null is not a batch style reset
 api.setDrawingsStyle(['text'],{fill:null});
+
+import {DrawingSelectionController,attachDrawingPanel,type DrawingSelectionSnapshot} from '../src/index.mjs';
+const groups=new DrawingSelectionController(api);const groupState:DrawingSelectionSnapshot=groups.snapshot({offset:0,limit:32});groupState.rows.forEach(row=>row.id.toUpperCase());groups.dispose();
+const externalPanel=attachDrawingPanel(document.createElement('div'),{} as CanvasChart,{label:'Drawing controls'});externalPanel.destroy();
+// @ts-expect-error group selection is explicit string identifiers
+groups.select(42);

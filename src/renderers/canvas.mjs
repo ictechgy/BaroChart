@@ -1,3 +1,6 @@
+import {disposeDrawingPanels} from './drawing-panel.mjs';
+export {attachDrawingPanel} from './drawing-panel.mjs';
+export {DrawingSelectionController} from './drawing-selection.mjs';
 import {registerTimeCursorHost,disposeTimeCursorHost,timeCursorState,refreshTimeCursor,publishTimeCursor,clearTimeCursorOrigin,timeCursorCommands} from './time-cursor.mjs';
 export {TimeCursorGroup} from './time-cursor.mjs';
 import {KeyboardDataExplorer,explorerInputAllowed} from './keyboard-explorer.mjs';
@@ -164,5 +167,5 @@ export class CanvasChart {
   }
   setTool(tool) {this.controller.setTool(tool);}
   resize() {this.invalidate();}
-  destroy({disposeModel = false} = {}) {if (this.disposed) return; this.disposed = true;disposeTimeCursorHost(this);this.timeLayout=null; this.disposeDataExplorer();this.controller.cancel(); if (this.frame !== null) cancelAnimationFrame(this.frame); this.frame = null; this.observer?.disconnect(); this.unsubscribe(); for (const [type, fn, options] of this.listeners) this.canvas.removeEventListener(type, fn, options); this.listeners = [];this.releaseLayers();this.sceneCache.clear(); this.renderer?.dispose(); this.canvas.remove();this.canvas.width=this.canvas.height=0; this.lastScene = null;this.renderMetrics=null; this.timings = []; if (disposeModel) this.model.dispose();}
+  destroy({disposeModel = false} = {}) {if (this.disposed) return; this.disposed = true;disposeDrawingPanels(this);disposeTimeCursorHost(this);this.timeLayout=null; this.disposeDataExplorer();this.controller.cancel(); if (this.frame !== null) cancelAnimationFrame(this.frame); this.frame = null; this.observer?.disconnect(); this.unsubscribe(); for (const [type, fn, options] of this.listeners) this.canvas.removeEventListener(type, fn, options); this.listeners = [];this.releaseLayers();this.sceneCache.clear(); this.renderer?.dispose(); this.canvas.remove();this.canvas.width=this.canvas.height=0; this.lastScene = null;this.renderMetrics=null; this.timings = []; if (disposeModel) this.model.dispose();}
 }

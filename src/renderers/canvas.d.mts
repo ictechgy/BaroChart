@@ -21,3 +21,16 @@ export class TimeCursorGroup {
  clear():void;dispose():void;
 }
 export interface TimeCursorState {requestedTime:number;matchedTime:number|null;index:number|null;status:'matched'|'unmatched'|'empty'|'offscreen';kind:'pointer'|'keyboard';generation:number;}
+
+/** Explicit session-local group selection. Never changes the canvas's single selected handle. */
+export class DrawingSelectionController {
+ constructor(api:ChartAPI);
+ select(id:string,selected?:boolean):DrawingSelectionSnapshot;
+ clear():DrawingSelectionSnapshot;refresh():DrawingSelectionSnapshot;
+ snapshot(options?:{offset?:number;limit?:number}):DrawingSelectionSnapshot;
+ applyStyle(patch:{color?:string;fill?:string;width?:number;font?:string}):{changed:number;invalidationFailed:boolean};
+ deleteSelected():{changed:number;invalidationFailed:boolean};dispose():void;
+}
+export interface DrawingSelectionSnapshot {rows:{id:string;type:DrawingType;panel:string;locked:boolean;selected:boolean}[];total:number;selectedIds:string[];selectedCount:number;staleCount:number;offset:number;limit:number;}
+/** Empty dedicated container, at most one panel per chart. Native controls, no canvas shortcuts. */
+export function attachDrawingPanel(container:HTMLElement,chart:CanvasChart,options?:{label?:string}):{selection:DrawingSelectionController;refresh():DrawingSelectionSnapshot|null;destroy():void};

@@ -235,3 +235,7 @@ two-chart example and unverified browser/UI limits.
 ### Batch drawing styles
 
 See [Atomic drawing style patches](DRAWING-STYLE.md) for `setDrawingsStyle(ids, patch)`, four portable style keys, stored-change receipts and one-undo failure atomicity.
+
+### Optional drawing selection controls (web)
+
+[Explicit drawing selection controls](DRAWING-PANEL.md) adds a separate bounded selection controller and an opt-in paged checkbox panel using the existing group style/delete APIs. It does not change the chart's single pointer-selected drawing or workspace schema. Real-browser and assistive-technology QA remain pending.
