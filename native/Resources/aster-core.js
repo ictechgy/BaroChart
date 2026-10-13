@@ -2186,18 +2186,18 @@ function compactData(api,options){
 
 
 const translationStringify=JSON.stringify,translationDefine=Object.defineProperty;
-function translationSlot(object,key,required=false){const d=Object.getOwnPropertyDescriptor(object,key);if(!d){if(required)throw new TypeError('Drawing translation missing '+key);return undefined;}if(!Object.hasOwn(d,'value'))throw new TypeError('Drawing translation own data properties required');return d.value;}
-function translationRecord(value,keys){if(!value||![Object.prototype,null].includes(Object.getPrototypeOf(value)))throw new TypeError('Drawing translation plain record required');const out=Object.create(null);for(const key of Reflect.ownKeys(value)){if(typeof key!=='string'||!keys.includes(key))throw new TypeError('Drawing translation fields');const d=Object.getOwnPropertyDescriptor(value,key);if(!d?.enumerable||!Object.hasOwn(d,'value'))throw new TypeError('Drawing translation own data fields required');out[key]=d.value;}return out;}
-function translationList(value,max){if(!Array.isArray(value)||Object.getPrototypeOf(value)!==Array.prototype)throw new TypeError('Drawing translation plain array required');const n=translationSlot(value,'length',true);if(n>max||Reflect.ownKeys(value).length!==n+1)throw new RangeError('Drawing translation array limit/shape');const result=[];for(let i=0;i<n;i++)result.push(translationSlot(value,String(i),true));return result;}
-function translationStale(){throw new Error('Drawing translation owner changed');}
-function translationCapture(object,keys,guards,writes=[]){if(!object||typeof object!=='object')throw new TypeError('Drawing translation managed owner required');const state=Object.create(null);for(const key of keys){state[key]=translationSlot(object,key);if(writes.includes(key)){const d=Object.getOwnPropertyDescriptor(object,key);if(!d?.writable)throw new TypeError('Drawing translation writable own state required');}}guards.push(()=>{for(const key of keys)if(!Object.is(translationSlot(object,key),state[key]))translationStale();});return state;}
+function translationSlot(object,key,required=false){const d=Object.getOwnPropertyDescriptor(object,key);if(!d){if(required)throw new TypeError('Drawing group edit missing '+key);return undefined;}if(!Object.hasOwn(d,'value'))throw new TypeError('Drawing group edit own data properties required');return d.value;}
+function translationRecord(value,keys){if(!value||![Object.prototype,null].includes(Object.getPrototypeOf(value)))throw new TypeError('Drawing group edit plain record required');const out=Object.create(null);for(const key of Reflect.ownKeys(value)){if(typeof key!=='string'||!keys.includes(key))throw new TypeError('Drawing group edit fields');const d=Object.getOwnPropertyDescriptor(value,key);if(!d?.enumerable||!Object.hasOwn(d,'value'))throw new TypeError('Drawing group edit own data fields required');out[key]=d.value;}return out;}
+function translationList(value,max){if(!Array.isArray(value)||Object.getPrototypeOf(value)!==Array.prototype)throw new TypeError('Drawing group edit plain array required');const n=translationSlot(value,'length',true);if(n>max||Reflect.ownKeys(value).length!==n+1)throw new RangeError('Drawing group edit array limit/shape');const result=[];for(let i=0;i<n;i++)result.push(translationSlot(value,String(i),true));return result;}
+function translationStale(){throw new Error('Drawing group edit owner changed');}
+function translationCapture(object,keys,guards,writes=[]){if(!object||typeof object!=='object')throw new TypeError('Drawing group edit managed owner required');const state=Object.create(null);for(const key of keys){state[key]=translationSlot(object,key);if(writes.includes(key)){const d=Object.getOwnPropertyDescriptor(object,key);if(!d?.writable)throw new TypeError('Drawing group edit writable own state required');}}guards.push(()=>{for(const key of keys)if(!Object.is(translationSlot(object,key),state[key]))translationStale();});return state;}
 function translationCapturedList(value,max,guards){const copy=translationList(value,max);guards.push(()=>{if(translationSlot(value,'length')!==copy.length)translationStale();for(let i=0;i<copy.length;i++)if(translationSlot(value,String(i))!==copy[i])translationStale();});return copy;}
 function translationDrawing(value){
- if(!Object.isFrozen(value))throw new TypeError('Drawing translation requires immutable managed drawings');
+ if(!Object.isFrozen(value))throw new TypeError('Drawing group edit requires immutable managed drawings');
  const d=translationRecord(value,['id','type','panel','points','style','text','locked','axisId','seriesId']);
- if(!Object.isFrozen(d.points))throw new TypeError('Drawing translation immutable anchors required');
- d.points=translationList(d.points,2048).map(point=>{if(!Object.isFrozen(point))throw new TypeError('Drawing translation immutable anchor required');return translationRecord(point,['time','price']);});
- if(d.style!==undefined){if(!Object.isFrozen(d.style))throw new TypeError('Drawing translation immutable style required');d.style=translationRecord(d.style,['color','fill','width','font']);}
+ if(!Object.isFrozen(d.points))throw new TypeError('Drawing group edit immutable anchors required');
+ d.points=translationList(d.points,2048).map(point=>{if(!Object.isFrozen(point))throw new TypeError('Drawing group edit immutable anchor required');return translationRecord(point,['time','price']);});
+ if(d.style!==undefined){if(!Object.isFrozen(d.style))throw new TypeError('Drawing group edit immutable style required');d.style=translationRecord(d.style,['color','fill','width','font']);}
  validateDrawing(d);return d;
 }
 // JSON character count without invoking toJSON or caller array/object methods.
@@ -2205,42 +2205,49 @@ function translationChars(value){if(value===null)return 4;if(typeof value!=='obj
 function translationFrozen(d){for(const p of d.points)Object.freeze(p);Object.freeze(d.points);if(d.style)Object.freeze(d.style);return Object.freeze(d);}
 
 /** Explicit raw-coordinate group edit. No indicator/layout computation. */
-function translateDrawings(api,ids,options){
+function translateDrawings(api,ids,options){return drawingGroupEdit(api,ids,options,false);}
+/** Mixed and orphan bindings may be removed without querying live metadata. */
+function deleteDrawings(api,ids){return drawingGroupEdit(api,ids,null,true);}
+function drawingGroupEdit(api,ids,options,remove){
  const guards=[],a=translationCapture(api,['model','controller','invalidate'],guards),model=a.model;
- const m=translationCapture(model,['disposed','drawings','panels','axes','series'],guards);
- if(m.disposed)throw new Error('Chart disposed');if(!(m.drawings instanceof DrawingStore))throw new TypeError('Drawing translation managed store required');
+ const m=translationCapture(model,remove?['disposed','drawings']:['disposed','drawings','panels','axes','series'],guards);
+ if(m.disposed)throw new Error('Chart disposed');if(!(m.drawings instanceof DrawingStore))throw new TypeError('Drawing group edit managed store required');
  const d=m.drawings,s=translationCapture(d,['items','undoStack','redoStack','selected','serial','transaction','maxDrawings','maxPoints','maxDocumentChars','historyLimit','historyBytes','retainedHistoryBytes'],guards,['items','undoStack','redoStack']);
- const retained=Object.getOwnPropertyDescriptor(d,'retainedHistoryBytes');if(retained&&!retained.writable||!retained&&!Object.isExtensible(d))throw new TypeError('Drawing translation writable history accounting required');
+ const retained=Object.getOwnPropertyDescriptor(d,'retainedHistoryBytes');if(retained&&!retained.writable||!retained&&!Object.isExtensible(d))throw new TypeError('Drawing group edit writable history accounting required');
  const c=a.controller?translationCapture(a.controller,['model','gesture'],guards):null;
- if(c&&c.model!==model)throw new Error('Drawing translation controller owner mismatch');if(s.transaction||c?.gesture)throw new Error('Drawing translation requires no active gesture or transaction');
+ if(c&&c.model!==model)throw new Error('Drawing group edit controller owner mismatch');if(s.transaction||c?.gesture)throw new Error('Drawing group edit requires no active gesture or transaction');
  const items=translationCapturedList(s.items,RESOURCE_LIMITS.maxDrawings,guards),undo=translationCapturedList(s.undoStack,10000,guards),redo=translationCapturedList(s.redoStack,10000,guards);
- const panels=translationCapturedList(m.panels,RESOURCE_LIMITS.maxPanels,guards).map(p=>translationCapture(p,['id'],guards));
- const axes=translationCapturedList(m.axes,RESOURCE_LIMITS.maxAxes,guards).map(p=>translationCapture(p,['id','panel'],guards));
- const series=translationCapturedList(m.series,RESOURCE_LIMITS.maxSeries,guards).map(p=>translationCapture(p,['id','panel','axisId'],guards));
- const keys=translationList(ids,128),o=translationRecord(options,['deltaTimeMs','deltaPrice']);
- if(!keys.length)throw new RangeError('Drawing translation requires 1..128 ids');
+ const panels=remove?null:translationCapturedList(m.panels,RESOURCE_LIMITS.maxPanels,guards).map(p=>translationCapture(p,['id'],guards));
+ const axes=remove?null:translationCapturedList(m.axes,RESOURCE_LIMITS.maxAxes,guards).map(p=>translationCapture(p,['id','panel'],guards));
+ const series=remove?null:translationCapturedList(m.series,RESOURCE_LIMITS.maxSeries,guards).map(p=>translationCapture(p,['id','panel','axisId'],guards));
+ const keys=translationList(ids,128),o=remove?null:translationRecord(options,['deltaTimeMs','deltaPrice']);
+ if(!keys.length)throw new RangeError('Drawing group edit requires 1..128 ids');
  const selected=new Set();for(const id of keys){identifier(id,'Drawing id');if(selected.has(id))throw new TypeError('Duplicate drawing id');selected.add(id);}
- if(!Number.isFinite(o.deltaTimeMs)||!Number.isFinite(o.deltaPrice))throw new TypeError('Finite deltaTimeMs and deltaPrice required');
- for(const [key,max,min] of [['maxDrawings',10000,0],['maxPoints',2097152,0],['maxDocumentChars',RESOURCE_LIMITS.maxDocumentChars,0],['historyLimit',10000,1],['historyBytes',RESOURCE_LIMITS.maxHistoryBytes,0]])if(!Number.isSafeInteger(s[key])||s[key]<min||s[key]>max)throw new RangeError('Drawing translation history/resource limit');
+ if(!remove&&(!Number.isFinite(o.deltaTimeMs)||!Number.isFinite(o.deltaPrice)))throw new TypeError('Finite deltaTimeMs and deltaPrice required');
+ for(const [key,max,min] of [['maxDrawings',10000,0],['maxPoints',2097152,0],['maxDocumentChars',RESOURCE_LIMITS.maxDocumentChars,0],['historyLimit',10000,1],['historyBytes',RESOURCE_LIMITS.maxHistoryBytes,0]])if(!Number.isSafeInteger(s[key])||s[key]<min||s[key]>max)throw new RangeError('Drawing group edit history/resource limit');
  const copies=new Map(),weights=new Map(),copy=value=>{let result=copies.get(value);if(!result){result=translationDrawing(value);copies.set(value,result);weights.set(value,2*translationChars(result));}return result;};
- const next=items.slice(),seen=new Set();let binding=null,changed=0,points=0,text=0;
+ let next=items.slice();const seen=new Set(),clearSelected=remove&&selected.has(s.selected);
+ if(clearSelected){const writable=()=>{const descriptor=Object.getOwnPropertyDescriptor(d,'selected');if(!descriptor||!Object.hasOwn(descriptor,'value')||!descriptor.writable)throw new TypeError('Drawing group edit writable selection required');};writable();guards.push(writable);}
+ let binding=null,changed=0,points=0,text=0;
  for(let i=0;i<items.length;i++){
-  const rawPoints=translationSlot(items[i],'points',true);if(!Array.isArray(rawPoints))throw new TypeError('Drawing anchors');points+=translationSlot(rawPoints,'length',true);if(points>s.maxPoints)throw new RangeError('Drawing translation point limit');
+  const rawPoints=translationSlot(items[i],'points',true);if(!Array.isArray(rawPoints))throw new TypeError('Drawing anchors');points+=translationSlot(rawPoints,'length',true);if(points>s.maxPoints)throw new RangeError('Drawing group edit point limit');
   const before=copy(items[i]);if(seen.has(before.id))throw new TypeError('Duplicate drawing id');seen.add(before.id);text+=before.text?.length??0;
   if(!selected.has(before.id))continue;
   if(before.locked)throw new Error('Drawing is locked');
-  const b=[before.panel,before.axisId??null,before.seriesId??null];if(binding&&b.some((v,j)=>v!==binding[j]))throw new Error('Drawing translation requires identical panel/axis/series binding');binding=b;
+  if(remove){next[i]=null;changed++;continue;}
+  const b=[before.panel,before.axisId??null,before.seriesId??null];if(binding&&b.some((v,j)=>v!==binding[j]))throw new Error('Drawing group edit requires identical panel/axis/series binding');binding=b;
   if(!panels.some(p=>p.id===b[0])||b[1]!==null&&!axes.some(p=>p.id===b[1]&&p.panel===b[0])||b[2]!==null&&!series.some(p=>p.id===b[2]&&p.panel===b[0]&&(p.axisId??null)===b[1]))throw new Error('Missing or mismatched drawing binding');
   let moved=false;const anchors=before.points.map(p=>{const time=o.deltaTimeMs===0?p.time:p.time+o.deltaTimeMs,price=o.deltaPrice===0?p.price:p.price+o.deltaPrice;if(time!==p.time||price!==p.price)moved=true;return {time,price};});
   const candidate={...before,points:anchors};if(before.style!==undefined)candidate.style=translationSlot(items[i],'style');validateDrawing(candidate);if(moved){next[i]=translationFrozen(candidate);changed++;}
  }
- if(keys.some(id=>!seen.has(id)))throw new Error('Missing drawing');if(items.length>s.maxDrawings||points>s.maxPoints||text>1000000)throw new RangeError('Drawing translation resource limit');
+ if(keys.some(id=>!seen.has(id)))throw new Error('Missing drawing');if(items.length>s.maxDrawings||points>s.maxPoints||text>1000000)throw new RangeError('Drawing group edit resource limit');
+ if(remove)next=next.filter(value=>value!==null);
  const receipt={changed,invalidationFailed:false};
  if(!changed){for(const check of guards)check();return receipt;}
  const snapshotWeight=snapshot=>{let n=snapshot.length*8;for(const value of snapshot){copy(value);n+=weights.get(value);}return n;};
- const priorWeight=snapshotWeight(items);if(priorWeight>s.historyBytes)throw new RangeError('Drawing translation undo snapshot exceeds historyBytes');
+ const priorWeight=snapshotWeight(items);if(priorWeight>s.historyBytes)throw new RangeError('Drawing group edit undo snapshot exceeds historyBytes');
  const history=[],historyWeights=[];let priorHistoryBytes=0;
- for(const snapshot of undo){const rows=translationCapturedList(snapshot,s.maxDrawings,guards),weight=snapshotWeight(rows);priorHistoryBytes+=weight;if(priorHistoryBytes>RESOURCE_LIMITS.maxHistoryBytes)throw new RangeError('Drawing translation retained history resource limit');history.push(rows);historyWeights.push(weight);}
+ for(const snapshot of undo){const rows=translationCapturedList(snapshot,s.maxDrawings,guards),weight=snapshotWeight(rows);priorHistoryBytes+=weight;if(priorHistoryBytes>RESOURCE_LIMITS.maxHistoryBytes)throw new RangeError('Drawing group edit retained history resource limit');history.push(rows);historyWeights.push(weight);}
  history.push(items);historyWeights.push(priorWeight);
  let retainedBytes=historyWeights.reduce((x,y)=>x+y,0),start=0;while(history.length-start>s.historyLimit||retainedBytes>s.historyBytes)retainedBytes-=historyWeights[start++];
  const nextUndo=history.slice(start),nextRedo=[];
@@ -2248,6 +2255,7 @@ function translateDrawings(api,ids,options){
  // begin/commit/trim/weight method or serializer is called after this guard.
  for(const check of guards)check();
  translationDefine(d,'items',{value:next});translationDefine(d,'undoStack',{value:nextUndo});translationDefine(d,'redoStack',{value:nextRedo});translationDefine(d,'retainedHistoryBytes',retained?{value:retainedBytes}:{value:retainedBytes,writable:true,enumerable:true,configurable:true});
+ if(clearSelected)translationDefine(d,'selected',{value:null});
  try{a.invalidate.call(api);}catch{receipt.invalidationFailed=true;}
  return receipt;
 }
@@ -2261,7 +2269,7 @@ function values(input) {
  return Float64Array.from(input,x=>x===null?NaN:x);
 }
 function columns(input) {return Object.fromEntries(FIELDS.map(key=>[key,values(input?.[key])]));}
-const COMMANDS=new Set(['compactData','setData','setColumns','applyDataEvent','applyDataEvents','configureDataIngestion','enqueueDataEvents','drainDataEvents','pauseDataIngestion','resumeDataIngestion','cancelDataEvents','dataIngestionStats','saveDataIngestion','loadDataIngestion','addPanel','setPanel','addAxis','setAxis','removeAxis','setDrawingTarget','crosshairValues','dataAt','addSeries','setSeries','setSeriesValues','removeSeries','addIndicator','setIndicatorParams','removeIndicator','indicatorValues','indicatorValueAt','registerIndicatorModule','saveStudies','loadStudies','addDrawing','editDrawing','translateDrawings','deleteDrawing','selectDrawing','saveDrawings','loadDrawings','undo','redo','setTool','setText','setTheme','setSymbol','setVisibleRange','fit','zoom','pan','inspect']);
+const COMMANDS=new Set(['compactData','setData','setColumns','applyDataEvent','applyDataEvents','configureDataIngestion','enqueueDataEvents','drainDataEvents','pauseDataIngestion','resumeDataIngestion','cancelDataEvents','dataIngestionStats','saveDataIngestion','loadDataIngestion','addPanel','setPanel','addAxis','setAxis','removeAxis','setDrawingTarget','crosshairValues','dataAt','addSeries','setSeries','setSeriesValues','removeSeries','addIndicator','setIndicatorParams','removeIndicator','indicatorValues','indicatorValueAt','registerIndicatorModule','saveStudies','loadStudies','addDrawing','editDrawing','translateDrawings','deleteDrawings','deleteDrawing','selectDrawing','saveDrawings','loadDrawings','undo','redo','setTool','setText','setTheme','setSymbol','setVisibleRange','fit','zoom','pan','inspect']);
 
 /** Shared web/JavaScriptCore/QuickJS facade. JSON arguments retain Double values.
  * Factories passed as source are trusted application code, never market data.
@@ -2270,7 +2278,7 @@ class ChartAPI {
  constructor(model,{controller=null,invalidate=()=>{}}={}) {this.model=model;this.controller=controller;this.invalidate=invalidate;}
  dispatch(operation,args=[]) {
   if(!COMMANDS.has(operation)||!Array.isArray(args))throw new TypeError('Unknown chart command or argument list');
-  const arity={compactData:1,setData:1,setColumns:2,applyDataEvent:1,applyDataEvents:1,configureDataIngestion:1,enqueueDataEvents:1,drainDataEvents:1,pauseDataIngestion:0,resumeDataIngestion:0,cancelDataEvents:0,dataIngestionStats:0,saveDataIngestion:0,loadDataIngestion:1,addPanel:1,setPanel:2,addAxis:1,setAxis:2,removeAxis:1,setDrawingTarget:1,crosshairValues:2,dataAt:2,addSeries:1,setSeries:2,setSeriesValues:2,removeSeries:1,addIndicator:3,setIndicatorParams:2,removeIndicator:1,indicatorValues:2,indicatorValueAt:4,registerIndicatorModule:2,saveStudies:0,loadStudies:1,addDrawing:1,editDrawing:2,translateDrawings:2,deleteDrawing:1,selectDrawing:1,saveDrawings:0,loadDrawings:1,undo:0,redo:0,setTool:1,setText:1,setTheme:1,setSymbol:1,setVisibleRange:2,fit:0,zoom:2,pan:1,inspect:0};if(args.length>arity[operation])throw new TypeError('Chart command argument count');
+  const arity={compactData:1,setData:1,setColumns:2,applyDataEvent:1,applyDataEvents:1,configureDataIngestion:1,enqueueDataEvents:1,drainDataEvents:1,pauseDataIngestion:0,resumeDataIngestion:0,cancelDataEvents:0,dataIngestionStats:0,saveDataIngestion:0,loadDataIngestion:1,addPanel:1,setPanel:2,addAxis:1,setAxis:2,removeAxis:1,setDrawingTarget:1,crosshairValues:2,dataAt:2,addSeries:1,setSeries:2,setSeriesValues:2,removeSeries:1,addIndicator:3,setIndicatorParams:2,removeIndicator:1,indicatorValues:2,indicatorValueAt:4,registerIndicatorModule:2,saveStudies:0,loadStudies:1,addDrawing:1,editDrawing:2,translateDrawings:2,deleteDrawings:1,deleteDrawing:1,selectDrawing:1,saveDrawings:0,loadDrawings:1,undo:0,redo:0,setTool:1,setText:1,setTheme:1,setSymbol:1,setVisibleRange:2,fit:0,zoom:2,pan:1,inspect:0};if(args.length>arity[operation])throw new TypeError('Chart command argument count');
   return this[operation](...args)??null;
  }
  changed(result) {this.invalidate();return result;}
@@ -2383,6 +2391,7 @@ class ChartAPI {
  drawingOptions(options) {optionRecord(options,['id','type','panel','points','style','text','locked','axisId','seriesId'],'Drawing');if(options.style)optionRecord(options.style,['color','fill','width','font'],'Drawing style');const next={...options,...(options.style?{style:style(options.style,['color','fill'])}:{})};if(next.seriesId!=null&&next.axisId===undefined){const s=this.model.series.find(s=>s.id===next.seriesId);if(s)next.axisId=s.axisId??null;}return next;}
  drawingMutationContext(){const d=this.model.drawings,interactive=!!this.controller?.gesture;return {items:interactive&&d.transaction?d.transaction:d.items,beforeMutation:interactive?()=>this.controller.cancel({notify:false}):null};}
  addDrawing(options) {const next={panel:'price',...this.drawingOptions(options)};this.model.validateDrawingBinding(next);return this.changed(this.model.drawings.add(next,this.drawingMutationContext()));}
+ deleteDrawings(ids){return deleteDrawings(this,ids);}
  translateDrawings(ids,options){return translateDrawings(this,ids,options);}
  editDrawing(id,patch) {const context=this.drawingMutationContext(),previous=context.items.find(d=>d.id===id);if(!previous)throw new Error('Missing committed drawing');const next=this.drawingOptions(patch);this.model.validateDrawingBinding({...previous,...next});this.model.drawings.edit(id,next,context);return this.changed();}
  deleteDrawing(id=this.model.drawings.selected) {const context=this.drawingMutationContext();if(this.controller?.gesture?.kind==='create'&&this.controller.gesture.id===id&&!context.items.some(d=>d.id===id)){this.controller.cancel({notify:false});return this.changed(false);}return this.changed(this.model.drawings.remove(id,context));}

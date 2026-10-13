@@ -47,3 +47,7 @@ const groupReceipt:{changed:number;invalidationFailed:boolean}=api.translateDraw
 groupReceipt.changed.toFixed();
 // @ts-expect-error both raw deltas are explicit
 api.translateDrawings(['t'],{deltaPrice:1});
+const deleteReceipt:{changed:number;invalidationFailed:boolean}=api.deleteDrawings(['t'] as const);
+deleteReceipt.changed.toFixed();
+// @ts-expect-error an explicit ID array is required
+api.deleteDrawings('t');
