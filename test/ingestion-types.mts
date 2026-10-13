@@ -12,3 +12,7 @@ void receipt;void code;
 api.enqueueDataEvents({streamId:'A',generation:1,firstSequence:0,events:[{kind:'reset',bars:[]}]});
 // @ts-expect-error no executable beforeNotify hook in the public batch options
 store.applyEvents(events,{beforeNotify:()=>{}});
+api.compactData({keepLastBars:32,studyHistory:'restart',pendingData:'preserve-retained'});
+api.compactData({keepLastBars:32,studyHistory:'restart',pendingData:'reject'});
+// @ts-expect-error queue disposal is never an implicit compaction policy
+api.compactData({keepLastBars:32,studyHistory:'restart',pendingData:'discard'});

@@ -2,7 +2,9 @@
 
 Retained-window history: see [DATA-COMPACTION.md](DATA-COMPACTION.md) for explicit
 `compactData({keepLastBars, studyHistory:"restart"})`, exclusive ownership,
-study restart and source-only transient byte limits.
+study restart and source-only transient byte limits. Optional `pendingData:"preserve-retained"`
+keeps an accepted paused FIFO whose timestamp dependencies survive the trim; ordinary
+drain capacity/numeric checks still apply. The default requires an empty queue.
 
 0.2.11의 세션 VWAP·pivots·기준 시점 조회는 [SESSION-STUDIES.md](SESSION-STUDIES.md), 정적 사용자 모듈·지표 저장/병합은 [INDICATOR-MODULES.md](INDICATOR-MODULES.md)를 참고하세요. 아래 과거 실행 수와 새 검증 수를 합산하지 않습니다.
 

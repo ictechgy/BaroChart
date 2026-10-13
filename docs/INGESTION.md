@@ -95,5 +95,12 @@ generation을 묶고 구독 해제를 호스트가 처리해야 합니다. 지�
 The optional [compactData](DATA-COMPACTION.md) command is separate from ordinary
 ingestion admission. Stop the producer, drain, pause, compact with explicit study
 history restart, then resume. Pending payload is never automatically discarded.
-Trigger before maxStoredBars/maxStoreBytes rejects an append; this first slice does
-not implement atomic append-plus-eviction or preserve full-history study seeds.
+Trigger before maxStoredBars/maxStoreBytes rejects an append where possible. A paused,
+source-current FIFO may opt into `pendingData:'preserve-retained'`: compaction checks all
+pending timestamp dependencies against the retained suffix and earlier pending appends,
+preserves payload/cursors/counters, then rebinds the source version before observers.
+It does not apply the FIFO or certify that a later drain fits numeric/capacity budgets.
+An evicted-target correction rejects the complete compaction. The default still requires
+an empty queue; no-op does not validate or rebind pending data. See the compaction contract
+for small-prefix progress and unresolved cap/dependency cases. This is not atomic
+append-plus-eviction and does not preserve full-history study seeds.

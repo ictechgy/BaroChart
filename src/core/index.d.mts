@@ -132,7 +132,7 @@ export interface SessionWindow {open:string;close:string;kind?:string}
 export function portableSessionCalendar(options:PortableSessionSpec):string;
 export interface IndicatorQueryOptions {mode?:'raw'|'plot';asOfIndex?:number}
 export interface IndicatorPoint {value:number|null;sourceIndex:number|null;sourceTime:number|null}
-export interface DataCompactionOptions {keepLastBars:number;studyHistory:'restart';maxPeakStoreBytes?:number}
+export interface DataCompactionOptions {keepLastBars:number;studyHistory:'restart';maxPeakStoreBytes?:number;pendingData?:'reject'|'preserve-retained'}
 export interface DataCompactionReceipt {removed:number;length:number;capacity:number;bytes:number;previousBytes:number;peakSourceBytes:number;firstRetainedTime:number;version:number;timeVersion:number;studyHistory:'restart';invalidationFailed:boolean}
 export class ChartAPI {
  constructor(model:ChartModel,options?:{controller?:InteractionController;invalidate?:()=>void});

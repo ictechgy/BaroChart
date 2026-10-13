@@ -2026,6 +2026,30 @@ function compactionRecord(value,keys,label){if(!value||![Object.prototype,null].
 // substituted maps and arbitrary proxies are not supported compaction owners.
 function compactionCapture(object,keys,guards,writes=[]){const result={};for(const key of keys){const d=Object.getOwnPropertyDescriptor(object,key);if(d&&!Object.hasOwn(d,'value')||writes.includes(key)&&(d?!d.writable:!Object.isExtensible(object)))throw new TypeError('Compaction owner own writable data required');result[key]=d?.value;guards.push(()=>{const next=Object.getOwnPropertyDescriptor(object,key);if(Boolean(next)!==Boolean(d)||next&&(!Object.hasOwn(next,'value')||!Object.is(next.value,d.value)||next.writable!==d.writable||next.configurable!==d.configurable))compactionStale();});}return result;}
 function compactionRows(array,guards){if(!Array.isArray(array)||Object.getPrototypeOf(array)!==Array.prototype)throw new TypeError('Compaction ordinary array required');const length=Object.getOwnPropertyDescriptor(array,'length').value,copy=[];guards.push(()=>{if(Object.getOwnPropertyDescriptor(array,'length').value!==length)compactionStale();});for(let i=0;i<length;i++){const d=Object.getOwnPropertyDescriptor(array,String(i));if(!d||!Object.hasOwn(d,'value'))throw new TypeError('Compaction dense own data array');copy.push(d.value);guards.push(()=>{if(Object.getOwnPropertyDescriptor(array,String(i))?.value!==d.value)compactionStale();});}return copy;}
+// Queue preservation validates positional meaning, not future drain budgets or
+// intermediate volume arithmetic. Never call the overridable prefix()/stats().
+function compactionPending(ingestion,source,refs,removed,guards){
+ const q=compactionCapture(ingestion,['sourceVersion','head','count','capacity','columns','kinds','nextSequence','firstPendingSequence','policy','counters','lastError'],guards);
+ if(q.sourceVersion!==source.version)throw new Error('Compaction pending source version changed');
+ if(!Number.isSafeInteger(q.capacity)||q.capacity<1||q.capacity>4096||!Number.isSafeInteger(q.count)||q.count<0||q.count>q.capacity||!Number.isSafeInteger(q.head)||q.head<0||q.head>=q.capacity)throw new TypeError('Compaction pending ring bounds');
+ const policyKeys=['streamId','generation','firstSequence','maxQueuedEvents','maxQueuedBytes','maxBatchEvents','maxStoredBars','maxStoreBytes'],counterKeys=['accepted','applied','cancelled','rejectedPackets','rejectedEvents','failedDrains','peakPendingEvents','peakPendingBytes','lastAppliedSequence','lastCancelledSequence'];
+ compactionRecord(q.policy,policyKeys,'Compaction ingestion policy');compactionCapture(q.policy,policyKeys,guards);
+ compactionRecord(q.counters,counterKeys,'Compaction ingestion counters');compactionCapture(q.counters,counterKeys,guards);
+ const columns=compactionCapture(q.columns,FIELDS,guards);
+ for(const key of FIELDS){const a=columns[key];if(!(a instanceof Float64Array)||compactionTypedLength.call(a)!==q.capacity)throw new TypeError('Compaction pending Float64 columns');compactionBufferLength.call(compactionTypedBuffer.call(a));}
+ if(!(q.kinds instanceof Uint8Array)||compactionTypedLength.call(q.kinds)!==q.capacity)throw new TypeError('Compaction pending kind column');compactionBufferLength.call(compactionTypedBuffer.call(q.kinds));
+ // At most 4096 * 49 extra typed bytes, independent of store capacity. This
+ // owned FIFO copy also checks that later owner inspection did not alter it.
+ const snapshot=Object.fromEntries(FIELDS.map(key=>[key,new Float64Array(q.count)])),kinds=new Uint8Array(q.count),appended=new Set(),bar={};let tail=refs.time[source.length-1];
+ for(let i=0;i<q.count;i++){
+  const at=(q.head+i)%q.capacity;for(const key of FIELDS)bar[key]=snapshot[key][i]=columns[key][at];const kind=kinds[i]=q.kinds[at];validateBar(bar);
+  if(kind===0){if(!(bar.time>tail))throw new Error('Compaction pending append must follow virtual tail');tail=bar.time;appended.add(bar.time);}
+  else if(kind===1){if(bar.time!==tail)throw new Error('Compaction pending update must match virtual tail');}
+  else if(kind===2){let low=removed,high=source.length;while(low<high){const mid=low+Math.floor((high-low)/2);if(refs.time[mid]<bar.time)low=mid+1;else high=mid;}if(!appended.has(bar.time)&&(low===source.length||refs.time[low]!==bar.time))throw new Error('Compaction pending correction requires retained timestamp');}
+  else throw new TypeError('Compaction pending event kind');
+ }
+ guards.push(()=>{for(let i=0;i<q.count;i++){const at=(q.head+i)%q.capacity;if(q.kinds[at]!==kinds[i])compactionStale();for(const key of FIELDS)if(!Object.is(columns[key][at],snapshot[key][i]))compactionStale();}});
+}
 function compactData(api,options){
  const guards=[],a=compactionCapture(api,['model','controller'],guards),model=a.model;
  if(!model)throw new Error('Chart disposed');
@@ -2034,8 +2058,9 @@ function compactData(api,options){
  const store=m.store,s=compactionCapture(store,['columns','index','length','capacity','maxBars','version','timeVersion'],guards,['columns','index','length','capacity','version','timeVersion']);
  const refs=compactionCapture(s.columns,FIELDS,guards);
  if(!(store instanceof BarStore))throw new TypeError('Compaction BarStore required');
- const o=compactionRecord(options,['keepLastBars','studyHistory','maxPeakStoreBytes'],'Compaction options'),keep=o.keepLastBars,limit=o.maxPeakStoreBytes??COMPACTION_MAX_PEAK;
+ const o=compactionRecord(options,['keepLastBars','studyHistory','maxPeakStoreBytes','pendingData'],'Compaction options'),keep=o.keepLastBars,limit=o.maxPeakStoreBytes??COMPACTION_MAX_PEAK;
  if(!Number.isSafeInteger(keep)||keep<1||keep>RESOURCE_LIMITS.maxBars||o.studyHistory!=='restart')throw new RangeError('Positive keepLastBars and studyHistory restart required');
+ if(o.pendingData!==undefined&&o.pendingData!=='preserve-retained'&&o.pendingData!=='reject')throw new TypeError('Compaction pendingData policy');
  if(!Number.isSafeInteger(limit)||limit<0||limit>COMPACTION_MAX_PEAK)throw new RangeError('Compaction source peak byte limit');
  if(!s.length)throw new RangeError('Cannot compact an empty store');
  for(const key of FIELDS){const source=refs[key];if(!(source instanceof Float64Array)||compactionTypedLength.call(source)!==s.capacity)throw new TypeError('Compaction owned Float64 columns');compactionBufferLength.call(compactionTypedBuffer.call(source));}
@@ -2053,7 +2078,7 @@ function compactData(api,options){
  compactionRows(m.axes,guards);
  const view=compactionCapture(m.view,['from','to'],guards);if(!Number.isFinite(view.from)||!Number.isFinite(view.to)||view.to<=view.from)throw new TypeError('Compaction visible range');
  let ingestion;
- if(m.dataIngestion){ingestion=compactionCapture(m.dataIngestion,['model','store','sourceVersion','policy','paused','count','draining','leased','closed','epoch'],guards,['sourceVersion','epoch']);if(ingestion.model!==model||ingestion.store!==store||ingestion.closed||!ingestion.paused||ingestion.count||ingestion.draining||ingestion.leased)throw new Error('Compaction requires paused empty idle ingestion');}
+ if(m.dataIngestion){ingestion=compactionCapture(m.dataIngestion,['model','store','sourceVersion','policy','paused','count','draining','leased','closed','epoch'],guards,['sourceVersion','epoch']);if(ingestion.model!==model||ingestion.store!==store||ingestion.closed||!ingestion.paused||(ingestion.count&&o.pendingData!=='preserve-retained')||ingestion.draining||ingestion.leased)throw new Error('Compaction requires paused empty idle ingestion unless preserving retained pending data');if(o.pendingData==='preserve-retained')compactionPending(m.dataIngestion,s,refs,s.length-keep,guards);}
  if(![Map.prototype,NativeCheckpointEntries.prototype].includes(Object.getPrototypeOf(e.entries))||Reflect.ownKeys(e.entries).length)throw new TypeError('Compaction ordinary owned indicator entries');
  const entries=[...compactionMapEntries.call(e.entries)],entrySize=Object.getOwnPropertyDescriptor(Map.prototype,'size').get;
  guards.push(()=>{if(entrySize.call(e.entries)!==entries.length)compactionStale();for(const [id,row] of entries)if(Map.prototype.get.call(e.entries,id)!==row)compactionStale();});
