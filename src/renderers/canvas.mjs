@@ -1,3 +1,5 @@
+import {registerTimeCursorHost,disposeTimeCursorHost,timeCursorState,refreshTimeCursor,publishTimeCursor,clearTimeCursorOrigin,timeCursorCommands} from './time-cursor.mjs';
+export {TimeCursorGroup} from './time-cursor.mjs';
 import {KeyboardDataExplorer,explorerInputAllowed} from './keyboard-explorer.mjs';
 import {buildScene} from '../core/scene.mjs';
 import {InteractionController} from '../core/interaction.mjs';
@@ -44,13 +46,14 @@ export class CanvasChart {
     this.setupDataExplorer(dataExplorer);
     if (interactive) this.bind();
     if (observeResize) {this.observer = new ResizeObserver(() => this.invalidate()); this.observer.observe(container);}
-    this.unsubscribe = model.store.subscribe(() => this.invalidate()); this.invalidate();
-    }catch(error){this.disposeDataExplorer();this.observer?.disconnect();this.unsubscribe?.();this.renderer?.dispose();this.releaseLayers();this.sceneCache.clear();for(const [type,fn,options] of this.listeners)this.canvas.removeEventListener(type,fn,options);this.listeners=[];this.canvas.remove();this.disposed=true;throw error;}
+    this.unsubscribe = model.store.subscribe(() => this.invalidate()); registerTimeCursorHost(this,model,()=>{try{this.invalidate('hover');}catch(error){if(!this.disposed)this.reportError(error);}});this.invalidate();
+    }catch(error){disposeTimeCursorHost(this);this.disposeDataExplorer();this.observer?.disconnect();this.unsubscribe?.();this.renderer?.dispose();this.releaseLayers();this.sceneCache.clear();for(const [type,fn,options] of this.listeners)this.canvas.removeEventListener(type,fn,options);this.listeners=[];this.canvas.remove();this.disposed=true;throw error;}
   }
   fallback(reason = 'GPU context lost') {
-    const sourceCanvas=this.canvas,sourceController=this.controller;
+    const sourceCanvas=this.canvas,sourceController=this.controller,sourcePointerToken=this.timePointerToken;
     const current=()=>!this.disposed&&this.canvas===sourceCanvas&&this.controller===sourceController;
     if(this.explorer?.active)this.setDataExploration(false);
+    if(!current())return;clearTimeCursorOrigin(this,'pointer',sourcePointerToken);if(!current())return;this.timeLayout=null;
     if(!current())return;
     this.controller?.cancel();if(!current())return;
     this.renderer?.dispose();if(!current())return;this.renderer = null;
@@ -62,13 +65,13 @@ export class CanvasChart {
   }
   size() {return {width: Math.max(100, this.container.clientWidth), height: Math.max(80, this.container.clientHeight)};}
   bind() {
-    const input=fn=>e=>{try{fn(e);}catch(error){if(this.disposed)return;const canvas=this.canvas,controller=this.controller;if(!this.explorer?.active)controller.cancel();if(this.disposed||this.canvas!==canvas||this.controller!==controller)return;this.reportError(error);}};
+    const boundCanvas=this.canvas,input=fn=>e=>{if(this.disposed||this.canvas!==boundCanvas)return;try{fn(e);}catch(error){if(this.disposed)return;const canvas=this.canvas,controller=this.controller;if(!this.explorer?.active)controller.cancel();if(this.disposed||this.canvas!==canvas||this.controller!==controller)return;this.reportError(error);}};
     const on = (type, fn, options) => {this.canvas.addEventListener(type, fn, options); this.listeners.push([type, fn, options]);}, point = e => {const b = this.canvas.getBoundingClientRect(); return [e.clientX - b.left, e.clientY - b.top];};
     on('pointerdown',input(e=>{if(e.button!==0)return;const canvas=this.canvas,controller=this.controller;if(this.explorer?.active)this.setDataExploration(false);if(this.disposed||this.canvas!==canvas||this.controller!==controller)return;this.canvas.focus();if(this.disposed||this.canvas!==canvas||this.controller!==controller)return;this.canvas.setPointerCapture(e.pointerId);this.controller.down(e.pointerId,...point(e));}));
-    on('pointermove',input(e=>{if(!this.explorer?.active)this.controller.move(e.pointerId,...point(e));}));
+    on('pointermove',input(e=>{if(!this.explorer?.active){const canvas=this.canvas,controller=this.controller,[x,y]=point(e);controller.move(e.pointerId,x,y);if(!this.disposed&&this.canvas===canvas&&this.controller===controller&&!controller.pointers.size)this.publishPointerTime(x,y);}}));
     on('pointerup',input(e=>this.controller.up(e.pointerId)));on('pointercancel',input(()=>this.controller.cancel()));
     on('lostpointercapture', e => {if (this.controller.pointers.has(e.pointerId)) this.controller.cancel();});
-    on('pointerleave', () => {if (!this.controller.pointers.size) {this.model.crosshair = null; this.invalidate('hover');}});
+    on('pointerleave', input(() => {if (!this.controller.pointers.size) {this.model.crosshair = null;clearTimeCursorOrigin(this,'pointer',this.timePointerToken);if(!this.disposed)this.invalidate('hover');}}));
     on('wheel',input(e=>{const canvas=this.canvas,controller=this.controller;if(this.explorer?.active)this.setDataExploration(false);if(this.disposed||this.canvas!==canvas||this.controller!==controller)return;e.preventDefault();this.controller.wheel(e.deltaY*(e.deltaMode===1?16:1),point(e)[0]);}),{passive:false});
     on('focusout',e=>this.explorerFocusOut(e));
     on('keydown',input(e=>{if(e.defaultPrevented||e.isComposing||e.target!==this.canvas)return;if(this.explorer?.active){if(document.activeElement!==undefined&&document.activeElement!==this.canvas)return;if(!explorerInputAllowed(e,this.canvas))return;if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End','Enter','Escape'].includes(e.key)){e.preventDefault();const explorer=this.explorer,generation=explorer.generation,canvas=this.canvas;try{explorer.key(e.key);if(!this.disposed&&this.explorer===explorer&&this.canvas===canvas)this.publishExploration(true);}catch(error){if(!this.disposed&&this.explorer===explorer&&this.canvas===canvas&&explorer.generation===generation)this.publishExploration(true);throw error;}}return;}if(['Escape','Delete','Backspace','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','PageUp','PageDown','Home','End','+','=','-','_'].includes(e.key)||(e.ctrlKey||e.metaKey)&&['z','y'].includes(e.key.toLowerCase())){e.preventDefault();this.controller.key(e.key,{ctrl:e.ctrlKey||e.metaKey,shift:e.shiftKey});}}));
@@ -84,6 +87,9 @@ export class CanvasChart {
     readout.textContent='Data exploration off.';live.textContent='';
     for(const node of controls){const fn=e=>this.explorerFocusOut(e);node.addEventListener('focusout',fn);this.explorerNodes.listeners.push([node,fn]);}
   }
+  get timeCursor(){return timeCursorState(this);}
+  timeProjectionMatches(prior){const model=this.model;return prior.axisWidth===model.axisWidth&&prior.font===model.theme.font&&prior.panels.length===model.panels.length&&prior.axes.length===model.axes.length&&prior.panels.every((p,i)=>p===model.panels[i])&&prior.axes.every((a,i)=>a===model.axes[i]);}
+  publishPointerTime(x,y){const prior=this.timeLayout,size=this.size(),model=this.model;if(!prior||this.disposed||prior.canvas!==this.canvas||prior.version!==model.store.version||prior.store!==model.store||prior.from!==model.view.from||prior.to!==model.view.to||prior.width!==size.width||prior.height!==size.height||!this.timeProjectionMatches(prior)||this.fullDirty)return;const layout=prior.layout;if(!layout.panels.some(p=>x>=p.left&&x<=p.right&&y>=p.top&&y<=p.bottom))return;const index=Math.round(layout.index(x));if(index<0||index>=model.store.length)return;const token=publishTimeCursor(this,model.store.columns.time[index],'pointer');if(timeCursorState(this)?.generation===token)this.timePointerToken=token;}
   get dataExploration(){return this.explorer?.snapshot()??{active:false,time:null,index:null,seriesId:null,phase:'off',text:''};}
   setDataExploration(active){
     if(this.disposed)throw new Error('Chart disposed');if(!this.explorer)throw new Error('Configure dataExplorer output elements first');
@@ -99,7 +105,7 @@ export class CanvasChart {
   publishExploration(announce){
     const nodes=this.explorerNodes,explorer=this.explorer,canvas=this.canvas;if(this.disposed||!nodes||!explorer)return;
     if(explorerNodeOwners.get(nodes.readout)!==nodes.token||explorerNodeOwners.get(nodes.live)!==nodes.token)return;
-    const generation=explorer.generation,state=explorer.snapshot(),text=state.active?state.text:'Data exploration off.';
+    const generation=explorer.generation,state=explorer.snapshot();if(announce&&state.active&&state.index>=0){const token=publishTimeCursor(this,state.time,'keyboard');if(timeCursorState(this)?.generation===token)this.timeKeyboardToken=token;}else if(!state.active||state.index<0)clearTimeCursorOrigin(this,'keyboard',this.timeKeyboardToken);if(this.disposed||this.explorer!==explorer||this.canvas!==canvas||explorer.generation!==generation||this.explorerNodes!==nodes||explorerNodeOwners.get(nodes.readout)!==nodes.token||explorerNodeOwners.get(nodes.live)!==nodes.token)return;const text=state.active?state.text:'Data exploration off.';
     nodes.readout.textContent=text;
     if(this.disposed||this.canvas!==canvas||this.explorer!==explorer||explorer.generation!==generation||explorerNodeOwners.get(nodes.readout)!==nodes.token||explorerNodeOwners.get(nodes.live)!==nodes.token)return;
     if(announce)nodes.live.textContent=text;
@@ -116,7 +122,7 @@ export class CanvasChart {
     for(const node of [nodes.readout,nodes.live])if(explorerNodeOwners.get(node)===nodes.token){explorerNodeOwners.delete(node);node.textContent='';}
   }
   reportError(error){const next=error instanceof Error?error:new Error('Chart error'),changed=this.lastError?.message!==next.message;this.lastError=next;if(changed)try{this.onError?.(next);}catch{} }
-  invalidate(kind='all') {if(this.disposed)return;if(kind!=='hover'&&this.explorer?.active){this.explorer.changed();this.publishExploration(false);if(this.disposed)return;}if(kind!=='hover'&&kind!=='drawings')this.fullDirty=true;this.canvas.dispatchEvent(new Event('aster:state',{bubbles:true}));if(this.disposed||this.frame!==null)return; this.frame = requestAnimationFrame(() => {this.frame = null;try{this.drawNow(FRAME_RENDER);}catch(error){this.reportError(error);}});}
+  invalidate(kind='all') {if(this.disposed)return;if(kind!=='hover')refreshTimeCursor(this);if(kind!=='hover'&&this.explorer?.active){this.explorer.changed();this.publishExploration(false);if(this.disposed)return;}if(kind!=='hover'&&kind!=='drawings')this.fullDirty=true;this.canvas.dispatchEvent(new Event('aster:state',{bubbles:true}));if(this.disposed||this.frame!==null)return; this.frame = requestAnimationFrame(() => {this.frame = null;try{this.drawNow(FRAME_RENDER);}catch(error){this.reportError(error);}});}
   renderScene(scene,ratio){if(this.renderer)this.renderer.render(scene,ratio);else renderCanvas(this.ctx,scene,ratio);}
   canCacheLayers(pixels){return pixels*8<=100663296;}
   cachedLayerBytes(pixels){return pixels*8;}
@@ -141,21 +147,22 @@ export class CanvasChart {
     if (this.disposed) return; const w = Math.round(size.width * ratio), h = Math.round(size.height * ratio);
     if(!Number.isFinite(ratio)||ratio<=0||ratio>8||w>RESOURCE_LIMITS.maxCanvasDimension||h>RESOURCE_LIMITS.maxCanvasDimension||w*h>RESOURCE_LIMITS.maxCanvasPixels)throw new RangeError('Canvas size/DPR limit');
     if (this.canvas.width !== w || this.canvas.height !== h) {this.canvas.width = w; this.canvas.height = h;}
-    let scene;
+    const binding={canvas:this.canvas,store:this.model.store,version:this.model.store.version,from:this.model.view.from,to:this.model.view.to,width:size.width,height:size.height,axisWidth:this.model.axisWidth,font:this.model.theme.font,panels:this.model.panels.slice(),axes:this.model.axes.slice()};let scene;
     if(this.layerCaching){
       const frame=this.sceneCache.frame(this.model,size.width,size.height,{forceBase:frameToken!==FRAME_RENDER||this.fullDirty||ratio!==this.lastRatio});
+      const synced=timeCursorCommands(this,frame.scene.layout);if(synced.length){frame.hover={...frame.hover,commands:frame.hover.commands.concat(synced)};frame.scene={...frame.scene,commands:frame.scene.commands.concat(synced),stats:{...frame.scene.stats,commandCount:frame.scene.commands.length+synced.length}};}
       const key=[w,h,this.rendererKind,this.cacheBudget.generation].join('/'),bytes=this.cachedLayerBytes(w*h);
       const raster=this.wantsRaster(frame)&&w*h<=this.maxCachedPixels&&this.canCacheLayers(w*h)&&this.failedRasterKey!==key&&this.cacheBudget.reserve(this,bytes,()=>{this.releaseLayers();this.invalidate('hover');});
       let rendered=false;
       if(raster)try{this.renderMetrics={...this.renderLayers(frame,ratio),cacheMode:'raster'};rendered=this.cacheBudget.reserve(this,this.renderMetrics.cachedPixelBytes,()=>{this.releaseLayers();this.invalidate('hover');});if(!rendered)this.failedRasterKey=key;}catch(error){if(!(error instanceof CacheAllocationError))throw error;this.failedRasterKey=key;this.releaseLayers();}
       if(!rendered){this.releaseLayers();this.renderScene(frame.scene,ratio);this.renderMetrics={baseRedrawn:frame.baseChanged,drawingsRedrawn:frame.drawingsChanged,cachedPixelBytes:0,hoverCommands:frame.hover.commands.length,cacheMode:'scene'};}
       scene=frame.scene;
-    }else{this.releaseLayers();this.sceneCache.clear();scene=buildScene(this.model,size.width,size.height);this.renderScene(scene,ratio);this.renderMetrics={baseRedrawn:true,drawingsRedrawn:true,cachedPixelBytes:0,hoverCommands:0};}
-    this.fullDirty=false;this.lastRatio=ratio;this.lastScene=scene;this.lastError=null;
+    }else{this.releaseLayers();this.sceneCache.clear();scene=buildScene(this.model,size.width,size.height);const synced=timeCursorCommands(this,scene.layout);if(synced.length)scene={...scene,commands:scene.commands.concat(synced),stats:{...scene.stats,commandCount:scene.commands.length+synced.length}};this.renderScene(scene,ratio);this.renderMetrics={baseRedrawn:true,drawingsRedrawn:true,cachedPixelBytes:0,hoverCommands:0};}
+    this.fullDirty=false;this.lastRatio=ratio;this.lastScene=scene;this.timeLayout=!this.disposed&&binding.canvas===this.canvas&&binding.store===this.model.store&&binding.version===this.model.store.version&&binding.from===this.model.view.from&&binding.to===this.model.view.to&&this.timeProjectionMatches(binding)?{...binding,layout:scene.layout}:null;this.lastError=null;
     this.timings.push(performance.now()-start);if(this.timings.length>300)this.timings.shift();this.canvas.dispatchEvent(new Event('aster:render',{bubbles:true}));return scene.stats;
     }catch(error){this.fullDirty=true;this.sceneCache.clear();this.reportError(error);throw error;}
   }
   setTool(tool) {this.controller.setTool(tool);}
   resize() {this.invalidate();}
-  destroy({disposeModel = false} = {}) {if (this.disposed) return; this.disposed = true; this.disposeDataExplorer();this.controller.cancel(); if (this.frame !== null) cancelAnimationFrame(this.frame); this.frame = null; this.observer?.disconnect(); this.unsubscribe(); for (const [type, fn, options] of this.listeners) this.canvas.removeEventListener(type, fn, options); this.listeners = [];this.releaseLayers();this.sceneCache.clear(); this.renderer?.dispose(); this.canvas.remove();this.canvas.width=this.canvas.height=0; this.lastScene = null;this.renderMetrics=null; this.timings = []; if (disposeModel) this.model.dispose();}
+  destroy({disposeModel = false} = {}) {if (this.disposed) return; this.disposed = true;disposeTimeCursorHost(this);this.timeLayout=null; this.disposeDataExplorer();this.controller.cancel(); if (this.frame !== null) cancelAnimationFrame(this.frame); this.frame = null; this.observer?.disconnect(); this.unsubscribe(); for (const [type, fn, options] of this.listeners) this.canvas.removeEventListener(type, fn, options); this.listeners = [];this.releaseLayers();this.sceneCache.clear(); this.renderer?.dispose(); this.canvas.remove();this.canvas.width=this.canvas.height=0; this.lastScene = null;this.renderMetrics=null; this.timings = []; if (disposeModel) this.model.dispose();}
 }

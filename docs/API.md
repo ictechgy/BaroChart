@@ -215,3 +215,13 @@ and `preflightWorkspace(document, binding)` reads. Preflight returns
 reservation or redraw is implied. See [native workspace contract](NATIVE-WORKSPACES.md)
 and [remaining native API work](NATIVE-FEATURE-PARITY.md). Generated bridge VM and
 static-source checks do not certify new Swift/Java SDK compilation or devices.
+
+## Linked web time cursors
+
+`TimeCursorGroup` from `barochart/canvas` links up to eight live charts using an
+explicit `exact` or `at-or-before` stored bar-open timestamp policy. It adds only
+a transient vertical overlay; price, viewport and keyboard selection stay local.
+`chart.timeCursor` exposes requested versus matched times. Mapping itself performs
+no study calculation, but a later dirty receiver redraw can. See
+[TIME-CURSOR.md](TIME-CURSOR.md) for lifecycle, gap semantics, bounds, the synthetic
+two-chart example and unverified browser/UI limits.

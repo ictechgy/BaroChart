@@ -29,3 +29,17 @@ const workspaceBinding:WorkspaceDatasetBinding={key:'feed/symbol/1m',revision:'1
 const workspaceOptions:AsyncWorkspaceOptions={datasetBinding:workspaceBinding};
 const workspaceDocument:string=saveWorkspace(api,workspaceBinding);
 const workspacePrepared:Promise<ChartModel>=prepareWorkspaceAsync(model.store,workspaceDocument,workspaceOptions);
+
+import {TimeCursorGroup,type TimeCursorState} from 'barochart/canvas';
+const linkedCursors=new TimeCursorGroup({match:'exact'});
+if(typeof document!=='undefined'){
+ const linkedChart=new CanvasChart(document.body,new ChartModel());
+ const unlink:()=>void=linkedCursors.add(linkedChart);
+ const cursorSnapshot:TimeCursorState|null=linkedChart.timeCursor;
+ cursorSnapshot?.requestedTime.toFixed();unlink();linkedChart.destroy({disposeModel:true});
+}
+linkedCursors.dispose();
+// @ts-expect-error policy is explicit, not nearest
+new TimeCursorGroup({match:'nearest'});
+// @ts-expect-error policy is required
+new TimeCursorGroup();
