@@ -860,6 +860,28 @@ function roll(s, key, value, n) {
   else { q.sum += value - q.a[q.head]; q.a[q.head] = value; q.head = (q.head + 1) % n; }
   return q.a.length === n ? q.sum / n : NaN;
 }
+// Compensated rolling sums preserve small contributions when dominant bars leave.
+// Extreme magnitudes rebase in FIFO order; this is deliberately not scaled VWMA.
+function vwmaAccumulate(pair,value) {
+  if(!Number.isFinite(pair[0]))return;
+  const previous=pair[0],next=previous+value;
+  const correction=pair[1]+(Math.abs(previous)>=Math.abs(value)?(previous-next)+value:(value-next)+previous);
+  if(!Number.isFinite(next)||!Number.isFinite(correction)||!Number.isFinite(next+correction)){pair[0]=NaN;pair[1]=0;}else{pair[0]=next;pair[1]=correction;}
+}
+function vwmaLarge(s){return [1,2].some(k=>!Number.isFinite(s.sums[k][0]+s.sums[k][1])||s.sums[k][0]+s.sums[k][1]>=Number.MAX_VALUE/4);}
+function vwmaCompensationLarge(s,p){return s.sums.some((q,k)=>{const scale=s.sums[k][0]+s.sums[k][1];return Math.abs(q[1])>Math.max(Number.MIN_VALUE*32*p,Math.abs(scale)*Number.EPSILON*32*p);});}
+function vwmaContribution(s,pair,sign){const [product,volume]=pair;vwmaAccumulate(s.sums[1],sign*volume);if(Number.isFinite(product)){vwmaAccumulate(s.sums[0],sign*product);vwmaAccumulate(s.sums[2],sign*Math.abs(product));}}
+function vwmaRebase(s){s.sums=[[0,0],[0,0],[0,0]];for(let j=0;j<s.a.length;j++)vwmaContribution(s,s.a[(s.head+j)%s.a.length],1);}
+function vwmaStep(s,b,i,p){
+ const large=vwmaLarge(s),pair=[b.close*b.volume,b.volume];let dominant=false;
+ if(s.a.length===p){const old=s.a[s.head];dominant=Math.abs(old[0])>0&&Math.abs(old[0])>=Math.abs(s.sums[0][0]+s.sums[0][1])/2||old[1]>0&&old[1]>=(s.sums[1][0]+s.sums[1][1])/2;vwmaContribution(s,old,-1);s.invalid-=Number(!Number.isFinite(old[0]));s.positive-=Number(old[1]>0);s.a[s.head]=pair;s.head=(s.head+1)%p;}else s.a.push(pair);
+ vwmaContribution(s,pair,1);s.invalid+=Number(!Number.isFinite(pair[0]));s.positive+=Number(pair[1]>0);
+ if(!s.positive)s.sums=[[0,0],[0,0],[0,0]];
+ else if(dominant||large||vwmaLarge(s)||vwmaCompensationLarge(s,p)||(i+1)%p===0||s.sums.some(q=>!Number.isFinite(q[0]+q[1]))||s.sums[1][0]+s.sums[1][1]<=0||s.sums[2][0]+s.sums[2][1]<0)vwmaRebase(s);
+ const numerator=s.sums[0][0]+s.sums[0][1],volume=s.sums[1][0]+s.sums[1][1],absolute=s.sums[2][0]+s.sums[2][1];
+ if(s.a.length<p||s.invalid||!s.positive||!Number.isFinite(numerator)||!Number.isFinite(volume)||!Number.isFinite(absolute))return[NaN];
+ const result=numerator/volume;return[Number.isFinite(result)?result:NaN];
+}
 function smooth(s, key, value, n, alpha) {
   const q = s[key] ??= {count: 0, sum: 0, value: NaN};
   if (!Number.isFinite(value)) { q.count = 0; q.sum = 0; q.value = NaN; return NaN; }
@@ -894,6 +916,7 @@ function isCanonicalBuiltinDefinition(name,def){
  return Object.keys(origin.offsets).every(key=>Object.is(own(offsets,key),origin.offsets[key]));
 }
 add('sma', ({period: p = 20, source = 'close'} = {}) => {period(p); return definition(['value'], {}, (s, b) => [roll(s, 'r', b[source], p)]);});
+add('vwma', ({period:p=20}={})=>{period(p);return definition(['value'],{a:[],head:0,sums:[[0,0],[0,0],[0,0]],invalid:0,positive:0},(s,b,i)=>vwmaStep(s,b,i,p));});
 add('ema', ({period: p = 20, source = 'close'} = {}) => {period(p); return definition(['value'], {}, (s, b) => [smooth(s, 'e', b[source], p, 2 / (p + 1))]);});
 add('wma', ({period: p = 20} = {}) => {period(p); return definition(['value'], {}, (s, b) => { roll(s, 'r', b.close, p); const q = s.r; if (q.a.length < p) return [NaN]; let sum = 0; for (let j = 0; j < p; j++) sum += q.a[(q.head + j) % p] * (j + 1); return [sum / (p * (p + 1) / 2)]; });});
 add('rsi', ({period: p = 14} = {}) => {period(p); return definition(['value'], {previous: NaN}, (s, b) => {
@@ -1629,6 +1652,24 @@ function checkpointExtreme(value, n, index, maximum) {
   }
   if (index > 0 && !value.a.length) checkpointFail('empty extreme queue');
 }
+function checkpointVwma(state,params,index){
+ const n=params.period===undefined?20:params.period;checkpointInteger(n,1,10000);
+ checkpointRecord(state,['a','head','sums','invalid','positive']);
+ if(!Array.isArray(state.a)||state.a.length!==Math.min(n,index))checkpointFail('VWMA window');
+ checkpointInteger(state.head,0,n-1);if(state.head!==(index<n?0:index%n))checkpointFail('VWMA head');
+ let invalid=0,positive=0;const expected=[[0,0],[0,0],[0,0]];
+ const add=(q,v)=>{if(!Number.isFinite(q[0]))return;const a=q[0],t=a+v,c=q[1]+(Math.abs(a)>=Math.abs(v)?(a-t)+v:(v-t)+a);q[0]=Number.isFinite(t)&&Number.isFinite(c)&&Number.isFinite(t+c)?t:NaN;q[1]=Number.isFinite(q[0])?c:0;};
+ for(let j=0;j<state.a.length;j++){const row=state.a[(state.head+j)%state.a.length];if(!Array.isArray(row)||row.length!==2)checkpointFail('VWMA pair');checkpointNumeric(row[0]);if(Number.isNaN(row[0]))checkpointFail('VWMA product');checkpointNumeric(row[1],true);if(row[1]<0||row[1]===0&&row[0]!==0)checkpointFail('VWMA volume');invalid+=Number(!Number.isFinite(row[0]));positive+=Number(row[1]>0);add(expected[1],row[1]);if(Number.isFinite(row[0])){add(expected[0],row[0]);add(expected[2],Math.abs(row[0]));}}
+ if(state.invalid!==invalid||state.positive!==positive)checkpointFail('VWMA counters');
+ if(!Array.isArray(state.sums)||state.sums.length!==3)checkpointFail('VWMA sums');
+ const strict=index%n===0||!positive||[1,2].some(k=>!Number.isFinite(expected[k][0]+expected[k][1])||expected[k][0]+expected[k][1]>=Number.MAX_VALUE/4);
+ for(let k=0;k<3;k++){const q=state.sums[k],e=expected[k];if(!Array.isArray(q)||q.length!==2)checkpointFail('VWMA compensation');checkpointOutputNumber(q[0]);checkpointNumeric(q[1],true);if(Number.isNaN(q[0])&&q[1]!==0)checkpointFail('VWMA invalid sum');
+  const actual=q[0]+q[1],wanted=e[0]+e[1];if(Number.isNaN(actual)!==Number.isNaN(wanted)||actual===Infinity||actual===-Infinity)checkpointFail('VWMA sum status');
+  if(strict){if(!q.every((v,i)=>Object.is(v,e[i])))checkpointFail('VWMA canonical sums');}
+  else if(Number.isFinite(wanted)){const scale=k===1?Math.abs(wanted):expected[2][0]+expected[2][1],tolerance=Math.max(Number.MIN_VALUE*32*n,Math.abs(scale)*Number.EPSILON*32*n);if(Math.abs(actual-wanted)>tolerance||Math.abs(q[1])>tolerance)checkpointFail('VWMA sum consistency');}
+ }
+ return state;
+}
 function checkpointInitialEquals(value, expected) {
   if (Object.is(value, expected)) return true;
   if (!value || !expected || typeof value !== 'object' || typeof expected !== 'object' || Array.isArray(value) !== Array.isArray(expected)) return false;
@@ -1643,6 +1684,7 @@ const checkpointInitialStates = {
 function validateCheckpointState(name, params, state, index) {
   checkpointInteger(index, 0, CHECKPOINT_MAX_HISTORY);validateIndicatorParams(params);
   if(indicatorModule(name))return validateModuleCheckpoint(name,params,state,index);
+  if(name==='vwma')return checkpointVwma(state,params,index);
   if(name==='vwap'||name==='pivots'){const validated=validateSessionCheckpoint(name,params,state,index);if(validated!==null)return validated;}
   if (!Object.hasOwn(checkpointInitialStates, name)) checkpointFail('builtin name');
   if(name==='aroon')checkpointInteger(params.period===undefined?25:params.period,1,10000);

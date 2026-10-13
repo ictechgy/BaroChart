@@ -3,7 +3,7 @@
  const rows=Array.from({length:530},(_,i)=>({time:1700000000000+i*60000,open:10,high:15+i%11,low:3-i%7,close:10,volume:i%5}));
  function parity(m,p){const output=m.indicators.get('a').outputs;for(let i=0;i<m.store.length;i++){let up=NaN,down=NaN;if(i>=p){let hi=i,lo=i;for(let j=i-1;j>=i-p;j--){if(m.store.at(j).high>m.store.at(hi).high)hi=j;if(m.store.at(j).low<m.store.at(lo).low)lo=j;}up=100*(p-(i-hi))/p;down=100*(p-(i-lo))/p;}assert(Object.is(output.up[i],up)&&Object.is(output.down[i],down)&&Object.is(output.oscillator[i],up-down),'Independent scan mismatch '+i);}}
  let m;
- run('native command registration and independent scan oracle',()=>{nativeInit(0,{series:[]});nativeCommand('setData',[rows]);nativeCommand('addIndicator',['a','aroon',{period:25}]);m=nativeModel;models.push(m);assert(Aster.builtinIndicators.size===34,'Builtin count');parity(m,25);});
+ run('native command registration and independent scan oracle',()=>{nativeInit(0,{series:[]});nativeCommand('setData',[rows]);nativeCommand('addIndicator',['a','aroon',{period:25}]);m=nativeModel;models.push(m);assert(Aster.builtinIndicators.size===35,'Builtin count');parity(m,25);});
  run('parameter replacement and historical mutations preserve recurrence',()=>{nativeCommand('setIndicatorParams',['a',{period:7}]);parity(m,7);for(const i of [529,256,0]){const b=m.store.at(i);m.store.update(i,{...b,high:b.high+20});parity(m,7);}m.store.append({...rows[529],time:rows[529].time+60000});parity(m,7);});
  run('native prepared workspace restores bounded checkpoint ownership',()=>{
   const binding={key:'aroon/fixture',revision:'1',adjustmentVersion:'1',priceUnit:'USD',adjustment:'raw'},s=m.store;

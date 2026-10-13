@@ -166,7 +166,7 @@ asserted capacity 256→128→256 and immediate derived-cache retirement each ti
 compaction is unsuitable as invisible per-tick UI work; schedule explicit maintenance
 with these synchronous costs in mind. No worker compaction API is supplied here.
 
-The independent all-34 builtin fresh-suffix oracle includes append/update/correction,
+The independent all-35 builtin fresh-suffix oracle includes append/update/correction,
 NaN/−0, hidden/unbound studies, tiny-price and zero-volume conditions; scalar examples
 explicitly show the intended difference from full-history EMA/OBV/ADL/VWAP/pivots.
 Actual standalone Linux QuickJS ran 11 fixed nativeCommand scenarios using the existing

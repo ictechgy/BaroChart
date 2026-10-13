@@ -2,7 +2,7 @@
 
 0.2.11의 세션 VWAP·pivots·기준 시점 조회는 [SESSION-STUDIES.md](SESSION-STUDIES.md), 정적 사용자 모듈·지표 저장/병합은 [INDICATOR-MODULES.md](INDICATOR-MODULES.md)를 참고하세요. 아래 과거 실행 수와 새 검증 수를 합산하지 않습니다.
 
-지표는 축약된 화면 봉이 아니라 **전체 원본 OHLCV**로 계산합니다. 조회한 화면 범위·DPR은 결과에 영향을 주지 않습니다. 34종 built-in factory와 사용자 stateful factory를 제공합니다.
+지표는 축약된 화면 봉이 아니라 **전체 원본 OHLCV**로 계산합니다. 조회한 화면 범위·DPR은 결과에 영향을 주지 않습니다. 35종 built-in factory와 사용자 stateful factory를 제공합니다.
 
 0-based index, period=p입니다. p는 1..10,000 정수입니다. NaN은 warm-up 또는 정의되지 않은 값이며 렌더러는 해당 출력점을 생략합니다. 원본 입력 NaN/Infinity는 저장소에서 거부하므로 gap을 건너뛰어 seed를 잇는 동작은 없습니다.
 
@@ -28,6 +28,7 @@
 | DEMA | p=20, 2×EMA(C)−EMA(EMA(C)), 모두 SMA seed | 2p−2 |
 | TEMA | p=20, 3E1−3E2+E3 | 3p−3 |
 | HMA | p=20, WMA(floor√p, 2WMA(floor(p/2),C)−WMA(p,C)); 기간 최소1 | p+floor√p−2; WMA O(p) |
+| VWMA | sum(close×volume)/sum(volume), p20 현재 포함 p봉; zero volume 및 명시 overflow는 NaN | p−1 |
 | Keltner | EMA20 middle ± 2×Wilder ATR10; multiplier/atrPeriod 설정 | middle p−1; band max(p,atrPeriod)−1 |
 | Supertrend | Wilder ATR10, HL2±3ATR, 이전 close가 넘은 band 또는 좁아진 band 갱신 | p−1; 첫 방향 +1/lower. 상승은 lower 하향 이탈 시 −1, 하락은 upper 상향 이탈 시 +1 |
 | Ichimoku | high/low midpoint Tenkan9/Kijun26, SpanA=(T+K)/2, SpanB52, Chikou=close | T8/K25/A25/B51/C0; plotOffsets A/B +26, C −26. 원본 출력 배열은 이동하지 않음 |
@@ -69,3 +70,16 @@ for (const output of ['up', 'down', 'oscillator']) {
 Aroon 추가 검증은 독립 전체-window scan과 incremental append/update/correction/prepend/reset, 실제 Node Worker의 params/workspace 복원, compact restart, native bundle VM/독립 QuickJS 경로를 분리합니다. 이 실행 결과가 Swift/JSC 또는 Android/JNI SDK·기기 검증을 대신하지는 않습니다.
 
 검증 범위와 실행 결과: [Aroon validation](AROON-VALIDATION.md).
+
+
+## VWMA 추가 규약
+
+`vwma`는 close 고정, `{period:20}`(정수1..10000), `value` 한 출력을 제공합니다. 현재 포함 p봉을 사용하고 첫 출력은 index p−1입니다. 0 volume만 있는 window는 NaN입니다. 시간 gap은 빈 봉을 합성하지 않습니다. 원본 finite OHLCV/비음수 volume 규약을 유지합니다.
+
+**극대값 제한:** 원시 Float64 `close*volume` 곱셈을 사용합니다. product overflow가 포함되거나 volume 합 또는 absolute-product 합이 표현 불가한 window는 NaN gap입니다. 양·음 product가 상쇄되어 수학적 평균이 유한해도 absolute-product 합 overflow이면 gap입니다. 이는 scaled mean이나 임의 정밀도 계산이 아닙니다. product underflow는 0이 될 수 있으며 period 1에도 별도 우회가 없습니다. 문제 봉이 빠지면 현재 window에서 정상 계산을 회복합니다.
+
+세 rolling 합계(분자/volume/absolute-product)는 보상값을 함께 저장합니다. p번마다, 또는 abs/volume 합이 MAX_VALUE/4 이상이거나 산술 상태가 비유한이거나 퇴거 항이 기존 순합/volume의 절반 이상이거나 보상값이 현재 합계 규모의 오차 한도를 벗어날 때 시간순 window를 재합산합니다. 보통 amortized O(1), 극대값·심한 상쇄 구간 O(p)/봉, 상태 O(p)입니다. checkpoint에도 ring/counter/sum/comp를 보존하며 기존 byte/count 한도를 약화하지 않습니다. synchronous dirty-history 계산은 UI thread를 막을 수 있습니다.
+
+수식의 일반 정의는 [TradingView 공식 VWMA 설명](https://www.tradingview.com/support/solutions/43000592293-volume-weighted-moving-average-vwma/)을 참조했습니다. 위 warmup/overflow/복구와 부동소수 규약은 이 구현의 명시 계약이며 타제품 모든 값과의 parity 보장은 아닙니다.
+
+검증 범위와 실행 결과: [VWMA validation](VWMA-VALIDATION.md).

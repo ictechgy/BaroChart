@@ -73,7 +73,7 @@ A live runtime, accessor/non-configurable publication slots and duplicate jobs
 are rejected. Host code must still transfer the successful target runtime's
 ownership and retire the old runtime safely; no Swift/Java method does this yet.
 
-Node direct-class tests cover all 34 built-in indicator oracles after initial,
+Node direct-class tests cover all 35 built-in indicator oracles after initial,
 update, append and correction operations, configuration/scene/anchor fidelity,
 malformed transfer, logical admission, reentry and ownership. Separate generated
 bundle tests use source and target VMs. Native SDK/device/UI support cannot be

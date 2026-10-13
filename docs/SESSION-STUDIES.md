@@ -1,6 +1,6 @@
 # Session analysis and causal queries (0.2.11)
 
-The existing 34 builtins remain (including Aroon). VWAP and pivots gain optional session configuration; their default UTC `sessionMs=86400000` behavior, outputs and accumulation order are preserved. The 14 drawing types remain. An anchored VWAP is a study parameter, not a new drawing type.
+The existing 35 builtins remain (including Aroon and VWMA). VWAP and pivots gain optional session configuration; their default UTC `sessionMs=86400000` behavior, outputs and accumulation order are preserved. The 14 drawing types remain. An anchored VWAP is a study parameter, not a new drawing type.
 
 ```js
 import {portableSessionCalendar} from 'barochart/core';

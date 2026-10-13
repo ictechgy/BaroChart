@@ -41,7 +41,7 @@ test('legacy default VWAP stays value-only with exact accumulation/zero-volume c
  const def=vwapDefinition(),bars=[bar(0,10,0),bar(1,10,1),bar(2,20,3),bar(86400000,30,0),bar(86400001,40,2)];assert.deepEqual(def.outputs,['value']);assert.deepEqual(run(def,bars),[[NaN],[10],[17.5],[NaN],[40]]);assert.deepEqual(def.create().snapshot(),{session:NaN,pv:0,v:0});
 });
 test('existing builtin names use the new definitions without increasing builtin count',()=>{
- assert.equal(builtinIndicators.size,34);assert.deepEqual(builtinIndicators.get('vwap')({deviation:2}).outputs,['value','upper','lower','deviation','volume']);assert.deepEqual(builtinIndicators.get('pivots')({calendar:calendar()}).create().snapshot(),{session:null,count:0,high:null,low:null,close:null,levels:[NaN,NaN,NaN,NaN,NaN]});
+ assert.equal(builtinIndicators.size,35);assert.deepEqual(builtinIndicators.get('vwap')({deviation:2}).outputs,['value','upper','lower','deviation','volume']);assert.deepEqual(builtinIndicators.get('pivots')({calendar:calendar()}).create().snapshot(),{session:null,count:0,high:null,low:null,close:null,levels:[NaN,NaN,NaN,NaN,NaN]});
 });
 test('VWAP bands use independent two-pass volume-weighted population variance',()=>{
  const bars=[bar(0,10,0),bar(1,10,1),bar(2,20,3),bar(3,30,2),bar(4,999,0)],def=vwapDefinition({deviation:2});assert.deepEqual(def.outputs,['value','upper','lower','deviation','volume']);const actual=run(def,bars);for(let i=0;i<bars.length;i++)close(actual[i],twoPass(bars.slice(0,i+1)));close(actual[2],[17.5,17.5+2*Math.sqrt(18.75),17.5-2*Math.sqrt(18.75),Math.sqrt(18.75),4]);

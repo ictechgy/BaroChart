@@ -166,7 +166,7 @@ test('sparse merges retain scalar floating-point tree results for noninteger vol
  apply(store,events);scalar(reference,events);assert.deepEqual(['min','max','sum'].map(k=>Array.from(store.index[k])),['min','max','sum'].map(k=>Array.from(reference.index[k])));
 });
 
-test('34 builtins and linked module match scalar and fresh full vectors after irregular corrections',()=>{
+test('35 builtins and linked module match scalar and fresh full vectors after irregular corrections',()=>{
  const columns=seededColumns(600,123);for(let i=0;i<600;i++)columns.time[i]=T+i*60000+(i>=200?3600000:0)+(i>=400?86400000:0);
  const store=new BarStore(),reference=new BarStore();store.setColumns(columns);reference.setColumns(columns);const batchEngine=new IndicatorEngine(store),scalarEngine=new IndicatorEngine(reference),params={period:5,fast:3,slow:7,signal:4,smoothK:2,smoothD:2,conversion:3,base:5,span:7,displacement:2};
  const names=[...builtinIndicators.keys(),'aster.volume-direction@1/pressure'];

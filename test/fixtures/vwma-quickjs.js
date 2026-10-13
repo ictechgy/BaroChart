@@ -1,0 +1,15 @@
+(function(){
+ const scenarios=[],models=[],assert=(v,m)=>{if(!v)throw Error(m);},run=(name,fn)=>{fn();scenarios.push(name);};
+ const rows=Array.from({length:530},(_,i)=>({time:1700000000000+i*60000,open:10,high:15+i%11,low:3-i%7,close:10,volume:i%5}));
+ function parity(m,p){const output=m.indicators.get('a').outputs.value;for(let i=0;i<m.store.length;i++){let expected=NaN;if(i>=p-1){let num=0,den=0;for(let j=i-p+1;j<=i;j++){const b=m.store.at(j);num+=b.close*b.volume;den+=b.volume;}if(den>0)expected=num/den;}assert(Object.is(output[i],expected),'Independent scan mismatch '+i);}}
+ let m;
+ run('native command registration and independent scan oracle',()=>{nativeInit(0,{series:[]});nativeCommand('setData',[rows]);nativeCommand('addIndicator',['a','vwma',{period:25}]);m=nativeModel;models.push(m);assert(Aster.builtinIndicators.size===35,'Builtin count');parity(m,25);});
+ run('parameter replacement and historical mutations preserve recurrence',()=>{nativeCommand('setIndicatorParams',['a',{period:7}]);parity(m,7);for(const i of [529,256,0]){const b=m.store.at(i);m.store.update(i,{...b,close:12,volume:7});parity(m,7);}m.store.append({...rows[529],time:rows[529].time+60000});parity(m,7);});
+ run('native prepared workspace restores bounded checkpoint ownership',()=>{
+  const binding={key:'vwma/fixture',revision:'1',adjustmentVersion:'1',priceUnit:'USD',adjustment:'raw'},s=m.store;
+  const spec={schema:'aster.native-workspace-target',version:1,document:Aster.saveWorkspace(nativeAPI,binding),datasetBinding:binding,source:{length:s.length,maxBars:s.maxBars,timeframeMs:s.timeframeMs,timeOrigin:s.timeOrigin,version:s.version,timeVersion:s.timeVersion},size:{width:900,height:600},retainedBytes:123456,maxBytes:805306368};
+  const p=new Aster.NativeWorkspacePrepared(Aster.safeCheckpointStringify(spec));for(const [slot,key] of ['time','open','high','low','close','volume'].entries())for(let i=0;i<s.length;i+=71){const n=Math.min(71,s.length-i);p.target(slot,i,n).set(s.columns[key].subarray(i,i+n));}p.start();let done=false;for(let i=0;i<1000;i++)if(p.step(127).complete){done=true;break;}assert(done,'Bounded target completion');const restored=p.finish().model;p.dispose();models.push(restored);parity(restored,7);const map=restored.indicators.entries.get('a').checkpoints;assert(map instanceof Aster.NativeCheckpointMap&&map.validateHistory(s.length)===map,'Checkpoint ownership');restored.store.update(256,{...restored.store.at(256),close:8,volume:2});parity(restored,7);restored.dispose();assert(p.checkpointBudget.usedBytes===0,'Checkpoint ledger cleanup');
+ });
+ run('compaction restarts warmup and cleanup releases listeners',()=>{const receipt=nativeCommand('compactData',[{keepLastBars:64,studyHistory:'restart'}]);assert(receipt.removed===467,'Compaction receipt');parity(m,7);for(const model of models){const store=model.store;model.dispose();assert(store.listeners.size===0&&store.listenerErrors.length===0,'Listener cleanup');}});
+ return JSON.stringify({case:'vwma-quickjs',passed:true,checks:4,scenarios});
+})()
