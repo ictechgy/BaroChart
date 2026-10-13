@@ -33,6 +33,8 @@ Other examples on the same server:
 - [Independent price axes](http://127.0.0.1:5173/examples/web/axes.html)
 - [Financial coordinates and time alignment](http://127.0.0.1:5173/examples/web/financial.html)
 - [Session studies and custom modules](http://127.0.0.1:5173/examples/web/analysis.html)
+- [Linked time cursors](http://127.0.0.1:5173/examples/web/linked-cursors.html)
+- [Drawing group selection and batch edits](http://127.0.0.1:5173/examples/web/drawing-groups.html)
 
 Run tests separately:
 
