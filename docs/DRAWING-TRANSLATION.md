@@ -22,7 +22,7 @@ Sizing and validation finish before callback-free installation. Overridden `begi
 
 This is a synchronous, bounded core edit. Many freehand anchors or a large retained history can still block the caller while validating/copying and sizing snapshots. It is not a browser responsiveness or native SDK validation claim.
 
-The notification count above belongs to the core `ChartAPI` observer. The native JavaScript command dispatcher is covered by VM and standalone QuickJS tests. Swift/Java generic host commands have their own notification behavior; no new optimized SDK no-op facade or device execution is included in this slice.
+The notification count above belongs to the core `ChartAPI` observer. The native JavaScript command dispatcher is covered by VM and standalone QuickJS tests. A subsequent thin Swift/Java facade also inspects the strict numeric `changed` field (0..128) before host notification. Zero leaves the host revision unchanged; a positive count notifies once. It never falls back to another receipt field. Existing owner-thread/closed guards and UI-edit async behavior remain in place. Receipt conversion/transport failure after core execution does not prove rollback; inspect the chart before retrying. Java nested-decoder execution and stub typechecking, and Swift static source checks, do not establish real SDK/device execution.
 
 ## Executed validation
 
@@ -31,3 +31,13 @@ Cloud Linux/Node 24.19.0: **2,917 full-suite tests passed, 0 failed, 0 skipped**
 Standalone vendored QuickJS executed three fixed scenarios: all fourteen types through the native command dispatcher with one undo; overflow/mixed-binding whole-operation rejection; no-op and observer-failure receipt semantics. Runtime, OOM and interruption cleanup reported zero final tracked live bytes and allocation count. These harness counters do not establish process RSS bounds, browser focus/visual behavior, or Swift/Android device execution. No comparative performance claim is made.
 
 ECMAScript syntax validation covered **383 modules** and strict TypeScript 5.9.3 passed.
+
+## Native receipt verification boundary
+
+The thin host methods are `translateDrawings(ids, deltaTimeMs, deltaPrice)` in Java and `translateDrawings(_:deltaTimeMs:deltaPrice:)` in Swift. They use the ordinary checked command route and retain its owner-thread/closed-engine and async UI-edit policy. This is not a data-ingestion command or a replacement for its BUSY rules.
+
+`node scripts/check-java-drawing-translation.mjs` executes the production nested Java count decoder with test-only JSON/Android signatures. `node scripts/check-java-host.mjs` additionally compiles a consuming call. Neither runner loads the JNI-backed engine. Node source tests inspect Swift forwarding, receipt bounds and notification branching; they do not compile Swift or execute JavaScriptCore. For either host, a receipt conversion failure after native execution can follow a committed move and must not trigger a blind retry.
+
+The subsequent native-facade checkpoint passed **2,937 Node tests, 0 failures and 0 skips**, including **30 focused new/existing receipt tests**. The production Java nested decoder passed **65 fixed scenarios / 103 assertions**. Compiler-module verification produced **36 Java classes with zero diagnostics**, using source/target 8 and test-only Android/JSON signatures; Java SE 8 API compatibility is not thereby certified. Class-initialization tracing excludes initialization of the outer JNI-backed Engine or Android classes. JSON participation is limited to the test-only exception and opaque NULL sentinel, not parsing or container operations. Native observer counts remain source-checked, not runtime-tested on a device.
+
+The native-facade checkpoint also passed parsing of **386 ECMAScript modules** and strict TypeScript 5.9.3.

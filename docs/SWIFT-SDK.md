@@ -1,5 +1,11 @@
 # SwiftPM SDK 소비 경로
 
+The new `translateDrawings` facade forwards explicit IDs and raw time/price deltas.
+It validates the core `changed` count (0..128): zero skips host revision/notification,
+positive changes notify once. See [drawing translation](DRAWING-TRANSLATION.md).
+Java decoder execution/typechecking uses test-only signatures; Swift is statically
+reviewed only. Neither is a new Android/JNI or Swift/JSC/device validation.
+
 New compaction facade (real platform validation pending): `compactData` uses the explicit retained-window
 restart contract in [DATA-COMPACTION.md](DATA-COMPACTION.md). No-op host notification
 count is zero; actual removal notifies once. Platform compilation/runtime limits

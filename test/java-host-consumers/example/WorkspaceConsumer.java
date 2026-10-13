@@ -2,6 +2,7 @@ package example;
 
 import dev.aster.charts.AsterEngine;
 import org.json.JSONException;
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 /** Compile-only application API usage. Never loads or runs the JNI-backed Engine. */
@@ -24,6 +25,9 @@ public final class WorkspaceConsumer {
     public static JSONObject compact(AsterEngine engine) throws JSONException {
         JSONObject options=new JSONObject().put("keepLastBars",1000).put("studyHistory","restart").put("maxPeakStoreBytes",2000000);
         return engine.compactData(options);
+    }
+    public static JSONObject translate(AsterEngine engine) throws JSONException {
+        return engine.translateDrawings(new JSONArray(new String[]{"trend", "level"}), .5, 2.0);
     }
     public static String cancelAndInspect(AsterEngine.WorkspaceJob job) {
         job.cancel();

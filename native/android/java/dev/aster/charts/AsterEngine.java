@@ -128,6 +128,16 @@ public final class AsterEngine implements AutoCloseable {
             return value>0;
         }
     }
+    // Separate from compaction: a group contains at most 128 changed drawings.
+    static final class DrawingTranslationReceipt {
+        private DrawingTranslationReceipt() {}
+        static boolean changed(Object changed) throws JSONException {
+            if(!(changed instanceof Number))throw new JSONException("Drawing translation changed must be numeric");
+            double value=((Number)changed).doubleValue();
+            if(!Double.isFinite(value)||value!=Math.rint(value)||value<0||value>128)throw new JSONException("Drawing translation changed integer range");
+            return value>0;
+        }
+    }
     public Object command(String operation,Object... args) throws JSONException {
         check();Object result;
         // Cover the deferred begin gap as well as core's active ingestion lease.
@@ -140,6 +150,9 @@ public final class AsterEngine implements AutoCloseable {
         if("compactData".equals(operation)){
             if(!(result instanceof JSONObject))throw new JSONException("Compaction receipt object required");
             if(CompactionReceipt.changed(((JSONObject)result).get("removed")))notifyChanges();
+        }else if("translateDrawings".equals(operation)){
+            if(!(result instanceof JSONObject))throw new JSONException("Drawing translation receipt object required");
+            if(DrawingTranslationReceipt.changed(((JSONObject)result).get("changed")))notifyChanges();
         }else if(!operation.equals("inspect")&&!operation.equals("indicatorValues")&&!operation.equals("saveDrawings")&&!operation.equals("crosshairValues")&&!operation.equals("dataAt")&&!operation.equals("saveStudies")&&!operation.equals("indicatorValueAt")&&!operation.equals("dataIngestionStats")&&!operation.equals("saveDataIngestion"))notifyChanges();return result;
     }
     private void notifyChanges(){revision++;pendingNotifications++;if(notifying)return;notifying=true;observerErrors.clear();try{while(pendingNotifications>0){pendingNotifications--;for(Runnable observer:new java.util.ArrayList<>(observers)){try{observer.run();}catch(RuntimeException error){if(observerErrors.size()<32)observerErrors.add(error);try{if(onObserverError!=null)onObserverError.accept(error);}catch(RuntimeException reporting){if(observerErrors.size()<32)observerErrors.add(reporting);}}}}}finally{notifying=false;}}
@@ -160,6 +173,12 @@ public final class AsterEngine implements AutoCloseable {
      * Transport/receipt failure after native execution does not prove rollback.
      */
     public JSONObject compactData(JSONObject options) throws JSONException {return (JSONObject)command("compactData",options);}
+    /** Raw-coordinate group edit with one core undo. Zero changes do not notify.
+     * Receipt/transport failure after execution does not imply rollback. */
+    public JSONObject translateDrawings(JSONArray ids,double deltaTimeMs,double deltaPrice) throws JSONException {
+        JSONObject options=new JSONObject().put("deltaTimeMs",deltaTimeMs).put("deltaPrice",deltaPrice);
+        return (JSONObject)command("translateDrawings",ids,options);
+    }
     public JSONObject configureDataIngestion(JSONObject policy) throws JSONException {return (JSONObject)command("configureDataIngestion",policy);}
     public JSONObject enqueueDataEvents(JSONObject packet) throws JSONException {return (JSONObject)command("enqueueDataEvents",packet);}
     public JSONObject drainDataEvents() throws JSONException {return (JSONObject)command("drainDataEvents");}

@@ -1062,6 +1062,11 @@ public final class AsterEngine {
             let count=removed.toDouble()
             guard count.isFinite,count.rounded(.towardZero)==count,count>=0,count<=4194304 else {throw AsterError.invalidScene}
             if count>0 {notifyChanges()}
+        } else if operation == "translateDrawings" {
+            guard result.isObject,let changed=result.forProperty("changed"),changed.isNumber else {throw AsterError.invalidScene}
+            let count=changed.toDouble()
+            guard count.isFinite,count.rounded(.towardZero)==count,count>=0,count<=128 else {throw AsterError.invalidScene}
+            if count>0 {notifyChanges()}
         } else if !["inspect", "indicatorValues", "indicatorValueAt", "saveStudies", "saveDrawings", "crosshairValues", "dataAt", "dataIngestionStats", "saveDataIngestion"].contains(operation) {
             notifyChanges()
         }
@@ -1185,6 +1190,11 @@ public final class AsterEngine {
     public func registerIndicatorSource(_ name: String, _ source: String) throws {try call("nativeRegisterIndicatorSource",[name,source]);notifyChanges()}
     @discardableResult public func addDrawing(_ options: [String: Any]) throws -> String {try command("addDrawing", [options]).toString() ?? ""}
     public func editDrawing(_ id: String, _ patch: [String: Any]) throws {try command("editDrawing", [id, patch])}
+    /// Raw-coordinate group edit with one core undo. A zero-change receipt does not notify.
+    /// Receipt conversion failure after execution does not imply rollback.
+    @discardableResult public func translateDrawings(_ ids: [String], deltaTimeMs: Double, deltaPrice: Double) throws -> [String: Any] {
+        try ingestionCommand("translateDrawings",[ids,["deltaTimeMs":deltaTimeMs,"deltaPrice":deltaPrice]])
+    }
     @discardableResult public func deleteDrawing(_ id: String) throws -> Bool {try command("deleteDrawing", [id]).toBool()}
     public func selectDrawing(_ id: String?) throws {try command("selectDrawing", [id as Any? ?? NSNull()])}
     public func setTheme(_ patch: [String: Any]) throws {try command("setTheme", [patch])}
