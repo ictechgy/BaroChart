@@ -597,3 +597,44 @@ for(const phase of ['get','set'])test(`disabled ${phase} reentry stops later con
  Object.defineProperty(previous,'disabled',{configurable:true,get(){if(phase==='get'){p.selection.select('b',true);throw new Error('obsolete read');}return false;},set(){p.selection.select('b',true);throw new Error('obsolete write');}});
  assert.doesNotThrow(()=>p.refresh());assert.equal(nextWrites,0);selection(p,['b']);assert.equal(status(f).textContent,'');
 });
+
+test('structural audit: removal callback undo restores live row listener',t=>{
+ const h=fixture(t),f=h.create(),p=f.attach(),row=list(f).children[0],original=row.remove.bind(row);let once=true;
+ row.remove=()=>{original();if(once){once=false;f.api.undo();}};
+ f.api.deleteDrawing('a');
+ assert.deepEqual(rowIds(f),['a','b','keep']);
+ const box=boxes(f)[0];assert.equal(box.listenerCount('change'),1);box.checked=true;event(box,'change');selection(p,['a']);
+});
+test('structural audit: stale focus error does not replace newer action status',t=>{
+ const h=fixture(t),f=h.create(),p=f.attach();check(f,0).focus();f.store.remove('a');
+ button(f,'Refresh drawings').onFocus=()=>{p.selection.select('keep');p.refresh();status(f).textContent='New selection ready.';throw new Error('obsolete focus');};
+ click(f,'Refresh drawings');selection(p,['keep']);assert.equal(status(f).textContent,'New selection ready.');
+});
+for(const phase of ['remove','insert'])for(const behavior of ['remount','new-selection-throw'])test(`structural ${phase} after-operation ${behavior} preserves the newer owner`,t=>{
+ const h=fixture(t),f=h.create(),p=f.attach();let replacement,once=true;
+ const target=phase==='remove'?list(f).children[0]:list(f),method=phase==='remove'?'remove':'insertBefore',original=target[method].bind(target);
+ target[method]=(...args)=>{const result=original(...args);if(once){once=false;if(behavior==='remount'){p.destroy();replacement=f.attach();replacement.selection.select('keep');replacement.refresh();}else{p.selection.select('keep');p.refresh();}status(f).textContent='Newer render ready.';if(behavior==='new-selection-throw')throw new Error('obsolete structural call');}return result;};
+ if(phase==='remove')f.api.deleteDrawing('a');else{f.store.items.reverse();f.chart.invalidate('hover');}
+ selection(replacement??p,['keep']);assert.equal(status(f).textContent,'Newer render ready.');assert.deepEqual(rowIds(f),phase==='remove'?['b','keep']:['keep','b','a']);assert.ok(boxes(f).every(b=>b.listenerCount('change')===1));
+});
+for(const phase of ['remove','insert','focus'])test(`current structural ${phase} error remains observable and later refresh recovers`,t=>{
+ const h=fixture(t),f=h.create(),p=f.attach(),error=new Error('current '+phase);let target,method;
+ if(phase==='remove'){target=list(f).children[0];method='remove';f.store.remove('a');}else if(phase==='insert'){target=list(f);method='insertBefore';f.store.items.reverse();}else{boxes(f)[0].focus();target=button(f,'Refresh drawings');method='focus';f.store.remove('a');}
+ const original=target[method].bind(target);target[method]=(...args)=>{original(...args);throw error;};assert.throws(()=>p.refresh(),e=>e===error);target[method]=original;p.refresh();assert.deepEqual(rowIds(f),phase==='insert'?['keep','b','a']:['b','keep']);assert.ok(boxes(f).every(b=>b.listenerCount('change')===1));
+});
+test('current remove failure before DOM mutation retains cleanup for retry without dead rows',t=>{
+ const h=fixture(t),f=h.create(),p=f.attach(),row=list(f).children[0],box=boxes(f)[0],original=row.remove.bind(row),error=new Error('before removal');f.store.remove('a');row.remove=()=>{throw error;};
+ assert.throws(()=>p.refresh(),e=>e===error);assert.equal(box.listenerCount('change'),0);row.remove=original;p.refresh();assert.deepEqual(rowIds(f),['b','keep']);assert.equal(box.listenerCount('change'),0);assert.ok(boxes(f).every(b=>b.listenerCount('change')===1));
+});
+test('remove failure with selection-only reentry retains cleanup without rolling selection back',t=>{
+ const h=fixture(t),f=h.create(),p=f.attach(),row=list(f).children[0],box=boxes(f)[0],original=row.remove.bind(row);f.store.remove('a');row.remove=()=>{p.selection.select('b');throw new Error('obsolete pre-remove');};
+ assert.doesNotThrow(()=>p.refresh());selection(p,['b']);assert.equal(box.listenerCount('change'),0);row.remove=original;p.refresh();assert.deepEqual(rowIds(f),['b','keep']);assert.equal(boxes(f)[0].checked,true);selection(p,['b']);
+});
+test('failed retired node cleanup never removes a newer same-ID row',t=>{
+ const h=fixture(t),f=h.create(),p=f.attach(),row=list(f).children[0],original=row.remove.bind(row);let once=true;row.remove=()=>{if(once){once=false;f.api.undo();throw new Error('obsolete pre-remove');}original();};
+ f.api.deleteDrawing('a');p.refresh();assert.deepEqual(rowIds(f),['a','b','keep']);assert.notStrictEqual(list(f).children[0],row);assert.equal(boxes(f)[0].listenerCount('change'),1);check(f,0);selection(p,['a']);
+});
+test('retry of a focused pending removal preserves fallback focus and destroy clears all listeners',t=>{
+ const h=fixture(t),f=h.create(),p=f.attach(),row=list(f).children[0],box=boxes(f)[0],original=row.remove.bind(row);box.focus();f.store.remove('a');row.remove=()=>{throw new Error('retry later');};assert.throws(()=>p.refresh(),/retry later/);row.remove=original;p.refresh();assert.strictEqual(h.document.activeElement,button(f,'Refresh drawings'));
+ const next=list(f).children[0];f.store.remove('b');next.remove=()=>{throw new Error('still pending');};assert.throws(()=>p.refresh(),/still pending/);p.destroy();assert.equal(f.panelContainer.children.length,0);assert.equal(h.elements.reduce((n,e)=>n+e.listenerCount(),0),0);
+});
