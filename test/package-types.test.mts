@@ -43,3 +43,7 @@ linkedCursors.dispose();
 new TimeCursorGroup({match:'nearest'});
 // @ts-expect-error policy is required
 new TimeCursorGroup();
+const groupReceipt:{changed:number;invalidationFailed:boolean}=api.translateDrawings(['t'] as const,{deltaTimeMs:.5,deltaPrice:2});
+groupReceipt.changed.toFixed();
+// @ts-expect-error both raw deltas are explicit
+api.translateDrawings(['t'],{deltaPrice:1});

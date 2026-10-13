@@ -225,3 +225,7 @@ a transient vertical overlay; price, viewport and keyboard selection stay local.
 no study calculation, but a later dirty receiver redraw can. See
 [TIME-CURSOR.md](TIME-CURSOR.md) for lifecycle, gap semantics, bounds, the synthetic
 two-chart example and unverified browser/UI limits.
+
+## Atomic drawing group translation
+
+`translateDrawings(ids, {deltaTimeMs, deltaPrice})` moves 1–128 explicit, unlocked drawings with one common panel/axis/series binding and one undo unit. It returns `{changed, invalidationFailed}`. All candidates and the full prior undo snapshot are validated before publication; active transactions/gestures reject. Zero or rounded-away changes preserve history and do not notify. See [raw-coordinate translation contract](DRAWING-TRANSLATION.md) for resource, failure, notification and precision rules. This core command does not add a multi-selection UI.
