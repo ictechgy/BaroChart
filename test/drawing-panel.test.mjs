@@ -439,6 +439,7 @@ test('refresh text callbacks can remount a panel without stale render writes or 
   const h = fixture(t), f = h.create(), panel = f.attach();
   const oldRoot = f.panelContainer.children[0], text = find(list(f).children[0], node => node.tagName === 'SPAN');
   let replacement;
+  text.textContent='Host changed the row';
   text.onText = () => {
     text.onText = null; panel.destroy(); replacement = f.attach({label: 'Replacement during refresh'});
     replacement.selection.select('keep'); replacement.refresh(); status(f).textContent = 'Replacement ready.';
@@ -556,3 +557,43 @@ test('attach, page, selection, refresh, and batch edits do not query data or com
 });
 
 test('each implicit label contains exactly one labelable control without nested labels',t=>{const h=fixture(t),f=h.create();f.attach();const labels=descendants(f.panelContainer).filter(n=>n.tagName==='LABEL');assert.ok(labels.length>=11);for(const label of labels){const children=descendants(label);assert.equal(children.filter(n=>['INPUT','BUTTON','SELECT','TEXTAREA','METER','OUTPUT','PROGRESS'].includes(n.tagName)).length,1);assert.equal(children.filter(n=>n.tagName==='LABEL').length,0);}for(const name of['color','fill','width','font']){const{enabled,input}=field(f,name);assert.equal(enabled.parentNode.tagName,'LABEL');assert.equal(input.parentNode.tagName,'LABEL');assert.notEqual(enabled.parentNode,input.parentNode);assert.match(input.parentNode.textContent,new RegExp(name+' value'));}});
+
+function watchPanelProperties(f) {
+ const pairs=boxes(f).flatMap(box=>[[box,'checked'],[box.parentNode.children[1],'textContent']]);
+ pairs.push([count(f),'textContent'],...['Previous page','Next page','Clear selection','Delete selected','Apply checked styles'].map(name=>[button(f,name),'disabled']));
+ const stats={reads:0,writes:0};
+ for(const [node,key] of pairs){let value=node[key];Object.defineProperty(node,key,{configurable:true,get(){stats.reads++;return value;},set(next){stats.writes++;value=next;}});}
+ return stats;
+}
+for(const size of [1000,10000])test(`unchanged ${size}-drawing hover validates immediately with 70 reads and zero DOM writes`,t=>{
+ const h=fixture(t),f=h.create([]);f.store.load(JSON.stringify({schema:'aster.drawings',version:1,drawings:Array.from({length:size},(_,i)=>drawing('d'+i))}));const p=f.attach(),stats=watchPanelProperties(f);
+ for(let i=0;i<3;i++)f.chart.invalidate('hover');t.diagnostic(JSON.stringify({drawings:size,events:3,reads:stats.reads,writes:stats.writes}));assert.equal(stats.reads,210);assert.equal(stats.writes,0);assert.equal(h.frames.size,1);
+ const items=f.store.items;items[size-1]=items[0];f.chart.invalidate('hover');assert.match(status(f).textContent,/Duplicate/);assert.equal(stats.writes,0);assert.strictEqual(f.store.items,items);
+});
+test('actual DOM drift is repaired and same-array metadata changes are reflected before RAF',t=>{
+ const h=fixture(t),f=h.create(),p=f.attach(),box=boxes(f)[0],text=box.parentNode.children[1];box.checked=true;text.textContent='host changed';count(f).textContent='wrong';button(f,'Next page').disabled=false;
+ p.refresh();assert.equal(box.checked,false);assert.match(text.textContent,/^a · horizontal/);assert.match(count(f).textContent,/0 selected/);assert.equal(button(f,'Next page').disabled,true);
+ const items=f.store.items;items[0]=Object.freeze({...items[0],locked:true});f.chart.invalidate('hover');assert.match(text.textContent,/locked/);assert.strictEqual(items,f.store.items);assert.equal(f.renderer.calls,0);
+});
+for(const property of ['checked','textContent'])test(`DOM ${property} comparison getter reentry preserves replacement panel`,t=>{
+ const h=fixture(t),f=h.create(),p=f.attach(),node=property==='checked'?boxes(f)[0]:boxes(f)[0].parentNode.children[1];let reads=0,writes=0,next;
+ Object.defineProperty(node,property,{configurable:true,get(){reads++;p.destroy();next=f.attach();return 'old';},set(){writes++;}});
+ p.refresh();assert.equal(reads,1);assert.equal(writes,0);assert.equal(f.panelContainer.children.length,1);assert.equal(count(f).textContent.startsWith('0 selected'),true);next.destroy();
+});
+test('DOM getter selection reentry stops old checked and text writes',t=>{
+ const h=fixture(t),f=h.create(),p=f.attach(),box=boxes(f)[0];let writes=0;Object.defineProperty(box,'checked',{configurable:true,get(){p.selection.select('b',true);return false;},set(){writes++;}});
+ p.refresh();assert.equal(writes,0);selection(p,['b']);
+});
+test('comparison getter errors report once and allow a later refresh',t=>{
+ const h=fixture(t),f=h.create(),p=f.attach(),box=boxes(f)[0],error=new Error('DOM read failed');Object.defineProperty(box,'checked',{configurable:true,get(){throw error;}});
+ assert.throws(()=>p.refresh(),e=>e===error);f.chart.invalidate('hover');assert.equal(status(f).textContent,error.message);Object.defineProperty(box,'checked',{configurable:true,writable:true,value:true});p.refresh();assert.equal(box.checked,false);
+});
+test('DOM setter selection reentry stops remaining stale writes',t=>{
+ const h=fixture(t),f=h.create(),p=f.attach(),box=boxes(f)[0],text=box.parentNode.children[1],before=text.writes.length;Object.defineProperty(box,'checked',{configurable:true,get(){return true;},set(){p.selection.select('b',true);}});
+ p.refresh();assert.equal(text.writes.length,before);selection(p,['b']);
+});
+for(const phase of ['get','set'])test(`disabled ${phase} reentry stops later control writes and stale error status`,t=>{
+ const h=fixture(t),f=h.create(),p=f.attach(),previous=button(f,'Previous page'),next=button(f,'Next page');let nextWrites=0;Object.defineProperty(next,'disabled',{configurable:true,get(){return true;},set(){nextWrites++;}});
+ Object.defineProperty(previous,'disabled',{configurable:true,get(){if(phase==='get'){p.selection.select('b',true);throw new Error('obsolete read');}return false;},set(){p.selection.select('b',true);throw new Error('obsolete write');}});
+ assert.doesNotThrow(()=>p.refresh());assert.equal(nextWrites,0);selection(p,['b']);assert.equal(status(f).textContent,'');
+});

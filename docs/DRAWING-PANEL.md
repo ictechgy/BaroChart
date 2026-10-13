@@ -39,3 +39,13 @@ These checks do not run actual browser native checkbox defaults, focus event ord
 For the subsequent metadata work reduction and all measured regressions/outliers, see [Drawing selection metadata cost](DRAWING-SELECTION-COST.md).
 
 The style controls now use separate sibling labels for each checkbox and value input. Each implicit label contains exactly one labelable control, following the [HTML label content model](https://html.spec.whatwg.org/multipage/forms.html#the-label-element). The prior shared label contained both inputs. Accessible names and keyboard order are preserved; the structural fake-DOM regression does not establish actual browser or assistive-technology behavior.
+
+## Repeated state notifications
+
+The panel still refreshes synchronously for every matching `aster:state` event. Every refresh validates the full drawing source, including off-page rows; same-array edits are not hidden by an identity cache. Source validation remains O(n), and multiple events in one animation frame still repeat that work.
+
+Rendering compares the actual `checked`, `textContent` and `disabled` properties before assigning them. An unchanged 32-row page avoids 70 assignments per refresh, at the cost of 70 property reads. Actual host edits to these values are repaired on the next refresh. Matching text content does not promise normalization of arbitrary host-added child markup. Selection/style text inputs and live status announcements retain their existing behavior.
+
+Property reads and writes are separated by ownership, render-generation and selection-generation checks. A comparison getter or setter that disposes/remounts the panel or starts a newer selection cannot continue writing the older render. Current getter errors remain errors; an error from an already-obsolete render is discarded. No event filtering, source-revision cache or next-frame delay is introduced.
+
+Test-only DOM instrumentation at 1,000 and 10,000 drawings recorded 210 assignments across three unchanged baseline notifications versus zero assignments and 210 reads with this change. This measures these explicit property operations, not total allocation, browser style/layout work, FPS or assistive-technology behavior. Existing focus, source-validation and lifecycle regressions remain required.
