@@ -1,0 +1,13 @@
+{
+  "name": "fancy-canvas",
+  "version": "2.1.0",
+  "license": "MIT",
+  "repository": "https://github.com/tradingview/fancy-canvas",
+  "licenseSource": "https://raw.githubusercontent.com/tradingview/fancy-canvas/2.1.0/LICENSE",
+  "licenseFile": "LICENSE.fancy-canvas",
+  "licenseSHA256": "5c428f2bcebe7745f9043139a074ef2aa54aaba9aac5ce95cd330aa283a3b57e",
+  "distribution": "Bundled inside lightweight-charts-5.2.1.mjs, the optional standalone benchmark comparator. No separate fancy-canvas source or package was added.",
+  "parentPackageMetadata": "package.lightweight-charts.json",
+  "parentBuildSource": "https://raw.githubusercontent.com/tradingview/lightweight-charts/v5.2.1/rollup.config.js",
+  "parentBundleSHA256": "1bb1ee79f9d4dd17261b53d930f7a8995748276f80e7ba0e24412b5068062f5f"
+}

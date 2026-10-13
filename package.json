@@ -1,0 +1,156 @@
+{
+  "name": "barochart",
+  "version": "0.2.13",
+  "type": "module",
+  "description": "BaroChart: Float64 financial chart engine for web and native hosts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.mts",
+      "import": "./src/index.mjs"
+    },
+    "./core": {
+      "types": "./src/core/index.d.mts",
+      "import": "./src/core/index.mjs"
+    },
+    "./canvas": {
+      "types": "./src/renderers/canvas.d.mts",
+      "import": "./src/renderers/canvas.mjs"
+    },
+    "./webgl": {
+      "types": "./src/renderers/webgl.d.mts",
+      "import": "./src/renderers/webgl.mjs"
+    },
+    "./worker": {
+      "types": "./src/web/worker.d.mts",
+      "import": "./src/web/worker.mjs"
+    },
+    "./react": {
+      "types": "./src/react/index.d.mts",
+      "import": "./src/react/index.mjs"
+    },
+    "./worker-entry": {
+      "types": "./src/web/worker-entry.d.mts",
+      "import": "./src/web/worker-entry.mjs"
+    }
+  },
+  "types": "./src/index.d.mts",
+  "scripts": {
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "demo": "node scripts/serve.mjs",
+    "bench": "node --expose-gc benchmarks/core.mjs",
+    "build:native": "node scripts/build-native.mjs",
+    "test:native": "./artifacts/aster-native --self-test",
+    "bench:native": "./artifacts/aster-native --bench",
+    "check": "node scripts/check.mjs",
+    "test:browser": "node test/browser.mjs",
+    "test:lifecycle": "node test/lifecycle.mjs",
+    "bench:browser": "node benchmarks/browser.mjs",
+    "test:native:ui": "./artifacts/aster-native --ui-test",
+    "check:types": "node scripts/check-types.mjs",
+    "bench:report": "node scripts/report.mjs",
+    "bench:renderer": "node benchmarks/renderer.mjs",
+    "test:gpu": "node test/gpu-browser.mjs",
+    "build:ios": "node scripts/build-ios.mjs",
+    "build:android": "node scripts/build-android.mjs",
+    "test:mutations": "node test/mutations.mjs",
+    "test:ios": "node scripts/test-ios.mjs",
+    "test:android": "node scripts/test-android.mjs",
+    "test:api:browser": "node test/api-browser.mjs",
+    "test:api:native": "./artifacts/aster-native --api-test",
+    "test:ux": "node test/ux-browser.mjs",
+    "bench:audit": "node --expose-gc benchmarks/audit.mjs",
+    "bench:review-costs": "node --expose-gc benchmarks/review-costs.mjs",
+    "bench:worker": "node benchmarks/worker.mjs",
+    "test:boundaries": "node test/runtime-boundaries.mjs",
+    "test:native:async": "./artifacts/aster-native --async-test",
+    "test:ios:async": "node scripts/test-ios-async.mjs",
+    "test:android:async": "node scripts/test-android-async.mjs",
+    "bench:android:async": "node scripts/test-android-async.mjs --bench",
+    "bench:correction": "node --expose-gc benchmarks/correction.mjs",
+    "check:security:offline": "node scripts/static-security.mjs",
+    "bench:native:async": "./artifacts/aster-native --async-bench",
+    "bench:ios:async": "node scripts/test-ios-async.mjs --bench",
+    "check:package": "node scripts/verify-npm.mjs",
+    "test:native:prepare": "./artifacts/aster-native --prepare-test",
+    "bench:native:prepare": "./artifacts/aster-native --prepare-bench",
+    "bench:native:initial": "node scripts/bench-initial-prepare.mjs",
+    "test:native:soak": "./artifacts/aster-native --soak-test",
+    "test:browser:compat": "node test/browser-compat.mjs --safari",
+    "test:browser:soak": "node benchmarks/browser-soak.mjs",
+    "test:ios:prepare": "node scripts/test-ios-prepare.mjs",
+    "bench:ios:prepare": "node scripts/test-ios-prepare.mjs --bench",
+    "test:ios:soak": "node scripts/test-ios-prepare.mjs --soak",
+    "test:android:prepare": "node scripts/test-android-prepare.mjs",
+    "bench:android:prepare": "node scripts/test-android-prepare.mjs --bench",
+    "test:android:soak": "node scripts/test-android-prepare.mjs --soak",
+    "test:android:async:large": "node scripts/test-android-async.mjs --large",
+    "test:layers": "node test/layers-browser.mjs",
+    "test:financial:browser": "node test/financial-browser.mjs",
+    "test:android:retention": "node scripts/test-android-retention.mjs",
+    "bench:hover": "node benchmarks/hover.mjs",
+    "test:cache:policy": "node test/cache-policy-browser.mjs",
+    "test:native:frames": "./artifacts/aster-native --frame-test",
+    "bench:native:hover": "node scripts/profile-native-hover.mjs . benchmarks/results/native-hover.json --cached",
+    "test:axes:browser": "node test/axes-browser.mjs",
+    "test:axes:native": "./artifacts/aster-native --axes-test",
+    "test:axes:native:ui": "./artifacts/aster-native --axes-ui-test",
+    "test:axes:ios": "node scripts/test-ios-axes.mjs",
+    "test:native:cache:recovery": "node scripts/test-native-cache-recovery.mjs",
+    "test:aa:overlap": "node test/aa-overlap-browser.mjs",
+    "test:android:hover": "node scripts/test-android-hover.mjs",
+    "test:react": "node test/react-browser.mjs",
+    "test:package:consumers": "node scripts/test-package-consumers.mjs",
+    "test:bindings:browser": "node test/binding-browser.mjs",
+    "build:apple:transactions": "node scripts/build-apple-transactions.mjs",
+    "test:apple:transactions": "node scripts/test-apple-transactions.mjs",
+    "build:android:library": "node scripts/build-android-library.mjs",
+    "test:sdk:swift": "node scripts/test-swift-consumer.mjs",
+    "test:sdk:kotlin": "node scripts/test-kotlin-consumer.mjs",
+    "build:ios:mobile-ux": "node scripts/build-ios-mobile-ux.mjs",
+    "test:ios:mobile-ux": "node scripts/test-ios-mobile-ux.mjs",
+    "build:android:mobile-ux": "node scripts/build-android-mobile-ux.mjs",
+    "test:android:mobile-ux": "node scripts/test-android-mobile-ux.mjs",
+    "test:native:publication": "./artifacts/aster-native --publication-test",
+    "test:analysis:browser": "node test/analysis-browser.mjs",
+    "test:native:studies": "./artifacts/aster-native --study-test",
+    "test:sdk:closed": "node scripts/test-closed-observer.mjs",
+    "bench:studies": "node --expose-gc benchmarks/studies.mjs",
+    "test:native:ingestion": "node scripts/test-native-ingestion.mjs",
+    "test:browser:ingestion": "node test/cycle12-ingestion-browser.mjs --verify-only --strategy queued --bars 512 --lines 1",
+    "bench:ingestion": "node scripts/profile-cycle12-ingestion.mjs",
+    "build:ios:ingestion": "node scripts/build-ios-ingestion.mjs",
+    "test:ios:ingestion": "node scripts/test-ios-ingestion.mjs",
+    "build:android:ingestion": "node scripts/build-android-ingestion.mjs",
+    "test:android:ingestion": "node scripts/test-android-ingestion.mjs",
+    "check:quickjs": "node scripts/test-quickjs-cloud.mjs",
+    "check:quickjs:checkpoints": "node scripts/test-quickjs-cloud.mjs --checkpoint",
+    "check:quickjs:target": "node scripts/test-quickjs-cloud.mjs --target",
+    "check:quickjs:source": "node scripts/test-quickjs-cloud.mjs --source"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "Apache-2.0",
+  "private": true,
+  "files": [
+    "src",
+    "native",
+    "Package.swift",
+    "docs",
+    "LICENSE",
+    "NOTICE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "peerDependencies": {
+    "react": "^18.3.1 || ^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
+  "sideEffects": [
+    "./src/web/compute-worker.mjs",
+    "./src/web/worker-entry.mjs"
+  ]
+}

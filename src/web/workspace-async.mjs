@@ -1,0 +1,33 @@
+import {BarStore,FIELDS} from '../core/data.mjs';
+import {ChartModel} from '../core/model.mjs';
+import {workspaceBinding,workspaceBindingSame,readWorkspaceDocument,installWorkspaceConfiguration} from '../core/workspace.mjs';
+import {runCalculationJob,runDedicatedCalculationWorker} from './calculation-job.mjs';
+import {paramSlot,paramVector,paramRecord,paramList,paramLength,paramDefinition,paramLayout,paramLayoutSame,paramSame,PARAM_CHECKPOINT_BYTES} from './indicator-params-protocol.mjs';
+import {validateIndicatorParamsPacket} from './indicator-params-packet.mjs';
+function workspaceStale(){const error=new Error('Workspace source changed during preparation');error.name='StaleSourceError';throw error;}
+export function prepareWorkspaceAsync(store,text,options={}){
+ let candidate;
+ return runCalculationJob(options,async context=>{
+  if(!(store instanceof BarStore))throw new TypeError('Actual BarStore required');
+  const columns=paramSlot(store,'columns'),length=paramSlot(store,'length'),capacity=paramSlot(store,'capacity'),version=paramSlot(store,'version');if(!Number.isSafeInteger(length)||length<0||length>4194304||!Number.isSafeInteger(capacity)||capacity<16||capacity<length||capacity>4194304||(capacity&(capacity-1)))throw new RangeError('Workspace source dimensions');
+  const source=FIELDS.map(k=>paramVector(paramSlot(columns,k),Float64Array,length));const guard=()=>{if(paramSlot(store,'version')!==version||paramSlot(store,'columns')!==columns||paramSlot(store,'length')!==length||paramSlot(store,'capacity')!==capacity||FIELDS.some((k,i)=>paramSlot(columns,k)!==source[i]))workspaceStale();};context.guard=guard;context.current=guard;
+  const binding=workspaceBinding(options.datasetBinding),doc=readWorkspaceDocument(text);if(!workspaceBindingSame(doc.dataset,binding))throw new TypeError('Workspace dataset binding mismatch');if(doc.source.length!==length||doc.source.firstTime!==(length?source[0][0]:null)||doc.source.lastTime!==(length?source[0][length-1]:null))throw new TypeError('Workspace source extent mismatch');context.check();guard();
+  const definitions=doc.indicators.map(study=>{const def=paramDefinition(study.name,study.params,study.module),layout=paramLayout(def);if(!paramLayoutSame(study,layout)||!paramSame(study.plotOffsets,layout.plotOffsets))throw new TypeError('Workspace output schema/offset binding');guard();return {def,layout,create:def.create};});
+  const outputs=definitions.reduce((sum,e)=>sum+e.layout.outputs.length,0),count=length===0?0:Math.floor(length/256)+1;
+  // Sum ALL studies. Shared source copied once; encoded checkpoints have one
+  // aggregate 32MiB ceiling, not128 independent allowances. 32MiB document
+  // reserve includes input/parsed/transport text and detached metadata copies.
+  context.reserve(length*48+capacity*outputs*16+128*1024*1024+32*1024*1024+16*(count+1)*definitions.length);
+  const factory=options.workerFactory;if(factory!==undefined&&typeof factory!=='function')throw new TypeError('Worker factory required');const transport={workerFactory:factory??(()=>new Worker(new URL('./workspace-worker.mjs',import.meta.url),{type:'module'}))};
+  const owned={};let done=0;context.progress('snapshot',0,length*6);for(let f=0;f<FIELDS.length;f++){const target=new Float64Array(length);owned[FIELDS[f]]=target;for(let start=0;start<length;start+=16384){context.check();guard();const end=Math.min(length,start+16384);for(let i=start;i<end;i++)target[i]=source[f][i];done+=end-start;context.progress('snapshot',done,length*6);await context.yield();}}
+  context.progress('compute',0,1);const packet=await runDedicatedCalculationWorker({schema:'aster.workspace-request',version:1,jobId:context.id,kind:'workspace',text,capacity,columns:owned},new URL('./workspace-worker.mjs',import.meta.url),transport,context,FIELDS.map(k=>owned[k].buffer));context.progress('compute',1,1);
+  const schema=Object.getOwnPropertyDescriptor(packet??{},'schema');if(schema&&Object.hasOwn(schema,'value')&&schema.value==='aster.workspace-error'){const e=paramRecord(packet,['schema','version','jobId','kind','message'],'Workspace error');if(e.version!==1||e.jobId!==context.id||e.kind!=='workspace'||typeof e.message!=='string'||e.message.length>256)throw new TypeError('Workspace error binding');throw new Error(e.message);}
+  const p=paramRecord(packet,['schema','version','jobId','kind','entries'],'Workspace packet');if(p.schema!=='aster.workspace-result'||p.version!==1||p.jobId!==context.id||p.kind!=='workspace')throw new TypeError('Workspace result protocol');const packets=paramList(p.entries,128,'Workspace entries');if(packets.length!==doc.indicators.length)throw new TypeError('Workspace entry count');
+  // Preflight aggregate checkpoint bytes before copying ANY returned entry.
+  let checkpointBytes=0;for(const entry of packets){const result=paramSlot(entry,'result'),cp=paramSlot(result,'checkpoints'),bytes=paramLength(paramSlot(cp,'bytes'));checkpointBytes+=bytes;if(checkpointBytes>PARAM_CHECKPOINT_BYTES)throw new RangeError('Workspace checkpoint byte limit');}
+  const entries=[],buffers=new Set(),validationTotal=outputs*capacity+packets.length*(count*3+1)+checkpointBytes;let validationDone=0;const validationContext=Object.create(context);validationContext.progress=(_phase,done)=>context.progress('validate',validationDone+done,validationTotal);context.progress('validate',0,validationTotal);for(let i=0;i<packets.length;i++){const study=doc.indicators[i],d=definitions[i],entry=await validateIndicatorParamsPacket(packets[i],{jobId:context.id,binding:{id:study.id,name:study.name,params:study.params,module:study.module,length,capacity,checkpointSize:256},def:d.def,layout:d.layout,signal:options.signal,buffers},validationContext);validationDone+=d.layout.outputs.length*capacity+count*3+1+paramLength(paramSlot(paramSlot(paramSlot(packets[i],'result'),'checkpoints'),'bytes'));entries.push([study.id,entry]);context.check();guard();}
+  for(const d of definitions){const layout=paramLayout(d.def);if(d.def.create!==d.create||!paramLayoutSame(layout,d.layout)||!paramSame(layout.plotOffsets,d.layout.plotOffsets))throw new TypeError('Workspace definition changed during staging');}
+  context.check();guard();const c=doc.chart;candidate=new ChartModel({store,theme:c.theme,panels:c.panels,axes:c.axes,precision:c.precision,axisWidth:c.axisWidth});candidate.indicators.entries=new Map(entries);installWorkspaceConfiguration(candidate,doc);context.check();guard();
+  context.publish(()=>{guard();return candidate;});
+ }).then(model=>{candidate=null;return model;},error=>{candidate?.dispose();candidate=null;throw error;});
+}

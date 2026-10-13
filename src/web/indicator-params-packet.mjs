@@ -1,0 +1,24 @@
+import {validateIndicatorParams} from '../core/indicator-params.mjs';
+import {validateIndicatorModuleBinding} from '../core/indicator-modules.mjs';
+import {LazyCheckpoints} from './checkpoint-codec.mjs';
+import {paramRecord,paramVector,paramLength,paramSame,paramList,PARAM_CHECKPOINT_BYTES,PARAM_RECORD_BYTES} from './indicator-params-protocol.mjs';
+export async function validateIndicatorParamsPacket(packet,expected,context){
+ context.check();context.current();const schema=Object.getOwnPropertyDescriptor(packet??{},'schema');
+ if(schema&&Object.hasOwn(schema,'value')&&schema.value==='aster.params-error'){const e=paramRecord(packet,['schema','version','jobId','kind','message'],'Parameter error');if(e.version!==1||e.jobId!==expected.jobId||e.kind!=='indicator-params'||typeof e.message!=='string'||e.message.length>256)throw new TypeError('Parameter error binding');throw new Error(e.message);}
+ const p=paramRecord(packet,['schema','version','jobId','kind','binding','result'],'Parameter result');if(p.schema!=='aster.params-result'||p.version!==1||p.jobId!==expected.jobId||p.kind!=='indicator-params')throw new TypeError('Parameter result protocol');
+ const b=paramRecord(p.binding,['id','name','params','module','length','capacity','checkpointSize'],'Parameter binding'),wanted=expected.binding;
+ for(const k of ['id','name','length','capacity','checkpointSize'])if(!Object.is(b[k],wanted[k]))throw new TypeError('Parameter request binding');validateIndicatorParams(b.params);if(!paramSame(b.params,wanted.params))throw new TypeError('Parameter requested params');validateIndicatorModuleBinding(b.name,b.module);
+ const r=paramRecord(p.result,['outputs','plotOffsets','arrays','checkpoints','revision','computedFrom','computedUntil','dirty','dirtyTo','invalidated','length'],'Parameter entry');
+ const outputs=paramList(r.outputs,32,'Output schema'),layout=expected.layout;if(outputs.length!==layout.outputs.length||outputs.some((k,i)=>k!==layout.outputs[i]))throw new TypeError('Parameter output schema');
+ const offsets=paramRecord(r.plotOffsets,Object.keys(layout.plotOffsets),'Plot offsets');if(!paramSame(offsets,layout.plotOffsets))throw new TypeError('Parameter plot offsets');
+ if(r.revision!==(b.length?1:0)||r.computedFrom!==0||r.computedUntil!==b.length||r.dirty!==b.length||r.dirtyTo!==0||r.invalidated!==false||r.length!==b.length)throw new TypeError('Parameter completed metadata');
+ const buffers=expected.buffers??new Set(),vectors=paramList(r.arrays,32,'Output arrays');if(vectors.length!==outputs.length)throw new TypeError('Parameter output arity');for(const a of vectors)paramVector(a,Float64Array,b.capacity,buffers);
+ const cp=paramRecord(r.checkpoints,['indices','offsets','bytes'],'Parameter checkpoints'),count=b.length===0?0:Math.floor(b.length/b.checkpointSize)+1;
+ paramVector(cp.indices,Uint32Array,count,buffers);paramVector(cp.offsets,Uint32Array,count+1,buffers);const bytes=paramLength(cp.bytes);if(bytes>PARAM_CHECKPOINT_BYTES)throw new RangeError('Parameter checkpoint byte limit');paramVector(cp.bytes,Uint8Array,bytes,buffers);
+ if(cp.offsets[0]!==0||cp.offsets[count]!==bytes)throw new TypeError('Parameter checkpoint offsets');for(let i=0;i<count;i++)if(cp.indices[i]!==i*b.checkpointSize||cp.offsets[i+1]<=cp.offsets[i]||cp.offsets[i+1]-cp.offsets[i]>PARAM_RECORD_BYTES)throw new TypeError('Parameter checkpoint record/grid');
+ const arrays=[],clean={},total=outputs.length*b.capacity+count*2+1+bytes+count;let done=0;context.progress('validate',0,total);
+ for(let j=0;j<vectors.length;j++){const from=vectors[j],to=new Float64Array(b.capacity);arrays.push(to);for(let start=0;start<b.capacity;start+=16384){const end=Math.min(b.capacity,start+16384);for(let i=start;i<end;i++){const v=from[i];if(i>=b.length?!Number.isNaN(v):v===Infinity||v===-Infinity)throw new TypeError('Parameter output finite/NaN tail');to[i]=v;}done+=end-start;context.progress('validate',done,total);await context.yield();}}
+ for(const [key,Type,n] of [['indices',Uint32Array,count],['offsets',Uint32Array,count+1],['bytes',Uint8Array,bytes]]){const to=new Type(n);clean[key]=to;for(let start=0;start<n;start+=16384){const end=Math.min(n,start+16384);for(let i=start;i<end;i++)to[i]=cp[key][i];done+=end-start;context.progress('validate',done,total);await context.yield();}}
+ const lazy=new LazyCheckpoints(clean);await lazy.validateAsync(b.length,b.checkpointSize,b.name,wanted.params,{signal:expected.signal,maxRecordsPerSlice:32,maxSliceMs:1,checkOwner:()=>{context.check();context.current();context.check();context.guard();},yieldTask:()=>context.yield(),onProgress:({completed})=>context.progress('validate',done+completed,total)});context.check();context.current();
+ return {def:expected.def,name:b.name,params:{...wanted.params},arrays,checkpoints:lazy,revision:r.revision,computedFrom:0,computedUntil:b.length,dirty:b.length,dirtyTo:0,invalidated:false,length:b.length};
+}

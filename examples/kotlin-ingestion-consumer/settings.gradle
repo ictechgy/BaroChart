@@ -1,0 +1,18 @@
+pluginManagement {
+    repositories { google(); mavenCentral(); gradlePluginPortal() }
+    resolutionStrategy {
+        eachPlugin {
+            if (requested.id.id == 'org.jetbrains.kotlin.android') useModule('org.jetbrains.kotlin:kotlin-gradle-plugin:' + requested.version)
+        }
+    }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories { google(); mavenCentral() }
+}
+rootProject.name = 'aster-kotlin-ingestion-consumer'
+include ':app'
+if (providers.gradleProperty('asterProjectDependency').orElse('false').get().toBoolean()) {
+    include ':aster'
+    project(':aster').projectDir = file('../../native/android/library')
+}

@@ -1,0 +1,27 @@
+BaroChart
+Copyright 2026 BaroChart contributors
+https://github.com/ictechgy/BaroChart
+
+BaroChart is distributed under the Apache License, Version 2.0.
+Third-party components retain their own licenses and copyright notices.
+See THIRD_PARTY_NOTICES.md in the source distribution for the inventory.
+
+The Android runtime includes QuickJS 2026-06-04 under the MIT license.
+The original QuickJS LICENSE accompanies the Android artifact as
+assets/licenses/QUICKJS-LICENSE.txt. The bundled QuickJS source files carry
+these additional or more specific copyright notices, reproduced here:
+
+Copyright (c) 2016-2017 Fabrice Bellard
+Copyright (c) 2017 Fabrice Bellard
+Copyright (c) 2018 Charlie Gordon
+Copyright (c) 2017-2018 Fabrice Bellard
+Copyright (c) 2017-2018 Charlie Gordon
+Copyright (c) 2017-2021 Fabrice Bellard
+Copyright (c) 2017-2021 Charlie Gordon
+Copyright (c) 2024 Fabrice Bellard
+Copyright (c) 2017-2025 Fabrice Bellard
+Copyright (c) 2017-2025 Charlie Gordon
+
+The optional benchmark comparator and its notices are contained separately
+in benchmarks/vendor/. It is not part of the BaroChart production runtime
+or Android AAR.

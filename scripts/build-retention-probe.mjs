@@ -1,0 +1,24 @@
+// Differential fixture builder. Build the selected baseline first; --out is a dedicated scratch directory.
+import {mkdir,readdir,rm,writeFile,readFile} from 'node:fs/promises';
+import {spawnSync} from 'node:child_process';
+import {join,resolve} from 'node:path';
+import {homedir} from 'node:os';
+const root=resolve(import.meta.dirname,'..');
+const flag=name=>{const i=process.argv.indexOf(name);if(i<0||!process.argv[i+1])throw new Error(name+' required');return process.argv[i+1];};
+const out=resolve(flag('--out')),engine=resolve(flag('--engine')),frozen=resolve(flag('--base-apk'));
+const sdk=process.env.ANDROID_SDK_ROOT??join(homedir(),'Library/Android/sdk'),jdk=process.env.JAVA_HOME??'/opt/homebrew/opt/openjdk',build=join(sdk,'build-tools/36.0.0'),android=join(sdk,'platforms/android-36/android.jar');
+const run=(exe,args)=>{const result=spawnSync(exe,args,{cwd:root,stdio:'inherit'});if(result.status!==0)throw new Error(exe+' failed '+result.status);};
+for(const name of ['classes','dex'])await rm(join(out,name),{recursive:true,force:true});
+for(const name of ['classes','dex','assets','lib/arm64-v8a'])await mkdir(join(out,name),{recursive:true});
+run('python3',['-c','import zipfile,pathlib,sys\no=pathlib.Path(sys.argv[1])\nwith zipfile.ZipFile(sys.argv[2]) as z:\n for name in ["assets/aster-core.js","lib/arm64-v8a/libaster.so"]:\n  (o/name).write_bytes(z.read(name))',out,frozen]);
+const native=(await readdir(join(root,'native/android/java/dev/aster/charts'))).filter(name=>name.endsWith('.java')).map(name=>name==='AsterEngine.java'?engine:join(root,'native/android/java/dev/aster/charts',name));
+const fixtures=(await readdir(join(root,'examples/android'))).filter(name=>name.endsWith('.java')).map(name=>join(root,'examples/android',name));
+run(join(jdk,'bin/javac'),['--release','8','-cp',android,'-d',join(out,'classes'),...native,...fixtures]);
+const classes=(await readdir(join(out,'classes/dev/aster/charts'))).map(name=>join(out,'classes/dev/aster/charts',name));
+run(join(jdk,'bin/java'),['-cp',join(build,'lib/d8.jar'),'com.android.tools.r8.D8','--lib',android,'--min-api','26','--output',join(out,'dex'),...classes]);
+run(join(build,'aapt2'),['link','--manifest',join(root,'examples/android/AndroidManifest.xml'),'-I',android,'-A',join(out,'assets'),'--min-sdk-version','26','--target-sdk-version','36','-o',join(out,'unsigned.apk')]);
+run('python3',['-c','import zipfile,pathlib,sys\np=pathlib.Path(sys.argv[1])\nwith zipfile.ZipFile(p/"unsigned.apk","a",zipfile.ZIP_DEFLATED) as z:\n for name in ["dex/classes.dex","lib/arm64-v8a/libaster.so"]:\n  z.write(p/name,"classes.dex" if name.startswith("dex/") else name)',out]);
+run(join(build,'zipalign'),['-f','-p','4',join(out,'unsigned.apk'),join(out,'aligned.apk')]);
+run(join(jdk,'bin/java'),['-jar',join(build,'lib/apksigner.jar'),'sign','--ks',join(root,'artifacts/android/debug.jks'),'--ks-pass','pass:android','--out',join(out,'aster-retention.apk'),join(out,'aligned.apk')]);
+await writeFile(join(out,'build-source.json'),JSON.stringify({engine,frozen,root,sourceScope:'Caller-selected APK JNI/core assets; selected Java engine and current retention/other fixtures; no device action' },null,2));
+console.log(join(out,'aster-retention.apk'));

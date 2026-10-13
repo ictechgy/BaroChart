@@ -1,0 +1,31 @@
+plugins { id 'com.android.application'; id 'org.jetbrains.kotlin.android' }
+android {
+    namespace 'dev.aster.ingestion.consumer'
+    compileSdk 36
+    buildToolsVersion '36.0.0'
+    ndkVersion '29.0.14033849'
+    defaultConfig { applicationId 'dev.aster.ingestion.consumer'; minSdk 26; targetSdk 36; versionCode 1; versionName '1.0'; ndk { abiFilters 'arm64-v8a' } }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_1_8; targetCompatibility JavaVersion.VERSION_1_8 }
+    packagingOptions { jniLibs { useLegacyPackaging true } }
+    signingConfigs {
+        localValidation {
+            storeFile file(providers.gradleProperty('asterDebugKeystore').get())
+            storePassword 'android'; keyAlias 'aster-debug'; keyPassword 'android'
+        }
+    }
+    buildTypes {
+        debug { signingConfig signingConfigs.localValidation }
+        release {
+            minifyEnabled true
+            shrinkResources true
+            debuggable true
+            signingConfig signingConfigs.localValidation
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt')
+        }
+    }
+}
+kotlin { compilerOptions { jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_1_8; allWarningsAsErrors = true } }
+dependencies {
+    if (providers.gradleProperty('asterProjectDependency').orElse('false').get().toBoolean()) implementation project(':aster')
+    else implementation files(providers.gradleProperty('asterAar').get())
+}

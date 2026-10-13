@@ -1,0 +1,41 @@
+// !$*UTF8*$!
+{
+ archiveVersion = 1; classes = {}; objectVersion = 60;
+ objects = {
+  000000000000000000000001 = {isa = PBXProject; attributes = {LastUpgradeCheck = 2700; TargetAttributes = {000000000000000000000023 = {CreatedOnToolsVersion = 27.0;}; 000000000000000000000024 = {CreatedOnToolsVersion = 27.0; TestTargetID = 000000000000000000000023;};};}; buildConfigurationList = 000000000000000000000002; compatibilityVersion = "Xcode 15.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base); mainGroup = 000000000000000000000005; productRefGroup = 000000000000000000000006; projectDirPath = ""; projectRoot = ""; packageReferences = (000000000000000000000031); targets = (000000000000000000000023, 000000000000000000000024);};
+  000000000000000000000002 = {isa = XCConfigurationList; buildConfigurations = (000000000000000000000003, 000000000000000000000004); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+  000000000000000000000003 = {isa = XCBuildConfiguration; name = Debug; buildSettings = {CLANG_ENABLE_MODULES = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; SWIFT_TREAT_WARNINGS_AS_ERRORS = YES; CODE_SIGNING_ALLOWED = NO;};};
+  000000000000000000000004 = {isa = XCBuildConfiguration; name = Release; buildSettings = {CLANG_ENABLE_MODULES = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; SWIFT_OPTIMIZATION_LEVEL = "-O"; SWIFT_TREAT_WARNINGS_AS_ERRORS = YES; CODE_SIGNING_ALLOWED = NO;};};
+  000000000000000000000005 = {isa = PBXGroup; children = (000000000000000000000007,000000000000000000000008,000000000000000000000006); sourceTree = "<group>";};
+  000000000000000000000006 = {isa = PBXGroup; name = Products; children = (000000000000000000000012,000000000000000000000013); sourceTree = "<group>";};
+  000000000000000000000007 = {isa = PBXGroup; path = App; children = (000000000000000000000009,000000000000000000000011); sourceTree = "<group>";};
+  000000000000000000000008 = {isa = PBXGroup; path = UITests; children = (000000000000000000000010); sourceTree = "<group>";};
+  000000000000000000000009 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>";};
+  000000000000000000000010 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SDKConsumerTests.swift; sourceTree = "<group>";};
+  000000000000000000000011 = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>";};
+  000000000000000000000012 = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AsterSDKConsumer.app; sourceTree = BUILT_PRODUCTS_DIR;};
+  000000000000000000000013 = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AsterSDKConsumerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR;};
+  000000000000000000000014 = {isa = PBXBuildFile; fileRef = 000000000000000000000009;};
+  000000000000000000000015 = {isa = PBXBuildFile; fileRef = 000000000000000000000010;};
+  000000000000000000000016 = {isa = PBXBuildFile; productRef = 000000000000000000000032;};
+  000000000000000000000017 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (000000000000000000000014); runOnlyForDeploymentPostprocessing = 0;};
+  000000000000000000000018 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (000000000000000000000016); runOnlyForDeploymentPostprocessing = 0;};
+  000000000000000000000019 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;};
+  000000000000000000000020 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (000000000000000000000015); runOnlyForDeploymentPostprocessing = 0;};
+  000000000000000000000021 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;};
+  000000000000000000000022 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;};
+  000000000000000000000023 = {isa = PBXNativeTarget; name = AsterSDKConsumer; productName = AsterSDKConsumer; productReference = 000000000000000000000012; productType = "com.apple.product-type.application"; buildConfigurationList = 000000000000000000000025; buildPhases = (000000000000000000000017,000000000000000000000018,000000000000000000000019); buildRules = (); dependencies = (); packageProductDependencies = (000000000000000000000032);};
+  000000000000000000000024 = {isa = PBXNativeTarget; name = AsterSDKConsumerUITests; productName = AsterSDKConsumerUITests; productReference = 000000000000000000000013; productType = "com.apple.product-type.bundle.ui-testing"; buildConfigurationList = 000000000000000000000028; buildPhases = (000000000000000000000020,000000000000000000000021,000000000000000000000022); buildRules = (); dependencies = (000000000000000000000034);};
+  000000000000000000000025 = {isa = XCConfigurationList; buildConfigurations = (000000000000000000000026,000000000000000000000027); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+  000000000000000000000026 = {isa = XCBuildConfiguration; name = Debug; buildSettings = {PRODUCT_BUNDLE_IDENTIFIER = dev.aster.sdkconsumer.ios; PRODUCT_NAME = "$(TARGET_NAME)"; INFOPLIST_FILE = App/Info.plist; GENERATE_INFOPLIST_FILE = NO; TARGETED_DEVICE_FAMILY = "1,2"; ENABLE_TESTABILITY = YES; SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) ASTER_SDK_EXPLICIT_VIEW_DISPOSE";};};
+  000000000000000000000027 = {isa = XCBuildConfiguration; name = Release; buildSettings = {PRODUCT_BUNDLE_IDENTIFIER = dev.aster.sdkconsumer.ios; PRODUCT_NAME = "$(TARGET_NAME)"; INFOPLIST_FILE = App/Info.plist; GENERATE_INFOPLIST_FILE = NO; TARGETED_DEVICE_FAMILY = "1,2"; SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) ASTER_SDK_EXPLICIT_VIEW_DISPOSE";};};
+  000000000000000000000028 = {isa = XCConfigurationList; buildConfigurations = (000000000000000000000029,000000000000000000000030); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+  000000000000000000000029 = {isa = XCBuildConfiguration; name = Debug; buildSettings = {PRODUCT_BUNDLE_IDENTIFIER = dev.aster.sdkconsumer.ios.uitests; PRODUCT_NAME = "$(TARGET_NAME)"; GENERATE_INFOPLIST_FILE = YES; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = AsterSDKConsumer; ENABLE_TESTABILITY = YES;};};
+  000000000000000000000030 = {isa = XCBuildConfiguration; name = Release; buildSettings = {PRODUCT_BUNDLE_IDENTIFIER = dev.aster.sdkconsumer.ios.uitests; PRODUCT_NAME = "$(TARGET_NAME)"; GENERATE_INFOPLIST_FILE = YES; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = AsterSDKConsumer;};};
+  000000000000000000000031 = {isa = XCLocalSwiftPackageReference; relativePath = "../../..";};
+  000000000000000000000032 = {isa = XCSwiftPackageProductDependency; package = 000000000000000000000031; productName = AsterNative;};
+  000000000000000000000033 = {isa = PBXContainerItemProxy; containerPortal = 000000000000000000000001; proxyType = 1; remoteGlobalIDString = 000000000000000000000023; remoteInfo = AsterSDKConsumer;};
+  000000000000000000000034 = {isa = PBXTargetDependency; target = 000000000000000000000023; targetProxy = 000000000000000000000033;};
+ };
+ rootObject = 000000000000000000000001;
+}

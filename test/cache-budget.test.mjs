@@ -1,0 +1,2 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {LayerCacheBudget} from '../src/renderers/cache-budget.mjs';
+test('shared budget remains correct when trimming one owner releases another owner',()=>{const budget=new LayerCacheBudget(9),a={},b={},c={},trimmed=[];budget.reserve(a,3,()=>trimmed.push('a'));budget.reserve(c,3,()=>trimmed.push('c'));budget.reserve(b,3,()=>{trimmed.push('b');budget.release(c);});budget.setLimit(0);assert.equal(budget.usedBytes,0);assert.equal(budget.entries.size,0);assert.deepEqual(trimmed,['b','a']);});

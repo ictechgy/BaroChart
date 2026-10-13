@@ -1,0 +1,3 @@
+<resources>
+    <public type="string" name="aster_sdk_version" />
+</resources>

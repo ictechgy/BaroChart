@@ -1,0 +1,32 @@
+package example;
+
+import dev.aster.charts.AsterEngine;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+/** Compile-only application API usage. Never loads or runs the JNI-backed Engine. */
+public final class WorkspaceConsumer {
+    private WorkspaceConsumer() {}
+    public static AsterEngine.WorkspaceJob restore(AsterEngine engine, String document,
+            JSONObject binding, AsterEngine.AsyncListener listener) throws JSONException {
+        return engine.restoreWorkspaceAsync(document, binding,
+            new AsterEngine.AsyncOptions(30000, 4096), listener);
+    }
+    public static AsterEngine.WorkspaceJob restoreWithDefaults(AsterEngine engine,
+            String document, JSONObject binding, AsterEngine.AsyncListener listener) throws JSONException {
+        return engine.restoreWorkspaceAsync(document, binding, listener);
+    }
+    public static JSONObject readData(AsterEngine engine) throws JSONException {
+        JSONObject query=new JSONObject().put("index",0);
+        JSONObject latest=engine.dataAt(query);
+        return latest==null?null:engine.dataAt(query,new JSONObject().put("asOfIndex",0));
+    }
+    public static JSONObject compact(AsterEngine engine) throws JSONException {
+        JSONObject options=new JSONObject().put("keepLastBars",1000).put("studyHistory","restart").put("maxPeakStoreBytes",2000000);
+        return engine.compactData(options);
+    }
+    public static String cancelAndInspect(AsterEngine.WorkspaceJob job) {
+        job.cancel();
+        return job.cleanupPending() ? job.pendingFailure() : null;
+    }
+}

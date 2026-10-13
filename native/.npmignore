@@ -1,0 +1,7 @@
+# Generated local SDK build products are not source SDK inputs.
+**/build/
+**/.gradle/
+**/.kotlin/
+**/.cxx/
+**/*.aar
+**/*.class

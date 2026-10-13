@@ -1,0 +1,10 @@
+import {mkdtemp,writeFile,readFile} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join,resolve} from 'node:path';import {spawnSync} from 'node:child_process';import {createHash} from 'node:crypto';
+const root=resolve(import.meta.dirname,'..'),source=resolve(process.argv[2]??'.'),output=resolve(process.argv[3]??'benchmarks/results/native-hover.json');
+const scratch=await mkdtemp(join(tmpdir(),'aster-native-hover-')),quote=x=>'"'+x.replaceAll('\\','\\\\').replaceAll('"','\\"')+'"';
+await writeFile(join(scratch,'main.swift'),'import Foundation\ntry profileNativeHover(bundle:URL(fileURLWithPath:'+quote(join(source,'native/Resources/aster-core.js'))+'),output:URL(fileURLWithPath:'+quote(output)+'),cached:'+String(process.argv.includes('--cached'))+')\n');
+const cached=process.argv.includes('--cached');
+const files=[join(source,'native/AsterNative.swift'),join(source,'native/AsterColumns.swift'),join(root,'benchmarks/native-hover.swift'),join(scratch,'main.swift')];
+if(cached)files.push(join(source,'native/AsterFrameRenderer.swift'));
+const r=spawnSync('swiftc',[...(cached?['-D','ASTER_FRAME_CACHE']:[]),'-O','-warnings-as-errors','-module-cache-path','/tmp/aster-swift-module-cache',...files,'-o',join(scratch,'profile')],{stdio:'inherit'});if(r.status)process.exit(r.status);
+const run=spawnSync(join(scratch,'profile'),[],{stdio:'inherit'});if(run.status)process.exit(run.status);
+const report=JSON.parse(await readFile(output));report.bundleSHA256=createHash('sha256').update(await readFile(join(source,'native/Resources/aster-core.js'))).digest('hex');report.fixtureSHA256=createHash('sha256').update(await readFile(join(root,'benchmarks/native-hover.swift'))).digest('hex');await writeFile(output,JSON.stringify(report,null,2));

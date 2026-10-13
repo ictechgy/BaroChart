@@ -1,0 +1,37 @@
+plugins { id 'com.android.library' }
+
+def sdkVersion = providers.gradleProperty('asterVersion').orElse('0.2.10').get()
+def selectedCore = file(providers.gradleProperty('asterCoreFile').orElse('../../Resources/aster-core.js').get())
+def generatedAssets = layout.buildDirectory.dir('generated/asterAssets')
+if (providers.gradleProperty('asterBuildDir').isPresent()) layout.buildDirectory = file(providers.gradleProperty('asterBuildDir').get())
+
+android {
+    namespace 'dev.aster.charts'
+    compileSdk 36
+    buildToolsVersion '36.0.0'
+    ndkVersion '29.0.14033849'
+    defaultConfig {
+        minSdk 26
+        ndk { abiFilters 'arm64-v8a' }
+        consumerProguardFiles 'consumer-rules.pro'
+        resValue 'string', 'aster_sdk_version', sdkVersion
+        externalNativeBuild { cmake { arguments '-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON' } }
+    }
+    sourceSets.main {
+        java.srcDirs = ['../java']
+        assets.srcDir generatedAssets
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_1_8; targetCompatibility JavaVersion.VERSION_1_8 }
+    externalNativeBuild { cmake { path 'CMakeLists.txt'; version '3.22.1'; buildStagingDirectory new File(layout.buildDirectory.get().asFile.parentFile, project.name + '-cmake') } }
+}
+
+tasks.register('prepareAsterAssets', Sync) {
+    if (!selectedCore.isFile()) throw new GradleException('Missing bundled core: ' + selectedCore)
+    from(selectedCore) { rename { 'aster-core.js' } }
+    from('../quickjs/LICENSE') { into 'licenses'; rename { 'QUICKJS-LICENSE.txt' } }
+    from('LICENSE.txt') { into 'licenses' }
+    from('../../../NOTICE') { into 'licenses'; rename { 'NOTICE.txt' } }
+    into generatedAssets
+}
+tasks.named('preBuild').configure { dependsOn 'prepareAsterAssets' }
+tasks.withType(JavaCompile).configureEach { options.compilerArgs.addAll(['-Werror', '-Xlint:-options']) }

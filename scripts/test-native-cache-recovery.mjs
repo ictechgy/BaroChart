@@ -1,0 +1,13 @@
+import {readFile,writeFile,mkdtemp,mkdir} from 'node:fs/promises';
+import {resolve,join} from 'node:path';
+import {tmpdir} from 'node:os';
+import {spawnSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
+const source=resolve(process.argv[2]??'.'),output=resolve(process.argv[3]??'benchmarks/results/cycle7-native-cache-recovery.json'),scratch=await mkdtemp(join(tmpdir(),'aster-cache-recovery-'));
+const original=await readFile(join(source,'native/AsterFrameRenderer.swift'),'utf8'),seam='private func bitmap(_ w:Int,_ h:Int,_ scale:Double)->CGContext?{';
+if(original.split(seam).length!==2)throw Error('Allocation injection seam changed');
+await writeFile(join(scratch,'AsterFrameRenderer.swift'),original.replace(seam,seam+'CacheFault.attempts += 1;if CacheFault.armed {CacheFault.armed=false;return nil};'));
+const fixture=await readFile(new URL('../test/native-cache-recovery.swift',import.meta.url));await writeFile(join(scratch,'main.swift'),fixture);await mkdir('/tmp/aster-swift-module-cache',{recursive:true});
+const binary=join(scratch,'native-cache-recovery'),result=spawnSync('swiftc',['-O','-warnings-as-errors','-module-cache-path','/tmp/aster-swift-module-cache',join(source,'native/AsterNative.swift'),join(source,'native/AsterColumns.swift'),join(scratch,'AsterFrameRenderer.swift'),join(scratch,'main.swift'),'-o',binary],{stdio:'inherit'});if(result.status!==0)process.exit(result.status??1);
+const bundle=join(source,'native/Resources/aster-core.js'),run=spawnSync(binary,[bundle,output],{stdio:'inherit'});if(run.status!==0)process.exit(run.status??1);
+const sha=data=>createHash('sha256').update(data).digest('hex'),report=JSON.parse(await readFile(output,'utf8'));report.provenance={frameSourceSHA256:sha(original),engineSourceSHA256:sha(await readFile(join(source,'native/AsterNative.swift'))),bundleSHA256:sha(await readFile(bundle)),fixtureSHA256:sha(fixture),injection:'One nil at allocation entry; original policy and production source otherwise unchanged'};await writeFile(output,JSON.stringify(report,null,2));

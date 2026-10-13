@@ -1,0 +1,17 @@
+// Explicit optional compiler check; npm test remains Node-only.
+import {mkdtemp,writeFile,readFile,stat} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join,resolve} from 'node:path';
+import {spawnSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
+import {buildNativeBundle} from './native-core-bundle.mjs';
+import {validateQuickjsCloudResults,validateQuickjsCheckpointResults,validateQuickjsNativeTargetResults,validateQuickjsNativeSourceResults,validateQuickjsDataExplorerResults,validateQuickjsIndicatorReentryResults} from './quickjs-cloud-result.mjs';
+const checkpoint=process.argv[2]==='--checkpoint',target=process.argv[2]==='--target',source=process.argv[2]==='--source',explorer=process.argv[2]==='--explorer',indicatorReentry=process.argv[2]==='--indicator-reentry';if(process.argv.length>3||process.argv.length===3&&!checkpoint&&!target&&!source&&!explorer&&!indicatorReentry)throw Error('Only optional --checkpoint, --target, --source, --explorer or --indicator-reentry is supported');
+const root=resolve(import.meta.dirname,'..'),dir=await mkdtemp(join(tmpdir(),'aster-quickjs-cloud-')),vendor=join(root,'native/android/quickjs'),cc=process.env.CC??'cc';
+const run=(file,args,timeout=120000)=>{const r=spawnSync(file,args,{cwd:root,encoding:'utf8',timeout,maxBuffer:2*1024*1024});if(r.error||r.status!==0)throw new Error(`${file} failed: ${r.error??r.status}\n${r.stdout}\n${r.stderr}`);return r.stdout;};
+const version=(await readFile(join(vendor,'VERSION'),'utf8')).trim();
+const bundle=await buildNativeBundle({modulePaths:target||source?[]:[checkpoint||explorer||indicatorReentry?'test/fixtures/native-checkpoint-quickjs-module.mjs':'test/fixtures/native-workspace-module.mjs']}),bundlePath=join(dir,'aster-core.js'),host=join(dir,'host.o'),binary=join(dir,'quickjs-cloud');await writeFile(bundlePath,bundle);
+run(cc,['-std=gnu11','-O2','-Wall','-Wextra','-Werror','-D_GNU_SOURCE','-isystem',vendor,'-c','test/quickjs-cloud-host.c','-o',host]);
+run(cc,['-std=gnu11','-O2','-Werror','-D_GNU_SOURCE',`-DCONFIG_VERSION="${version}"`,'-I',vendor,host,...['quickjs','dtoa','libregexp','libunicode','cutils'].map(n=>join(vendor,n+'.c')),'-lm','-pthread','-o',binary]);
+const raw=run(binary,[bundlePath,indicatorReentry?'test/fixtures/indicator-reentry-quickjs.js':explorer?'test/fixtures/data-explorer-quickjs.js':source?'test/fixtures/native-workspace-source-quickjs.js':target?'test/fixtures/native-workspace-target-quickjs.js':checkpoint?'test/fixtures/native-checkpoint-quickjs.js':'test/fixtures/native-workspace-quickjs.js'],45000),results=(indicatorReentry?validateQuickjsIndicatorReentryResults:explorer?validateQuickjsDataExplorerResults:source?validateQuickjsNativeSourceResults:target?validateQuickjsNativeTargetResults:checkpoint?validateQuickjsCheckpointResults:validateQuickjsCloudResults)(raw.trim().split('\n').map(s=>JSON.parse(s)));
+console.log(JSON.stringify({schema:'aster.quickjs-cloud-test',version:1,suite:indicatorReentry?'indicator-reentry':explorer?'data-explorer':source?'native-source':target?'native-target':checkpoint?'checkpoints':'workspace',engineVersion:version,compiler:run(cc,['--version']).split('\n')[0],bundleSHA256:createHash('sha256').update(bundle).digest('hex'),binaryBytes:(await stat(binary)).size,temporaryDirectory:dir,results,nativeSDKCompiled:false},null,2));

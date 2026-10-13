@@ -1,0 +1,5 @@
+import {runChartWorker} from 'barochart/worker';
+import {BarStore,ChartModel,seededColumns} from 'barochart/core';
+// Overrideable URL supplied by the app; this fixture checks the packaged default.
+export const calculate=columns=>runChartWorker({columns});
+export async function smoke(options){const columns=seededColumns(32,42),packet=await runChartWorker({columns,options:{indicators:[{id:'e',name:'ema',params:{period:5}}],series:[{id:'e',type:'line',panel:'price',indicator:'e'}]}},options),store=new BarStore();store.setColumns(columns);const model=new ChartModel({store}),expected=model.indicators.add('e','ema',{period:5}).outputs.value,actual=packet.indicators[0].arrays[0];for(const field of Object.keys(columns))for(let i=0;i<32;i++)if(!Object.is(columns[field][i],packet.store.columns[field][i]))throw new Error('Worker raw parity '+field+':'+i);for(let i=0;i<32;i++)if(!Object.is(expected[i],actual[i]))throw new Error('Worker indicator parity '+i);model.dispose();return {bars:packet.store.length,rawValuesVerified:192,indicatorValuesVerified:32,lastEMA:actual[31]};}

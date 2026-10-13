@@ -1,0 +1,12 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {BarStore,ChartModel,InteractionController,seededColumns,buildScene,createLayout,drawingGeometry} from '../src/index.mjs';
+test('keyboard pan/zoom/select/edit/undo/escape has finite coordinates and a keyboard exit',()=>{
+ const store=new BarStore();store.setColumns(seededColumns(400));const model=new ChartModel({store});model.addSeries({id:'p',type:'candles',panel:'price'});const input=new InteractionController(model,()=>({width:1200,height:700}));model.setVisibleRange(100,300);const view={...model.view};input.key('ArrowRight');assert.ok(model.view.from>view.from);const span=model.view.to-model.view.from;input.key('+');assert.ok(model.view.to-model.view.from<span);
+ const id=model.drawings.add({type:'rectangle',points:[{time:store.at(200).time,price:100},{time:store.at(210).time,price:101}]});const saved=model.drawings.save();input.key('ArrowDown');assert.notEqual(model.drawings.save(),saved);input.key('z',{ctrl:true});assert.equal(model.drawings.save(),saved);input.key('PageDown');assert.equal(model.drawings.selected,id);model.drawings.edit(id,{locked:true});const locked=model.drawings.save();input.key('ArrowDown');assert.equal(model.drawings.save(),locked);input.key('Escape');assert.equal(model.drawings.selected,null);model.dispose();
+});
+test('geometry caching is invalidated by store identity and stays correct after view changes',()=>{
+ const s=new BarStore();s.setColumns(seededColumns(300));const m=new ChartModel({store:s});m.addSeries({id:'p',type:'candles',panel:'price'});m.drawings.add({type:'trendline',points:[{time:s.at(100).time,price:100},{time:s.at(120).time,price:101}]});const d=m.drawings.items[0],l=createLayout(m,1200,700),first=drawingGeometry(d,l);assert.equal(drawingGeometry(d,l),first);m.pan(-10);const next=drawingGeometry(d,createLayout(m,1200,700));assert.notDeepEqual(next[0].coords,first[0].coords);const other=new ChartModel();other.drawings=m.drawings;assert.notEqual(createLayout(other,1200,700).geometryKey,l.geometryKey);m.dispose();other.dispose();
+});
+test('empty charts have an explicit message and panel titles are clipped to the plot',()=>{
+ const m=new ChartModel();const scene=buildScene(m,1200,700);assert.equal(scene.commands.length,1);assert.equal(scene.commands[0].text,'No data');m.store.setColumns(seededColumns(20));m.setPanel('price',{label:'A long title'});const title=buildScene(m,300,200).commands.find(c=>c.text==='A long title');assert.ok(title.clip);m.dispose();
+});
