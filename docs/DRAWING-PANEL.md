@@ -35,3 +35,5 @@ All **169 `test/*.test.mjs` files** passed in **nine serial batches**, totaling 
 The new focused suite passed **131/131**: 84 DOM-free controller tests and 47 real-CanvasChart tests using a bubbling fake DOM and queued RAF. Existing keyboard/explorer regressions passed 78/78. All 396 ESM files parsed; strict TypeScript 5.9.3 and offline installed-package checks passed. Demo HTML local references and JavaScript wiring were checked statically. Independent review confirmed model/API ownership guards and focus-triggered callback state preservation.
 
 These checks do not run actual browser native checkbox defaults, focus event ordering, rendering, assistive technology or mobile SDK UI. Drawing lookup tests stop before RAF and make no dirty-redraw latency guarantee. Selection and listener cleanup assertions are structural, not a measured long-term heap/GC claim.
+
+For the subsequent metadata work reduction and all measured regressions/outliers, see [Drawing selection metadata cost](DRAWING-SELECTION-COST.md).
