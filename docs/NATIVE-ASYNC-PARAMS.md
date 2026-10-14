@@ -59,9 +59,13 @@ not an RSS limit or a bound on unrelated idle engines or caller-held old outputs
 Descriptor-before-admission failures need a provisional reservation or an explicit
 slot-only limitation, never an asserted zero-byte total bound.
 
-A new per-job checkpoint ledger cannot bypass the engine's existing shared limit.
-Before commit, check other retained entries plus replacement checkpoints against
-an engine-wide checkpoint limit, excluding the retiring target only at commit.
+At publication admission, check other retained entries plus replacement
+checkpoints against 32 MiB, excluding the retiring target. The adopted map keeps
+its fixed remaining-budget allowance. Later growth or clearing of other entries
+does not redistribute that allowance: this is not a lifetime engine-wide limit.
+A sustained shared ledger would require separate growth-accounting validation.
+This source admission contract also does not establish the host process memory
+cap or RSS; host job reservations and cleanup acknowledgment remain separate.
 Staging retains its own reservation until ownership transfer. Transfer/retirement
 must be callback-free and exception-free after publication begins. Ordinary and
 NativeCheckpointEntries source maps need explicit compatible retirement behavior;
@@ -110,3 +114,48 @@ passed 71 target oracle/cleanup assertions for 35 builtins, plus runtime, OOM an
 interrupt cleanup with zero final live allocations. The C executable was reused
 after verifying its host/vendor source hashes against its recorded build. This
 is not a new native SDK compilation or an end-to-end async parameter API test.
+
+## Original-runtime transport (internal, host facade pending)
+
+`NativeParamsCapture` retains the original model, BarStore and entries map while
+`NativeParamsImport` owns detached replacement vectors and bounded checkpoints.
+Only the selected entry is adopted. All its derived series indices are retired,
+even when the new numeric revision equals the old revision. Borrowed old output
+vectors are not overwritten by the replacement. Copy, calculation, receipt and
+validation retain the ingestion lease; source/configuration changes invalidate
+the job. The host must acknowledge worker cleanup before source prepare releases
+the lease, and must fence cancellation around final publication.
+
+The internal bridge uses an increasing host-known registration and a fixed source
+ticket. It records registration before construction. Status lookup retains the
+latest four records, including committed/unchanged receipts; returned status is
+a copy. A lost Begin or Publish response is resolved by status/abort for the same
+registration, never by unconditional replay. Unknown or evicted status is
+inconclusive. These tokens correlate ownership; they are not security credentials.
+Notification, once-only completion and host reservation release are still host
+responsibilities and have not been connected to Java/Swift yet.
+
+Source columns and result vectors transfer in at most 16,384-value slices using
+the existing F64 buffer transport. An original-runtime result write requires a
+matching one-use ticket/slot/offset/count arm immediately before the write. The
+host serializes these two calls on the owner thread; it must not interleave jobs
+or retain borrowed views. Because legacy writeBuffer carries no ticket, a late
+write with the same slice cannot be distinguished from a new arm by JS alone;
+arm and write must be consecutive within one owner turn, never separate queued
+callbacks. Every result value and NaN tail is checked before
+publication. Each checkpoint is decoded independently with a native UTF-16 byte
+limit, avoiding a single giant checkpoint JSON parse. First use of each result
+vector still allocates/zeros its full capacity; allocation/GC and a single record
+parse are not cooperatively preemptible. No UI latency bound is claimed.
+
+VM transport tests exercise two isolated JS contexts and response loss by
+ignoring an executed call's response. They do not simulate JNI/JSC serialization,
+owner threads, actual native cancellation or OS process memory limits. Those
+remain acceptance work for the host stages.
+
+The source/transport slice passed 400 related Node tests, including two-context
+transport, old-token isolation, constructor reentry, status-copy integrity and
+post-cleanup stale rejection. A standalone vendored QuickJS run passed the 12
+source-protocol assertions plus normal/OOM/interrupt cleanup with zero remaining
+tracked allocations. Strict TypeScript and offline package checks passed. This is
+a related-suite result, not a rerun of the entire project suite or native SDK QA.

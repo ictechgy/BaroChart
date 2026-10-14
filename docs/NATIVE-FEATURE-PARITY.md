@@ -7,7 +7,7 @@ feature parity or performance superiority.
 | Feature | Core / web | Native source surface | New platform verification |
 |---|---|---|---|
 | Synchronous atomic indicator params | ChartAPI, types, tests | Swift/Java command facade | Not compiled here |
-| Entry-only async indicator params | Real Worker; original store retained | Internal isolated target and checkpoint-ownership groundwork; no native facade/job yet | Cloud target VM/QuickJS only; source publication and host integration pending |
+| Entry-only async indicator params | Real Worker; original store retained | Internal target/source publication and bounded receipt transport; no native facade/job yet | Cloud VM/QuickJS protocols only; host integration pending |
 | OHLCV resampling / confirmed alignment | Pure core and web Worker APIs | Core functions bundled; no named Swift/Java facade/job | Not implemented as SDK API |
 | Workspace export | Core canonical bounded writer | Dedicated Swift/Java save read | Node VM + standalone QuickJS + static facade tests only |
 | Workspace preflight | Native metadata/source assertion | Dedicated Swift/Java validated-only read | Node VM + standalone QuickJS + static facade tests only |
@@ -44,7 +44,7 @@ feature parity or performance superiority.
 Java restore source implementation and its exact cloud-test boundary are described
 in [JAVA-WORKSPACE-RESTORE.md](JAVA-WORKSPACE-RESTORE.md). The uncompiled Swift
 source/creator-lifetime contract is in [SWIFT-WORKSPACE-RESTORE.md](SWIFT-WORKSPACE-RESTORE.md).
-Native entry-only params are being implemented in stages described in [NATIVE-ASYNC-PARAMS.md](NATIVE-ASYNC-PARAMS.md); source publication and Swift/Java jobs remain pending. Native background resampling remains subsequent work. The current small slice is documented in
+Native entry-only params are being implemented in stages described in [NATIVE-ASYNC-PARAMS.md](NATIVE-ASYNC-PARAMS.md); Swift/Java jobs and their facade integration remain pending. Native background resampling remains subsequent work. The current small slice is documented in
 [NATIVE-WORKSPACES.md](NATIVE-WORKSPACES.md).
 
 ## Minimum future platform verification
