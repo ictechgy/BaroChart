@@ -34,3 +34,18 @@ export class DrawingSelectionController {
 export interface DrawingSelectionSnapshot {rows:{id:string;type:DrawingType;panel:string;locked:boolean;selected:boolean}[];total:number;selectedIds:string[];selectedCount:number;staleCount:number;offset:number;limit:number;}
 /** Empty dedicated container, at most one panel per chart. Native controls, no canvas shortcuts. */
 export function attachDrawingPanel(container:HTMLElement,chart:CanvasChart,options?:{label?:string}):{selection:DrawingSelectionController;refresh():DrawingSelectionSnapshot|null;destroy():void};
+
+/** Opt-in synchronization of visible stored bar-open centers, not continuous market-time intervals. */
+export class TimeRangeGroup {
+ constructor(options:{mode:'manual'|'view';missing:'clip'|'reject'});
+ readonly size:number;readonly diagnostics:{generation:number;kind:string}[];
+ add(chart:CanvasChart,roles:{publish:boolean;receive:boolean}):()=>void;
+ syncFrom(chart:CanvasChart):{generation:number;published:boolean;status:'empty-source'|'published';requestedTimeRange:{from:number;to:number}|null;trimmed:boolean};
+ status(chart:CanvasChart):TimeRangeState|null;dispose():void;
+}
+export interface TimeRangeState {
+ generation:number;requestedTimeRange:{from:number;to:number};matchedSourceIndices:{from:number;to:number}|null;
+ effectiveIndices:{from:number;to:number};effectiveStoredTimes:{from:number;to:number}|null;
+ padding:{before:number;after:number};expanded:boolean;clipped:boolean;applied:boolean;
+ status:'empty'|'insufficient'|'unmatched'|'clipped'|'applied';stale:boolean;
+}

@@ -1,3 +1,5 @@
+import {registerTimeRangeHost,disposeTimeRangeHost,refreshTimeRange} from './time-range.mjs';
+export {TimeRangeGroup} from './time-range.mjs';
 import {disposeDrawingPanels} from './drawing-panel.mjs';
 export {attachDrawingPanel} from './drawing-panel.mjs';
 export {DrawingSelectionController} from './drawing-selection.mjs';
@@ -49,8 +51,8 @@ export class CanvasChart {
     this.setupDataExplorer(dataExplorer);
     if (interactive) this.bind();
     if (observeResize) {this.observer = new ResizeObserver(() => this.invalidate()); this.observer.observe(container);}
-    this.unsubscribe = model.store.subscribe(() => this.invalidate()); registerTimeCursorHost(this,model,()=>{try{this.invalidate('hover');}catch(error){if(!this.disposed)this.reportError(error);}});this.invalidate();
-    }catch(error){disposeTimeCursorHost(this);this.disposeDataExplorer();this.observer?.disconnect();this.unsubscribe?.();this.renderer?.dispose();this.releaseLayers();this.sceneCache.clear();for(const [type,fn,options] of this.listeners)this.canvas.removeEventListener(type,fn,options);this.listeners=[];this.canvas.remove();this.disposed=true;throw error;}
+    registerTimeRangeHost(this,model,()=>this.invalidate());this.unsubscribe = model.store.subscribe(() => this.invalidate()); registerTimeCursorHost(this,model,()=>{try{this.invalidate('hover');}catch(error){if(!this.disposed)this.reportError(error);}});this.invalidate();
+    }catch(error){disposeTimeRangeHost(this);disposeTimeCursorHost(this);this.disposeDataExplorer();this.observer?.disconnect();this.unsubscribe?.();this.renderer?.dispose();this.releaseLayers();this.sceneCache.clear();for(const [type,fn,options] of this.listeners)this.canvas.removeEventListener(type,fn,options);this.listeners=[];this.canvas.remove();this.disposed=true;throw error;}
   }
   fallback(reason = 'GPU context lost') {
     const sourceCanvas=this.canvas,sourceController=this.controller,sourcePointerToken=this.timePointerToken;
@@ -125,7 +127,7 @@ export class CanvasChart {
     for(const node of [nodes.readout,nodes.live])if(explorerNodeOwners.get(node)===nodes.token){explorerNodeOwners.delete(node);node.textContent='';}
   }
   reportError(error){const next=error instanceof Error?error:new Error('Chart error'),changed=this.lastError?.message!==next.message;this.lastError=next;if(changed)try{this.onError?.(next);}catch{} }
-  invalidate(kind='all') {if(this.disposed)return;if(kind!=='hover')refreshTimeCursor(this);if(kind!=='hover'&&this.explorer?.active){this.explorer.changed();this.publishExploration(false);if(this.disposed)return;}if(kind!=='hover'&&kind!=='drawings')this.fullDirty=true;this.canvas.dispatchEvent(new Event('aster:state',{bubbles:true}));if(this.disposed||this.frame!==null)return; this.frame = requestAnimationFrame(() => {this.frame = null;try{this.drawNow(FRAME_RENDER);}catch(error){this.reportError(error);}});}
+  invalidate(kind='all') {if(this.disposed)return;refreshTimeRange(this);if(this.disposed)return;if(kind!=='hover')refreshTimeCursor(this);if(kind!=='hover'&&this.explorer?.active){this.explorer.changed();this.publishExploration(false);if(this.disposed)return;}if(kind!=='hover'&&kind!=='drawings')this.fullDirty=true;this.canvas.dispatchEvent(new Event('aster:state',{bubbles:true}));if(this.disposed||this.frame!==null)return; this.frame = requestAnimationFrame(() => {this.frame = null;try{this.drawNow(FRAME_RENDER);}catch(error){this.reportError(error);}});}
   renderScene(scene,ratio){if(this.renderer)this.renderer.render(scene,ratio);else renderCanvas(this.ctx,scene,ratio);}
   canCacheLayers(pixels){return pixels*8<=100663296;}
   cachedLayerBytes(pixels){return pixels*8;}
@@ -167,5 +169,5 @@ export class CanvasChart {
   }
   setTool(tool) {this.controller.setTool(tool);}
   resize() {this.invalidate();}
-  destroy({disposeModel = false} = {}) {if (this.disposed) return; this.disposed = true;disposeDrawingPanels(this);disposeTimeCursorHost(this);this.timeLayout=null; this.disposeDataExplorer();this.controller.cancel(); if (this.frame !== null) cancelAnimationFrame(this.frame); this.frame = null; this.observer?.disconnect(); this.unsubscribe(); for (const [type, fn, options] of this.listeners) this.canvas.removeEventListener(type, fn, options); this.listeners = [];this.releaseLayers();this.sceneCache.clear(); this.renderer?.dispose(); this.canvas.remove();this.canvas.width=this.canvas.height=0; this.lastScene = null;this.renderMetrics=null; this.timings = []; if (disposeModel) this.model.dispose();}
+  destroy({disposeModel = false} = {}) {if (this.disposed) return; this.disposed = true;disposeTimeRangeHost(this);disposeDrawingPanels(this);disposeTimeCursorHost(this);this.timeLayout=null; this.disposeDataExplorer();this.controller.cancel(); if (this.frame !== null) cancelAnimationFrame(this.frame); this.frame = null; this.observer?.disconnect(); this.unsubscribe(); for (const [type, fn, options] of this.listeners) this.canvas.removeEventListener(type, fn, options); this.listeners = [];this.releaseLayers();this.sceneCache.clear(); this.renderer?.dispose(); this.canvas.remove();this.canvas.width=this.canvas.height=0; this.lastScene = null;this.renderMetrics=null; this.timings = []; if (disposeModel) this.model.dispose();}
 }

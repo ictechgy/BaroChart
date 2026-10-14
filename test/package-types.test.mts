@@ -51,3 +51,16 @@ const deleteReceipt:{changed:number;invalidationFailed:boolean}=api.deleteDrawin
 deleteReceipt.changed.toFixed();
 // @ts-expect-error an explicit ID array is required
 api.deleteDrawings('t');
+import {TimeRangeGroup,type TimeRangeState} from 'barochart/canvas';
+const ranges=new TimeRangeGroup({mode:'view',missing:'clip'});
+if(typeof document!=='undefined'){
+ const rangeChart=new CanvasChart(document.body,new ChartModel());
+ const leaveRange:()=>void=ranges.add(rangeChart,{publish:true,receive:true});
+ const result=ranges.syncFrom(rangeChart);result.requestedTimeRange?.from.toFixed();
+ const rangeStatus:TimeRangeState|null=ranges.status(rangeChart);rangeStatus?.padding.after.toFixed();leaveRange();rangeChart.destroy({disposeModel:true});
+}
+ranges.dispose();
+// @ts-expect-error explicit missing-data policy required
+new TimeRangeGroup({mode:'view'});
+// @ts-expect-error unknown policy
+new TimeRangeGroup({mode:'automatic',missing:'clip'});

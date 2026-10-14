@@ -2,6 +2,12 @@
 
 This development source tree is derived from the private 0.2.13 development checkpoint. It is not a stable SDK release or a claim of commercial feature/performance parity. Historical platform runs do not certify later changes.
 
+## Linked-range and contrast update (2026-10-14)
+
+The subsequent TimeRangeGroup and drawing-demo contrast update passed **3,502/3,502 Node tests**, all **177 files exactly once in nine serial batches**, with zero failures/skips/cancellations, missing files or duplicates. The fixed test/source snapshot and each batch log hash were checked. This is segmented completion, not one monolithic run. All **406 ESM syntax checks**, strict TypeScript 5.9.3 and offline installed-package/type checks also passed.
+
+Time-range coverage includes independent stored-time mapping, interval/gap cases, per-receiver missing-data results, automatic-data-change suppression, real CanvasChart controller wiring and initialization/cleanup of the shipped linked-ranges module using modeled DOM/Canvas primitives. Mapping/publication calculation-count assertions stop before ordinary dirty redraw. No new Mac/browser/AT or competitive performance result is claimed for this feature. The separately recorded Mac checks below apply only to their stated earlier fixture and hotfixes.
+
 ## Cumulative cloud regression checks (2026-10-14)
 
 All **3,479/3,479 Node tests** passed with no failures, skips or cancellations. A fixed manifest covered all **173 test files exactly once**, in **nine short serial batches**, with zero missing/duplicate files, zero exit codes and verified log hashes. This was segmented completion, not a single monolithic invocation. The code under test was `423eb03654eefedca337a20a6154640d021d96a2`; the working changes were limited to the browser-QA documentation recorded here. No production code changed for this verification.

@@ -34,6 +34,7 @@ npm run demo
 - [금융 좌표·시간 정렬](http://127.0.0.1:5173/examples/web/financial.html)
 - [세션 분석·사용자 모듈](http://127.0.0.1:5173/examples/web/analysis.html)
 - [차트 간 시간 커서 연결](http://127.0.0.1:5173/examples/web/linked-cursors.html)
+- [시간 범위 연결 예제](http://127.0.0.1:5173/examples/web/linked-ranges.html): 저장된 봉 시간으로 뷰 범위를 동기화합니다. [API 계약](docs/TIME-RANGE.md).
 - [도형 그룹 선택과 일괄 편집](http://127.0.0.1:5173/examples/web/drawing-groups.html)
 
 테스트는 별도로 실행합니다.
