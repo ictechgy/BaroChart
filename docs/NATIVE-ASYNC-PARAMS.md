@@ -1,6 +1,8 @@
 # Native entry-only asynchronous indicator parameters
 
-Design and staged implementation contract. Both SDKs expose synchronous
+Design and staged implementation contract. Source-level async facades are now
+provided for Java and Swift as experimental integration APIs, with different
+validation limits below. Both SDKs expose synchronous
 `setIndicatorParams`; the web Worker API is already entry-only. Whole-workspace
 native restoration replaces the runtime and is not an equivalent implementation.
 The entry-only native contract preserves the original runtime, ChartModel, BarStore,
@@ -68,8 +70,8 @@ This source admission contract also does not establish the host process memory
 cap or RSS; host job reservations and cleanup acknowledgment remain separate.
 Staging retains its own reservation until ownership transfer. Transfer/retirement
 must be callback-free and exception-free after publication begins. Ordinary and
-NativeCheckpointEntries source maps need explicit compatible retirement behavior;
-this must be established before connecting a host facade.
+NativeCheckpointEntries source maps use the internal identity-gated ownership
+helpers; borrowed temporary engine maps do not own or retire the source entries.
 
 ## Staged acceptance
 
@@ -88,7 +90,8 @@ this must be established before connecting a host facade.
   Android/JNI or Swift/JSC execution. SDK/device builds are not performed here.
 
 Java now has the source-level async facade described below. Its cloud checks do
-not establish Android/JNI runtime support; Swift integration remains pending.
+not establish Android/JNI runtime support. Swift now has a source implementation
+and static ownership checks, without Swift compilation or JSC execution.
 
 ## Initial internal target slice
 
@@ -133,8 +136,8 @@ a copy. A lost Begin or Publish response is resolved by status/abort for the sam
 registration, never by unconditional replay. Unknown or evicted status is
 inconclusive. These tokens correlate ownership; they are not security credentials.
 Notification, once-only completion and host reservation release are host
-responsibilities. The Java source implementation below connects these stages;
-Swift integration is still pending.
+responsibilities. The Java and Swift source implementations below connect these
+stages, with different unresolved-publication completion policies.
 
 Source columns and result vectors transfer in at most 16,384-value slices using
 the existing F64 buffer transport. An original-runtime result write requires a
@@ -202,4 +205,101 @@ Cloud tests execute the production Java state machine with an independent fake
 transport and real JVM worker threads. The complete Engine is typechecked against
 compile-only Android and JSON signatures. Actual Handler scheduling, JSON/JNI
 serialization, allocator behavior, Android builds and devices remain unverified.
-Swift/JSC async parameter integration remains a separate pending stage.
+Swift compilation/JSC runtime validation remains pending for the source implementation below.
+
+
+## Swift source facade (not compiled or executed on Apple platforms)
+
+**Experimental and unverified on Apple platforms.** Static checks cannot establish
+Swift compilation, concurrency diagnostics, actual ARC cleanup, or JSC behavior.
+
+`AsterEngine.setIndicatorParamsAsync(_:params:timeout:maxBarsPerStep:progress:completion:)`
+returns `AsterParamsJob`. Create and call the engine on the main thread. The source
+runtime, model, store and unrelated entries stay in place. The worker uses an
+independent VM with a fixed calculation chunk (1..16,384). Static modules must be
+prelinked in the same bundle; arbitrary registered source strings are unsupported.
+
+The entire worker computation and return transfer are inside an outer
+`autoreleasepool`. Only owned `Data`, bounded checkpoint/descriptor strings and
+primitive progress/results cross to the owner. The main cleanup acknowledgment
+is enqueued after the pool exits. The owner then prepares and publishes; no
+worker context is installed in the engine. This source ordering has static tests,
+not evidence of actual JSC/ARC release timing or Swift 6 concurrency compilation.
+
+Workspace and parameter jobs share two opaque admission slots and 768 MiB of
+known logical admitted bytes. Before a descriptor is known only the slot is
+bounded. Pending recovery and retiring-source creator acknowledgment keep that
+reservation. Existing generic prepare jobs and idle engine memory are not covered
+by this combined workspace/params accounting. The checkpoint limit remains the
+publication-time policy described above, not a lifetime engine/RSS ceiling.
+
+`cancel()` and `commitOutcome` are thread-safe. `cleanupPending`,
+`job.retryCleanup()`, `AsterEngine.paramsCleanupStatus()` and
+`AsterEngine.retryParamsCleanup(registration)` are main-owner operations.
+Cancellation linearizes immediately before publication without holding a lock
+across JavaScript. Once publication begins, a confirmed commit wins over later
+cancellation/deadline. A noop completes as `unchanged`, without redraw.
+
+### Uncertain publication and recovery
+
+Swift differs from the Java host: closing an engine does not prove destruction
+of its publicly exposed raw `JSContext`. Therefore close never converts an unknown
+publication to cleanup-complete merely because the engine is closed.
+
+If publication/status or Abort cannot be confirmed, the original completion is
+called **once** with `AsterParamsError.cleanupPending(registration:outcome:)`.
+This is **not permission to call the mutation again**. The job drops its client
+progress/completion closures and error references. A bounded recovery registry
+keeps the original context, actual creator-retirement lease, registration,
+admission and small state. Engine/job references there are weak. It does not keep
+client callbacks or an `Error` object.
+
+Retry the original registration explicitly, even after the engine has closed or
+been released. Each retry makes one Status/Abort attempt and returns numeric/enum
+status snapshots. It never calls the original completion a second time. Keep the
+returned outcome if the record is removed; an absent record alone does not mean
+committed. `paramsCleanupStatus()` reports remaining records. An unresolved record
+continues holding capacity; there is no automatic retry loop or hard timeout of
+trusted synchronous JavaScript.
+
+After confirmed release, any retiring-source creator cleanup must acknowledge
+before admission/busy is released. If a previously unknown commit is then found,
+an open engine still owning that exact source context is redrawn once, after
+budget release. Closed, deallocated or replaced engines are not notified. Ordinary
+observer errors use the existing bounded `observerErrors` / `onObserverError`
+channel and do not reverse publication.
+
+```swift
+// Source example only: this new API has not been Swift-compiled in cloud checks.
+var pendingRegistration: Int?
+let job = try engine.setIndicatorParamsAsync("trend", params: ["period": 30]) { result in
+    switch result {
+    case .success(let metrics):
+        print(metrics.outcome) // committed or unchanged
+    case .failure(let error):
+        if case AsterParamsError.cleanupPending(let registration, let outcome) = error {
+            pendingRegistration = registration
+            print("Publication/cleanup requires recovery", outcome)
+            // Do not issue another setIndicatorParamsAsync here.
+        } else {
+            print(error)
+        }
+    }
+}
+// Later, from the main owner, even if the old engine has closed:
+if let registration = pendingRegistration {
+    let results = try AsterEngine.retryParamsCleanup(registration)
+    let remaining = try AsterEngine.paramsCleanupStatus()
+    // Record each result.outcome; if awaitingCreatorCleanup is true, inspect
+    // remaining again after the creator acknowledgment. Do not retry mutation.
+    print(results, remaining)
+}
+// Optional, before publication: job.cancel()
+```
+
+Each F64 transfer is at most 16,384 values; checkpoint decode is one record at a
+time (256 KiB UTF-16 accounting) and output validation is chunked. This still
+allocates full staged output vectors on the owner and can execute trusted factory,
+validator, allocation/GC, or one record parse synchronously. No hard main-thread
+latency bound is claimed. Actual Apple SDK compilation, JSC transfer/ARC behavior,
+cancel/close/recovery races and device lifecycle tests remain required.

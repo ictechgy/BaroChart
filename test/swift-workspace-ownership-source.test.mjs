@@ -44,6 +44,7 @@ function ordered(scope, ...parts) {
 }
 const record = block(source, /\bclass\s+AsterWorkspaceSourceRecord\b/);
 const registry = block(source, /\benum\s+AsterWorkspaceRegistry\b/);
+const admission = block(source, /\benum\s+AsterNativeAdmission\b/);
 const job = block(source, /\bclass\s+AsterWorkspaceJob\b/);
 const runtime = block(source, /\bclass\s+AsterWorkspaceRuntime\b/);
 const retirement = block(source, /\bclass\s+AsterRuntimeRetirement\b/);
@@ -76,8 +77,11 @@ staticTest('two global slots and admitted bytes are independently bounded', () =
   assert.doesNotMatch(reserve, /\bbytes\b|\.admitted|\.admit\(/);
   assert.match(compact(record), /varbytes=0,admitted=false/);
   ordered(method(registry, 'admit'), 'records[record.registration] === record', '!record.admitted',
-    'cost > 0', 'cost <= asterWorkspaceMaxBytes - bytes',
-    'bytes += cost', 'record.bytes = cost', 'record.admitted = true');
+    'AsterNativeAdmission.admit(record.admission,cost)', 'record.bytes = cost', 'record.admitted = true');
+  ordered(method(admission, 'admit'), '!lease.released', '!lease.admitted', 'cost > 0', 'cost <= asterWorkspaceMaxBytes - bytes', 'bytes += cost', 'lease.bytes = cost', 'lease.admitted = true');
+  ordered(method(admission, 'reserve'), 'guard slots < 2', 'slots += 1');
+  ordered(method(admission, 'release'), 'if lease.released {return}', 'lease.released = true', 'slots -= 1', 'bytes -= lease.bytes');
+  assert.match(method(registry, 'reserve'), /catch\s*\{AsterNativeAdmission\.release\(admission\);throw error\}/);
   ordered(method(job, 'admit'), 'AsterWorkspaceDescriptor(value,ticket:ticket)',
     'AsterWorkspaceRegistry.admit(record,plan.bytes)', 'AsterWorkspaceRuntime(', 'runtime.start()');
   const status = compact(method(registry, 'status'));
@@ -123,10 +127,10 @@ staticTest('confirmed cleanup holds reservations until source retirement is ackn
   ordered(remove, 'precondition(Thread.isMainThread && record.released)',
     'guard records[record.registration] === record',
     '!record.detaching', 'record.detach',
-    'records.removeValue(forKey:record.registration)', 'bytes -= record.bytes', 'completion()');
+    'records.removeValue(forKey:record.registration)', 'AsterNativeAdmission.release(record.admission)', 'completion()');
   const detached = block(remove, /record\.detach\b\s*/);
   ordered(detached, 'precondition(Thread.isMainThread)', 'guard records[record.registration] === record',
-    'records.removeValue(forKey:record.registration)', 'bytes -= record.bytes', 'completion()');
+    'records.removeValue(forKey:record.registration)', 'AsterNativeAdmission.release(record.admission)', 'completion()');
   assert.equal((compact(remove).match(/records\.removeValue/g) ?? []).length, 1);
   ordered(method(record, 'detach'), 'precondition(Thread.isMainThread && released && !detaching)',
     'detaching = true', 'context = nil', 'let owner = runtime', 'runtime = nil',

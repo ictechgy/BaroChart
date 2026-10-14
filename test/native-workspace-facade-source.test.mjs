@@ -33,7 +33,8 @@ test('Java workspace close recovery remains reachable after the source handle is
  const close=method(java,'@Override public void close(');
  assert.ok(close.indexOf('Thread.currentThread()!=owner')<close.indexOf('job.closeOnOwner()'));
  assert.ok(close.indexOf('job.closeOnOwner()')<close.indexOf('if(handle!=0)'));
- assert.match(close,/handle=0;try\{free\(released\);\}finally\{if\(activeWorkspace!=null\)activeWorkspace\.job\.closeOnOwner\(\);\}/);
+ assert.match(close,/ParamsJob paramsClosing=activeParams;if\(paramsClosing!=null\)paramsClosing\.job\.sourceFreeStartedOnOwner\(\);handle=0;/);
+ assert.match(close,/handle=0;try\{free\(released\);if\(paramsClosing!=null\)paramsClosing\.job\.sourceFreedOnOwner\(\);\}finally\{if\(activeWorkspace!=null\)activeWorkspace\.job\.closeOnOwner\(\);\}/);
 });
 test('Java workspace adapter uses the production initial-enqueue cleanup boundary',()=>{
  const restore=method(java,'public WorkspaceJob restoreWorkspaceAsync(String document,JSONObject binding,AsyncOptions options');

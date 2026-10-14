@@ -7,7 +7,7 @@ feature parity or performance superiority.
 | Feature | Core / web | Native source surface | New platform verification |
 |---|---|---|---|
 | Synchronous atomic indicator params | ChartAPI, types, tests | Swift/Java command facade | Not compiled here |
-| Entry-only async indicator params | Real Worker; original store retained | Java entry-only job/facade source; Swift facade pending | VM/QuickJS protocol, fake-host JVM and stub typecheck; actual Android/JNI unverified |
+| Entry-only async indicator params | Real Worker; original store retained | Java and Swift entry-only job/facade source | VM/QuickJS protocol, fake-host JVM and stub typecheck; Swift static checks only; actual SDK/JNI/JSC unverified |
 | OHLCV resampling / confirmed alignment | Pure core and web Worker APIs | Core functions bundled; no named Swift/Java facade/job | Not implemented as SDK API |
 | Workspace export | Core canonical bounded writer | Dedicated Swift/Java save read | Node VM + standalone QuickJS + static facade tests only |
 | Workspace preflight | Native metadata/source assertion | Dedicated Swift/Java validated-only read | Node VM + standalone QuickJS + static facade tests only |
@@ -44,7 +44,7 @@ feature parity or performance superiority.
 Java restore source implementation and its exact cloud-test boundary are described
 in [JAVA-WORKSPACE-RESTORE.md](JAVA-WORKSPACE-RESTORE.md). The uncompiled Swift
 source/creator-lifetime contract is in [SWIFT-WORKSPACE-RESTORE.md](SWIFT-WORKSPACE-RESTORE.md).
-Native entry-only params are being implemented in stages described in [NATIVE-ASYNC-PARAMS.md](NATIVE-ASYNC-PARAMS.md); Java job/facade source has cloud-only validation; Swift job/facade remains pending. Native background resampling remains subsequent work. The current small slice is documented in
+Native entry-only params are being implemented in stages described in [NATIVE-ASYNC-PARAMS.md](NATIVE-ASYNC-PARAMS.md); Java job/facade source has cloud-only validation; Swift job/facade has static ownership checks only, without compilation or JSC execution. Native background resampling remains subsequent work. The current small slice is documented in
 [NATIVE-WORKSPACES.md](NATIVE-WORKSPACES.md).
 
 ## Minimum future platform verification

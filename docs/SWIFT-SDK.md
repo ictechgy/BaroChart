@@ -1,5 +1,12 @@
 # SwiftPM SDK 소비 경로
 
+새 `setIndicatorParamsAsync`는 Apple 플랫폼에서 아직 검증하지 않은 실험적
+소스 API입니다. 원본 엔진을 유지하며 지표 한 개만
+교체합니다. Swift 컴파일/JSC 실행 전이며 정적 계약 검사만 수행했습니다.
+불확정 게시의 `cleanupPending`은 재호출 가능한 실패가 아닙니다. 원래
+registration의 status/retry 경로와 Java와 다른 완료 정책은
+[NATIVE-ASYNC-PARAMS.md](NATIVE-ASYNC-PARAMS.md#swift-source-facade-not-compiled-or-executed-on-apple-platforms)를 참고하세요.
+
 The thin `deleteDrawings` method forwards explicit IDs using the ordinary checked
 command and existing mutation notification. See [atomic group deletion](DRAWING-DELETE.md)
 for undo, failure and current platform-verification limits.

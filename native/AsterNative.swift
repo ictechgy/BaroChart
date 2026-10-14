@@ -308,6 +308,27 @@ public struct AsterWorkspaceCleanupStatus {
     public let admitted, awaitingCreatorCleanup: Bool
 }
 private let asterWorkspaceMaxBytes = 768 * 1024 * 1024
+// Main-owner accounting shared by workspace and entry-only parameter jobs.
+// Before descriptor admission only the slot is bounded; zero is unknown cost.
+private final class AsterNativeAdmissionLease {fileprivate var bytes = 0, admitted = false, released = false}
+private enum AsterNativeAdmission {
+    private static var slots = 0, bytes = 0
+    static func reserve() throws -> AsterNativeAdmissionLease {
+        precondition(Thread.isMainThread)
+        guard slots < 2 else {throw AsterAsyncError.busy}
+        slots += 1;return AsterNativeAdmissionLease()
+    }
+    static func admit(_ lease: AsterNativeAdmissionLease, _ cost: Int) throws {
+        precondition(Thread.isMainThread)
+        guard !lease.released, !lease.admitted, cost > 0, cost <= asterWorkspaceMaxBytes - bytes else {throw AsterAsyncError.busy}
+        bytes += cost;lease.bytes = cost;lease.admitted = true
+    }
+    static func release(_ lease: AsterNativeAdmissionLease) {
+        precondition(Thread.isMainThread)
+        if lease.released {return}
+        lease.released = true;slots -= 1;bytes -= lease.bytes
+    }
+}
 private func asterWorkspaceObject(_ value: JSValue) throws -> [String: Any] {
     guard value.isObject, let object = value.toDictionary() as? [String: Any] else {throw AsterAsyncError.invalidProtocol("Workspace object receipt")}
     return object
@@ -322,13 +343,14 @@ private func asterWorkspaceTrue(_ value: JSValue) throws {
 // Main-only minimal recovery owner: no Engine/job/Error/client callback fields.
 private final class AsterWorkspaceSourceRecord {
     let registration: Int
+    let admission: AsterNativeAdmissionLease
     var context: JSContext?
     private var runtime: AsterContextRuntime?
     var bytes = 0, admitted = false, pending = false, retrying = false, failures = 0
     var began = false, released = false, detaching = false
-    init(registration: Int, context: JSContext, runtime: AsterContextRuntime?) throws {
+    init(registration: Int, context: JSContext, runtime: AsterContextRuntime?, admission: AsterNativeAdmissionLease) throws {
         if let runtime = runtime, !runtime.acquireCaptureLease() {throw AsterAsyncError.invalidProtocol("Source runtime is retiring")}
-        self.registration = registration;self.context = context;self.runtime = runtime
+        self.registration = registration;self.context = context;self.runtime = runtime;self.admission = admission
     }
     func abort() throws {
         precondition(Thread.isMainThread)
@@ -354,19 +376,23 @@ private final class AsterWorkspaceSourceRecord {
 // All operations are main-only: no registry lock encloses JS/ARC/callbacks.
 private enum AsterWorkspaceRegistry {
     private static var records: [Int: AsterWorkspaceSourceRecord] = [:]
-    private static var next = 0, bytes = 0
+    private static var next = 0
     static func reserve(_ context: JSContext, _ runtime: AsterContextRuntime?) throws -> AsterWorkspaceSourceRecord {
         precondition(Thread.isMainThread)
         guard records.count < 2, next < 9007199254740991 else {throw AsterAsyncError.busy}
         next += 1
-        let record = try AsterWorkspaceSourceRecord(registration:next,context:context,runtime:runtime)
-        records[record.registration] = record;return record
+        let admission = try AsterNativeAdmission.reserve()
+        do {
+            let record = try AsterWorkspaceSourceRecord(registration:next,context:context,runtime:runtime,admission:admission)
+            records[record.registration] = record;return record
+        } catch {AsterNativeAdmission.release(admission);throw error}
     }
     static func contains(_ registration: Int) -> Bool {precondition(Thread.isMainThread);return records[registration] != nil}
     static func admit(_ record: AsterWorkspaceSourceRecord, _ cost: Int) throws {
         precondition(Thread.isMainThread)
-        guard records[record.registration] === record, !record.admitted, cost > 0, cost <= asterWorkspaceMaxBytes - bytes else {throw AsterAsyncError.busy}
-        bytes += cost;record.bytes = cost;record.admitted = true
+        guard records[record.registration] === record, !record.admitted else {throw AsterAsyncError.busy}
+        try AsterNativeAdmission.admit(record.admission,cost)
+        record.bytes = cost;record.admitted = true
     }
     static func remove(_ record: AsterWorkspaceSourceRecord, completion: @escaping () -> Void = {}) {
         precondition(Thread.isMainThread && record.released)
@@ -375,7 +401,7 @@ private enum AsterWorkspaceRegistry {
             precondition(Thread.isMainThread)
             guard records[record.registration] === record else {return}
             // Actual retired-source creator cleanup precedes reservation release.
-            records.removeValue(forKey:record.registration);bytes -= record.bytes
+            records.removeValue(forKey:record.registration);AsterNativeAdmission.release(record.admission)
             completion()
         }
     }
@@ -857,6 +883,414 @@ private final class AsterWorkspaceRuntime: AsterContextRuntime {
 
 /// Native JavaScriptCore host; no browser, WKWebView or DOM is involved.
 /// Call from one owning thread (normally the UI thread).
+/// Publication and cleanup are independent. Unknown is never permission to retry
+/// the mutation. Use retryParamsCleanup with the original registration instead.
+public enum AsterParamsCommitOutcome: String {case notCommitted, committed, unchanged, unknown}
+public enum AsterParamsError: Error {case cleanupPending(registration: Int, outcome: AsterParamsCommitOutcome)}
+public struct AsterParamsStatus {
+    public let registration, admittedLogicalBytes, retryFailures: Int
+    public let outcome: AsterParamsCommitOutcome
+    public let cleanupPending, awaitingCreatorCleanup: Bool
+}
+public struct AsterParamsMetrics {
+    public internal(set) var copiedBytes = 0, logicalAdmissionBytes = 0, progressCallbackErrors = 0
+    public internal(set) var totalMs = 0.0
+    public internal(set) var outcome: AsterParamsCommitOutcome = .notCommitted
+}
+// Main-only minimal recovery owner. Client callbacks and Error are never stored.
+private final class AsterParamsSourceRecord {
+    let registration: Int, id: String, admission: AsterNativeAdmissionLease
+    var context: JSContext?
+    private var runtime: AsterContextRuntime?
+    weak var sourceIdentity: JSContext?
+    weak var engine: AsterEngine?
+    weak var job: AsterParamsJob?
+    var began = false, released = false, pending = false, retrying = false, detaching = false, notified = false
+    var failures = 0
+    var outcome: AsterParamsCommitOutcome = .notCommitted
+    init(registration: Int, id: String, engine: AsterEngine, context: JSContext, runtime: AsterContextRuntime?, admission: AsterNativeAdmissionLease) throws {
+        if let runtime = runtime, !runtime.acquireCaptureLease() {throw AsterAsyncError.invalidProtocol("Source runtime is retiring")}
+        self.registration = registration;self.id = id;self.engine = engine;self.context = context;sourceIdentity = context
+        self.runtime = runtime;self.admission = admission
+    }
+    func statusValue() -> AsterParamsStatus {
+        precondition(Thread.isMainThread)
+        return AsterParamsStatus(registration:registration,admittedLogicalBytes:admission.bytes,retryFailures:failures,outcome:outcome,cleanupPending:pending || detaching,awaitingCreatorCleanup:detaching)
+    }
+    // Null, malformed, mismatched and evicted receipts remain uncertain.
+    @discardableResult func accept(_ value: JSValue) throws -> String {
+        precondition(Thread.isMainThread)
+        let object = try asterWorkspaceObject(value)
+        guard try asterInteger(object["registration"],9007199254740991) == registration,
+              let status = object["status"] as? String,
+              ["active","committed","unchanged","failed","aborted"].contains(status) else {throw AsterAsyncError.invalidProtocol("Params status binding")}
+        if status == "committed" || status == "unchanged" {
+            guard let receipt = object["receipt"] as? [String:Any], receipt["schema"] as? String == "aster.native-params-published",
+                  try asterInteger(receipt["version"],1) == 1,
+                  try asterInteger(receipt["registration"],9007199254740991) == registration,
+                  receipt["id"] as? String == id, receipt["status"] as? String == status,
+                  let outputs = receipt["outputs"] as? [String], !outputs.isEmpty, outputs.count <= 32,
+                  Set(outputs).count == outputs.count, outputs.allSatisfy({!$0.isEmpty && $0.utf16.count <= 128}),
+                  let offsets = receipt["plotOffsets"] as? [String:Any], offsets.count <= outputs.count else {throw AsterAsyncError.invalidProtocol("Params published receipt")}
+            for (key,value) in offsets {
+                guard outputs.contains(key), let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+                      number.doubleValue.isFinite, abs(number.doubleValue) <= 10000,
+                      number.doubleValue.rounded(.towardZero) == number.doubleValue else {throw AsterAsyncError.invalidProtocol("Params offset receipt")}
+            }
+            outcome = status == "committed" ? .committed : .unchanged;released = true
+        } else if status == "failed" || status == "aborted" {outcome = .notCommitted;released = true}
+        job?.setOutcome(outcome)
+        return status
+    }
+    func recover() throws {
+        precondition(Thread.isMainThread)
+        if released {return}
+        if !began {released = true;return}
+        try autoreleasepool {
+            guard let context = context else {throw AsterAsyncError.invalidProtocol("Missing params source")}
+            let status = try accept(asterInvoke(context,"nativeParamsSourceStatus",[registration]))
+            if status == "active" {
+                _ = try accept(asterInvoke(context,"nativeParamsSourceAbort",[registration]))
+            }
+            guard released else {throw AsterAsyncError.invalidProtocol("Params release not confirmed")}
+        }
+    }
+    func detach(_ completion: @escaping () -> Void) {
+        precondition(Thread.isMainThread && released && !detaching)
+        detaching = true;context = nil
+        let owner = runtime;runtime = nil
+        if let owner = owner {owner.releaseCaptureLease(afterRetirementIfNeeded:completion)} else {completion()}
+    }
+}
+private enum AsterParamsRegistry {
+    private static var records: [Int:AsterParamsSourceRecord] = [:]
+    private static var next = 0
+    static func reserve(_ engine: AsterEngine, _ id: String, _ context: JSContext, _ runtime: AsterContextRuntime?) throws -> AsterParamsSourceRecord {
+        precondition(Thread.isMainThread)
+        guard next < 9007199254740991 else {throw AsterAsyncError.busy}
+        let admission = try AsterNativeAdmission.reserve();next += 1
+        do {
+            let record = try AsterParamsSourceRecord(registration:next,id:id,engine:engine,context:context,runtime:runtime,admission:admission)
+            records[record.registration] = record;return record
+        } catch {AsterNativeAdmission.release(admission);throw error}
+    }
+    static func contains(_ registration: Int) -> Bool {precondition(Thread.isMainThread);return records[registration] != nil}
+    static func status(_ registration: Int? = nil) -> [AsterParamsStatus] {
+        precondition(Thread.isMainThread)
+        return records.values.filter{registration == nil || $0.registration == registration}.sorted{$0.registration < $1.registration}.map{$0.statusValue()}
+    }
+    static func remove(_ record: AsterParamsSourceRecord, completion: @escaping () -> Void = {}) {
+        precondition(Thread.isMainThread && record.released)
+        guard records[record.registration] === record, !record.detaching else {return}
+        record.detach {
+            precondition(Thread.isMainThread)
+            guard records[record.registration] === record else {return}
+            records.removeValue(forKey:record.registration);AsterNativeAdmission.release(record.admission)
+            record.detaching = false;record.pending = false
+            let owner = record.engine
+            if owner?.pendingParamsRegistration == record.registration {owner?.pendingParamsRegistration = nil}
+            if owner?.activeParams === record.job {owner?.activeParams = nil}
+            record.job?.setOutcome(record.outcome)
+            // Both admission and busy are released before any observer reentry.
+            if record.outcome == .committed && !record.notified {
+                record.notified = true
+                let shouldNotify: Bool = autoreleasepool {
+                    guard let owner = owner, !owner.closed, !owner.closing, let source = record.sourceIdentity else {return false}
+                    return owner.contextBacking === source
+                }
+                // No temporary source JSContext alias survives into observers.
+                if shouldNotify {owner?.notifyChanges()}
+            }
+            completion()
+        }
+    }
+    // One attempt only; closed Engine is not proof of JSContext destruction.
+    static func retry(_ registration: Int? = nil) -> [AsterParamsStatus] {
+        precondition(Thread.isMainThread)
+        var results: [AsterParamsStatus] = []
+        for record in Array(records.values).sorted(by:{$0.registration < $1.registration}) where record.pending && !record.retrying && !record.detaching && (registration == nil || registration == record.registration) {
+            record.retrying = true
+            do {try record.recover();record.retrying = false;remove(record)}
+            catch {record.retrying = false;record.failures = min(32,record.failures + 1)}
+            results.append(record.statusValue())
+        }
+        return results
+    }
+}
+private struct AsterParamsPlan {
+    let ticket, length, capacity, bytes: Int
+    let metadata: String
+    init(_ object: [String:Any], ticket: Int, registration: Int, id: String) throws {
+        guard object["phase"] as? String == "copy", let text = object["metadataJSON"] as? String, text.utf16.count <= 131072,
+              let plan = object["plan"] as? [String:Any] else {throw AsterAsyncError.invalidProtocol("Params admission descriptor")}
+        let binding = try asterDictionary(text,maximumBytes:524288)
+        guard binding["schema"] as? String == "aster.native-params-target", try asterInteger(binding["version"],1) == 1,
+              try asterInteger(binding["registration"],9007199254740991) == registration, binding["id"] as? String == id else {throw AsterAsyncError.invalidProtocol("Params metadata binding")}
+        length = try asterInteger(binding["length"],4194304);capacity = try asterInteger(binding["capacity"],4194304)
+        guard capacity >= max(16,length), capacity & (capacity - 1) == 0 else {throw AsterAsyncError.invalidProtocol("Params capacity")}
+        bytes = try asterInteger(plan["totalBytes"],asterWorkspaceMaxBytes)
+        guard bytes > 0 else {throw AsterAsyncError.invalidProtocol("Params admission bytes")}
+        self.ticket = ticket;metadata = text
+    }
+}
+private final class AsterParamsBox<T> {
+    private let condition = NSCondition()
+    private var result: Result<T,Error>?
+    func resolve(_ result: Result<T,Error>) {condition.lock();if self.result == nil {self.result = result;condition.broadcast()};condition.unlock()}
+    func wait(_ job: AsterParamsJob) throws -> T {
+        condition.lock();defer {condition.unlock()}
+        while result == nil {condition.unlock();do {try job.check()} catch {condition.lock();throw error};condition.lock();if result == nil {_ = condition.wait(until:Date(timeIntervalSinceNow:0.02))}}
+        return try result!.get()
+    }
+}
+/// Cancellation is thread-safe. Status and explicit recovery are main-owned.
+/// cleanupPending is a single completion, not a retryable mutation failure.
+public final class AsterParamsJob {
+    private let lock = NSLock()
+    private var cancelled = false, terminal = false, publishing = false, finishing = false
+    private var progressPending = false, latestProgress: AsterAsyncProgress?, callbackErrors = 0
+    private var outcome: AsterParamsCommitOutcome = .notCommitted
+    fileprivate weak var engine: AsterEngine?
+    private var record: AsterParamsSourceRecord?
+    private var params: [String:Any]?
+    private var plan: AsterParamsPlan?
+    private var progress: ((AsterAsyncProgress) throws -> Void)?
+    private var completion: ((Result<AsterParamsMetrics,Error>) -> Void)?
+    private let sourceRevision: UInt64, timeout: Double, maxBars: Int
+    private let started = asterClock()
+    private var metrics = AsterParamsMetrics()
+    public let registration: Int
+    fileprivate init(engine: AsterEngine, record: AsterParamsSourceRecord, params: [String:Any], timeout: Double, maxBars: Int,
+                     progress: ((AsterAsyncProgress) throws -> Void)?, completion: @escaping (Result<AsterParamsMetrics,Error>) -> Void) {
+        self.engine = engine;self.record = record;self.params = params;self.timeout = timeout;self.maxBars = maxBars
+        self.progress = progress;self.completion = completion;sourceRevision = engine.revision;registration = record.registration;record.job = self
+    }
+    public func cancel() {lock.lock();if !terminal && !publishing {cancelled = true};lock.unlock()}
+    public var commitOutcome: AsterParamsCommitOutcome {lock.lock();defer {lock.unlock()};return outcome}
+    public var cleanupPending: Bool {precondition(Thread.isMainThread);return AsterParamsRegistry.status(registration).contains{$0.cleanupPending}}
+    @discardableResult public func retryCleanup() throws -> [AsterParamsStatus] {
+        guard Thread.isMainThread else {throw AsterAsyncError.mainOwnerRequired}
+        return AsterParamsRegistry.retry(registration)
+    }
+    fileprivate func setOutcome(_ value: AsterParamsCommitOutcome) {lock.lock();outcome = value;lock.unlock()}
+    fileprivate func check() throws {
+        lock.lock();let stopped = cancelled, done = terminal || finishing;lock.unlock()
+        if stopped {throw AsterAsyncError.cancelled}
+        if done {throw AsterAsyncError.invalidProtocol("Params job completed")}
+        if asterClock() - started >= timeout {throw AsterAsyncError.timedOut}
+    }
+    private func finalOwner() throws -> AsterEngine {
+        precondition(Thread.isMainThread)
+        guard let engine = engine else {throw AsterAsyncError.sourceDeallocated}
+        guard !engine.closed, !engine.closing else {throw AsterAsyncError.engineClosed}
+        guard engine.activeParams === self, engine.revision == sourceRevision,
+              let source = record?.context, engine.contextBacking === source else {throw AsterAsyncError.invalidProtocol("Params source stale")}
+        return engine
+    }
+    private func sourceCall<T>(_ operation: (JSContext) throws -> T) throws -> T {
+        precondition(Thread.isMainThread)
+        try check();_ = try finalOwner()
+        let result: T = try autoreleasepool {
+            guard let source = record?.context else {throw AsterAsyncError.invalidProtocol("Missing params source")}
+            if let ticket = plan?.ticket {try asterWorkspaceTrue(asterInvoke(source,"nativeParamsSourceCheck",[ticket,sourceRevision]))}
+            return try operation(source)
+        }
+        try check();_ = try finalOwner();return result
+    }
+    private func onOwner<T>(_ operation: @escaping (JSContext) throws -> T) throws -> T {
+        let box = AsterParamsBox<T>()
+        DispatchQueue.main.async { [self] in
+            do {box.resolve(.success(try sourceCall(operation)))} catch {box.resolve(.failure(error))}
+        }
+        return try box.wait(self)
+    }
+    fileprivate func start(bundle: String) {
+        precondition(Thread.isMainThread)
+        do {
+            try check();_ = try finalOwner()
+            guard let record = record, let params = params else {throw AsterAsyncError.invalidProtocol("Missing params request")}
+            record.began = true
+            let begin = try sourceCall {try asterWorkspaceObject(asterInvoke($0,"nativeParamsSourceBegin",[record.id,params,sourceRevision,asterWorkspaceMaxBytes,registration]))}
+            guard try asterInteger(begin["registration"],9007199254740991) == registration else {throw AsterAsyncError.invalidProtocol("Params registration")}
+            let ticket = try asterInteger(begin["ticket"],9007199254740991)
+            guard ticket > 0 else {throw AsterAsyncError.invalidProtocol("Params ticket")}
+            self.params = nil;admit(ticket:ticket,bundle:bundle)
+        } catch {settle(error)}
+    }
+    private func admit(ticket: Int, bundle: String) {
+        precondition(Thread.isMainThread)
+        do {
+            let value = try sourceCall {try asterWorkspaceObject(asterInvoke($0,"nativeParamsSourceStep",[ticket,8,sourceRevision]))}
+            guard let record = record else {throw AsterAsyncError.invalidProtocol("Missing params reservation")}
+            let complete = try asterWorkspaceBool(value["complete"])
+            if !complete {
+                guard value["phase"] as? String == "admission" else {throw AsterAsyncError.invalidProtocol("Params admission phase")}
+                DispatchQueue.main.async { [self] in admit(ticket:ticket,bundle:bundle) };return
+            }
+            if value["phase"] as? String == "noop" {publish(ticket:ticket);return}
+            let plan = try AsterParamsPlan(value,ticket:ticket,registration:registration,id:record.id)
+            try AsterNativeAdmission.admit(record.admission,plan.bytes);self.plan = plan;metrics.logicalAdmissionBytes = plan.bytes
+            try check();_ = try finalOwner()
+            Thread.detachNewThread { [self] in
+                // Only owned Swift scalars/Data/String cross the VM boundary.
+                // No worker JS alias escapes this entire autorelease pool.
+                let result: Result<Int,Error> = autoreleasepool {
+                    do {return .success(try compute(bundle:bundle,plan:plan))} catch {return .failure(error)}
+                }
+                DispatchQueue.main.async { [self] in
+                    switch result {
+                    case .success(let copied):metrics.copiedBytes = copied;publish(ticket:ticket)
+                    case .failure(let error):settle(error)
+                    }
+                }
+            }
+        } catch {settle(error)}
+    }
+    private func report(_ value: AsterAsyncProgress) {
+        lock.lock();if terminal || publishing || finishing {lock.unlock();return};latestProgress = value
+        if progressPending {lock.unlock();return};progressPending = true;lock.unlock()
+        DispatchQueue.main.async { [self] in
+            lock.lock();let value = latestProgress, done = terminal || publishing || finishing;progressPending = false;lock.unlock()
+            guard !done, let value = value, let progress = progress else {return}
+            do {try progress(value)} catch {lock.lock();callbackErrors = min(32,callbackErrors + 1);lock.unlock()}
+        }
+    }
+    private func compute(bundle: String, plan: AsterParamsPlan) throws -> Int {
+        try check()
+        guard let context = JSContext(virtualMachine:JSVirtualMachine()) else {throw AsterError.unavailableContext}
+        context.evaluateScript(bundle)
+        if let error = context.exception {context.exception = nil;throw AsterError.javaScript(error.toString() ?? "Worker initialization")}
+        try check();try asterWorkspaceTrue(asterInvoke(context,"nativeParamsTargetCreate",[plan.metadata]))
+        var copied = 0
+        for slot in 0..<6 {
+            var offset = 0
+            while offset < plan.length {
+                try check();let count = min(16384,plan.length-offset), at = offset
+                let data: Data = try onOwner { source in
+                    let value = try asterInvoke(source,"nativeAsyncBuffer",[plan.ticket,slot,at,count])
+                    return Data(bytes:try asterTypedBytes(value,source,count:count),count:count*8)
+                }
+                try check()
+                try autoreleasepool {
+                    let value = try asterInvoke(context,"nativeAsyncTargetBuffer",[slot,offset,count])
+                    let pointer = try asterTypedBytes(value,context,count:count)
+                    data.withUnsafeBytes { bytes in pointer.copyMemory(from:bytes.baseAddress!,byteCount:data.count) }
+                }
+                copied += data.count;offset += count
+            }
+        }
+        try asterWorkspaceTrue(asterInvoke(context,"nativeParamsTargetStart"))
+        while true {
+            try check()
+            let step = try autoreleasepool {try asterWorkspaceObject(asterInvoke(context,"nativeParamsTargetStep",[maxBars]))}
+            let complete = try asterWorkspaceBool(step["complete"])
+            guard let phase = step["phase"] as? String, ["validate","calculate","outputs","ready"].contains(phase), complete == (phase == "ready") else {throw AsterAsyncError.invalidProtocol("Params target phase")}
+            let done = try asterInteger(step["done"],134217728), total = try asterInteger(step["total"],134217728)
+            guard done <= total else {throw AsterAsyncError.invalidProtocol("Params target progress")}
+            if complete {break}
+            report(AsterAsyncProgress(phase:phase,done:done,total:total))
+        }
+        let text: String = try autoreleasepool {
+            let value = try asterInvoke(context,"nativeParamsTargetDescriptor")
+            guard value.isString, let text = value.toString(), text.utf16.count <= 131072 else {throw AsterAsyncError.invalidProtocol("Params result descriptor")}
+            return text
+        }
+        let descriptor = try asterDictionary(text,maximumBytes:524288)
+        guard descriptor["schema"] as? String == "aster.native-params-result", try asterInteger(descriptor["version"],1) == 1,
+              try asterInteger(descriptor["registration"],9007199254740991) == registration,
+              try asterInteger(descriptor["length"],4194304) == plan.length, try asterInteger(descriptor["capacity"],4194304) == plan.capacity,
+              let outputs = descriptor["outputs"] as? [String], !outputs.isEmpty, outputs.count <= 32,
+              plan.capacity * outputs.count * 8 <= 256*1024*1024 else {throw AsterAsyncError.invalidProtocol("Params result bounds")}
+        let checkpointCount = try asterInteger(descriptor["checkpointCount"],16385)
+        guard checkpointCount == (plan.length == 0 ? 0 : plan.length/256+1), try asterInteger(descriptor["checkpointBytes"],32*1024*1024) >= 0 else {throw AsterAsyncError.invalidProtocol("Params checkpoint count")}
+        let _: Bool = try onOwner { source in try asterWorkspaceTrue(asterInvoke(source,"nativeParamsSourceReceive",[plan.ticket,text,self.sourceRevision]));return true }
+        for slot in outputs.indices {
+            var offset = 0
+            while offset < plan.capacity {
+                try check();let count = min(16384,plan.capacity-offset), at = offset
+                let data: Data = try autoreleasepool {
+                    let value = try asterInvoke(context,"nativeAsyncBuffer",[registration,slot,at,count])
+                    return Data(bytes:try asterTypedBytes(value,context,count:count),count:count*8)
+                }
+                let _: Bool = try onOwner { source in
+                    try asterWorkspaceTrue(asterInvoke(source,"nativeParamsSourceArmWrite",[plan.ticket,slot,at,count,self.sourceRevision]))
+                    // Arm and binary write execute in one owner turn; no queued write.
+                    let value = try asterInvoke(source,"nativeAsyncTargetBuffer",[slot,at,count])
+                    let pointer = try asterTypedBytes(value,source,count:count)
+                    data.withUnsafeBytes { bytes in pointer.copyMemory(from:bytes.baseAddress!,byteCount:data.count) };return true
+                }
+                copied += data.count;offset += count
+            }
+        }
+        for ordinal in 0..<checkpointCount {
+            try check()
+            let row = try autoreleasepool {try asterWorkspaceObject(asterInvoke(context,"nativeParamsTargetCheckpoint",[ordinal]))}
+            guard try asterInteger(row["index"],4194304) == ordinal*256, let text = row["text"] as? String, text.utf16.count <= 131072 else {throw AsterAsyncError.invalidProtocol("Params checkpoint record")}
+            let _: Bool = try onOwner { source in try asterWorkspaceTrue(asterInvoke(source,"nativeParamsSourceCheckpoint",[plan.ticket,ordinal*256,text,self.sourceRevision]));return true }
+        }
+        while true {
+            try check()
+            let complete: Bool = try onOwner { source in
+                let value = try asterWorkspaceObject(asterInvoke(source,"nativeParamsSourceValidate",[plan.ticket,16384,self.sourceRevision]))
+                let complete = try asterWorkspaceBool(value["complete"])
+                guard let phase = value["phase"] as? String, ["validate","ready"].contains(phase), complete == (phase == "ready") else {throw AsterAsyncError.invalidProtocol("Params validation phase")}
+                return complete
+            }
+            if complete {break}
+        }
+        try check();return copied
+    }
+    private func publish(ticket: Int) {
+        precondition(Thread.isMainThread)
+        do {
+            try sourceCall {try asterWorkspaceTrue(asterInvoke($0,"nativeParamsSourcePrepare",[ticket,sourceRevision]))}
+            try check();_ = try finalOwner()
+            guard let record = record else {throw AsterAsyncError.invalidProtocol("Missing params source")}
+            // Linearize cancellation before publication without holding a lock
+            // across JS. Later cancellation cannot reverse a confirmed commit.
+            lock.lock();let stopped = cancelled;if !stopped {publishing = true};lock.unlock()
+            if stopped {throw AsterAsyncError.cancelled}
+            record.outcome = .unknown;setOutcome(.unknown)
+            do {
+                _ = try autoreleasepool {
+                    guard let source = record.context else {throw AsterAsyncError.invalidProtocol("Missing params source")}
+                    return try record.accept(asterInvoke(source,"nativeParamsSourcePublish",[ticket,sourceRevision]))
+                }
+            }
+            catch {try record.recover()}
+            guard record.released else {throw AsterAsyncError.invalidProtocol("Params publication unresolved")}
+            settle(nil)
+        } catch {settle(error)}
+    }
+    // Called only before a worker starts or after its autoreleasepool exit ack.
+    private func settle(_ error: Error?) {
+        precondition(Thread.isMainThread)
+        lock.lock();let done = terminal || finishing;if !done {finishing = true};lock.unlock();if done {return}
+        guard let record = record else {finish(.failure(error ?? AsterAsyncError.invalidProtocol("Missing params source")));return}
+        do {
+            try record.recover()
+            AsterParamsRegistry.remove(record) { [self] in
+                self.record = nil;plan = nil
+                if record.outcome == .committed || record.outcome == .unchanged {metrics.outcome = record.outcome;finish(.success(metrics))}
+                else {finish(.failure(error ?? AsterAsyncError.invalidProtocol("Params not committed")))}
+            }
+        } catch {
+            record.pending = true;record.failures = min(32,record.failures + 1)
+            engine?.pendingParamsRegistration = registration
+            self.record = nil;plan = nil
+            finish(.failure(AsterParamsError.cleanupPending(registration:registration,outcome:record.outcome)))
+        }
+    }
+    private func finish(_ result: Result<AsterParamsMetrics,Error>) {
+        precondition(Thread.isMainThread)
+        lock.lock();if terminal {lock.unlock();return};terminal = true;latestProgress = nil;metrics.progressCallbackErrors = callbackErrors;lock.unlock()
+        if let engine = engine, engine.activeParams === self {engine.activeParams = nil}
+        params = nil;plan = nil;record = nil
+        let callback = completion;completion = nil;progress = nil;metrics.totalMs = (asterClock()-started)*1000
+        switch result {case .success:callback?(.success(metrics));case .failure(let error):callback?(.failure(error))}
+    }
+}
+
 public final class AsterEngine {
     /// Opt-in async success replaces this context. Re-read it after completion;
     /// cached raw JSContext/JSValue objects from the retired VM are unsupported.
@@ -868,6 +1302,8 @@ public final class AsterEngine {
     fileprivate var workspaceContextInstalled = false
     fileprivate var contextRuntime: AsterContextRuntime?
     fileprivate var activeWorkspace: AsterWorkspaceJob?
+    fileprivate var activeParams: AsterParamsJob?
+    fileprivate var pendingParamsRegistration: Int?
     fileprivate var pendingWorkspaceRegistration: Int?
     fileprivate var closing = false
     fileprivate var activeAsync: AsterAsyncJob?
@@ -913,6 +1349,11 @@ public final class AsterEngine {
             guard !AsterWorkspaceRegistry.contains(pending) else {throw AsterAsyncError.busy}
             pendingWorkspaceRegistration = nil
         }
+        if let pending = pendingParamsRegistration {
+            guard !AsterParamsRegistry.contains(pending) else {throw AsterAsyncError.busy}
+            pendingParamsRegistration = nil
+        }
+        guard activeParams == nil else {throw AsterAsyncError.busy}
         guard activeWorkspace == nil else {throw AsterAsyncError.busy}
     }
     public static func workspaceCleanupStatus() throws -> [AsterWorkspaceCleanupStatus] {
@@ -923,6 +1364,32 @@ public final class AsterEngine {
     public static func retryWorkspaceCleanup() throws -> [AsterWorkspaceCleanupStatus] {
         guard Thread.isMainThread else {throw AsterAsyncError.mainOwnerRequired}
         AsterWorkspaceRegistry.retry();return AsterWorkspaceRegistry.status()
+    }
+    public static func paramsCleanupStatus() throws -> [AsterParamsStatus] {
+        guard Thread.isMainThread else {throw AsterAsyncError.mainOwnerRequired}
+        return AsterParamsRegistry.status()
+    }
+    /// Returns results from this one recovery attempt; never repeats completion.
+    @discardableResult public static func retryParamsCleanup(_ registration: Int? = nil) throws -> [AsterParamsStatus] {
+        guard Thread.isMainThread else {throw AsterAsyncError.mainOwnerRequired}
+        return AsterParamsRegistry.retry(registration)
+    }
+    /// Entry-only replacement in the original context; static linked modules only.
+    @discardableResult public func setIndicatorParamsAsync(_ id: String, params: [String:Any], timeout: Double = 30,
+        maxBarsPerStep: Int = 4096, progress: ((AsterAsyncProgress) throws -> Void)? = nil,
+        completion: @escaping (Result<AsterParamsMetrics,Error>) -> Void) throws -> AsterParamsJob {
+        try asyncPreflight(timeout)
+        guard !id.isEmpty, id.utf16.count <= 128, maxBarsPerStep >= 1, maxBarsPerStep <= 16384, revision <= 9007199254740991 else {throw AsterAsyncError.invalidProtocol("Params request bounds")}
+        let source = context, capturedRevision = revision
+        let data = try JSONSerialization.data(withJSONObject:params,options:[.sortedKeys])
+        guard data.count <= 131072, let owned = try JSONSerialization.jsonObject(with:data) as? [String:Any] else {throw AsterAsyncError.invalidProtocol("Params request size")}
+        try asyncPreflight(timeout)
+        guard contextBacking === source, revision == capturedRevision else {throw AsterAsyncError.invalidProtocol("Params source changed during arguments")}
+        let record = try AsterParamsRegistry.reserve(self,id,source,contextRuntime)
+        let job = AsterParamsJob(engine:self,record:record,params:owned,timeout:timeout,maxBars:maxBarsPerStep,progress:progress,completion:completion)
+        activeParams = job;let bundle = bundleSource
+        DispatchQueue.main.async {job.start(bundle:bundle)}
+        return job
     }
     /// Workspace contains settings only; dataset binding is a host assertion.
     @discardableResult public func restoreWorkspaceAsync(_ document: String, datasetBinding: [String:Any], timeout: Double = 30,
@@ -1017,8 +1484,9 @@ public final class AsterEngine {
         guard Thread.current === owner else {throw AsterError.wrongThread}
         if closing {return};closing = true;defer {closing = false}
         if Thread.isMainThread, let pending = pendingWorkspaceRegistration {AsterWorkspaceRegistry.retry(pending)}
+        if Thread.isMainThread, let pending = pendingParamsRegistration {_ = AsterParamsRegistry.retry(pending)}
         if closed {return}
-        activeWorkspace?.cancel()
+        activeWorkspace?.cancel();activeParams?.cancel()
         let cleanups = Array(frameCleanup.values);frameCleanup.removeAll();for cleanup in cleanups {cleanup()}
         if context.objectForKeyedSubscript("nativeReleaseFrameCaches")?.isUndefined == false {_ = try call("nativeReleaseFrameCaches")}
         if context.objectForKeyedSubscript("nativeReleaseDataIngestion")?.isUndefined == false {_ = try call("nativeReleaseDataIngestion")}
@@ -1028,7 +1496,7 @@ public final class AsterEngine {
         observers.removeAll();onObserverError = nil;observerErrors.removeAll();pendingNotifications = 0
     }
     deinit {
-        activeWorkspace?.cancel();activeAsync?.stop(AsterAsyncError.sourceDeallocated)
+        activeWorkspace?.cancel();activeParams?.cancel();activeAsync?.stop(AsterAsyncError.sourceDeallocated)
         if workspaceContextInstalled {contextBacking = nil}
         contextRuntime?.retire()
     }
@@ -1045,7 +1513,7 @@ public final class AsterEngine {
         // The async handle is published before its deferred JavaScript begin.
         // Guard this owner-only gap too; the core lease covers direct JS calls
         // after begin. Existing data mutations keep their stale-result policy.
-        if (activeAsync.map{!$0.isCommitted} ?? false) || activeWorkspace != nil || pendingWorkspaceRegistration.map{AsterWorkspaceRegistry.contains($0)} == true {
+        if (activeAsync.map{!$0.isCommitted} ?? false) || activeWorkspace != nil || pendingWorkspaceRegistration.map{AsterWorkspaceRegistry.contains($0)} == true || activeParams != nil || pendingParamsRegistration.map{AsterParamsRegistry.contains($0)} == true {
             if ["compactData", "configureDataIngestion", "enqueueDataEvents", "drainDataEvents", "pauseDataIngestion", "resumeDataIngestion", "cancelDataEvents", "loadDataIngestion"].contains(operation) {throw AsterIngestionError(code:"BUSY",message:"Native asynchronous job is active")}
         }
         let result:JSValue
