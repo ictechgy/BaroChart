@@ -12,6 +12,8 @@ export const JAVA_HOST_PRODUCTION_SOURCES = Object.freeze([
     'native/android/java/dev/aster/charts/AsterEngine.java',
     'native/android/java/dev/aster/charts/AsterColumns.java',
         'native/android/java/dev/aster/charts/WorkspaceRestoreJob.java',
+    'native/android/java/dev/aster/charts/NativeJobBudget.java',
+    'native/android/java/dev/aster/charts/ParamsUpdateJob.java',
 ]);
 export const JAVA_HOST_BOUNDARY = Object.freeze({
     evidence: 'Java typecheck against independent compile-only signatures',

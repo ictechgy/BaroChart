@@ -248,3 +248,22 @@ or run on a device.** Preserved AAR artifacts predate this method. The documente
 native SDK build/runtime workflow above remains required before app deployment.
 
 Portable batch style patches use `setDrawingsStyle` with a checked zero-change notification policy. See [Atomic drawing style patches](DRAWING-STYLE.md) for the four keys, one-undo budget, and current runtime validation limits.
+
+## Entry-only asynchronous parameter source slice
+
+`engine.setIndicatorParamsAsync(id, params, options, listener)` now returns
+`ParamsJob` with `cancel()`, `cleanupPending()`, `commitOutcome()` and owner-thread
+`retryCleanup()`. The overload without options uses default `AsyncOptions`.
+Unlike workspace restoration, this keeps the original runtime/store and changes
+only the indicator entry and its derived series caches. It requires a linked
+portable definition and rejects a concurrent async job.
+
+See [Native async parameter contract](NATIVE-ASYNC-PARAMS.md) for cooperative
+cancellation, shared logical admission, unchanged/no-notify completion, lost-reply
+status recovery and `indeterminate` completion after confirmed close. Do not
+retry a mutation whose commit outcome remains unknown.
+
+This source slice has cloud JVM fake-transport execution and compile-only Engine
+consumer checks. **No Android SDK build, new AAR, JNI integration execution or
+device validation has been performed for this API.** Existing native artifacts
+predate it. Swift entry-only async parameter support is still pending.

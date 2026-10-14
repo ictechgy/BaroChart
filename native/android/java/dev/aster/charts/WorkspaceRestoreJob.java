@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit;
  * owner-only; target JNI is worker-only until the worker has exited. */
 final class WorkspaceRestoreJob {
     static final long MAX_BYTES=805306368L;
-    private static int activeJobs;private static long reservedBytes,nextRegistration;
+    private static long nextRegistration;
     static synchronized long nextRegistration(){if(nextRegistration>=9007199254740991L)throw new IllegalStateException("Workspace registration exhausted");return ++nextRegistration;}
     static final class Descriptor {
         final long ticket,logicalBytes;final String metadata;final int length;
@@ -42,7 +42,7 @@ final class WorkspaceRestoreJob {
         void notifyObservers();void onProgress(String phase,long done,long total);
         void onComplete(String status,Throwable error,Metrics metrics);void onCallbackError(Throwable error);
     }
-    private Host host;private String document,binding;private final long source,revision,started=System.nanoTime(),timeoutNanos;private final int bars;
+    private NativeJobBudget.Lease budgetLease;private Host host;private String document,binding;private final long source,revision,started=System.nanoTime(),timeoutNanos;private final int bars;
     private volatile String stopped;private volatile Throwable failure;private volatile boolean committed,terminal;private boolean sourceReleased,slotReserved,bytesReserved,reservationReleased,startCalled,beginInProgress,beginAttempted,admitting,handoffInProgress,sourceReleaseInProgress;private volatile boolean ownerCleanupPending;private long ticket=-1,logicalBytes,copiedBytes,pendingTarget;private int callbackErrors;private Descriptor descriptor;private Thread worker;private Progress latestProgress;private boolean progressQueued;
     WorkspaceRestoreJob(Host host,String document,String binding,long timeoutMillis,int bars){host.requireOwner();if(document==null||document.length()>2097152||binding==null||binding.length()>32768||timeoutMillis<1||timeoutMillis>600000||bars<1||bars>16384)throw new IllegalArgumentException("Workspace arguments/limits");this.host=host;this.document=document;this.binding=binding;this.timeoutNanos=timeoutMillis*1000000L;this.bars=bars;source=host.currentHandle();revision=host.currentRevision();if(source==0||revision<0||revision>9007199254740991L||host.closed())throw new IllegalStateException("Workspace source closed/revision limit");}
     void enqueueInitial(){host.requireOwner();try{if(!host.post(this::start))throw new IllegalStateException("Workspace owner queue unavailable");}catch(Throwable error){try{releaseReservation();}finally{discardBeforeStart();}throw error;}}
@@ -50,10 +50,10 @@ final class WorkspaceRestoreJob {
     // No source was entered and no completion callback is owed for a throwing call.
     synchronized void discardBeforeStart(){if(terminal)return;host.requireOwner();if(startCalled)throw new IllegalStateException("Workspace already started");terminal=true;sourceReleased=true;reservationReleased=true;document=null;binding=null;descriptor=null;worker=null;latestProgress=null;host=null;}
     boolean committed(){return committed;}
-    private static synchronized void reserveSlot(WorkspaceRestoreJob job){if(job.slotReserved)throw new IllegalStateException("Workspace already reserved");if(activeJobs>=2)throw new IllegalStateException("Workspace inflight job limit");activeJobs++;job.slotReserved=true;}
-    private static synchronized void reserveBytes(WorkspaceRestoreJob job,long bytes){if(job.bytesReserved)throw new IllegalStateException("Workspace bytes already reserved");if(bytes>MAX_BYTES-reservedBytes)throw new IllegalStateException("Workspace inflight byte limit");reservedBytes+=bytes;job.logicalBytes=bytes;job.bytesReserved=true;}
-    private static synchronized void releaseBudget(WorkspaceRestoreJob job){if(job.bytesReserved){reservedBytes-=job.logicalBytes;job.bytesReserved=false;}if(job.slotReserved){activeJobs--;job.slotReserved=false;}}
-    static synchronized long[] budgetForTest(){return new long[]{activeJobs,reservedBytes};}
+    private static synchronized void reserveSlot(WorkspaceRestoreJob job){if(job.slotReserved)throw new IllegalStateException("Workspace already reserved");job.budgetLease=NativeJobBudget.reserve();job.slotReserved=true;}
+    private static synchronized void reserveBytes(WorkspaceRestoreJob job,long bytes){if(job.bytesReserved)throw new IllegalStateException("Workspace bytes already reserved");NativeJobBudget.admit(job.budgetLease,bytes);job.logicalBytes=bytes;job.bytesReserved=true;}
+    private static synchronized void releaseBudget(WorkspaceRestoreJob job){NativeJobBudget.release(job.budgetLease);job.budgetLease=null;job.bytesReserved=false;job.slotReserved=false;}
+    static synchronized long[] budgetForTest(){return NativeJobBudget.snapshot();}
     synchronized void cancel(){if(committed||terminal||stopped!=null)return;stopped="cancelled";if(!postOwner(this::stopOnOwner)&&worker==null&&!beginInProgress)deferOwnerCleanup();}
     void closeOnOwner(){if(terminal||committed)return;host.requireOwner();stop("closed",null);stopOnOwner();}
     private synchronized void stop(String status,Throwable error){if(committed||terminal)return;if(stopped==null)stopped=status;if(failure==null)failure=error;}

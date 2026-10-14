@@ -39,4 +39,11 @@ public final class WorkspaceConsumer {
     public static JSONObject style(AsterEngine engine) throws JSONException {
         return engine.setDrawingsStyle(new JSONArray(new String[]{"trend"}),new JSONObject().put("color","#abc"));
     }
+    public static AsterEngine.ParamsJob changeParams(AsterEngine engine,AsterEngine.AsyncListener listener)throws JSONException {
+        return engine.setIndicatorParamsAsync("ema",new JSONObject().put("period",20),new AsterEngine.AsyncOptions(30000,4096),listener);
+    }
+    public static AsterEngine.ParamsJob changeParamsDefault(AsterEngine engine,AsterEngine.AsyncListener listener)throws JSONException {
+        return engine.setIndicatorParamsAsync("ema",new JSONObject().put("period",20),listener);
+    }
+    public static String paramsCleanupOnOwner(AsterEngine.ParamsJob job){job.retryCleanup();return job.commitOutcome();}
 }

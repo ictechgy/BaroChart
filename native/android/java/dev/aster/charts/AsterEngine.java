@@ -19,6 +19,7 @@ public final class AsterEngine implements AutoCloseable {
     private final java.util.Set<Runnable> closeObservers=new java.util.LinkedHashSet<>();
     private boolean closing=false;
     private WorkspaceJob activeWorkspace;
+    private ParamsJob activeParams;
     private long revision=0;
     private int pendingNotifications=0;private boolean notifying=false;
     private final java.util.List<Throwable> observerErrors=new java.util.ArrayList<>();
@@ -39,7 +40,7 @@ public final class AsterEngine implements AutoCloseable {
         try(InputStream in=context.getAssets().open("aster-core.js")){ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] buffer=new byte[8192];int size;while((size=in.read(buffer))!=-1)out.write(buffer,0,size);sourceBundle=new String(out.toByteArray(),StandardCharsets.UTF_8);handle=create(sourceBundle);}
         try {invoke("nativeInit",count,options==null?JSONObject.NULL:options);}catch(JSONException|RuntimeException e){free(handle);handle=0;throw e;}
     }
-    private void check(){if(Thread.currentThread()!=owner)throw new IllegalStateException("Use the engine on its owning thread before close");if(activeWorkspace!=null&&activeWorkspace.job.pendingOwnerCleanup())activeWorkspace.job.resumeOwnerCleanup();if(handle==0)throw new IllegalStateException("Use the engine on its owning thread before close");}
+    private void check(){if(Thread.currentThread()!=owner)throw new IllegalStateException("Use the engine on its owning thread before close");if(activeWorkspace!=null&&activeWorkspace.job.pendingOwnerCleanup())activeWorkspace.job.resumeOwnerCleanup();if(activeParams!=null&&activeParams.job.pendingOwnerCleanup())activeParams.job.resumeOwnerCleanup();if(handle==0)throw new IllegalStateException("Use the engine on its owning thread before close");}
     public Object invoke(String name,Object... args) throws JSONException {check();if(name==null||name.length()==0||name.length()>128||args.length>16)throw new IllegalArgumentException("Native function name/argument limit");return new JSONArray("["+call(handle,name,new JSONArray(args).toString())+"]").get(0);}
     static final class SceneTiming {
         final long jniNanos,envelopeParseNanos,bodyParseNanos;final int jsonChars;
@@ -141,9 +142,9 @@ public final class AsterEngine implements AutoCloseable {
     public Object command(String operation,Object... args) throws JSONException {
         check();Object result;
         // Cover the deferred begin gap as well as core's active ingestion lease.
-        if("compactData".equals(operation)&&(activeJob!=null&&!activeJob.committed||activeWorkspace!=null))throw new IngestionException("BUSY","Compaction has an active asynchronous calculation");
+        if("compactData".equals(operation)&&(activeJob!=null&&!activeJob.committed||activeWorkspace!=null||activeParams!=null))throw new IngestionException("BUSY","Compaction has an active asynchronous calculation");
         if(ingestionCommand(operation)){
-            if((activeJob!=null&&!activeJob.committed||activeWorkspace!=null&&!activeWorkspace.job.committed())&&!operation.equals("dataIngestionStats")&&!operation.equals("saveDataIngestion"))throw new IngestionException("BUSY","Data ingestion has an active asynchronous calculation");
+            if((activeJob!=null&&!activeJob.committed||activeWorkspace!=null&&!activeWorkspace.job.committed()||activeParams!=null&&!activeParams.job.committed())&&!operation.equals("dataIngestionStats")&&!operation.equals("saveDataIngestion"))throw new IngestionException("BUSY","Data ingestion has an active asynchronous calculation");
             JSONObject envelope=(JSONObject)invoke("nativeDataIngestionCommand",operation,new JSONArray(args));
             result=ingestionResult(envelope);
         }else result=invoke("nativeCommand",operation,new JSONArray(args));
@@ -251,8 +252,8 @@ public final class AsterEngine implements AutoCloseable {
     @Override public void close(){
         if(Thread.currentThread()!=owner)throw new IllegalStateException("Close on owning thread");if(closing)return;closing=true;
         Error cleanupFailure=null;
-        try{if(activeWorkspace!=null)activeWorkspace.job.closeOnOwner();if(handle!=0){try{if(activeJob!=null)activeJob.stopOnOwner("closed");java.util.ArrayList<Runnable> cleanup=new java.util.ArrayList<>(closeObservers);closeObservers.clear();for(Runnable observer:cleanup)try{observer.run();}catch(RuntimeException ignored){/* Cleanup isolation; native context is still released. */}catch(Error error){if(cleanupFailure==null)cleanupFailure=error;}}
-            finally{long released=handle;handle=0;try{free(released);}finally{if(activeWorkspace!=null)activeWorkspace.job.closeOnOwner();}}}if(cleanupFailure!=null)throw cleanupFailure;}
+        try{if(activeParams!=null)activeParams.job.closeOnOwner();if(activeWorkspace!=null)activeWorkspace.job.closeOnOwner();if(handle!=0){try{if(activeJob!=null)activeJob.stopOnOwner("closed");java.util.ArrayList<Runnable> cleanup=new java.util.ArrayList<>(closeObservers);closeObservers.clear();for(Runnable observer:cleanup)try{observer.run();}catch(RuntimeException ignored){/* Cleanup isolation; native context is still released. */}catch(Error error){if(cleanupFailure==null)cleanupFailure=error;}}
+            finally{long released=handle;ParamsJob paramsClosing=activeParams;if(paramsClosing!=null)paramsClosing.job.sourceFreeStartedOnOwner();handle=0;try{free(released);if(paramsClosing!=null)paramsClosing.job.sourceFreedOnOwner();}finally{if(activeWorkspace!=null)activeWorkspace.job.closeOnOwner();}}}if(cleanupFailure!=null)throw cleanupFailure;}
         finally{closeObservers.clear();observers.clear();observerErrors.clear();onObserverError=null;closing=false;}
     }
 
@@ -294,7 +295,7 @@ public final class AsterEngine implements AutoCloseable {
     private void checkAsyncOwner(){check();if(Looper.myLooper()!=Looper.getMainLooper())throw new IllegalStateException("Async calculation requires a main/UI owner engine");}
     private AsyncJob beginAsync(String kind,String request,AsterColumns columns,AsyncOptions options,AsyncListener listener) throws JSONException {
         checkAsyncOwner();if(options==null||listener==null)throw new IllegalArgumentException("Async options and listener required");
-        if(activeWorkspace!=null)throw new IllegalStateException("Workspace restore is active");
+        if(activeWorkspace!=null||activeParams!=null)throw new IllegalStateException("Workspace or parameter update is active");
         Thread preceding=null;if(activeJob!=null){preceding=activeJob.blockingWorker();activeJob.stopOnOwner("superseded");}
         AsyncJob job=new AsyncJob(kind,request,columns,options,listener,preceding);activeJob=job;job.start();return job;
     }
@@ -303,8 +304,8 @@ public final class AsterEngine implements AutoCloseable {
     public WorkspaceJob restoreWorkspaceAsync(String document,JSONObject binding,AsyncListener listener)throws JSONException {return restoreWorkspaceAsync(document,binding,new AsyncOptions(),listener);}
     /** Owned document + explicit dataset binding; one active job, no implicit supersession. */
     public WorkspaceJob restoreWorkspaceAsync(String document,JSONObject binding,AsyncOptions options,AsyncListener listener)throws JSONException {
-        checkAsyncOwner();if(activeJob!=null||activeWorkspace!=null)throw new IllegalStateException("Async restore busy");if(document==null||document.length()>2097152||binding==null||options==null||listener==null)throw new IllegalArgumentException("Workspace document/binding/options/listener required");
-        final long sourceHandle=handle,sourceRevision=revision;final String bindingJSON=binding.toString();checkAsyncOwner();if(handle!=sourceHandle||revision!=sourceRevision||activeJob!=null||activeWorkspace!=null)throw new IllegalStateException("Workspace source stale during arguments");
+        checkAsyncOwner();if(activeJob!=null||activeWorkspace!=null||activeParams!=null)throw new IllegalStateException("Async restore busy");if(document==null||document.length()>2097152||binding==null||options==null||listener==null)throw new IllegalArgumentException("Workspace document/binding/options/listener required");
+        final long sourceHandle=handle,sourceRevision=revision;final String bindingJSON=binding.toString();checkAsyncOwner();if(handle!=sourceHandle||revision!=sourceRevision||activeJob!=null||activeWorkspace!=null||activeParams!=null)throw new IllegalStateException("Workspace source stale during arguments");
         final Handler queue=new Handler(Looper.getMainLooper());final long registration=WorkspaceRestoreJob.nextRegistration();
         WorkspaceRestoreJob.Host host=new WorkspaceRestoreJob.Host(){
             private long expectedBytes;
@@ -338,6 +339,72 @@ public final class AsterEngine implements AutoCloseable {
             public void onCallbackError(Throwable error){if(observerErrors.size()<32)observerErrors.add(error);try{if(onObserverError!=null)onObserverError.accept(error);}catch(Throwable reporting){if(observerErrors.size()<32)observerErrors.add(reporting);}}
         };
         WorkspaceRestoreJob state=new WorkspaceRestoreJob(host,document,bindingJSON,options.timeoutMillis,options.maxBarsPerStep);WorkspaceJob result=new WorkspaceJob(state);activeWorkspace=result;state.enqueueInitial();return result;
+    }
+    /** Cancellation/status handle for entry-only parameter updates. */
+    public static final class ParamsJob {
+        private final ParamsUpdateJob job;
+        private ParamsJob(ParamsUpdateJob job){this.job=job;}
+        public void cancel(){job.cancel();}
+        public boolean cleanupPending(){return job.pendingOwnerCleanup();}
+        public String commitOutcome(){return job.commitOutcome();}
+        /** Retry only on the original owner thread; never retries an uncertain free. */
+        public void retryCleanup(){job.resumeOwnerCleanup();}
+    }
+    public ParamsJob setIndicatorParamsAsync(String id,JSONObject params,AsyncListener listener)throws JSONException{return setIndicatorParamsAsync(id,params,new AsyncOptions(),listener);}
+    /** Original runtime/store retained; linked portable indicator definitions only. */
+    public ParamsJob setIndicatorParamsAsync(String id,JSONObject params,AsyncOptions options,AsyncListener listener)throws JSONException{
+        checkAsyncOwner();if(activeJob!=null||activeWorkspace!=null||activeParams!=null)throw new IllegalStateException("Async params busy");
+        if(id==null||id.length()>128||params==null||options==null||listener==null)throw new IllegalArgumentException("Params arguments required");
+        final long sourceHandle=handle,sourceRevision=revision;final String text=params.toString();
+        checkAsyncOwner();if(handle!=sourceHandle||revision!=sourceRevision||activeJob!=null||activeWorkspace!=null||activeParams!=null)throw new IllegalStateException("Params source stale during arguments");
+        final Handler queue=new Handler(Looper.getMainLooper());final long registration=WorkspaceRestoreJob.nextRegistration();
+        ParamsUpdateJob.Host host=new ParamsUpdateJob.Host(){
+            public void requireOwner(){if(Thread.currentThread()!=owner)throw new IllegalStateException("Params owning thread required");}
+            public long currentHandle(){return handle;}public long currentRevision(){return revision;}public boolean closed(){return handle==0||closing;}
+            public boolean current(ParamsUpdateJob job){return activeParams!=null&&activeParams.job==job;}
+            public boolean post(Runnable action){return queue.post(action);}public boolean postDelayed(Runnable action,long millis){return queue.postDelayed(action,millis);}
+            public long begin(long h,String id,String params,long r,long token)throws JSONException{JSONObject v=(JSONObject)invokeHandle(h,"nativeParamsSourceBegin",id,new JSONObject(params),r,NativeJobBudget.MAX_BYTES,token);if(workspaceInteger(v.get("registration"),1,9007199254740991L,"registration")!=token)throw new JSONException("Params begin registration");return workspaceInteger(v.get("ticket"),1,9007199254740991L,"ticket");}
+            public ParamsUpdateJob.Descriptor admit(long h,long ticket,long r)throws JSONException{JSONObject v=(JSONObject)invokeHandle(h,"nativeParamsSourceStep",ticket,8,r);Object complete=v.get("complete");if(!(complete instanceof Boolean))throw new JSONException("Params admission completion");if(!((Boolean)complete))return null;if("noop".equals(v.get("phase")))return new ParamsUpdateJob.Descriptor(null,0,0,true);if(!"copy".equals(v.get("phase")))throw new JSONException("Params admission phase");Object metadata=v.get("metadataJSON");if(!(metadata instanceof String)||((String)metadata).length()>131072)throw new JSONException("Params metadata limit");JSONObject meta=new JSONObject((String)metadata);return new ParamsUpdateJob.Descriptor((String)metadata,(int)workspaceInteger(meta.get("length"),0,AsterColumns.MAX_BARS,"length"),workspaceInteger(v.getJSONObject("plan").get("totalBytes"),1,NativeJobBudget.MAX_BYTES,"logical bytes"),false);}
+            public void checkSource(long h,long ticket,long r)throws JSONException{paramsTrue(invokeHandle(h,"nativeParamsSourceCheck",ticket,r));}
+            public byte[] readSource(long h,long ticket,int slot,int offset,int count){return readBuffer(h,ticket,slot,offset,count);}
+            public long createTarget(){return create(sourceBundle);}
+            public void initializeTarget(long h,String metadata)throws JSONException{paramsTrue(invokeHandle(h,"nativeParamsTargetCreate",metadata));}
+            public void writeTarget(long h,int slot,int offset,byte[] bytes){writeBuffer(h,slot,offset,bytes);}
+            public void startTarget(long h)throws JSONException{paramsTrue(invokeHandle(h,"nativeParamsTargetStart"));}
+            public boolean stepTarget(long h,int bars)throws JSONException{JSONObject p=(JSONObject)invokeHandle(h,"nativeParamsTargetStep",bars);Object phase=p.get("phase"),flag=p.get("complete");if(!(flag instanceof Boolean)||!java.util.Arrays.asList("validate","calculate","outputs","ready").contains(phase)||((Boolean)flag)!=phase.equals("ready"))throw new JSONException("Params target progress");long done=workspaceInteger(p.get("done"),0,9007199254740991L,"progress"),total=workspaceInteger(p.get("total"),0,9007199254740991L,"total");if(done>total)throw new JSONException("Params progress bounds");return (Boolean)flag;}
+            public ParamsUpdateJob.Result result(long h)throws JSONException{Object text=invokeHandle(h,"nativeParamsTargetDescriptor");if(!(text instanceof String)||((String)text).length()>131072)throw new JSONException("Params result metadata");JSONObject v=new JSONObject((String)text);return new ParamsUpdateJob.Result((String)text,v.getJSONArray("outputs").length(),(int)workspaceInteger(v.get("capacity"),16,AsterColumns.MAX_BARS,"capacity"),(int)workspaceInteger(v.get("checkpointCount"),0,16385,"checkpoint count"));}
+            public byte[] readResult(long h,long token,int slot,int offset,int count){return readBuffer(h,token,slot,offset,count);}
+            public ParamsUpdateJob.Record checkpoint(long h,int ordinal)throws JSONException{JSONObject v=(JSONObject)invokeHandle(h,"nativeParamsTargetCheckpoint",ordinal);Object text=v.get("text");if(!(text instanceof String))throw new JSONException("Params checkpoint text");return new ParamsUpdateJob.Record((int)workspaceInteger(v.get("index"),0,AsterColumns.MAX_BARS,"checkpoint index"),(String)text);}
+            public void freeTarget(long h){free(h);}
+            public void receive(long h,long ticket,String text,long r)throws JSONException{paramsTrue(invokeHandle(h,"nativeParamsSourceReceive",ticket,text,r));}
+            public void writeResult(long h,long ticket,int slot,int offset,byte[] bytes,long r)throws JSONException{paramsTrue(invokeHandle(h,"nativeParamsSourceArmWrite",ticket,slot,offset,bytes.length/8,r));writeBuffer(h,slot,offset,bytes);}
+            public void importCheckpoint(long h,long ticket,ParamsUpdateJob.Record record,long r)throws JSONException{paramsTrue(invokeHandle(h,"nativeParamsSourceCheckpoint",ticket,record.index,record.text,r));}
+            public boolean validate(long h,long ticket,int values,long r)throws JSONException{JSONObject p=(JSONObject)invokeHandle(h,"nativeParamsSourceValidate",ticket,values,r);Object flag=p.get("complete");if(!(flag instanceof Boolean))throw new JSONException("Params validation completion");return (Boolean)flag;}
+            public void prepare(long h,long ticket,long r)throws JSONException{paramsTrue(invokeHandle(h,"nativeParamsSourcePrepare",ticket,r));}
+            public ParamsUpdateJob.Receipt publish(long h,long ticket,long r)throws JSONException{return paramsReceipt(invokeHandle(h,"nativeParamsSourcePublish",ticket,r),registration,id);}
+            public ParamsUpdateJob.Receipt status(long h,long token)throws JSONException{return paramsReceipt(invokeHandle(h,"nativeParamsSourceStatus",token),token,id);}
+            public ParamsUpdateJob.Receipt abort(long h,long token)throws JSONException{return paramsReceipt(invokeHandle(h,"nativeParamsSourceAbort",token),token,id);}
+            public void releaseReservation(ParamsUpdateJob job){if(current(job))activeParams=null;}
+            public void notifyObservers(){notifyChanges();}
+            public void onProgress(String phase,long done,long total){listener.onProgress(new AsyncProgress(phase,done,total));}
+            public void onComplete(String status,String outcome,String cleanup,Throwable error,long copied,long bytes,int callbackErrors){try{listener.onComplete(new AsyncResult(status,error,new JSONObject().put("kind","indicator-params").put("commitOutcome",outcome).put("cleanupState",cleanup).put("copiedBytes",copied).put("logicalAdmissionBytes",bytes).put("callbackErrors",callbackErrors)));}catch(JSONException impossible){throw new IllegalStateException(impossible);}}
+            public void onCallbackError(Throwable error){if(observerErrors.size()<32)observerErrors.add(error);try{if(onObserverError!=null)onObserverError.accept(error);}catch(Throwable reporting){if(observerErrors.size()<32)observerErrors.add(reporting);}}
+        };
+        ParamsUpdateJob state=new ParamsUpdateJob(host,id,text,registration,options.timeoutMillis,options.maxBarsPerStep);ParamsJob result=new ParamsJob(state);activeParams=result;state.enqueueInitial();return result;
+    }
+    private static void paramsTrue(Object value)throws JSONException{if(!Boolean.TRUE.equals(value))throw new JSONException("Params acknowledgment");}
+    private static ParamsUpdateJob.Receipt paramsReceipt(Object raw,long registration,String id)throws JSONException{
+        if(raw==JSONObject.NULL)return new ParamsUpdateJob.Receipt("unknown",registration);
+        if(!(raw instanceof JSONObject))throw new JSONException("Params status object");JSONObject value=(JSONObject)raw;
+        if(workspaceInteger(value.get("registration"),1,9007199254740991L,"registration")!=registration)throw new JSONException("Params status registration");
+        Object status=value.get("status");if(!(status instanceof String))throw new JSONException("Params status string");
+        if(status.equals("committed")||status.equals("unchanged")){
+            JSONObject receipt=value.getJSONObject("receipt");
+            if(!"aster.native-params-published".equals(receipt.get("schema"))||workspaceInteger(receipt.get("version"),1,1,"version")!=1||workspaceInteger(receipt.get("registration"),1,9007199254740991L,"registration")!=registration||!status.equals(receipt.get("status"))||!id.equals(receipt.get("id")))throw new JSONException("Params publication receipt binding");
+            JSONArray outputs=receipt.getJSONArray("outputs");if(outputs.length()<1||outputs.length()>32)throw new JSONException("Params publication outputs");java.util.HashSet<String> names=new java.util.HashSet<>();for(int i=0;i<outputs.length();i++){Object name=outputs.get(i);if(!(name instanceof String)||((String)name).isEmpty()||((String)name).length()>128||java.util.Arrays.asList("__proto__","constructor","prototype").contains(name)||!names.add((String)name))throw new JSONException("Params publication output name");}
+            JSONObject offsets=receipt.getJSONObject("plotOffsets");java.util.Iterator<String> keys=offsets.keys();while(keys.hasNext()){String key=keys.next();if(!names.contains(key))throw new JSONException("Params publication offset output");workspaceInteger(offsets.get(key),-10000,10000,"plot offset");}
+        }
+        return new ParamsUpdateJob.Receipt((String)status,registration);
     }
     private static long workspaceInteger(Object value,long min,long max,String label)throws JSONException {if(!(value instanceof Number))throw new JSONException("Workspace numeric "+label);double n=((Number)value).doubleValue();if(!Double.isFinite(n)||n!=Math.rint(n)||n<min||n>max)throw new JSONException("Workspace integer "+label);return (long)n;}
     private static Object invokeHandle(long h,String function,Object... args) throws JSONException {return new JSONArray("["+call(h,function,new JSONArray(args).toString())+"]").get(0);}

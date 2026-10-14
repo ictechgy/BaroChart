@@ -13,6 +13,7 @@ test('Java workspace ownership evidence is scoped to the production helper with 
         'performanceMeasured', 'unavailableOwnerCleanupSupported']) assert.equal(JAVA_WORKSPACE_JOB_BOUNDARY[key], false, key);
     assert.deepEqual(JAVA_WORKSPACE_JOB_SOURCES, [
         'native/android/java/dev/aster/charts/WorkspaceRestoreJob.java',
+    'native/android/java/dev/aster/charts/NativeJobBudget.java',
         'test/java-workspace-job/dev/aster/charts/WorkspaceRestoreJobHarness.java',
     ]);
 });

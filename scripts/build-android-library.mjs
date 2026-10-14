@@ -68,7 +68,7 @@ with zipfile.ZipFile(p) as z:
  jar=z.read('classes.jar')
  with zipfile.ZipFile(io.BytesIO(jar)) as c:
   classes=c.namelist()
-  expected=['AsterEngine','AsterEngine$AsyncJob','AsterEngine$AsyncResult','AsterEngine$AsyncOptions','AsterEngine$AsyncListener','AsterEngine$AsyncProgress','AsterColumns','AsterChartView','AsterBitmapCachePool']
+  expected=['AsterEngine','AsterEngine$AsyncJob','AsterEngine$AsyncResult','AsterEngine$AsyncOptions','AsterEngine$AsyncListener','AsterEngine$AsyncProgress','AsterEngine$ParamsJob','ParamsUpdateJob','NativeJobBudget','AsterColumns','AsterChartView','AsterBitmapCachePool']
   for name in expected:
    if 'dev/aster/charts/'+name+'.class' not in classes:raise ValueError('Missing SDK class: '+name)
   if any('Verification' in name or 'Activity' in name or 'Instrumentation' in name for name in classes):raise ValueError('Demo/test classes in SDK')
@@ -76,7 +76,7 @@ with zipfile.ZipFile(p) as z:
   j=pathlib.Path(d)/'classes.jar';j.write_bytes(jar)
   import subprocess
   api=subprocess.run([str(jdk/'bin/javap'),'-public','-classpath',str(j),'dev.aster.charts.AsterEngine','dev.aster.charts.AsterColumns','dev.aster.charts.AsterChartView'],capture_output=True,text=True,check=True).stdout
-  for contract in ['implements java.lang.AutoCloseable','public dev.aster.charts.AsterEngine(android.content.Context, int)','setColumns(org.json.JSONObject)','addIndicator(','addDrawing(','applyDataEventAsync(','prepareColumnsAsync(','public void close()','public static dev.aster.charts.AsterColumns copyOf(','public dev.aster.charts.AsterChartView(android.content.Context, dev.aster.charts.AsterEngine)','setTool(java.lang.String)','renderCacheMetrics()']:
+  for contract in ['implements java.lang.AutoCloseable','public dev.aster.charts.AsterEngine(android.content.Context, int)','setColumns(org.json.JSONObject)','addIndicator(','addDrawing(','applyDataEventAsync(','prepareColumnsAsync(','setIndicatorParamsAsync(','public void close()','public static dev.aster.charts.AsterColumns copyOf(','public dev.aster.charts.AsterChartView(android.content.Context, dev.aster.charts.AsterEngine)','setTool(java.lang.String)','renderCacheMetrics()']:
    if contract not in api:raise ValueError('Missing public API: '+contract)
  print(json.dumps({'entries':names,'classCount':len(classes),'sdkVersion':version.text,'coreSHA256':hashlib.sha256(js).hexdigest(),'jniSHA256':hashlib.sha256(native).hexdigest(),'classesSHA256':hashlib.sha256(jar).hexdigest(),'jniLoadAlignment':aligns,'minSDK':26,'abis':['arm64-v8a'],'publicAPI':api}))
 `,resolve(aar),resolve(core),jdk]));

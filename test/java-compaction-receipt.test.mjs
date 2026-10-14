@@ -29,6 +29,8 @@ test('Java compaction evidence distinguishes the actual decoder from compile-onl
         'native/android/java/dev/aster/charts/AsterEngine.java',
         'native/android/java/dev/aster/charts/AsterColumns.java',
         'native/android/java/dev/aster/charts/WorkspaceRestoreJob.java',
+        'native/android/java/dev/aster/charts/NativeJobBudget.java',
+        'native/android/java/dev/aster/charts/ParamsUpdateJob.java',
     ]);
     assert.equal(JAVA_COMPACTION_HARNESS, 'test/java-compaction-receipt/dev/aster/charts/CompactionReceiptTest.java');
 });

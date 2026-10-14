@@ -14,6 +14,8 @@ test('Java host check keeps its non-Android compile-only evidence boundary expli
         'native/android/java/dev/aster/charts/AsterEngine.java',
         'native/android/java/dev/aster/charts/AsterColumns.java',
         'native/android/java/dev/aster/charts/WorkspaceRestoreJob.java',
+        'native/android/java/dev/aster/charts/NativeJobBudget.java',
+        'native/android/java/dev/aster/charts/ParamsUpdateJob.java',
     ]);
 });
 

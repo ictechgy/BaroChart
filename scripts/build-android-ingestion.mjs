@@ -19,7 +19,7 @@ const selectedJNI=await hash(join(out,'lib/arm64-v8a/libaster.so'));if(expectedJ
 const sourceFiles=[];for(const dir of [join(root,'native/android/java/dev/aster/charts'),join(root,'examples/android/cycle12')])for(const name of (await readdir(dir)).filter(n=>n.endsWith('.java')))sourceFiles.push(join(dir,name));
 sourceFiles.push(join(root,'examples/android/IngestionVerification.java'),join(root,'examples/android/TimezoneVerification.java'));
 const hashes={};const snapshots=[];for(const source of sourceFiles){const name=source.split('/').at(-1),dest=join(out,'java',name);await copyFile(source,dest);hashes[name]=await hash(dest);snapshots.push(dest);}
-const production=snapshots.filter(p=>['AsterEngine.java','AsterColumns.java','AsterChartView.java','AsterBitmapCachePool.java','WorkspaceRestoreJob.java'].includes(p.split('/').at(-1)));
+const production=snapshots.filter(p=>['AsterEngine.java','AsterColumns.java','AsterChartView.java','AsterBitmapCachePool.java','WorkspaceRestoreJob.java','NativeJobBudget.java','ParamsUpdateJob.java'].includes(p.split('/').at(-1)));
 // Existing low-memory compatibility callbacks are deprecated in API36. Keep
 // their production code unchanged; all other lint warnings remain fatal.
 run(join(jdk,'bin/javac'),['--release','8','-Werror','-Xlint:all,-options,-deprecation','-cp',android,'-d',join(out,'classes'),...production]);

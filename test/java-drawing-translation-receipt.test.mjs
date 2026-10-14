@@ -31,6 +31,8 @@ test('Java drawing translation evidence distinguishes the actual decoder from co
         'native/android/java/dev/aster/charts/AsterEngine.java',
         'native/android/java/dev/aster/charts/AsterColumns.java',
         'native/android/java/dev/aster/charts/WorkspaceRestoreJob.java',
+        'native/android/java/dev/aster/charts/NativeJobBudget.java',
+        'native/android/java/dev/aster/charts/ParamsUpdateJob.java',
     ]);
     assert.equal(JAVA_DRAWING_TRANSLATION_HARNESS, 'test/java-drawing-translation-receipt/dev/aster/charts/DrawingTranslationReceiptTest.java');
 });

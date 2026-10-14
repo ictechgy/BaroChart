@@ -1,9 +1,9 @@
 # Native entry-only asynchronous indicator parameters
 
-Design and staged implementation contract. Swift/Java currently expose synchronous
+Design and staged implementation contract. Both SDKs expose synchronous
 `setIndicatorParams`; the web Worker API is already entry-only. Whole-workspace
 native restoration replaces the runtime and is not an equivalent implementation.
-The proposed native API must preserve the original runtime, ChartModel, BarStore,
+The entry-only native contract preserves the original runtime, ChartModel, BarStore,
 other indicator entries, drawing history, series styles and axis bindings.
 
 ## Execution and ownership
@@ -87,8 +87,8 @@ this must be established before connecting a host facade.
 - Actual generated-bundle VM and standalone QuickJS protocols are separate from
   Android/JNI or Swift/JSC execution. SDK/device builds are not performed here.
 
-No public native async facade is advertised as available until its source
-integration and the stated cloud acceptance stages are complete.
+Java now has the source-level async facade described below. Its cloud checks do
+not establish Android/JNI runtime support; Swift integration remains pending.
 
 ## Initial internal target slice
 
@@ -115,7 +115,7 @@ interrupt cleanup with zero final live allocations. The C executable was reused
 after verifying its host/vendor source hashes against its recorded build. This
 is not a new native SDK compilation or an end-to-end async parameter API test.
 
-## Original-runtime transport (internal, host facade pending)
+## Original-runtime transport (internal protocol)
 
 `NativeParamsCapture` retains the original model, BarStore and entries map while
 `NativeParamsImport` owns detached replacement vectors and bounded checkpoints.
@@ -132,8 +132,9 @@ latest four records, including committed/unchanged receipts; returned status is
 a copy. A lost Begin or Publish response is resolved by status/abort for the same
 registration, never by unconditional replay. Unknown or evicted status is
 inconclusive. These tokens correlate ownership; they are not security credentials.
-Notification, once-only completion and host reservation release are still host
-responsibilities and have not been connected to Java/Swift yet.
+Notification, once-only completion and host reservation release are host
+responsibilities. The Java source implementation below connects these stages;
+Swift integration is still pending.
 
 Source columns and result vectors transfer in at most 16,384-value slices using
 the existing F64 buffer transport. An original-runtime result write requires a
@@ -159,3 +160,46 @@ post-cleanup stale rejection. A standalone vendored QuickJS run passed the 12
 source-protocol assertions plus normal/OOM/interrupt cleanup with zero remaining
 tracked allocations. Strict TypeScript and offline package checks passed. This is
 a related-suite result, not a rerun of the entire project suite or native SDK QA.
+
+
+## Java source facade and execution boundary
+
+`AsterEngine.setIndicatorParamsAsync(id, params, options, listener)` returns a
+`ParamsJob`. The complete parameter object replaces the old settings. The engine
+must be main/UI-owned and no other async job may be active. There is no implicit
+supersession. A custom indicator must be application-linked in the native bundle;
+source strings and downloaded modules are not accepted for this operation.
+
+The original runtime, store and unrelated entries remain in place. A temporary
+worker runtime computes one replacement, sends bounded vectors/checkpoints back,
+and is freed before owner prepare/publication. Workspace restore and
+parameter jobs share two admission slots and 768 MiB of known logical bytes.
+Before a descriptor is established only the slot is reserved. This is not an RSS
+bound. Ordinary idle engine memory and externally held old results remain outside
+that shared active-job budget.
+
+`cancel()` is thread-safe; `cleanupPending()` and `commitOutcome()` expose state.
+`retryCleanup()` must run on the original owner thread. An unavailable owner queue
+retains the source and reservation until owner recovery. Completion metrics carry
+`commitOutcome` (`notCommitted`, `committed`, `unchanged`, or `unknown`) and
+`cleanupState`. Committed publication is not undone by later cancellation or
+observer errors. An unchanged replacement completes without observer notification.
+
+A lost publication reply is resolved through the registration status. If that
+lookup also fails, outcome remains unknown, the engine remains busy and cleanup
+is pending. Do not retry the mutation. Confirmed engine close plus worker cleanup
+can complete as `indeterminate`/`unknown` without notification; this does not say
+whether publication happened before close. If native free itself throws, its
+outcome is uncertain: no blind second free, false success, or budget release is
+performed. Such a pending job can continue occupying admission capacity.
+
+Cancellation/deadlines are cooperative between native calls. A trusted custom
+factory/step/validator, a single checkpoint parse, allocation or GC cannot be
+preempted by this Java scheduler. No hard UI-latency or custom-code sandbox bound
+is implied. The owner still performs bounded result validation and publication.
+
+Cloud tests execute the production Java state machine with an independent fake
+transport and real JVM worker threads. The complete Engine is typechecked against
+compile-only Android and JSON signatures. Actual Handler scheduling, JSON/JNI
+serialization, allocator behavior, Android builds and devices remain unverified.
+Swift/JSC async parameter integration remains a separate pending stage.
