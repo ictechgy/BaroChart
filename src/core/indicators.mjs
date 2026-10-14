@@ -1,3 +1,4 @@
+import {retireNativeEntryIfReplaced,retireNativeEntriesAfterClear} from './native-checkpoints.mjs';
 import {registerStoreOwner,unregisterStoreOwner} from './store-owners.mjs';
 import {optionRecord,identifier,RESOURCE_LIMITS} from './contracts.mjs';
 import {validateIndicatorParams} from './indicator-params.mjs';
@@ -205,9 +206,9 @@ export class IndicatorEngine {
     identifier(id,'Indicator id');validateIndicatorParams(params);if(this.entries.size>=RESOURCE_LIMITS.maxIndicators)throw new RangeError('Indicator limit');
     if (this.entries.has(id)) throw new Error('Duplicate indicator id'); const make = this.registry.get(name); if (!make) throw new Error(`Unknown indicator: ${name}`);
     const def = make(params); if (!Array.isArray(def.outputs) || !def.outputs.length||def.outputs.length>32 || def.outputs.some(k=>typeof k!=='string'||!k||k.length>128||['__proto__','constructor','prototype'].includes(k)) || new Set(def.outputs).size!==def.outputs.length || typeof def.create !== 'function' || Object.entries(def.plotOffsets??{}).some(([k,v])=>!def.outputs.includes(k)||!Number.isInteger(v)||Math.abs(v)>10000)) throw new TypeError('Invalid indicator definition');
-    const entry={def,name,params:cloneState(params), dirty: 0, dirtyTo:this.store.length,invalidated:true,length: 0, arrays: [], checkpoints: new Map(), revision: 0};this.entries.set(id,entry);try{return this.get(id);}catch(error){if(this.entries.get(id)===entry)this.entries.delete(id);throw error;}
+    const entry={def,name,params:cloneState(params), dirty: 0, dirtyTo:this.store.length,invalidated:true,length: 0, arrays: [], checkpoints: new Map(), revision: 0};this.entries.set(id,entry);try{return this.get(id);}catch(error){if(this.entries.get(id)===entry){const entries=this.entries;entries.delete(id);retireNativeEntryIfReplaced(entries,id);}throw error;}
   }
-  remove(id) {this.entries.delete(id);}
+  remove(id) {const entries=this.entries;entries.delete(id);retireNativeEntryIfReplaced(entries,id);}
   get(id) {const task=this.calculate(id);let next;do{next=task.next();}while(!next.done);return next.value;}
   *calculate(id,chunkSize=4096) {
     if(!Number.isInteger(chunkSize)||chunkSize<1||chunkSize>65536)throw new RangeError('Calculation chunk size');
@@ -264,5 +265,5 @@ export class IndicatorEngine {
       if(!completed&&owned()&&!sameSource()){e.dirty=0;e.invalidated=true;}
     }
   }
-  dispose() {try{this.unsubscribe(); this.entries.clear();}finally{unregisterStoreOwner(this);}}
+  dispose() {try{this.unsubscribe(); const entries=this.entries;entries.clear();retireNativeEntriesAfterClear(entries);}finally{unregisterStoreOwner(this);}}
 }

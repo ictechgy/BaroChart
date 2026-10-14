@@ -1,11 +1,11 @@
 import {readFile} from 'node:fs/promises';
 import {resolve,dirname} from 'node:path';
 import vm from 'node:vm';
-export const CORE_MODULES=['contracts','labels','data','store-owners','block-index','markets','resample-plan','resample','indicator-params','indicator-modules','trusted-studies','session-studies','indicators','drawing-validation','drawings','scene-parts','model','scene','frame-cache','interaction','checkpoint-validation','native-checkpoints','ingestion-error','ingestion','study-setup','data-explorer','compaction','drawing-translation','api','workspace','native-workspace','async-state','prepare-state','native-workspace-target','native-workspace-source','async-ui'];
+export const CORE_MODULES=['contracts','labels','data','store-owners','block-index','markets','resample-plan','resample','indicator-params','indicator-modules','trusted-studies','session-studies','indicators','drawing-validation','drawings','scene-parts','model','scene','frame-cache','interaction','checkpoint-validation','native-checkpoints','ingestion-error','ingestion','study-setup','data-explorer','compaction','drawing-translation','api','workspace','native-workspace','async-state','prepare-state','native-workspace-target','native-workspace-source','native-params-target','async-ui'];
 const bundleRoot=resolve(import.meta.dirname,'..');
 export async function buildNativeBundle({modulePaths=[]}={}){
  const names=[],chunks=[];
- for(const file of CORE_MODULES){let source=await readFile(resolve(bundleRoot,`src/core/${file}.mjs`),'utf8');for(const match of source.matchAll(/export (?:class|function|const) (\w+)/g))if(!['store-owners','compaction','drawing-translation'].includes(file)&&match[1]!=='ownedCheckpointClear')names.push(match[1]);source=source.replace(/^import .*;\n/gm,'').replace(/^export \{.*\} from .*;\n/gm,'').replace(/export (?=class|function|const)/g,'');chunks.push(source);}
+ for(const file of CORE_MODULES){let source=await readFile(resolve(bundleRoot,`src/core/${file}.mjs`),'utf8');for(const match of source.matchAll(/export (?:class|function|const) (\w+)/g))if(!['store-owners','compaction','drawing-translation'].includes(file)&&!['ownedCheckpointClear','prepareNativeEntryCommit','retireNativeEntryIfReplaced','retireNativeEntriesAfterClear'].includes(match[1]))names.push(match[1]);source=source.replace(/^import .*;\n/gm,'').replace(/^export \{.*\} from .*;\n/gm,'').replace(/export (?=class|function|const)/g,'');chunks.push(source);}
  // Native renderer transport stays outside the DOM-free calculation exports.
  chunks.push((await readFile(resolve(bundleRoot,'src/renderers/native-command-packet.mjs'),'utf8')).replace(/export (?=class|function|const)/g,''));
  // Deliberately small build contract: self-contained, locally selected modules

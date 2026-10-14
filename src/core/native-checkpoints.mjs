@@ -56,3 +56,24 @@ export function ownedCheckpointClear(map){
  if(Object.getPrototypeOf(map)!==Map.prototype||Reflect.ownKeys(map).length)throw new TypeError('Compaction requires an unmodified checkpoint Map');
  ordinaryCheckpointHas.call(map,0);return ()=>ordinaryCheckpointClear.call(map);
 }
+
+// Entry-only native publication can preserve an ordinary entries Map identity.
+// The registry is keyed by that Map, never retained from a caller-held entry.
+// Direct replacement/mutation of engine.entries or Map intrinsics is unsupported.
+const nativeAdoptedOwners=new WeakMap(),nativeMapGet=Map.prototype.get,nativeMapSet=Map.prototype.set,nativeEntriesSet=NativeCheckpointEntries.prototype.set;
+export function retireNativeEntryIfReplaced(entries,id){
+ const owner=nativeAdoptedOwners.get(entries),row=owner?.rows.get(id);if(!row||nativeMapGet.call(entries,id)===row.entry)return;
+ owner.rows.delete(id);nativeCheckpointEntryOwners.delete(row.checkpoints);nativeCheckpointDispose.call(row.checkpoints);
+}
+export function retireNativeEntriesAfterClear(entries){
+ const owner=nativeAdoptedOwners.get(entries);if(!owner)return;for(const [id]of owner.rows)retireNativeEntryIfReplaced(entries,id);
+}
+export function prepareNativeEntryCommit(entries,id,previous,entry){
+ const proto=Object.getPrototypeOf(entries);if(![Map.prototype,NativeCheckpointEntries.prototype].includes(proto)||Reflect.ownKeys(entries).length||nativeMapGet.call(entries,id)!==previous)throw new TypeError('Native params entry owner');
+ const checkpoints=nativeEntryCheckpoints(entry);if(!checkpoints||nativeCheckpointRetired.has(checkpoints)||nativeCheckpointEntryOwners.has(checkpoints)||Object.getPrototypeOf(checkpoints)!==NativeCheckpointMap.prototype||Reflect.ownKeys(checkpoints).length)throw new TypeError('Native params checkpoint ownership');
+ let owner=nativeAdoptedOwners.get(entries);if(proto===Map.prototype&&!owner){owner={token:{},rows:new Map()};nativeAdoptedOwners.set(entries,owner);}let used=false;
+ return ()=>{if(used||nativeEntryCheckpoints(entry)!==checkpoints||nativeMapGet.call(entries,id)!==previous||nativeCheckpointRetired.has(checkpoints)||nativeCheckpointEntryOwners.has(checkpoints))throw new Error('Native params entry commit stale');used=true;
+  if(proto===NativeCheckpointEntries.prototype){nativeEntriesSet.call(entries,id,entry);return;}
+  nativeMapSet.call(entries,id,entry);retireNativeEntryIfReplaced(entries,id);owner.rows.set(id,{entry,checkpoints});nativeCheckpointEntryOwners.set(checkpoints,{owner:owner.token,id});
+ };
+}

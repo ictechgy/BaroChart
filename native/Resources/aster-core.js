@@ -1041,9 +1041,9 @@ class IndicatorEngine {
     identifier(id,'Indicator id');validateIndicatorParams(params);if(this.entries.size>=RESOURCE_LIMITS.maxIndicators)throw new RangeError('Indicator limit');
     if (this.entries.has(id)) throw new Error('Duplicate indicator id'); const make = this.registry.get(name); if (!make) throw new Error(`Unknown indicator: ${name}`);
     const def = make(params); if (!Array.isArray(def.outputs) || !def.outputs.length||def.outputs.length>32 || def.outputs.some(k=>typeof k!=='string'||!k||k.length>128||['__proto__','constructor','prototype'].includes(k)) || new Set(def.outputs).size!==def.outputs.length || typeof def.create !== 'function' || Object.entries(def.plotOffsets??{}).some(([k,v])=>!def.outputs.includes(k)||!Number.isInteger(v)||Math.abs(v)>10000)) throw new TypeError('Invalid indicator definition');
-    const entry={def,name,params:cloneState(params), dirty: 0, dirtyTo:this.store.length,invalidated:true,length: 0, arrays: [], checkpoints: new Map(), revision: 0};this.entries.set(id,entry);try{return this.get(id);}catch(error){if(this.entries.get(id)===entry)this.entries.delete(id);throw error;}
+    const entry={def,name,params:cloneState(params), dirty: 0, dirtyTo:this.store.length,invalidated:true,length: 0, arrays: [], checkpoints: new Map(), revision: 0};this.entries.set(id,entry);try{return this.get(id);}catch(error){if(this.entries.get(id)===entry){const entries=this.entries;entries.delete(id);retireNativeEntryIfReplaced(entries,id);}throw error;}
   }
-  remove(id) {this.entries.delete(id);}
+  remove(id) {const entries=this.entries;entries.delete(id);retireNativeEntryIfReplaced(entries,id);}
   get(id) {const task=this.calculate(id);let next;do{next=task.next();}while(!next.done);return next.value;}
   *calculate(id,chunkSize=4096) {
     if(!Number.isInteger(chunkSize)||chunkSize<1||chunkSize>65536)throw new RangeError('Calculation chunk size');
@@ -1100,7 +1100,7 @@ class IndicatorEngine {
       if(!completed&&owned()&&!sameSource()){e.dirty=0;e.invalidated=true;}
     }
   }
-  dispose() {try{this.unsubscribe(); this.entries.clear();}finally{unregisterStoreOwner(this);}}
+  dispose() {try{this.unsubscribe(); const entries=this.entries;entries.clear();retireNativeEntriesAfterClear(entries);}finally{unregisterStoreOwner(this);}}
 }
 
 // Shared structural validation; callers retain their existing copy/commit policy.
@@ -1816,6 +1816,27 @@ function ownedCheckpointClear(map){
  ordinaryCheckpointHas.call(map,0);return ()=>ordinaryCheckpointClear.call(map);
 }
 
+// Entry-only native publication can preserve an ordinary entries Map identity.
+// The registry is keyed by that Map, never retained from a caller-held entry.
+// Direct replacement/mutation of engine.entries or Map intrinsics is unsupported.
+const nativeAdoptedOwners=new WeakMap(),nativeMapGet=Map.prototype.get,nativeMapSet=Map.prototype.set,nativeEntriesSet=NativeCheckpointEntries.prototype.set;
+function retireNativeEntryIfReplaced(entries,id){
+ const owner=nativeAdoptedOwners.get(entries),row=owner?.rows.get(id);if(!row||nativeMapGet.call(entries,id)===row.entry)return;
+ owner.rows.delete(id);nativeCheckpointEntryOwners.delete(row.checkpoints);nativeCheckpointDispose.call(row.checkpoints);
+}
+function retireNativeEntriesAfterClear(entries){
+ const owner=nativeAdoptedOwners.get(entries);if(!owner)return;for(const [id]of owner.rows)retireNativeEntryIfReplaced(entries,id);
+}
+function prepareNativeEntryCommit(entries,id,previous,entry){
+ const proto=Object.getPrototypeOf(entries);if(![Map.prototype,NativeCheckpointEntries.prototype].includes(proto)||Reflect.ownKeys(entries).length||nativeMapGet.call(entries,id)!==previous)throw new TypeError('Native params entry owner');
+ const checkpoints=nativeEntryCheckpoints(entry);if(!checkpoints||nativeCheckpointRetired.has(checkpoints)||nativeCheckpointEntryOwners.has(checkpoints)||Object.getPrototypeOf(checkpoints)!==NativeCheckpointMap.prototype||Reflect.ownKeys(checkpoints).length)throw new TypeError('Native params checkpoint ownership');
+ let owner=nativeAdoptedOwners.get(entries);if(proto===Map.prototype&&!owner){owner={token:{},rows:new Map()};nativeAdoptedOwners.set(entries,owner);}let used=false;
+ return ()=>{if(used||nativeEntryCheckpoints(entry)!==checkpoints||nativeMapGet.call(entries,id)!==previous||nativeCheckpointRetired.has(checkpoints)||nativeCheckpointEntryOwners.has(checkpoints))throw new Error('Native params entry commit stale');used=true;
+  if(proto===NativeCheckpointEntries.prototype){nativeEntriesSet.call(entries,id,entry);return;}
+  nativeMapSet.call(entries,id,entry);retireNativeEntryIfReplaced(entries,id);owner.rows.set(id,{entry,checkpoints});nativeCheckpointEntryOwners.set(checkpoints,{owner:owner.token,id});
+ };
+}
+
 class IngestionError extends Error {
  constructor(code,message,cause){super(message);this.name='IngestionError';this.code=code;if(cause!==undefined)this.cause=cause;}
 }
@@ -1987,7 +2008,7 @@ function setStudyParams(model,id,params){
   if(entry.def.outputs.some(output=>!Object.is(offset(entry.def,output),offset(replacement.def,output))))throw new TypeError('Indicator parameter update cannot change plot offsets');
   const result=metadata(replacement.def);
   if(!current())throw new Error('Indicator params stale: owner changed during staging');
-  entriesMap.set(id,replacement);
+  entriesMap.set(id,replacement);retireNativeEntryIfReplaced(entriesMap,id);
   for(const s of series)if(s.indicator===id){s.rangeIndex=null;s.revision=undefined;s.dirtyFrom=0;}
   return result;
  }finally{candidate.dispose();}
@@ -2703,6 +2724,46 @@ class NativeWorkspaceCapture {
  dispose(){if(this.closed)return;this.closed=true;try{const release=this.lease;this.lease=null;release?.();}finally{this.api=null;this.model=null;this.input=null;this.size=null;this.session=null;this.refs=null;this.before=null;this.records=[];this.frames=[];this.recordIterator=null;this.buffers=[];this.document=null;this.ingestionText=null;this.binding=null;this.metadataJSON=null;this.seenDrawings=null;this.seenFrames=null;}}
 }
 
+// Internal isolated-runtime parameter calculation. No host publication or timers.
+const nativeParamsSame=(a,b)=>Object.keys(a).length===Object.keys(b).length&&Object.keys(a).every(k=>Object.hasOwn(b,k)&&Object.is(a[k],b[k]));
+function nativeParamsLayout(def){return {outputs:[...def.outputs],plotOffsets:{...def.plotOffsets}};}
+function nativeParamsLayoutEqual(a,b){return a.outputs.length===b.outputs.length&&a.outputs.every((k,i)=>k===b.outputs[i])&&nativeParamsSame(a.plotOffsets,b.plotOffsets);}
+function nativeParamsSpec(text){
+ if(typeof text!=='string'||text.length>131072)throw new RangeError('Native params metadata limit');const b=safeCheckpointParse(text);
+ optionRecord(b,['schema','version','registration','id','name','params','module','length','capacity','outputs','plotOffsets','maxBytes'],'Native params metadata');
+ if(b.schema!=='aster.native-params-target'||b.version!==1||!Number.isSafeInteger(b.registration)||b.registration<1)throw new TypeError('Native params protocol');identifier(b.id,'Indicator id');identifier(b.name,'Indicator name');validateIndicatorParams(b.params);
+ if(!Number.isSafeInteger(b.length)||b.length<0||b.length>RESOURCE_LIMITS.maxBars||!Number.isSafeInteger(b.capacity)||b.capacity<16||b.capacity<b.length||b.capacity>RESOURCE_LIMITS.maxBars||(b.capacity&(b.capacity-1)))throw new RangeError('Native params dimensions');
+ if(!Number.isSafeInteger(b.maxBytes)||b.maxBytes<1||b.maxBytes>805306368)throw new RangeError('Native params byte limit');
+ validateIndicatorModuleBinding(b.name,b.module);const factory=resolveIndicatorFactory(b.name);requirePortableFactory(b.name,factory);
+ // Definition construction follows the same IndicatorEngine admission as web.
+ const store={length:0,capacity:0,columns:{},_subscribeInternal:()=>()=>{}},probe=new IndicatorEngine(store);let def;
+ try{probe.registry.set(b.name,factory);probe.add(b.id,b.name,{...b.params});const entry=probe.entries.get(b.id);if(!nativeParamsSame(entry.params,b.params))throw new TypeError('Native params factory changed params');def=entry.def;}finally{probe.dispose();}
+ const layout=nativeParamsLayout(def);if(!Array.isArray(b.outputs)||!nativeParamsLayoutEqual(layout,{outputs:b.outputs,plotOffsets:b.plotOffsets}))throw new TypeError('Native params output binding');
+ const outputBytes=layout.outputs.length*b.capacity*8;if(outputBytes>268435456)throw new RangeError('Native params output limit');
+ const checkpointCount=b.length?Math.floor(b.length/256)+1:0,plan={sourceBytes:b.length*48,outputBytes,checkpointBytes:NATIVE_CHECKPOINT_TOTAL_BYTES,recordMetadataBytes:checkpointCount*128,scratchBytes:16*1024*1024};plan.totalBytes=Object.values(plan).reduce((a,n)=>a+n,0);if(plan.totalBytes>b.maxBytes)throw new RangeError('Native params target logical byte limit');
+ return {binding:b,def,create:def.create,layout,factory,checkpointCount,plan};
+}
+class NativeParamsTarget {
+ constructor(text){const s=nativeParamsSpec(text);Object.assign(this,s);this.closed=false;this.chunkSize=null;this.phase='capture';this.columns=Object.fromEntries(FIELDS.map(k=>[k,new Float64Array(s.binding.length)]));this.received=FIELDS.map(()=>0);this.at=0;this.output=0;this.previous=-Infinity;this.engine=null;this.entry=null;this.task=null;this.budget=new NativeCheckpointBudget();}
+ active(){if(this.closed)throw new Error('Native params target closed');}
+ guard(){this.active();if(this.def.create!==this.create||resolveIndicatorFactory(this.binding.name)!==this.factory||!nativeParamsLayoutEqual(nativeParamsLayout(this.def),this.layout))throw new Error('Native params definition changed');this.active();if(this.engine&&(this.engine.entries.get(this.binding.id)!==this.entry||this.entry.def!==this.def||!nativeParamsSame(this.entry.params,this.binding.params)))throw new Error('Native params target entry changed');}
+ target(slot,offset,count){this.active();if(this.phase!=='capture'||!Number.isInteger(slot)||slot<0||slot>=6||offset!==this.received[slot]||!Number.isSafeInteger(count)||count<1||count>16384||offset+count>this.binding.length)throw new RangeError('Native params input slice');this.received[slot]+=count;return this.columns[FIELDS[slot]].subarray(offset,offset+count);}
+ start(){this.guard();if(this.phase!=='capture'||this.received.some(n=>n!==this.binding.length))throw new Error('Native params incomplete input');this.phase='validate';return true;}
+ step(maxBars=4096){this.active();try{
+  if(!Number.isSafeInteger(maxBars)||maxBars<1||maxBars>16384)throw new RangeError('Native params work size');if(this.chunkSize!==null&&this.chunkSize!==maxBars)throw new RangeError('Native params work size must remain fixed');this.chunkSize=maxBars;this.guard();const b=this.binding,n=b.length;if(this.phase==='capture')throw new Error('Native params not started');
+  if(this.phase==='validate'){const end=Math.min(n,this.at+maxBars),bar={};for(;this.at<end;this.at++){for(const k of FIELDS)bar[k]=this.columns[k][this.at];validateBar(bar,this.previous);this.previous=bar.time;}if(this.at<n)return this.progress(this.at,n);const store={length:n,capacity:b.capacity,columns:this.columns,_subscribeInternal:()=>()=>{}};this.engine=new IndicatorEngine(store);this.engine.entries=new NativeCheckpointEntries();this.entry={def:this.def,name:b.name,params:{...b.params},dirty:0,dirtyTo:n,invalidated:true,length:0,arrays:[],checkpoints:new NativeCheckpointMap(b.name,b.params,{budget:this.budget}),revision:0};this.engine.entries.set(b.id,this.entry);this.phase='calculate';this.at=0;return this.progress(0,n);}
+  if(this.phase==='calculate'){if(!this.task)this.task=this.engine.calculate(b.id,maxBars);const next=this.task.next();this.guard();if(!next.done)return this.progress(next.value?.to??0,n);this.task=null;if(this.entry.checkpoints.size!==this.checkpointCount)throw new TypeError('Native params checkpoint count');this.phase='outputs';return this.progress(0,this.layout.outputs.length*b.capacity);}
+  if(this.phase==='outputs'){let remaining=maxBars;while(this.output<this.layout.outputs.length&&remaining){const a=this.entry.arrays[this.output],end=Math.min(b.capacity,this.at+remaining);if(!(a instanceof Float64Array)||a.length!==b.capacity)throw new TypeError('Native params output capacity');for(;this.at<end;this.at++,remaining--){const v=a[this.at];if(this.at>=n?!Number.isNaN(v):v===Infinity||v===-Infinity)throw new TypeError('Native params output finite/NaN');}if(this.at===b.capacity){this.at=0;this.output++;}}if(this.output<this.layout.outputs.length)return this.progress(this.output*b.capacity+this.at,this.layout.outputs.length*b.capacity);this.phase='ready';}
+  this.guard();return this.progress(1,1,true);
+ }catch(error){this.dispose();throw error;}}
+ progress(done,total,complete=false){return {phase:this.phase,done,total,complete};}
+ ready(){this.guard();if(this.phase!=='ready')throw new Error('Native params target not ready');}
+ descriptor(){this.ready();return {schema:'aster.native-params-result',version:1,registration:this.binding.registration,id:this.binding.id,name:this.binding.name,params:{...this.binding.params},module:this.binding.module?{...this.binding.module}:undefined,...nativeParamsLayout(this.def),length:this.binding.length,capacity:this.binding.capacity,checkpointCount:this.checkpointCount,checkpointBytes:this.budget.usedBytes,plan:{...this.plan}};}
+ outputBuffer(slot,offset,count){this.ready();if(!Number.isInteger(slot)||slot<0||slot>=this.layout.outputs.length||!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(count)||count<1||count>16384||offset+count>this.binding.capacity)throw new RangeError('Native params output slice');return this.entry.arrays[slot].subarray(offset,offset+count);}
+ checkpoint(ordinal){this.ready();if(!Number.isSafeInteger(ordinal)||ordinal<0||ordinal>=this.checkpointCount)throw new RangeError('Native params checkpoint ordinal');const index=ordinal*256,text=safeCheckpointStringify(this.entry.checkpoints.get(index));this.guard();if(text.length*2>NATIVE_CHECKPOINT_RECORD_BYTES)throw new RangeError('Native params checkpoint record limit');return {index,text};}
+ dispose(){if(this.closed)return;this.closed=true;try{this.task?.return();}finally{try{this.engine?.dispose();}finally{this.columns={};this.engine=null;this.entry=null;this.task=null;this.def=null;this.create=null;this.factory=null;this.layout=null;this.binding=null;}}}
+}
+
 const uiKeys=['limits','items','undo','redo','selected','serial'];
 const uiLimitKeys=['historyLimit','maxDrawings','maxPoints','maxDocumentChars','historyBytes'];
 const UI_CHUNK_CHARS=262144,UI_CHUNK_UTF8=1048576,UI_CHUNK_NODES=250000,UI_CHUNK_REFS=64,UI_CHUNK_POINTS=2048;
@@ -2803,7 +2864,7 @@ function packNativeCommands(layers,{mode,width,height,background,stats}){
  return {metadata,numbers};
 }
 
-globalThis.Aster={RESOURCE_LIMITS,optionRecord,boundedText,sizeLimit,identifier,PANEL_KEYS,AXIS_KEYS,SERIES_KEYS,THEME_KEYS,rememberSymbolFormatters,hasPortableFormatters,portableColor,portableFont,portableStyle,labelMetrics,labelWidth,fitLabel,labelCommand,panelTitle,FIELDS,validateBar,RangeIndex,BarStore,seededColumns,BlockRangeIndex,zonedParts,marketDate,shiftDate,zonedEpoch,validateSymbol,formatPrice,normalizeOHLCV,alignSeriesByTime,SessionCalendar,TickAggregator,applyDataEvent,DEMO_SYMBOLS,demoCalendar,validateResamplePlan,resamplePlanResolver,resampleOHLCV,resampleFromSessions,alignConfirmedByTime,validateIndicatorParams,UnsupportedIndicatorError,defineIndicatorModule,portableIndicatorFactory,portableIndicatorFactories,indicatorModule,requirePortableIndicator,indicatorModuleDefinitions,validateIndicatorModuleBinding,validateModuleCheckpoint,portableSessionCalendar,vwapDefinition,pivotsDefinition,validateSessionCheckpoint,builtinIndicators,isCanonicalBuiltinDefinition,resolveIndicatorFactory,requirePortableFactory,IndicatorEngine,DRAWING_TYPES,drawingPointCount,validateDrawing,DrawingStore,drawingGeometry,drawingHitTest,formatAxisValue,aggregateVolumeSeries,createDrawingCommands,createCrosshairCommands,crosshairValuesAt,SERIES_BLOCK_THRESHOLD,DARK_THEME,LIGHT_THEME,ChartModel,createLayout,buildScene,SceneCache,InteractionController,safeCheckpointStringify,safeCheckpointParse,validateCheckpointState,NATIVE_CHECKPOINT_RECORD_BYTES,nativeCheckpointFootprint,NativeCheckpointBudget,NativeCheckpointMap,NativeCheckpointEntries,IngestionError,assertDataIngestionIdle,acquireDataIngestionLease,dataIngestionBatchLimits,snapshotIngestionEvents,DataIngestion,restoreDataIngestion,saveStudySetup,setStudyParams,loadStudySetup,dataAt,ChartAPI,WORKSPACE_CHARS,workspaceSlot,workspaceSnapshot,workspaceBinding,workspaceBindingSame,validateWorkspaceDocument,readWorkspaceDocument,saveWorkspace,installWorkspaceConfiguration,nativeWorkspacePreflight,asyncConfigurationKey,AsyncCapture,AsyncPrepared,PrepareCapture,PreparedData,NATIVE_WORKSPACE_RESTORE_BYTES,nativeWorkspaceTargetPlan,NativeWorkspacePrepared,NativeWorkspaceCapture,AsyncUICapture,AsyncUIImport};
+globalThis.Aster={RESOURCE_LIMITS,optionRecord,boundedText,sizeLimit,identifier,PANEL_KEYS,AXIS_KEYS,SERIES_KEYS,THEME_KEYS,rememberSymbolFormatters,hasPortableFormatters,portableColor,portableFont,portableStyle,labelMetrics,labelWidth,fitLabel,labelCommand,panelTitle,FIELDS,validateBar,RangeIndex,BarStore,seededColumns,BlockRangeIndex,zonedParts,marketDate,shiftDate,zonedEpoch,validateSymbol,formatPrice,normalizeOHLCV,alignSeriesByTime,SessionCalendar,TickAggregator,applyDataEvent,DEMO_SYMBOLS,demoCalendar,validateResamplePlan,resamplePlanResolver,resampleOHLCV,resampleFromSessions,alignConfirmedByTime,validateIndicatorParams,UnsupportedIndicatorError,defineIndicatorModule,portableIndicatorFactory,portableIndicatorFactories,indicatorModule,requirePortableIndicator,indicatorModuleDefinitions,validateIndicatorModuleBinding,validateModuleCheckpoint,portableSessionCalendar,vwapDefinition,pivotsDefinition,validateSessionCheckpoint,builtinIndicators,isCanonicalBuiltinDefinition,resolveIndicatorFactory,requirePortableFactory,IndicatorEngine,DRAWING_TYPES,drawingPointCount,validateDrawing,DrawingStore,drawingGeometry,drawingHitTest,formatAxisValue,aggregateVolumeSeries,createDrawingCommands,createCrosshairCommands,crosshairValuesAt,SERIES_BLOCK_THRESHOLD,DARK_THEME,LIGHT_THEME,ChartModel,createLayout,buildScene,SceneCache,InteractionController,safeCheckpointStringify,safeCheckpointParse,validateCheckpointState,NATIVE_CHECKPOINT_RECORD_BYTES,nativeCheckpointFootprint,NativeCheckpointBudget,NativeCheckpointMap,NativeCheckpointEntries,IngestionError,assertDataIngestionIdle,acquireDataIngestionLease,dataIngestionBatchLimits,snapshotIngestionEvents,DataIngestion,restoreDataIngestion,saveStudySetup,setStudyParams,loadStudySetup,dataAt,ChartAPI,WORKSPACE_CHARS,workspaceSlot,workspaceSnapshot,workspaceBinding,workspaceBindingSame,validateWorkspaceDocument,readWorkspaceDocument,saveWorkspace,installWorkspaceConfiguration,nativeWorkspacePreflight,asyncConfigurationKey,AsyncCapture,AsyncPrepared,PrepareCapture,PreparedData,NATIVE_WORKSPACE_RESTORE_BYTES,nativeWorkspaceTargetPlan,NativeWorkspacePrepared,NativeWorkspaceCapture,NativeParamsTarget,AsyncUICapture,AsyncUIImport};
 let nativeLatestLayout=null,nativeLatestLayoutModel=null;
 let nativeWorkspaceSource=null,nativeWorkspaceRegistration=0;
 let nativeAsyncCapture=null,nativeAsyncTicket=0,nativeAsyncPrepared=null,nativeAsyncUIImport=null,nativeAsyncUIPrepared=null;

@@ -1,3 +1,4 @@
+import {retireNativeEntryIfReplaced} from '../core/native-checkpoints.mjs';
 import {ChartAPI} from '../core/api.mjs';
 import {BarStore,FIELDS} from '../core/data.mjs';
 import {requirePortableFactory} from '../core/indicators.mjs';
@@ -38,7 +39,7 @@ export function setIndicatorParamsAsync(chart,id,params,options={}){
   const binding={id,name:entry.name,params:{...requested},module:module??undefined,length,capacity,checkpointSize:256};context.progress('compute',0,1);
   const packet=await runDedicatedCalculationWorker({schema:'aster.params-request',version:1,jobId:context.id,kind:'indicator-params',binding,columns:owned},new URL('./indicator-params-worker.mjs',import.meta.url),transport,context,FIELDS.map(k=>owned[k].buffer));context.progress('compute',1,1);
   const replacement=await validateIndicatorParamsPacket(packet,{jobId:context.id,binding,def,layout,signal:options.signal},context),metadata=paramLayout(def);if(def.create!==create||!paramLayoutSame(metadata,layout)||!paramSame(metadata.plotOffsets,layout.plotOffsets))throw new TypeError('Indicator definition changed during staging');context.check();context.current();
-  context.publish(()=>{outputBytes();context.current();context.check();guard();entriesMap.set(id,replacement);for(const s of series)if(s.indicator===id){s.rangeIndex=null;s.revision=undefined;s.dirtyFrom=0;}return metadata;});
+  context.publish(()=>{outputBytes();context.current();context.check();guard();entriesMap.set(id,replacement);retireNativeEntryIfReplaced(entriesMap,id);for(const s of series)if(s.indicator===id){s.rangeIndex=null;s.revision=undefined;s.dirtyFrom=0;}return metadata;});
  });
  return operation.then(result=>{release();try{notification.call(chart);}catch(error){const diagnostic=observerDiagnostic(error);result={...result,observerError:diagnostic};try{report?.(diagnostic);}catch{}}return result;},error=>{release();throw error;});
 }
