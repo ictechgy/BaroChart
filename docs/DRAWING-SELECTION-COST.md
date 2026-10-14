@@ -12,7 +12,7 @@ Instrumented 1,000/10,000-drawing regressions confirm n ID descriptor reads for 
 
 ## Matched Node timing
 
-Baseline: `ae35897`. Node 24.19.0, separate processes, AB then BA for each source size; case order reversed in BA. Each case has 3 warmups and 15 timed samples. Fixture loading and initial 128 selections are outside timing. P95 uses nearest rank and equals the observed maximum with 15 samples. All 16 corresponding result snapshot SHA256 digests match. The checkpoint includes the harness and every raw sample.
+Baseline: `ae35897`. Node 24.19.0, separate processes, AB then BA for each source size; case order reversed in BA. Each case has 3 warmups and 15 timed samples. Fixture loading and initial 128 selections are outside timing. P95 uses nearest rank and equals the observed maximum with 15 samples. All 16 corresponding result snapshot SHA256 digests match. The harness and raw samples are retained separately in development verification records; they are not included in this public checkout.
 
 Results are limited, noisy samples. The 10k first-page AB median and both page-query AB tail samples regress; these are retained below. Baseline BA also has large outliers. Their causes were not profiled, so they are not attributed to GC or system load. The adoption basis is eliminated duplicated work and copied metadata, with observed selection/refresh improvements, not universal query speed.
 
