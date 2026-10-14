@@ -2,7 +2,7 @@ import {ChartModel,ChartAPI} from '../../src/core/index.mjs';
 import {CanvasChart,TimeCursorGroup} from '../../src/renderers/canvas.mjs';
 const epoch=Date.UTC(2026,0,5,9),charts=[],listeners=[];let group=null,closed=false;
 const on=(node,type,fn)=>{node.addEventListener(type,fn);listeners.push(()=>node.removeEventListener(type,fn));};
-function make(id,minutes){const model=new ChartModel(),api=new ChartAPI(model),bars=minutes.map((minute,i)=>{const close=100+Math.sin(i/5)*3;return {time:epoch+minute*60000,open:close-.5,high:close+1,low:close-1,close,volume:100+i};});api.setData(bars);api.addSeries({id:'price',type:'candlestick',panel:'price'});api.fit();
+function make(id,minutes){const model=new ChartModel(),api=new ChartAPI(model),bars=minutes.map((minute,i)=>{const close=100+Math.sin(i/5)*3;return {time:epoch+minute*60000,open:close-.5,high:close+1,low:close-1,close,volume:100+i};});api.setData(bars);api.addSeries({id:'price',type:'candles',panel:'price'});api.fit();
  const explore=document.getElementById(`explore-${id}`),read=document.getElementById(`read-${id}`),status=document.getElementById(`cursor-${id}`),chart=new CanvasChart(document.getElementById(`chart-${id}`),model,{dataExplorer:{readout:document.getElementById(`values-${id}`),live:document.getElementById(`live-${id}`),controls:[explore,read]}});charts.push(chart);
  const update=()=>{if(closed)return;const state=chart.timeCursor;status.textContent=state?`Requested ${new Date(state.requestedTime).toISOString()}; matched ${state.matchedTime===null?'none':new Date(state.matchedTime).toISOString()}; ${state.status}.`:'No linked cursor.';};
  on(chart.canvas,'aster:render',update);on(chart.canvas,'aster:state',update);
