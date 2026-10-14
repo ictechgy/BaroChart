@@ -7,4 +7,6 @@ function make(id,minutes){const model=new ChartModel(),api=new ChartAPI(model);a
 make('a',Array.from({length:120},(_,i)=>i));make('b',Array.from({length:24},(_,i)=>i*5).filter(m=>m<30||m>=45));
 function connect(){group=new TimeRangeGroup({mode:'view',missing:'clip'});for(const chart of charts)group.add(chart,{publish:true,receive:true});$('link').textContent='Disconnect ranges';update();}
 on($('link'),'click',()=>{if(closed)return;if(group){group.dispose();group=null;$('link').textContent='Connect ranges';update();}else connect();});connect();
-on(window,'pagehide',()=>{if(closed)return;closed=true;group?.dispose();group=null;for(const remove of listeners)remove();for(const chart of charts)chart.destroy({disposeModel:true});});
+// Cached history entries retain their chart instances; restoration only redraws.
+on(window,'pageshow',event=>{if(!event.persisted||closed)return;for(const chart of charts){if(closed)return;chart.resize();}});
+on(window,'pagehide',event=>{if(event.persisted||closed)return;closed=true;group?.dispose();group=null;for(const remove of listeners)remove();for(const chart of charts)chart.destroy({disposeModel:true});});

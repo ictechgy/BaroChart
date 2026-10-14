@@ -659,3 +659,15 @@ test('Refresh fallback focus callback may select a newer row without stale disab
 test('Refresh fallback focus callback may destroy and remount without stale writes',t=>{
  const h=fixture(t),f=h.create(),p=f.attach();check(f,0);const old=button(f,'Delete selected');old.focus();let replacement;button(f,'Refresh drawings').onFocus=()=>{p.destroy();replacement=f.attach();replacement.selection.select('keep');replacement.refresh();status(f).textContent='New owner ready.';};click(f,'Delete selected');selection(replacement,['keep']);assert.equal(status(f).textContent,'New owner ready.');assert.equal(f.container.listenerCount('aster:state'),1);
 });
+
+
+test('shipped drawing-groups module preserves its panel across repeated cached page transitions', async t => {
+ const h=fixture(t),saved=Object.getOwnPropertyDescriptor(globalThis,'window'),window=h.node(),nodes=Object.fromEntries(['chart','drawing-controls','undo','redo'].map(id=>[id,h.node()]));
+ globalThis.window=window;h.document.getElementById=id=>nodes[id];
+ t.after(()=>{event(window,'pagehide',{persisted:false});if(saved)Object.defineProperty(globalThis,'window',saved);else delete globalThis.window;});
+ await import('../examples/web/drawing-groups.mjs?bfcache-regression');
+ const canvas=nodes.chart.children[0],panel=nodes['drawing-controls'].children[0],listeners=()=>h.elements.reduce((n,e)=>n+e.listenerCount(),0),initial=listeners();assert.ok(canvas);assert.ok(panel);
+ for(let i=0;i<2;i++){event(window,'pagehide',{persisted:true});assert.strictEqual(nodes.chart.children[0],canvas);assert.strictEqual(nodes['drawing-controls'].children[0],panel);event(window,'pageshow',{persisted:true});assert.equal(listeners(),initial);}
+ const f={panelContainer:nodes['drawing-controls']};check(f,0);click(f,'Delete selected');assert.equal(boxes(f).length,32);event(nodes.undo,'click');assert.equal(rowIds(f)[0],'level-1');
+ event(window,'pagehide',{persisted:false});event(window,'pageshow',{persisted:true});event(window,'pagehide',{persisted:false});assert.equal(nodes.chart.children.length,0);assert.equal(nodes['drawing-controls'].children.length,0);assert.equal(listeners(),0);assert.equal(h.frames.size,0);
+});

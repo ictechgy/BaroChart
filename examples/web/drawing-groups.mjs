@@ -5,4 +5,7 @@ api.addSeries({id:'price',type:'candles',panel:'price'});
 for(let i=0;i<36;i++)api.addDrawing({id:'level-'+(i+1),type:i%3?'horizontal':'text',points:[{time:1700000000000+i*60000,price:98+i/3}],...(i%3?{}:{text:'Note '+(i+1)}),style:{color:'#3366cc',width:1}});
 const controls=attachDrawingPanel(document.getElementById('drawing-controls'),chart,{label:'Drawing groups'});
 const undo=()=>api.undo(),redo=()=>api.redo();document.getElementById('undo').addEventListener('click',undo);document.getElementById('redo').addEventListener('click',redo);
-window.addEventListener('pagehide',()=>{controls.destroy();chart.destroy({disposeModel:true});document.getElementById('undo').removeEventListener('click',undo);document.getElementById('redo').removeEventListener('click',redo);},{once:true});
+let closed=false;
+const show=event=>{if(event.persisted&&!closed)chart.resize();};
+const hide=event=>{if(event.persisted||closed)return;closed=true;window.removeEventListener('pagehide',hide);window.removeEventListener('pageshow',show);controls.destroy();chart.destroy({disposeModel:true});document.getElementById('undo').removeEventListener('click',undo);document.getElementById('redo').removeEventListener('click',redo);};
+window.addEventListener('pagehide',hide);window.addEventListener('pageshow',show);

@@ -20,5 +20,11 @@ test('shipped linked-ranges module initializes, maps ranges, disconnects and cle
  assert.equal(nodes['chart-a'].children.length,1);assert.equal(nodes['chart-b'].children.length,1);assert.equal(observers.length,2);flush();assert.ok(paints>0);
  send(nodes['sync-a'],'click');assert.match(nodes['range-b'].textContent,/Requested 2026-01-05T09:00:00.000Z to 2026-01-05T10:59:00.000Z/);assert.match(nodes['range-b'].textContent,/effective 2026-01-05T09:00:00.000Z to 2026-01-05T10:55:00.000Z; clipped/);
  const canvas=nodes['chart-a'].children[0];send(canvas,'keydown',{key:'+'});flush();assert.match(nodes['range-b'].textContent,/applied/);send(nodes.link,'click');assert.equal(nodes['range-b'].textContent,'No received range.');
+ const retained=['a','b'].map(id=>nodes['chart-'+id].children[0]),listenerCount=()=>elements.reduce((n,e)=>n+[...e.events.values()].reduce((a,s)=>a+s.size,0),0),beforeListeners=listenerCount();
+ for(let round=0;round<2;round++){send(window,'pagehide',{persisted:true});assert.deepEqual(['a','b'].map(id=>nodes['chart-'+id].children[0]),retained);assert.ok(observers.every(o=>!o.disconnected));send(window,'pageshow',{persisted:true});assert.equal(listenerCount(),beforeListeners);assert.equal(observers.length,2);flush();}
+ send(nodes.link,'click');assert.match(nodes.link.textContent,/Disconnect/);
+ // A synchronous state callback can permanently leave during restoration.
+ const terminate=()=>send(window,'pagehide',{persisted:false});retained[0].addEventListener('aster:state',terminate,{once:true});send(window,'pageshow',{persisted:true});retained[0].removeEventListener('aster:state',terminate);
+ send(window,'pageshow',{persisted:true});
  send(window,'pagehide');assert.equal(nodes['chart-a'].children.length,0);assert.equal(nodes['chart-b'].children.length,0);assert.equal(frames.size,0);assert.ok(observers.every(o=>o.disconnected));assert.equal(elements.reduce((n,e)=>n+[...e.events.values()].reduce((a,x)=>a+x.size,0),0),0);
 });

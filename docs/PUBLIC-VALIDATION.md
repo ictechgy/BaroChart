@@ -2,6 +2,14 @@
 
 This development source tree is derived from the private 0.2.13 development checkpoint. It is not a stable SDK release or a claim of commercial feature/performance parity. Historical platform runs do not certify later changes.
 
+## Cached-history example lifecycle fix (2026-10-14)
+
+A subsequent Mac Chrome 155 check found that returning to linked-ranges through the back/forward cache restored the page with zero canvases: its unconditional pagehide cleanup had destroyed both charts. The same source pattern existed in linked-cursors and drawing-groups. These three examples now retain existing charts, models, groups and controls on persisted pagehide, and request resize/redraw on persisted pageshow without creating new instances or listeners. Nonpersisted pagehide still performs one terminal cleanup. A cached page can be discarded without another event; this is not a guarantee of an explicit callback on every browser/process exit.
+
+The shipped-module regression failed in all three examples before the fix. Afterward, **82/82 related Node tests** passed, including repeated cached transitions, stable canvas/panel identities and listener counts, continued actions, terminal cleanup, and linked-chart restoration interrupted by a synchronous terminal pagehide callback. DOM/Canvas primitives are modeled here; actual browser back/forward retesting of this fix is pending. The 3,502-test integrated result below applies to the preceding `e2e834c` source, not a new full-suite run of this hotfix.
+
+See the [browser lifecycle guidance](https://web.dev/articles/bfcache): persisted pagehide signals intent to cache, while persisted pageshow identifies a cache restoration. The example redraw is an application choice to refresh layout, not a browser requirement to recreate chart objects.
+
 ## Linked-range and contrast update (2026-10-14)
 
 The subsequent TimeRangeGroup and drawing-demo contrast update passed **3,502/3,502 Node tests**, all **177 files exactly once in nine serial batches**, with zero failures/skips/cancellations, missing files or duplicates. The fixed test/source snapshot and each batch log hash were checked. This is segmented completion, not one monolithic run. All **406 ESM syntax checks**, strict TypeScript 5.9.3 and offline installed-package/type checks also passed.

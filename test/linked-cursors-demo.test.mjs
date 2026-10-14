@@ -22,5 +22,11 @@ test('shipped linked-cursors module creates both charts, maps gaps and disposes 
  send(canvas,'keydown',{key:'ArrowRight'});assert.match(nodes['cursor-b'].textContent,/Requested 2026-01-05T09:01:00.000Z; matched none/);
  nodes.policy.value='at-or-before';send(nodes.policy,'change');send(canvas,'keydown',{key:'Home'});for(let i=0;i<35;i++)send(canvas,'keydown',{key:'ArrowRight'});assert.match(nodes['cursor-b'].textContent,/Requested 2026-01-05T09:35:00.000Z; matched 2026-01-05T09:25:00.000Z/);
  send(nodes['read-a'],'click');assert.match(nodes['values-a'].textContent,/Bar 36;/);assert.match(nodes['values-a'].textContent,/volume 135\./);assert.match(nodes['values-a'].textContent,/Current plotted values, cutoff 89;/);send(nodes.link,'click');assert.equal(nodes['cursor-b'].textContent,'No linked cursor.');
+ const retained=['a','b'].map(id=>nodes['chart-'+id].children[0]),listenerCount=()=>elements.reduce((n,e)=>n+[...e.events.values()].reduce((a,s)=>a+s.size,0),0),beforeListeners=listenerCount();
+ for(let round=0;round<2;round++){send(window,'pagehide',{persisted:true});assert.deepEqual(['a','b'].map(id=>nodes['chart-'+id].children[0]),retained);assert.ok(observers.every(o=>!o.disconnected));send(window,'pageshow',{persisted:true});assert.equal(listenerCount(),beforeListeners);assert.equal(observers.length,2);flush();}
+ send(nodes.link,'click');assert.match(nodes.link.textContent,/Disconnect/);
+ // A synchronous state callback can permanently leave during restoration.
+ const terminate=()=>send(window,'pagehide',{persisted:false});retained[0].addEventListener('aster:state',terminate,{once:true});send(window,'pageshow',{persisted:true});retained[0].removeEventListener('aster:state',terminate);
+ send(window,'pageshow',{persisted:true});
  send(window,'pagehide');assert.equal(nodes['chart-a'].children.length,0);assert.equal(nodes['chart-b'].children.length,0);assert.equal(frames.size,0);assert.ok(observers.every(o=>o.disconnected));assert.equal(elements.reduce((n,e)=>n+[...e.events.values()].reduce((a,s)=>a+s.size,0),0),0);
 });
