@@ -30,7 +30,8 @@ export function attachDrawingPanel(container,chart,options={}){
    if(list.children[state.rows.indexOf(r)]!==row.node){if(!effect(()=>list.insertBefore(row.node,list.children[state.rows.indexOf(r)]??null)))return null;}
   }
   if(!assign(count,'textContent',state.selectedCount+' selected across all pages; '+state.total+' drawings. Showing '+(state.total?offset+1:0)+'–'+Math.min(offset+32,state.total)+'. Actions apply to every selected ID, including other pages.'))return null;
-  if(!assign(previous,'disabled',offset===0)||!assign(next,'disabled',offset+32>=state.total)||!assign(clear,'disabled',state.selectedCount===0)||!assign(remove,'disabled',state.selectedCount===0)||!assign(apply,'disabled',state.selectedCount===0))return null;
+  const disable=(node,value)=>{if(value&&currentFocus===node){let active;if(!effect(()=>{active=doc.activeElement;}))return false;if(active===node&&!effect(()=>refreshButton.focus()))return false;}return assign(node,'disabled',value);};
+  if(!disable(previous,offset===0)||!disable(next,offset+32>=state.total)||!disable(clear,state.selectedCount===0)||!disable(remove,state.selectedCount===0)||!disable(apply,state.selectedCount===0))return null;
   if(focusedRow&&!list.contains(currentFocus)){return effect(()=>refreshButton.focus())?state:null;}if(focusedRow&&doc.activeElement!==currentFocus&&list.contains(currentFocus)){return effect(()=>currentFocus.focus())?state:null;}return state;
  }
  function refresh(){if(!valid())throw new Error('Drawing panel disposed or owner changed');selection.refresh();return render();}

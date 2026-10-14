@@ -27,6 +27,8 @@ function fixture(t) {
       this.clientWidth = 800; this.clientHeight = 500; this.width = 0; this.height = 0;
       this.checked = false; this.disabled = false; this.value = ''; elements.push(this);
     }
+    get disabled(){return this._disabled??false;}
+    set disabled(value){this._disabled=!!value;if(this._disabled&&document.activeElement===this){document.activeElement=document.body;this.onDisabledBlur?.();}}
     get isConnected() {return this.connected || Boolean(this.parentNode?.isConnected);}
     get textContent() {return this._text + this.children.map(child => child.textContent).join('');}
     set textContent(value) {
@@ -78,7 +80,7 @@ function fixture(t) {
     requestAnimationFrame: callback => {const id = ++serial; frames.set(id, callback); return id;},
     cancelAnimationFrame: id => frames.delete(id)};
   for (const key of keys) Object.defineProperty(globalThis, key, {configurable: true, writable: true, value: globals[key]});
-  const root = new Element(); root.connected = true;
+  const root = new Element('body'); root.connected = true;document.body=root;
   const node = (tag = 'div') => {const value = new Element(tag); root.append(value); return value;};
   const create = (inputs = [drawing('a'), drawing('b'), drawing('keep')]) => {
     const model = new ChartModel(); models.push(model);
@@ -637,4 +639,23 @@ test('failed retired node cleanup never removes a newer same-ID row',t=>{
 test('retry of a focused pending removal preserves fallback focus and destroy clears all listeners',t=>{
  const h=fixture(t),f=h.create(),p=f.attach(),row=list(f).children[0],box=boxes(f)[0],original=row.remove.bind(row);box.focus();f.store.remove('a');row.remove=()=>{throw new Error('retry later');};assert.throws(()=>p.refresh(),/retry later/);row.remove=original;p.refresh();assert.strictEqual(h.document.activeElement,button(f,'Refresh drawings'));
  const next=list(f).children[0];f.store.remove('b');next.remove=()=>{throw new Error('still pending');};assert.throws(()=>p.refresh(),/still pending/);p.destroy();assert.equal(f.panelContainer.children.length,0);assert.equal(h.elements.reduce((n,e)=>n+e.listenerCount(),0),0);
+});
+for(const action of ['Apply checked styles','Delete selected','Clear selection'])test(`focused ${action} moves to Refresh before disabling instead of BODY`,t=>{
+ const h=fixture(t),f=h.create(),p=f.attach();check(f,0);if(action==='Apply checked styles')styleField(f,'width','3');const control=button(f,action);let blurs=0;control.onDisabledBlur=()=>blurs++;control.focus();click(f,action);
+ assert.equal(control.disabled,true);assert.strictEqual(h.document.activeElement,button(f,'Refresh drawings'));assert.equal(blurs,0);selection(p,[]);
+});
+test('last/first page navigation transfers focus only when its focused button becomes disabled',t=>{
+ const h=fixture(t),f=h.create(Array.from({length:33},(_,i)=>drawing('d'+i)));f.attach();button(f,'Next page').focus();click(f,'Next page');assert.strictEqual(h.document.activeElement,button(f,'Refresh drawings'));button(f,'Previous page').focus();click(f,'Previous page');assert.strictEqual(h.document.activeElement,button(f,'Refresh drawings'));
+});
+test('style no-op and invalid input retain the still-enabled action focus',t=>{
+ const h=fixture(t),f=h.create(),p=f.attach();check(f,0);styleField(f,'width','2');const apply=button(f,'Apply checked styles');apply.focus();click(f,'Apply checked styles');assert.strictEqual(h.document.activeElement,apply);assert.equal(apply.disabled,false);field(f,'width').input.value='';click(f,'Apply checked styles');assert.strictEqual(h.document.activeElement,apply);selection(p,['a']);
+});
+test('postcommit callback focus outside the panel is not stolen',t=>{
+ const h=fixture(t),f=h.create();f.attach();check(f,0);const outside=h.node('input');button(f,'Delete selected').focus();f.onInvalidate=()=>outside.focus();click(f,'Delete selected');assert.strictEqual(h.document.activeElement,outside);
+});
+test('Refresh fallback focus callback may select a newer row without stale disabling or status',t=>{
+ const h=fixture(t),f=h.create(),p=f.attach();check(f,0);button(f,'Delete selected').focus();button(f,'Refresh drawings').onFocus=()=>{p.selection.select('keep');p.refresh();status(f).textContent='New focus selection.';};click(f,'Delete selected');selection(p,['keep']);assert.equal(button(f,'Delete selected').disabled,false);assert.equal(status(f).textContent,'New focus selection.');
+});
+test('Refresh fallback focus callback may destroy and remount without stale writes',t=>{
+ const h=fixture(t),f=h.create(),p=f.attach();check(f,0);const old=button(f,'Delete selected');old.focus();let replacement;button(f,'Refresh drawings').onFocus=()=>{p.destroy();replacement=f.attach();replacement.selection.select('keep');replacement.refresh();status(f).textContent='New owner ready.';};click(f,'Delete selected');selection(replacement,['keep']);assert.equal(status(f).textContent,'New owner ready.');assert.equal(f.container.listenerCount('aster:state'),1);
 });
