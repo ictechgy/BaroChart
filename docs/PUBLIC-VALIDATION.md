@@ -42,7 +42,7 @@ The product fixture was commit `efd973bac0283addf02c449206324e74bd9cef98` plus e
 
 The earlier WebGL wait interruption was **not reproduced; its cause remains unconfirmed**. The corrected CDP navigation wait is independently reproduced and tested, but no evidence establishes that it caused the original interruption. A single successful round trip does not establish long-term GPU stability, leak freedom or competitive speed. The test-owned Mac processes were checked as stopped separately from the helper's close return.
 
-Remaining gaps include screen-reader announcements, broad contrast/layout and cross-browser coverage, sustained multi-chart/streaming GPU and memory measurements, and real Swift/JSC/Android SDK/JNI/device execution. The initial panel's low button-text contrast remains an observed issue, not an accessibility pass.
+Remaining gaps include screen-reader announcements, broad contrast/layout and cross-browser coverage, sustained multi-chart/streaming GPU and memory measurements, and real Swift/JSC/Android SDK/JNI/device execution. The initial panel's low button-text contrast was subsequently corrected in the drawing-groups example with an explicit foreground/background pair. The declared normal colors calculate to 12.944:1 versus the observed old pair's 1.114:1; the CSS fix has source-level regression checks, but has not yet been remeasured as browser computed styles. This is not an accessibility pass.
 
 ## Open validation gaps
 
