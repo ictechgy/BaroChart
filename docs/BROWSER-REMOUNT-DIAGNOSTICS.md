@@ -12,7 +12,11 @@ Navigation now shares a bounded operation deadline, clears its event listener an
 
 Transport deadlines require the host Node event loop to run. Timing out a Runtime.evaluate request does not preempt the browser's JavaScript/GPU work or guarantee cancellation of the underlying protocol command. Late replies are discarded.
 
-## Next authorized browser probe
+## Subsequent bounded browser probe
+
+A later, separately authorized Mac Chrome 155 run completed one Canvas → WebGL2 → Canvas round trip with 28/28 CDP requests responding. See [exact scope and limits](PUBLIC-VALIDATION.md#scoped-mac-browser-qa-2026-10-14). The earlier interruption was not reproduced and its cause remains unconfirmed. No product renderer change was made.
+
+## Diagnostic protocol
 
 No additional Mac execution is part of this change. A subsequent explicitly approved probe should:
 

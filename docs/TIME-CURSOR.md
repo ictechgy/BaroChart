@@ -1,6 +1,6 @@
 # Linked time cursors (web preview)
 
-`TimeCursorGroup` links the stored bar-open time selected by a pointer or keyboard across up to eight `CanvasChart` instances (including `GPUChart`). Mapping and publication do not calculate studies or call `dataAt`. **The resulting ordinary redraw can calculate cold/dirty studies; disabling layer caching rebuilds scenes. This is not a low-latency guarantee for large dirty charts.** Actual browser focus, GPU pixels and assistive-technology behavior have not been verified for this preview.
+`TimeCursorGroup` links the stored bar-open time selected by a pointer or keyboard across up to eight `CanvasChart` instances (including `GPUChart`). Mapping and publication do not calculate studies or call `dataAt`. **The resulting ordinary redraw can calculate cold/dirty studies; disabling layer caching rebuilds scenes. This is not a low-latency guarantee for large dirty charts.** The linked sample has scoped Mac Chrome checks for both charts, matching and keyboard readouts; GPU pixel equivalence and assistive-technology behavior remain unverified. See [validation scope](PUBLIC-VALIDATION.md#scoped-mac-browser-qa-2026-10-14).
 
 ```js
 import {CanvasChart, TimeCursorGroup} from 'barochart/canvas';
@@ -41,7 +41,7 @@ No additional store subscriptions or unbounded event queue are installed. Each g
 
 Node tests cover literal timestamp oracles, empty/gapped/differently sampled stores, source changes, group bounds, stale projection, reentrant selection and teardown, and rendered scene-command coordinates in a fake DOM. They distinguish zero study work during publication from ordinary study work in a later dirty frame, including `layerCaching:false`. These tests do not establish browser input-to-paint latency, focus correctness, screen-reader behavior, or mobile SDK support.
 
-Run `npm run demo` and open `/examples/web/linked-cursors.html` for the two-chart synthetic sample. The policy selector and disconnect button demonstrate explicit group ownership. This sample is provided for host/browser evaluation; its actual browser appearance and focus behavior remain unverified here.
+Run `npm run demo` and open `/examples/web/linked-cursors.html` for the two-chart synthetic sample. The policy selector and disconnect button demonstrate explicit group ownership. This sample is provided for host/browser evaluation; its selected Mac Chrome interactions have been checked, while broad appearance, cross-browser focus and screen-reader behavior remain unverified.
 
 ### Small Node cost probe
 

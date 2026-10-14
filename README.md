@@ -4,7 +4,7 @@ Financial charts built around your own data: a DOM-free Float64 core, Canvas and
 
 [한국어](README.ko.md) · [API reference](docs/API.md) · [Validation status](docs/PUBLIC-VALIDATION.md)
 
-**Version 0.2.13 is a development preview.** Source is available under Apache-2.0; the npm package has not been published. Recent native host changes and browser interaction changes still need platform validation. See the [current validation limits](docs/PUBLIC-VALIDATION.md) before adopting this version.
+**Version 0.2.13 is a development preview.** Source is available under Apache-2.0; the npm package has not been published. Selected browser flows have been checked in Mac Chrome 155; assistive technology, other browsers and recent native host changes still need platform validation. See the [current validation limits](docs/PUBLIC-VALIDATION.md) before adopting this version.
 
 ## What you can build
 
@@ -176,7 +176,7 @@ Some detailed contract documents retain historical version notes and Aster-era n
 
 The pre-branding Linux/Node baseline passed **2,551 of 2,552 tests**. One dry-run CLI hit a 15-second watchdog; its unchanged test file then passed **131/131** in isolation. The full-suite failure remains unresolved. This is not an all-green release certification.
 
-Recent browser focus, keyboard exploration and visual changes need real-browser and assistive-technology validation. Standalone QuickJS tests and Java tests using stubbed Android types do not substitute for native SDK builds or device runs. There is no verified claim of universal performance, commercial-product parity or physical-device FPS.
+Mac Chrome 155 checks cover the drawing panel, linked cursors, keyboard exploration and one Canvas/WebGL round trip. Screen readers, other browsers and long-running rendering remain unverified. Standalone QuickJS tests and Java tests using stubbed Android types do not substitute for native SDK builds or device runs. There is no verified claim of universal performance, commercial-product parity or physical-device FPS.
 
 To run the available local checks:
 

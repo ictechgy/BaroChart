@@ -1,6 +1,6 @@
 # Explicit drawing selection controls (web preview)
 
-`attachDrawingPanel(emptyContainer, chart, {label: 'Drawing controls'})` adds an opt-in external list of native checkboxes and buttons. It uses the existing atomic group style/delete APIs. This is a Node/fake-DOM-tested web control preview: actual browser focus, visual layout, screen-reader behavior and mobile SDK UI are not certified. The list scans bounded drawing metadata (up to the existing 10,000-drawing limit); paging bounds DOM rows rather than promising constant-time source lookup. Selection/list lookup performs no study computation; a subsequent chart redraw can still lazily calculate dirty studies.
+`attachDrawingPanel(emptyContainer, chart, {label: 'Drawing controls'})` adds an opt-in external list of native checkboxes and buttons. It uses the existing atomic group style/delete APIs. This web control preview has Node/fake-DOM coverage and scoped Mac Chrome focus checks; broad visual layout, screen-reader behavior and mobile SDK UI are not certified. See [browser QA scope](PUBLIC-VALIDATION.md#scoped-mac-browser-qa-2026-10-14). The list scans bounded drawing metadata (up to the existing 10,000-drawing limit); paging bounds DOM rows rather than promising constant-time source lookup. Selection/list lookup performs no study computation; a subsequent chart redraw can still lazily calculate dirty studies.
 
 ```js
 import {attachDrawingPanel} from 'barochart';
@@ -9,7 +9,7 @@ const panel = attachDrawingPanel(dedicatedEmptyElement, chart);
 panel.destroy();
 ```
 
-The [standalone example](../examples/web/drawing-groups.html) shows 36 drawings over two pages and explicit Undo/Redo controls. No new pointer drag, canvas selection overlay or canvas keyboard shortcut is added. Native checkbox and button keyboard behavior is retained: Tab is not trapped and no keydown/composition handler intercepts text entry, IME or modifier shortcuts. Labels and a bounded polite status region are provided, but their assistive-technology behavior requires real-browser testing.
+The [standalone example](../examples/web/drawing-groups.html) shows 36 drawings over two pages and explicit Undo/Redo controls. No new pointer drag, canvas selection overlay or canvas keyboard shortcut is added. Native checkbox and button keyboard behavior is retained: Tab is not trapped and no keydown/composition handler intercepts text entry, IME or modifier shortcuts. Labels and a bounded polite status region are provided, but their screen-reader/assistive-technology behavior remains unverified.
 
 ## Selection and actions
 
@@ -54,4 +54,4 @@ Structural callbacks also preserve the newer render. A retiring row is detached 
 
 When a currently focused panel button is about to become disabled, focus moves to the stable Refresh drawings button first. This applies to completed selection-clearing actions and page navigation reaching an endpoint. A still-enabled no-op or rejected action keeps its focus. If a host callback has already focused another element, the panel does not take that focus back. A focus callback that creates a new selection, render or owner stops the older disabling/status continuation.
 
-This addresses a BODY-focus result observed in Mac Chrome 155.0.8059.79 after Apply/Delete. The regression models native disabling blur; browser verification of the fix is recorded separately when performed. It does not establish screen-reader behavior or resolve the independently reported, unconfirmed WebGL remount stall.
+This addresses a BODY-focus result observed in Mac Chrome 155.0.8059.79 after Apply/Delete. The regression models native disabling blur; the separate Mac Chrome retest passed 16 scenarios / 60 checks, including actual event ordering and subsequent Tab navigation; see [validation scope](PUBLIC-VALIDATION.md#scoped-mac-browser-qa-2026-10-14). It does not establish screen-reader behavior or resolve the independently reported, unconfirmed WebGL remount stall.

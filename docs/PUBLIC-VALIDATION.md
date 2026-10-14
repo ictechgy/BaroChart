@@ -1,6 +1,14 @@
 # BaroChart development-preview validation
 
-This first public source tree is derived from the private 0.2.13 development checkpoint. It is not a stable SDK release or a claim of commercial feature/performance parity. Historical platform runs do not certify later changes.
+This development source tree is derived from the private 0.2.13 development checkpoint. It is not a stable SDK release or a claim of commercial feature/performance parity. Historical platform runs do not certify later changes.
+
+## Cumulative cloud regression checks (2026-10-14)
+
+All **3,479/3,479 Node tests** passed with no failures, skips or cancellations. A fixed manifest covered all **173 test files exactly once**, in **nine short serial batches**, with zero missing/duplicate files, zero exit codes and verified log hashes. This was segmented completion, not a single monolithic invocation. The code under test was `423eb03654eefedca337a20a6154640d021d96a2`; the working changes were limited to the browser-QA documentation recorded here. No production code changed for this verification.
+
+**400 ESM syntax checks**, strict TypeScript 5.9.3 and offline package consumer verification also passed.
+
+This integrates the local demo, focus and CDP harness fixes rather than relying only on the earlier 3,417-test baseline. The cloud run did not launch an actual browser; the separate Mac browser evidence is scoped below. No additional remote push or registry publication was performed.
 
 ## First public source-tree checks (2026-10-13)
 
@@ -20,11 +28,27 @@ The baseline before public branding was tested on Linux with Node.js 24.19.0:
 
 These baseline numbers are retained as historical evidence, separate from the successful first public source-tree checks above.
 
+## Scoped Mac browser QA (2026-10-14)
+
+Installed Google Chrome **155.0.8059.79**, isolated headless profiles, real DOM/Canvas, and trusted CDP Input mouse/keyboard events were used. These are browser checks, not physical-device input/display timing or screen-reader certification.
+
+The product fixture was commit `efd973bac0283addf02c449206324e74bd9cef98` plus exactly two source hotfixes: the linked-cursor sample uses the supported `candles` series type (from `d93443e`), and the drawing panel moves focus to Refresh before disabling the focused action/page button (from `8064791`). The entire fixture was not upgraded to the later cloud HEAD. The bounded WebGL probe separately used the CDP helper from `423eb03`.
+
+- Drawing groups: actual click/Tab/Space/Enter, checked style application, selection across 32-row pages, deletion, Undo/Redo and destroy/remount were exercised. The initial run exposed focus loss and the linked-demo startup error; later targeted retests address those findings rather than relabeling the initial run as all-pass.
+- Focus retest: **16 scenarios / 60 checks passed**. Apply/Delete/Clear and endpoint Previous/Next via click and Enter moved focus to Refresh before disabling, then Tab reached a row checkbox. Normalized no-op, blank checked value and zero width retained Apply focus, selection and Undo state. Page exceptions and console errors were zero. Favicon HTTP 403 resource errors were recorded separately.
+- Linked cursors: **16 targeted checks passed** after the supported-type fix, including both charts, time matching/gaps, keyboard readouts and disconnect behavior. These counts are from a separate run and are not added to the focus scenario count.
+- Main demo: the 100k initial load, 10k worker reload, VWMA price-panel placement, separate Aroon panel, pointer drawing/delete/Undo and keyboard exploration readout were exercised.
+- Bounded remount probe: **one Canvas → WebGL2 → Canvas round trip succeeded**, with 28/28 CDP requests responding. It kept the same model, 10,000 bars and VWMA/Aroon panels, retired the previous views, produced a scene in each renderer, and reported no fallback, lastError, page exception or console error. A favicon 403 was separate. This probe used programmatic select/change fixture setup; it did not test native OS select menus or GPU pixel equivalence. The 2.397-second supervising-process elapsed time is a tool observation, not a performance benchmark.
+
+The earlier WebGL wait interruption was **not reproduced; its cause remains unconfirmed**. The corrected CDP navigation wait is independently reproduced and tested, but no evidence establishes that it caused the original interruption. A single successful round trip does not establish long-term GPU stability, leak freedom or competitive speed. The test-owned Mac processes were checked as stopped separately from the helper's close return.
+
+Remaining gaps include screen-reader announcements, broad contrast/layout and cross-browser coverage, sustained multi-chart/streaming GPU and memory measurements, and real Swift/JSC/Android SDK/JNI/device execution. The initial panel's low button-text contrast remains an observed issue, not an accessibility pass.
+
 ## Open validation gaps
 
 - Recent Swift facade/workspace ownership changes received static review, but have not been compiled or executed with Swift/Apple JavaScriptCore in this validation environment.
 - Recent Android host changes have not been built/run against the real Android SDK/JNI or on devices here.
-- Latest keyboard exploration, focus, live announcements and visual behavior have controller/fake-DOM regression coverage, but no recent real-browser/screen-reader verification. Browser launch was blocked by the environment's local socket restriction. No browser sandbox/security bypass was used.
+- The Mac Chrome checks below cover selected real-browser flows. Screen-reader/assistive-technology behavior, other browsers, mobile browser UI and broad visual regression remain unverified. Cloud browser execution was blocked by local socket/reachability restrictions; no sandbox/security bypass was used.
 - No universal latency/FPS, long-term leak-freedom, accessibility certification or superiority over TradingView, SciChart or Vela has been demonstrated.
 
 ## Reproduce the supported checks
