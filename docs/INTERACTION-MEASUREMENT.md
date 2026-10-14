@@ -61,7 +61,8 @@ node benchmarks/interaction.mjs --large
   correctness tests.
 - Maximum 256 raw request rows, 512 long-task records (overflow explicitly
   counted), 32 error records, and existing bounded CDP diagnostics. Default
-  request timeout5s, case budget30s, run budget180s; config has hard finite
+  request timeout5s, cumulative startup ceiling15s (also capped by remaining
+  case/run time), case budget30s, run budget180s; config has hard finite
   bounds. Cases not started after the run budget are marked `not-run`. A browser launch
   failure stops further launch attempts and marks remaining cases `not-run`.
 
@@ -119,10 +120,22 @@ Destroy aborts/settles an active parameter job, removes owned input/render
 listeners and DOM, destroys the chart and disposes its model. Worker termination
 requests, calculation job/reservation counters, store subscriptions and pending
 chart RAF are checked. The runner deletes the runtime global before post-cleanup
-GC. Counts alone are not a GC/leak proof. Existing CDP cleanup requests owned
-browser termination and removes its temporary profile; OS process reaping is not
-independently measured. Protocol deadlines do not preempt a blocked JS task;
-cleanup has its own bounded protocol waits and may extend the case budget.
+GC. Counts alone are not a GC/leak proof. CDP cleanup confirms the owned browser
+root process exit before removing its temporary profile: TERM then, if needed,
+KILL, with at most one second waiting for each. Unconfirmed termination is an
+error and retains the profile. A small Node child regression checks process exit;
+this is not a real Chrome descendant/GPU process cleanup measurement.
+
+Startup deadlines cover both endpoint/socket opening and every initial CDP
+setup request cumulatively. Existing callers that omit the optional startup
+timeout retain their prior per-request defaults. Protocol deadlines do not
+preempt a blocked JS task. Final runtime cleanup/GC/heap calls may take up to
+15s, Browser.close up to3s, then root process termination up to2s. Thus a run
+budget bounds measurement admission, not total cleanup wall time; filesystem
+operations and descendant processes have no hard real-time guarantee. A pilot
+with a three-minute overall operational target should reserve cleanup headroom,
+for example `--config '{"runTimeoutMs":150000}'`, and report deadline failure
+without treating incomplete cases as results.
 
 ## Comparison scope
 

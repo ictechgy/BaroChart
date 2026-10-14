@@ -1,3 +1,4 @@
+import {browserLaunchBudget,configureBrowserTarget,terminateOwnedBrowser} from './browser-lifecycle.mjs';
 import {spawn} from 'node:child_process';
 import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -37,25 +38,26 @@ export function createCDPTransport(socket,{timeoutMs=180000,logLimit=128}={}){
 }
 
 // Isolated headless browser owned by this harness, not a user's existing tab.
-export async function launchBrowser({dpr=1,width=1280,height=900}={}){
+export async function launchBrowser({dpr=1,width=1280,height=900,timeoutMs}={}){
+  const remaining=browserLaunchBudget(timeoutMs);
   const profile=await mkdtemp(join(tmpdir(),'aster-chrome-'));
   const executable=process.env.CHROME_BIN??(process.platform==='darwin'?'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome':'chromium');
-  let child,socket,transport,closing;
-  const cleanup=async()=>{transport?.dispose();try{socket?.close();}catch{}if(child&&child.exitCode===null&&child.signalCode===null)child.kill();await rm(profile,{recursive:true,force:true}).catch(()=>{});};
+  let child,socket,transport,closing,cleaning;const ownedError=()=>{};
+  const cleanup=()=>cleaning??=(async()=>{transport?.dispose();try{socket?.close();}catch{}const result=await terminateOwnedBrowser(child);child?.off('error',ownedError);await rm(profile,{recursive:true,force:true});return {...result,profileRemoved:true};})();
   try{
-    child=spawn(executable,['--headless=new','--no-first-run','--no-default-browser-check','--disable-background-networking','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:['ignore','ignore','pipe']});
+    remaining(15000,'spawn');
+    child=spawn(executable,['--headless=new','--no-first-run','--no-default-browser-check','--disable-background-networking','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:['ignore','ignore','pipe']});child.on('error',ownedError);
     const endpoint=await new Promise((resolve,reject)=>{
       let text='';const finish=(error,value)=>{clearTimeout(timer);child.stderr.off('data',data);child.off('error',failed);child.off('exit',exited);error?reject(error):resolve(value);};
       const data=chunk=>{text=(text+chunk).slice(-8192);const match=text.match(/DevTools listening on (ws:\/\/[^\s]+)/);if(match)finish(null,match[1]);};
       const failed=error=>finish(error),exited=code=>finish(new Error(`Chrome exited ${code}: ${text.slice(-2000)}`));
-      const timer=setTimeout(()=>finish(new Error('Chrome launch timed out')),15000);
+      const timer=setTimeout(()=>finish(new Error('Chrome launch timed out')),remaining(15000,'endpoint'));
       child.stderr.on('data',data);child.on('error',failed);child.on('exit',exited);
     });
     socket=new WebSocket(endpoint);
-    await new Promise((resolve,reject)=>{const finish=error=>{clearTimeout(timer);socket.removeEventListener('open',opened);socket.removeEventListener('error',failed);socket.removeEventListener('close',closed);error?reject(error):resolve();};const opened=()=>finish(),failed=()=>finish(new Error('CDP WebSocket connection failed')),closed=()=>finish(new Error('CDP connection closed during open'));const timer=setTimeout(()=>finish(new Error('CDP WebSocket open timed out')),15000);socket.addEventListener('open',opened);socket.addEventListener('error',failed);socket.addEventListener('close',closed);});
+    await new Promise((resolve,reject)=>{const finish=error=>{clearTimeout(timer);socket.removeEventListener('open',opened);socket.removeEventListener('error',failed);socket.removeEventListener('close',closed);error?reject(error):resolve();};const opened=()=>finish(),failed=()=>finish(new Error('CDP WebSocket connection failed')),closed=()=>finish(new Error('CDP connection closed during open'));const timer=setTimeout(()=>finish(new Error('CDP WebSocket open timed out')),remaining(15000,'socket-open'));socket.addEventListener('open',opened);socket.addEventListener('error',failed);socket.addEventListener('close',closed);});
     transport=createCDPTransport(socket);
-    const target=await transport.send('Target.createTarget',{url:'about:blank'},null),attached=await transport.send('Target.attachToTarget',{targetId:target.targetId,flatten:true},null);transport.setSession(attached.sessionId);
-    await transport.send('Page.enable');await transport.send('Runtime.enable');await transport.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:dpr,mobile:false});
-    return {send:transport.send,evaluate:transport.evaluate,navigate:transport.navigate,on:transport.on,targetId:target.targetId,sessionId:attached.sessionId,get diagnostics(){return transport.diagnostics;},close:()=>closing??=(async()=>{try{if(socket.readyState===WebSocket.OPEN)await transport.send('Browser.close',{},null,3000,'close').catch(()=>{});}finally{await cleanup();}})()};
-  }catch(error){await cleanup();throw error;}
+    const target=await configureBrowserTarget(transport,{width,height,dpr,remaining});
+    return {send:transport.send,evaluate:transport.evaluate,navigate:transport.navigate,on:transport.on,targetId:target.targetId,sessionId:target.sessionId,get diagnostics(){return transport.diagnostics;},close:()=>closing??=(async()=>{try{if(socket.readyState===WebSocket.OPEN)await transport.send('Browser.close',{},null,3000,'close').catch(()=>{});}finally{return await cleanup();}})()};
+  }catch(error){try{await cleanup();}catch(cleanupError){throw new AggregateError([error,cleanupError],'Browser launch failed and cleanup was not confirmed',{cause:error});}throw error;}
 }
