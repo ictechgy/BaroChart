@@ -31,9 +31,28 @@ export function validateSymbol(symbol) {
   zonedParts(0, symbol.timezone); return Object.freeze({...symbol});
 }
 export function formatPrice(value, symbol) {return value.toFixed(symbol.priceDecimals);}
+// Timestamp strings use decimal arithmetic before conversion to binary64. Bounds
+// prevent unbounded coefficient/exponent expansion; OHLCV values remain Number.
+function decimalTime(value, timeUnit) {
+  if(value.length>128)throw new RangeError('Timestamp text limit 128 characters');
+  const match=/^([+-]?)(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/.exec(value.trim());
+  if(!match)throw new TypeError('Timestamp string must use decimal notation');
+  const exponent=Number(match[5]??0);
+  if(!Number.isSafeInteger(exponent)||Math.abs(exponent)>10000)throw new RangeError('Timestamp exponent limit 10000');
+  const fraction=match[3]??match[4]??'';
+  let digits=((match[2]??'')+fraction).replace(/^0+/,'');
+  if(!digits)return match[1]==='-'?-0:0;
+  let shift=exponent-fraction.length+(timeUnit==='s'?3:0);
+  while(shift<0&&digits.endsWith('0')){digits=digits.slice(0,-1);shift++;}
+  if(shift<0)throw new RangeError('Time must be an exact UTC millisecond integer');
+  if(digits.length+shift>16)throw new RangeError('Time must be in the Date range');
+  const time=Number(digits+'0'.repeat(shift))*(match[1]==='-'?-1:1);
+  if(Math.abs(time)>8640000000000000)throw new RangeError('Time must be in the Date range');
+  return time;
+}
 export function normalizeOHLCV(rows, {timeUnit = 'ms', format = 'objects'} = {}) {
   if (!['ms', 's'].includes(timeUnit) || !['objects', 'tuples'].includes(format)) throw new TypeError('Explicit format/time unit required');
-  return rows.map(row => {const b = Object.fromEntries(FIELDS.map((k, i) => {const value = format === 'tuples' ? row[i] : row[k]; if (typeof value !== 'number' && (typeof value !== 'string' || !value.trim())) throw new TypeError('Numeric fields or nonempty numeric strings required'); return [k, Number(value)];})); if (timeUnit === 's') b.time *= 1000; validateBar(b); return b;});
+  return rows.map(row => {const b = Object.fromEntries(FIELDS.map((k, i) => {const value = format === 'tuples' ? row[i] : row[k]; if(k==='time'&&typeof value==='string')return [k,decimalTime(value,timeUnit)]; if (typeof value !== 'number' && (typeof value !== 'string' || !value.trim())) throw new TypeError('Numeric fields or nonempty numeric strings required'); return [k, k==='time' ? value*(timeUnit==='s'?1000:1) : Number(value)];})); validateBar(b); return b;});
 }
 
 /** Exact timestamp join onto an existing timeline. Unmatched values remain NaN.
@@ -81,7 +100,13 @@ export class SessionCalendar {
   invalidate() {this.cache.clear();calendarAnchors.get(this).clear();}
   sessions(date) {
     if (!this.cache.has(date)) {
-      const windows = this.provider(date).map(s => ({date, kind: s.kind ?? 'regular', open: zonedEpoch(date, s.open, this.timezone), close: zonedEpoch(s.close <= s.open ? shiftDate(date, 1) : date, s.close, this.timezone)}));
+      const windows = this.provider(date).map(s => {
+        const kind=s.kind??'regular',open=s.open,close=s.close;
+        // Match zonedEpoch's HH:mm / HH:mm:ss equivalence before deciding
+        // whether the close belongs to the next local date (not UTC +24h).
+        const openClock=open.length===5?open+':00':open,closeClock=close.length===5?close+':00':close;
+        return {date,kind,open:zonedEpoch(date,open,this.timezone),close:zonedEpoch(closeClock<=openClock?shiftDate(date,1):date,close,this.timezone)};
+      });
       if (windows.some(s => s.close <= s.open) || windows.some((s, i) => i && s.open < windows[i - 1].close)) throw new RangeError('Ordered nonoverlapping sessions required');
       this.cache.set(date, windows);
       if (this.cache.size > this.maxCachedDays) this.cache.delete(this.cache.keys().next().value);

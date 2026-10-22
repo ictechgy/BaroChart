@@ -1,6 +1,6 @@
 # Portable workspace: first-slice design
 
-Status: implementation design; public contract is in WORKSPACES.md. Source data remains
+Status: historical first-slice implementation design; public contract is in WORKSPACES.md. Source data remains
 external. This is not a promise of complete host/native workspace support.
 
 ## Proposed API and ownership
@@ -32,7 +32,14 @@ A strict versioned plain document:
     chart: {panels, axes, theme, symbol, formatters, precision, axisWidth, view, follow}
     indicators: [{id, name, params, module?, outputs, plotOffsets}]
     series: [portable public series options, excluding external values]
-    drawings: {schema:'aster.drawings', version:1|2, drawings:[...]}
+    drawings: {schema:'aster.drawings', version:1|2, drawings:[...]}  // original first slice
+
+Current compatibility note (2026-10-18): the outer workspace version remains 1,
+but current embedded drawing documents accept versions 1/2/3/4. Position drawings
+require v3 and any explicit visibility boolean requires v4; bindings are retained.
+See [positions](POSITION-DRAWINGS.md), [visibility](DRAWING-VISIBILITY.md) and
+[the current workspace contract](WORKSPACES.md). The shape above records the
+original design, not a current loader restriction.
 
 Dataset fields are required nonempty bounded strings. Expected binding is
 supplied independently on restore and must exactly match all five fields.
@@ -117,7 +124,7 @@ cancellation limits must be explicit; a Promise around blocking work is insuffic
 ## Acceptance before release
 
 Golden save/restore/save with multi-panel/axis OHLCV and indicator series, all
-portable style/precision/symbol settings,14 drawing-tool anchors/bindings, hidden
+portable style/precision/symbol settings,16 drawing-tool anchors/bindings, hidden
 studies, own-key output names and -0 params. Unknown versions/fields/module
 versions, dataset revision/adjustment/extent mismatch, invalid axes/drawing refs,
 functions, large documents/records and unsupported values must reject atomically.

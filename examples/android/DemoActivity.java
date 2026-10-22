@@ -8,6 +8,26 @@ public final class DemoActivity extends Activity {
     private final JSONArray checks=new JSONArray();
     private TextView comparisonReadout;private final java.util.Map<String,Button> comparisonButtons=new java.util.LinkedHashMap<>();private boolean comparisonActive=false;private String savedComparison;
     private boolean analysisActive=false,analysisAsOf=false;private int analysisIndex;private String savedStudies;private final java.util.Map<String,Button> studyButtons=new java.util.LinkedHashMap<>();
+    private TextView dataReadout;private long dataActionGeneration=0,dataControlsMount=0;private boolean dataControlsClosed=false;
+    // Opt-in demo only: no key interception, automatic reads or announcements.
+    private void addDataControls(LinearLayout layout){
+        final long mount=++dataControlsMount;
+        HorizontalScrollView scroll=new HorizontalScrollView(this);LinearLayout row=new LinearLayout(this);scroll.addView(row);
+        for(String[] item:new String[][]{{"Explore on","on"},{"Explore off","off"},{"Previous bar","ArrowLeft"},{"Next bar","ArrowRight"},{"Previous series","ArrowUp"},{"Next series","ArrowDown"},{"Refresh selection","refresh"},{"Read values","read"}}){Button button=new Button(this);button.setText(item[0]);button.setContentDescription(item[0]);button.setMinHeight((int)(48*getResources().getDisplayMetrics().density));button.setOnClickListener(v->dataAction(item[1],mount));row.addView(button);}
+        dataReadout=new TextView(this);dataReadout.setTextColor(Color.WHITE);dataReadout.setBackgroundColor(Color.rgb(12,19,32));dataReadout.setText("Exploration OFF. Read values may calculate dirty indicators synchronously. Results update only on explicit actions.");dataReadout.setContentDescription("Last explicit data exploration result");dataReadout.setMaxLines(4);dataReadout.setVerticalScrollBarEnabled(true);dataReadout.setMovementMethod(android.text.method.ScrollingMovementMethod.getInstance());
+        layout.addView(scroll);layout.addView(dataReadout);
+    }
+    private void dataAction(String key,long mount){
+        final AsterEngine owner=engine;final TextView output=dataReadout;
+        if(dataControlsClosed||mount!=dataControlsMount||isDestroyed()||owner==null||output==null||!output.isAttachedToWindow())return;
+        final long generation=++dataActionGeneration;String text;
+        try{
+            JSONObject result;
+                if("on".equals(key))result=owner.setDataExploration(true);else if("off".equals(key))result=owner.setDataExploration(false);else if("refresh".equals(key))result=owner.refreshDataExploration();else if("read".equals(key))result=owner.readDataExploration();else result=owner.navigateDataExploration(key);
+                text="Last explicit result: "+result.optString("text","");if(text.equals("Last explicit result: "))text="Exploration OFF";
+        }catch(Exception error){text="Action error: "+error.getMessage()+". No automatic retry.";}
+        if(!dataControlsClosed&&mount==dataControlsMount&&!isDestroyed()&&output.isAttachedToWindow()&&engine==owner&&dataReadout==output&&generation==dataActionGeneration)output.setText(text.length()>4096?text.substring(0,4096):text);
+    }
     private void require(boolean v,String reason){if(!v)throw new AssertionError(reason);checks.put(reason);}
     @Override public void onCreate(Bundle state){super.onCreate(state);try{
         if(getIntent().getBooleanExtra("retention-test",false)){retentionMode=true;RetentionVerification.attach(this);return;}
@@ -30,7 +50,7 @@ public final class DemoActivity extends Activity {
         // Listeners observe input after AsterChartView has processed it; returning
         // false preserves its normal touch/mouse capture and drawing behavior.
         chart.setOnTouchListener((v,event)->{validation.post(this::refreshComparison);return false;});chart.setOnGenericMotionListener((v,event)->{validation.post(this::refreshComparison);return false;});
-        layout.addView(toolbar);layout.addView(comparisonScroll);layout.addView(studyScroll);layout.addView(comparisonReadout);layout.addView(chart,new LinearLayout.LayoutParams(-1,0,1));setContentView(layout);
+        layout.addView(toolbar);layout.addView(comparisonScroll);layout.addView(studyScroll);layout.addView(comparisonReadout);if(getIntent().getBooleanExtra("data-controls",false)&&!validationMode)addDataControls(layout);layout.addView(chart,new LinearLayout.LayoutParams(-1,0,1));setContentView(layout);
         if(comparisonMode){engine.invoke("nativeComparisonDemo");comparisonActive=true;}refreshComparison();
         if(getIntent().getBooleanExtra("study-test",false))validation.postDelayed(this::verifyStudies,500);
         if(getIntent().getBooleanExtra("public-resize-test",false))validation.postDelayed(this::verifyPublicInput,500);
@@ -108,5 +128,5 @@ public final class DemoActivity extends Activity {
     @Override protected void onStop(){if(soak!=null)soak.lifecycle("stop");super.onStop();}
     @Override protected void onResume(){super.onResume();if(soak!=null)soak.lifecycle("resume");}
     @Override protected void onNewIntent(android.content.Intent intent){super.onNewIntent(intent);if(intent.getBooleanExtra("soak-recreate",false)&&soak!=null){android.content.Intent original=new android.content.Intent(getIntent());original.putExtra("soak-test",true);original.removeExtra("soak-recreate");setIntent(original);soak.lifecycle("requested-recreate");recreate();}}
-    @Override protected void onDestroy(){validation.removeCallbacksAndMessages(null);if(retentionMode)RetentionVerification.destroyed(this);if(asyncJob!=null)asyncJob.cancel();if(asyncBenchmark!=null)asyncBenchmark.cancel();if(prepareBenchmark!=null)prepareBenchmark.cancel();if(asyncLargeVerification!=null)asyncLargeVerification.cancel();if(soak!=null)soak.stop();super.onDestroy();android.util.Log.i("AsterValidation","destroy activity="+System.identityHashCode(this)+" phase="+phase);if(engine!=null)engine.close();}
+    @Override protected void onDestroy(){dataControlsClosed=true;dataControlsMount++;dataActionGeneration++;dataReadout=null;validation.removeCallbacksAndMessages(null);if(retentionMode)RetentionVerification.destroyed(this);if(asyncJob!=null)asyncJob.cancel();if(asyncBenchmark!=null)asyncBenchmark.cancel();if(prepareBenchmark!=null)prepareBenchmark.cancel();if(asyncLargeVerification!=null)asyncLargeVerification.cancel();if(soak!=null)soak.stop();super.onDestroy();android.util.Log.i("AsterValidation","destroy activity="+System.identityHashCode(this)+" phase="+phase);if(engine!=null)engine.close();}
 }

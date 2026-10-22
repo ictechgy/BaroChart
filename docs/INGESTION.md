@@ -30,6 +30,38 @@ const committed=api.drainDataEvents(8); // 호스트가 선택한 owner-thread �
 그대로이므로 호스트가 우회하면 저장량이 수집 정책보다 커질 수 있습니다.
 정책은 프로세스 전체 메모리 제한이 아닙니다.
 
+## 동일한 직접 배치의 선택적 게시 생략
+
+JavaScript 직접 호출 `api.applyDataEvents(events,{skipUnchanged:true})` 또는
+`store.applyEvents(events,{skipUnchanged:true,maxBars,maxStoreBytes})`는 모든 입력과
+중간 상태·저장 예산·거래량 트리 산술을 먼저 검증합니다. append가 없고 최종
+교체 대상 여섯 OHLCV 필드가 현재 값과 각각 `Object.is`로 같을 때만 데이터
+게시와 API invalidation을 생략합니다. 누적 volume은 합산하지 않고 replacement로
+다룹니다. 동일 이벤트뿐 아니라 중간 변경 후 정확히 원복하는 배치도 해당합니다.
+중간 overflow/잘못된 시각/없는 correction은 최종 값이 같아져도 전체 거절합니다.
+append는 항상 변경이며 remove는 이 배치의 지원 이벤트가 아닙니다.
+
+명시적 true 옵션의 receipt에는 `unchanged:true|false`가 있습니다. true이면
+`events`는 검증한 이벤트 수, `from/to`는 요청한 대상의 반개구간이며 실제 게시된
+변경 수가 아닙니다. version/timeVersion, 컬럼·트리 identity, 지표 dirty/checkpoint,
+held buffer, store observer와 API invalidate 횟수는 모두 그대로입니다. false이면
+기존 단일 게시를 수행합니다. 기본값·false·undefined 옵션은 이전 동작과 receipt
+형태를 유지합니다. `+0`와 `−0`는 다른 값이고 NaN은 기존 OHLCV 검사에서 거절합니다.
+옵션은 own data 속성만 허용하며 getter를 실행하지 않습니다.
+
+이 옵션은 최신성 판별·자동 중복 제거 프로토콜이 아닙니다. revision/sequence가 없는
+오래된 다른 값의 snapshot도 명시한 update/correction이면 교체합니다. 역사 조회와
+live 응답이 겹치면 호스트가 공급자 revision 또는 요청 시작 시 source version 등을
+사용해 병합/거절 정책을 정해야 합니다. timestamp나 도착 순서만으로 최신성을
+추측하지 않습니다. 검증·트리 staging 비용은 여전히 남으며 실제 시간 성능 개선을
+측정한 기능이 아닙니다.
+
+Swift/Java에서는 [명시적 boolean overload](NATIVE-BATCH-UNCHANGED.md)로 같은 옵션을
+사용할 수 있습니다. 기존 1인수/false 호출, `applyDataEvent`의 batch 형식, JSON
+`dispatch`, ingestion queue/drain/저장 문서의 계약은 변경하지 않습니다. 특히 queue의 동일 payload도 수락 순번·applied 계수와 단일
+게시를 기존대로 유지합니다. 직접 no-op 호출은 queue의 pending/sourceVersion을
+수정하거나 재검증하지 않습니다.
+
 검증 실패는 컬럼·구간 트리·버전·공개 알림을 변경하지 않습니다. 성공 뒤
 observer 오류는 커밋을 취소하지 않습니다. 임의의 신뢰 사용자 지표가 이후
 lazy 계산에서 던지는 오류까지 데이터 트랜잭션이 되돌려 주지는 않습니다.
@@ -53,7 +85,7 @@ percent 축 기준과 시간/가격 drawing anchor가 보존됩니다.
 | 잘못된 stream/generation, 중복/누락 순번 | `STREAM_MISMATCH` / `SEQUENCE_MISMATCH`, nextSequence 유지 |
 | 큐 공간 부족 | `QUEUE_BUDGET`, packet 전체를 호스트가 계속 소유 |
 | 저장 행/typed byte 한도 또는 잘못된 순서 | drain `DRAIN_FAILED`, prefix 전체를 유지하고 paused |
-| 대기 중 기존 API로 source 변경 | `SOURCE_CHANGED`, paused; resume은 호스트의 명시적 재검증 선택 |
+| 대기 중 기존 API로 source 변경 | `SOURCE_CHANGED`, paused; resume은 현재 source/version에 재연결; 다음 drain에서 검증 |
 | pause / async lease | `PAUSED` / `BUSY`, 새 packet 미수락 |
 | 미설정 / 교체된 session | `NOT_CONFIGURED` / `CLOSED` |
 
@@ -83,10 +115,13 @@ context 교체는 정책·통계·순번을 보존하고 live busy 상태는 저
 두 심볼은 독립 모델/엔진 두 개를 사용합니다. `setSymbol`은 메타데이터 변경이며
 공급자를 해제하거나 데이터를 자동 교체하지 않습니다. producer의 streamId와
 generation을 묶고 구독 해제를 호스트가 처리해야 합니다. 지표 period 변경은
-현재 remove/add와 관련 series 재등록을 사용합니다. 이력을 버리지 않으므로
-새 period는 원래 전체 이력으로 계산합니다.
+[`api.setIndicatorParams(id, params)`](INDICATOR-PARAMETERS.md)로 같은 지표 ID와
+연결된 series를 유지하며 전체 파라미터를 교체할 수 있습니다. 비동기 경로는
+[웹](ASYNC-INDICATOR-PARAMS.md)과 [네이티브](NATIVE-ASYNC-PARAMS.md) 계약을 따릅니다.
+이력을 버리지 않으므로 새 period는 현재 보유한 전체 이력으로 계산합니다.
 
 실행 가능한 작은 예제: `node examples/ingestion.mjs`.
+수동 실패·복구 UI는 [ingestion queue 예제](INGESTION-DEMO.md)를 참고하세요.
 15분 fixture와 실제 검증 결과는 Cycle12 검증 (not included in this source distribution)과
 실측 경계 (not included in this source distribution)에 기록했습니다.
 

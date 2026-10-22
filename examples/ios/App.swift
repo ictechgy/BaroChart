@@ -10,6 +10,27 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     var soak:AsterPrepareSoak?,soakContainer:UIStackView?,soakViews:[Int:AsterChartView]=[:],soakWidths:[Int:NSLayoutConstraint]=[:]
     let asyncStatus=UILabel()
     let comparisonReadout=UILabel();var comparisonButtons:[String:UIButton]=[:],comparisonActive=false,savedComparison:String?,analysisCaption:String?;let analysisButton=UIButton(type:.system)
+    private var dataReadout:UITextView?,dataActionGeneration=0,dataControlsMount=0,dataControlsClosed=false
+    // Opt-in controls keep existing chart keys, gestures and default layout intact.
+    private func addDataControls(_ stack:UIStackView){
+        dataControlsMount += 1;let mount=dataControlsMount
+        let scroll=UIScrollView(),row=UIStackView();row.axis = .horizontal;row.spacing=8;row.translatesAutoresizingMaskIntoConstraints=false;scroll.addSubview(row)
+        NSLayoutConstraint.activate([row.leadingAnchor.constraint(equalTo:scroll.contentLayoutGuide.leadingAnchor),row.trailingAnchor.constraint(equalTo:scroll.contentLayoutGuide.trailingAnchor),row.topAnchor.constraint(equalTo:scroll.contentLayoutGuide.topAnchor),row.bottomAnchor.constraint(equalTo:scroll.contentLayoutGuide.bottomAnchor),row.heightAnchor.constraint(equalTo:scroll.frameLayoutGuide.heightAnchor),scroll.heightAnchor.constraint(equalToConstant:44)])
+        for (title,key) in [("Explore on","on"),("Explore off","off"),("Previous bar","ArrowLeft"),("Next bar","ArrowRight"),("Previous series","ArrowUp"),("Next series","ArrowDown"),("Refresh selection","refresh"),("Read values","read")]{let button=UIButton(type:.system);button.setTitle(title,for:.normal);button.accessibilityLabel=title;button.accessibilityIdentifier="data-"+key;button.addAction(UIAction{[weak self] _ in self?.dataAction(key,mount:mount)},for:.touchUpInside);button.widthAnchor.constraint(greaterThanOrEqualToConstant:110).isActive=true;row.addArrangedSubview(button)}
+        let output=UITextView();output.isEditable=false;output.isSelectable=true;output.textColor = .white;output.backgroundColor=UIColor(red:12/255,green:19/255,blue:32/255,alpha:1);output.text="Exploration OFF. Read values may calculate dirty indicators synchronously. Results update only on explicit actions.";output.accessibilityLabel="Last explicit data exploration result";output.heightAnchor.constraint(equalToConstant:88).isActive=true;dataReadout=output
+        stack.insertArrangedSubview(scroll,at:stack.arrangedSubviews.count-1);stack.insertArrangedSubview(output,at:stack.arrangedSubviews.count-1)
+    }
+    private func dataAction(_ key:String,mount:Int){
+        guard !dataControlsClosed,mount==dataControlsMount,let owner=engine,let output=dataReadout,output.window != nil else{return};dataActionGeneration += 1;let generation=dataActionGeneration
+        let text:String
+        do{
+            let result:[String:Any]
+                switch key{case "on":result=try owner.setDataExploration(true);case "off":result=try owner.setDataExploration(false);case "refresh":result=try owner.refreshDataExploration();case "read":result=try owner.readDataExploration();default:result=try owner.navigateDataExploration(key)}
+                let value=result["text"] as? String ?? "";text=value.isEmpty ? "Exploration OFF" : "Last explicit result: "+value
+        }catch{text="Action error: \(error). No automatic retry."}
+        guard !dataControlsClosed,mount==dataControlsMount,output.window != nil,engine===owner,dataReadout===output,generation==dataActionGeneration else{return};output.text=String(text.prefix(4096))
+    }
+    func stopDataControls(){dataControlsClosed=true;dataControlsMount += 1;dataActionGeneration += 1;dataReadout=nil}
     func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey:Any]? = nil) -> Bool {
         return true
     }
@@ -17,6 +38,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         let configuration = UISceneConfiguration(name:"Aster",sessionRole:session.role);configuration.delegateClass = AsterSceneDelegate.self;return configuration
     }
     func start(_ windowScene: UIWindowScene) {
+        stopDataControls();dataControlsClosed=false
         do {
             let args=ProcessInfo.processInfo.arguments,prepareDemo=args.contains("--prepare-demo"),validationMode=["--study-test","--study-ui-test","--closed-observer-test","--self-test","--async-test","--async-bench","--prepare-test","--prepare-bench","--soak-test"].contains(where:args.contains),empty=(!validationMode && !prepareDemo)||["--study-test","--study-ui-test","--closed-observer-test","--async-test","--async-bench","--prepare-test","--prepare-bench","--soak-test","--prepare-demo"].contains(where:args.contains)
             engine = try AsterEngine(bundleURL: Bundle.main.url(forResource: "aster-core", withExtension: "js")!, count:empty ? 0 : 10000,options:prepareDemo ? ["panels":[["id":"price","weight":3]],"series":[["id":"price","type":"candles","panel":"price"]]] : nil)
@@ -33,6 +55,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
             analysisButton.setTitle("Session VWAP",for:.normal);analysisButton.accessibilityIdentifier="analysis-session";analysisButton.addTarget(self,action:#selector(analysisAction),for:.touchUpInside);analysisButton.widthAnchor.constraint(greaterThanOrEqualToConstant:116).isActive=true;compareBar.insertArrangedSubview(analysisButton,at:0)
             comparisonReadout.textColor = .white;comparisonReadout.font = .monospacedSystemFont(ofSize:11,weight:.regular);comparisonReadout.numberOfLines=3;comparisonReadout.accessibilityIdentifier="comparison-readout";comparisonReadout.heightAnchor.constraint(equalToConstant:52).isActive=true
             chart = AsterChartView(engine: engine);chart.onInteraction={ [weak self] in self?.refreshComparison() }; let stack = UIStackView(arrangedSubviews:[toolScroll,asyncBar,compareScroll,comparisonReadout,chart]); stack.axis = .vertical; stack.translatesAutoresizingMaskIntoConstraints = false; toolScroll.heightAnchor.constraint(equalToConstant:44).isActive = true
+            if args.contains("--data-controls") && !validationMode{addDataControls(stack)}
             controller.view.addSubview(stack); NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo:controller.view.leadingAnchor),stack.trailingAnchor.constraint(equalTo:controller.view.trailingAnchor),stack.topAnchor.constraint(equalTo:controller.view.safeAreaLayoutGuide.topAnchor),stack.bottomAnchor.constraint(equalTo:controller.view.safeAreaLayoutGuide.bottomAnchor)])
             window.rootViewController = controller; self.window = window; window.makeKeyAndVisible()
             if !validationMode && !prepareDemo{_=try nativeComparisonAction(engine,"setup",width:390,height:600);comparisonActive=true};refreshComparison()
@@ -195,7 +218,7 @@ final class AsterSceneDelegate: UIResponder, UIWindowSceneDelegate {
     func sceneWillResignActive(_ scene:UIScene) {(UIApplication.shared.delegate as? AppDelegate)?.cancelAsync()}
     func sceneDidEnterBackground(_ scene:UIScene) {(UIApplication.shared.delegate as? AppDelegate)?.soak?.backgrounded()}
     func sceneDidBecomeActive(_ scene:UIScene) {(UIApplication.shared.delegate as? AppDelegate)?.soak?.foregrounded()}
-    func sceneDidDisconnect(_ scene:UIScene) {let delegate=UIApplication.shared.delegate as? AppDelegate;delegate?.cancelAsync();delegate?.soak?.stop();try? delegate?.engine?.close()}
+    func sceneDidDisconnect(_ scene:UIScene) {let delegate=UIApplication.shared.delegate as? AppDelegate;delegate?.stopDataControls();delegate?.cancelAsync();delegate?.soak?.stop();try? delegate?.engine?.close()}
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options: UIScene.ConnectionOptions) {
         guard let windowScene=scene as? UIWindowScene,let delegate=UIApplication.shared.delegate as? AppDelegate else{return};delegate.start(windowScene)
     }

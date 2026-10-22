@@ -114,7 +114,7 @@ function assertFrozen(drawing) {
   if (drawing.style) assert.ok(Object.isFrozen(drawing.style));
 }
 
-test('translation oracle: all 14 types use exact raw addition and one undo unit', t => {
+test('translation oracle: all 14 legacy types use exact raw addition and one undo unit', t => {
   const f = fixture(t), ids = [];
   for (const [type, count] of TYPES) {
     ids.push(f.store.add({

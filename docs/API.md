@@ -12,6 +12,8 @@ drain capacity/numeric checks still apply. The default requires an empty queue.
 
 화면 좌표 없이 값·지표·원본 인덱스를 조회하는 `dataAt`은 [DATA-EXPLORER.md](DATA-EXPLORER.md)를 참고하세요. 기본값은 현재 차트의 표시값이며 과거 cutoff는 명시적으로 지정합니다. 웹의 명시적 키보드 선택·Enter 조회 prototype은 [KEYBOARD-EXPLORER.md](KEYBOARD-EXPLORER.md)에 있습니다. 이동은 계산하지 않으며 실제 브라우저·보조기술 UX 검증은 아직 필요합니다.
 
+기존 `crosshairValues` readout은 각 표시 지표 시리즈마다 한 번 얻은 계산 결과에서 output 이름과 값을 함께 선택합니다. output 생략 시 같은 지표를 다시 조회하지 않습니다. 시리즈 간 또는 프레임 간 캐시는 추가하지 않으며, 레이아웃 계산과 dirty 지표의 동기 계산 비용은 남습니다. 이 변경은 readout 내부 중복 호출 제거이며 실제 입력 지연·paint 개선 수치를 의미하지 않습니다.
+
 ## 차트 모델
 
 `new ChartModel({store,panels,theme,visibleBars,axisWidth,precision})`는 데이터, 지표 엔진, 그리기 저장소를 조합합니다. `addPanel({id,weight,label,scale,range,padding,inverted,base,precision,formatter})`와 `setPanel(id,patch)`를 사용합니다. 패널은 x축을 공유하고 y축을 각각 가집니다. 자동 가격 범위는 가시 원본/축약 범위를 사용하고 도형이 자동 범위를 확장하지 않습니다. 수동 범위 `range:[min,max]`는 자동 축보다 우선합니다.
@@ -90,7 +92,7 @@ controller 정리 callback이나 메서드 getter가 대상 entry 또는 model/e
 
 ## 그리기·히스토리
 
-14종 도구: 기존 `trendline`, `horizontal`, `fibonacci`, `rectangle`, `ellipse`, `text` 및 `ray`, `extendedline`, `channel`, `fibextension`, `fibfan`, `fibtimezones`, `freehand`, `measurement`입니다. 수평선/텍스트는 anchor1, 채널/피보 확장은3, 자유선은2..2048, 나머지는2입니다. anchor는 `{time,price}`와 panel id로 저장합니다.
+16종 도구: 기존 `trendline`, `horizontal`, `fibonacci`, `rectangle`, `ellipse`, `text` 및 `ray`, `extendedline`, `channel`, `fibextension`, `fibfan`, `fibtimezones`, `freehand`, `measurement`, `longposition`, `shortposition`입니다. 수평선/텍스트는 anchor1, 채널/피보 확장은3, 롱/숏은4, 자유선은2..2048, 나머지는2입니다. anchor는 `{time,price}`와 panel id로 저장합니다.
 
 추세선은 선분, ray는 첫 점에서 두 번째 점 방향으로 확장, extendedline은 양방향 확장입니다. channel은 첫 두 점의 방향을 공유하며 세 번째 점을 지나는 평행선 및 점선 중간선입니다. channel/fibextension 생성 드래그는 세 번째 점을 끝점 아래40px에 초기화하며 이후 세 번째 핸들을 이동합니다. 3회 클릭 생성 방식은 없습니다. freehand는 1px 이상 이동한 점을 저장하며 2048개에서 중단합니다. 자동 곡선 smoothing/단순화는 없습니다.
 
@@ -108,22 +110,67 @@ model.drawings.load(saved);        // 검증 후 원자적 적용, load도 undo 
 `save()`/`saveDrawings()`도 `load()`와 같은 한도를 검사합니다. 도형/점 개수
 한도를 지켜도 좌표·문자열 길이에 따라 문서 한도를 넘을 수 있으며, 이때
 저장은 `TypeError`를 던지고 원본 도형·선택·undo/redo를 그대로 보존합니다.
+로드는 원본 JSON 길이와 정규화 후 다시 저장할 최소 버전 JSON 길이를 모두
+검사합니다. 지수 표기 숫자의 일반 표기 변환이나 공개 API의 색상 정규화로
+문서가 커질 수 있습니다. 후자가 한도를 넘으면 기존 도형·선택·이력·ID
+serial을 교체하거나 redraw를 알리기 전에 거부합니다. 정확히 한도인
+정규화 결과는 허용하며, 도형 교체로 변경된 상태는 기존처럼 한 번의 undo로 되돌립니다. 빈 문서에서 빈 문서로의 로드는 이력을 추가하지 않습니다.
 add/edit는 입력 검사뿐 아니라 실제 JSON 정규화된 저장 후보도 검사하여 getter나 직렬화 hook이 바꾼 잘못된 좌표·스타일이 저장되지 않게 합니다. 이 계약이 getter의 실행 횟수나 애플리케이션 코드의 부수효과까지 제어하지는 않습니다.
 암묵적인 삭제·축약은 하지 않습니다. 오류를 처리하고 호스트에서 내보낼
 도형 범위를 명시적으로 정해야 합니다. 활성 gesture는 먼저 commit/cancel해야
 저장할 수 있다는 기존 계약도 유지됩니다. 같은 크기 제한과 유효한 패널/축/
-시리즈 바인딩을 가진 대상에서 v1/v2 문서를 복원할 수 있습니다.
+시리즈 바인딩을 가진 대상에서 v1/v2/v3/v4 문서를 복원할 수 있습니다.
 
 
-begin/commit/cancel은 gesture transaction입니다. 드래그 중 여러 edit을 하나의 undo로 커밋합니다. cancel은 시작 상태로 복원하고 히스토리를 생성하지 않습니다. 기본 undo history는 최대 100건입니다. 새 수정 후 redo는 비웁니다. 현재 transaction 중 저장/로드는 오류입니다. 기존 v1과 독립 축/시리즈 바인딩을 포함하는 v2를 읽으며, 그 외 버전은 거부합니다. 바인딩이 없으면 v1, 있으면 v2로 저장합니다. 저장은 도형만 포함하며 데이터·차트 스타일·심볼 메타데이터는 호스트가 별도로 저장합니다.
+begin/commit/cancel은 gesture transaction입니다. 드래그 중 여러 edit을 하나의 undo로 커밋합니다. cancel은 시작 상태로 복원하고 히스토리를 생성하지 않습니다. 기본 undo history는 최대 100건입니다. 새 수정 후 redo는 비웁니다. 현재 transaction 중 저장/로드는 오류입니다. 현재 reader는 v1/v2/v3/v4를 읽으며, 그 외 버전은 거부합니다. 필요한 최소 버전으로 저장합니다: 기존 도구에 바인딩이 없으면 v1, 축/시리즈 바인딩이 있으면 v2, 롱/숏 position이 있으면 v3, 명시적인 `visible` boolean이 하나라도 있으면 v4입니다. v3/v4도 이전 버전의 바인딩을 보존합니다. [position](POSITION-DRAWINGS.md)과 [visibility](DRAWING-VISIBILITY.md)의 이전 reader 거절 규칙을 확인하세요. 저장은 도형만 포함하며 데이터·차트 스타일·심볼 메타데이터는 호스트가 별도로 저장합니다.
 
-선택된 unlocked 도형의 핸들을 먼저 검사하고, 나머지 geometry는 최근 도형부터 검사합니다. 잠금은 이동·편집·삭제를 막습니다. 패널에 clip하고 prepend/zoom/resize 후 anchor를 유지합니다. 몸체 이동은 시작 화면 좌표 각각에 동일 pixel delta를 적용한 뒤 시간·가격으로 역변환합니다. log 축과 압축된 주말 간격에서도 모양을 보존합니다. 버전1의 필드 형식은 유지하며 0.1 문서를0.2가 읽습니다. 0.1 reader는 새 도구 type을 거부합니다.
+선택된 unlocked 도형의 핸들을 먼저 검사하고, 나머지 geometry는 최근 도형부터 검사합니다. 잠금은 이동·geometry/style 편집·삭제를 막지만, 잠금 토글과 visibility-only 변경은 허용합니다. 숨김 도형은 캔버스 선택·hit test에서 제외되며 문서/이력/자원 한도에는 남습니다. [잠금과 표시 상태](DRAWING-VISIBILITY.md)를 참고하세요. 패널에 clip하고 prepend/zoom/resize 후 anchor를 유지합니다. 몸체 이동은 시작 화면 좌표 각각에 동일 pixel delta를 적용한 뒤 시간·가격으로 역변환합니다. log 축과 압축된 주말 간격에서도 모양을 보존합니다. 버전1의 필드 형식은 유지하며 0.1 문서를0.2가 읽습니다. 0.1 reader는 새 도구 type을 거부합니다.
 
 ## 입력 상태 기계
 
+과거 데이터를 `prepend`할 때 기존 봉이 있으면 view 양 끝에 추가 봉 수를
+더하여 같은 UTC 봉을 같은 화면상의 가로 위치에 유지합니다. 빈 저장소의 첫 페이지에는
+보존할 과거 봉이 없으므로, `follow=true`이면 append와 같은 규칙으로 기존
+view 폭을 유지하고 끝을 `length + forwardOffset - 0.5`에 맞춥니다.
+`follow=false`이면 호스트가 정한 논리 범위를 그대로 둡니다. 빈 페이지는
+view를 이동하지 않으며 잘못된 페이지는 전체 거부됩니다. 이 규칙은 동기
+경로와 준비된 Worker/공통 native-JavaScript 상태 복원에 같습니다.
+reset의 기존 fit 정책, 비어 있지 않은 backfill의 follow 값과 도형 UTC
+좌표는 바꾸지 않습니다. [복원과 과거 화면 검증 범위](PERSISTENCE-VIEW-SAFETY.md)를
+참고하세요.
+
 `InteractionController`는 pointer id와 down/move/up/cancel, wheel, key를 받는 플랫폼 독립 코어입니다. select 도구는 팬 또는 도형 편집, 그리기 도구는 새 도형을 생성합니다. 두 번째 손가락은 pending drawing/edit을 cancel하고 pinch가 소유권을 가져갑니다. 세 번째 손가락은 무시합니다. pinch 후 남은 한 손가락은 새 drawing을 만들지 않고 전체 release를 기다립니다. pointercancel/Escape/뷰 분리는 transaction을 복원·해제합니다. wheel 중 active gesture는 무시합니다.
 
-CanvasChart는 pointer capture, lostcapture, wheel preventDefault, 키보드 및 ResizeObserver를 연결합니다. Ctrl/Cmd+Z, Shift+Z/Y, Delete/Backspace, Escape와 Arrow(+Shift10px/Ctrl pan), +/- zoom, Home fit, End recent, PageUp/PageDown 도형 선택을 지원합니다. `destroy({disposeModel:true})`는 RAF·observer·DOM 이벤트·저장소 구독을 해제하고 자신이 소유한 모델을 dispose합니다. 여러 렌더러가 하나의 모델을 공유하면 마지막 소유자가 model.dispose를 호출해야 합니다. 호스트가 만든 timer/stream 구독은 호스트가 해제합니다.
+팬·pinch를 시작한 뒤 prepend/reset/새 봉 append처럼 저장된 시간축이 바뀌거나,
+외부 `setVisibleRange`/fit/zoom 또는 follow 변경으로 현재 view가 controller의
+마지막 적용값과 달라지면, 다음 pointer down/move/up 또는 cancel에서 이전 기준을
+폐기합니다. 현재 모델이 보정한 view/follow를 유지하며 옛 인덱스로 되돌리거나
+시간앵커를 추측하여 재보간하지 않습니다. 동일 시각 update/correction은 시간축을
+바꾸지 않으므로 정상적인 드래그를 계속합니다. 값이 같은 외부 view 쓰기는 별도
+변경으로 구분하지 않습니다. 추가 구독이 없으므로 데이터 변경 순간의 즉시 종료
+알림을 보장하는 정책은 아닙니다.
+
+이렇게 중단된 gesture는 추적 중인 최대 두 pointer가 모두 up될 때까지 wait합니다.
+남은 손가락의 move는 화면을 이동하지 않고, 그 사이 두 번째 down도 새 pinch로
+승격하지 않습니다. 세 번째 pointer는 기존대로 무시합니다. 전체 release 후 새
+실제 down으로 다시 시작할 수 있습니다. pointercancel/Escape는 wait와 포인터를
+즉시 비웁니다. 데이터/외부view가 그대로인 정상 cancel은 기존 시작view/follow를
+복원합니다. 도형 create/edit transaction 정책은 변경하지 않습니다. 이 경계는
+공통 controller 및 생성 native bundle VM에서 검사했으며 새 실제 터치기기·브라우저
+실행 결과를 뜻하지 않습니다.
+
+
+CanvasChart는 pointer capture, lostcapture, wheel preventDefault, 키보드 및 ResizeObserver를 연결합니다. Ctrl/Cmd+Z, Shift+Z/Y, Delete/Backspace, Escape와 Arrow(+Shift10px/Ctrl pan), +/- zoom, Home fit, End recent, PageUp/PageDown 도형 선택을 지원합니다. 선택이 없으면 PageUp은 마지막 도형, PageDown은 첫 도형에서 시작하며 기존 선택이 있으면 순서대로 순환합니다. 기존대로 잠긴 도형과 연결 대상이 사라진 도형도 목록 순서에 포함됩니다. `destroy({disposeModel:true})`는 RAF·observer·DOM 이벤트·저장소 구독을 해제하고 자신이 소유한 모델을 dispose합니다. 여러 렌더러가 하나의 모델을 공유하면 마지막 소유자가 model.dispose를 호출해야 합니다. 호스트가 만든 timer/stream 구독은 호스트가 해제합니다.
+
+웹 canvas의 일반 모드에서는 Alt 조합을 소비하지 않습니다. Ctrl/Cmd 조합은
+기존 undo/redo(Z, Shift+Z, Y)와 화살표 이동만 처리하며, 다른 조합은
+preventDefault 없이 호스트에 넘깁니다. 특히 Ctrl/Cmd +/-의 브라우저 확대/축소와
+Alt+좌우 이동을 차트 단축키로 가로채지 않습니다. 기존 Ctrl/Cmd 좌우 pan 및
+상하 zoom, Shift 도형 이동과 modifier 없는 키는 유지됩니다. 자식 입력 대상·
+IME 조합·이미 처리된 이벤트는 기존대로 무시합니다. 탐색 모드는 별도의
+modifier 없는 탐색 키 계약을 유지합니다. 이는 웹 이벤트 라우팅 정책이며
+직접 호출하는 native/core key 명령의 의미를 바꾸지 않습니다.
+
 
 `model.dispose()`는 자신이 소유한 시리즈 범위 인덱스 참조도 해제합니다. 공유 저장소·사용자가 제공한 values·시리즈 설정과 호출자가 별도로 보관한 출력 view는 지우거나 detach하지 않습니다. dispose 뒤 파생 시리즈 데이터를 다시 만들 수 없으며, 사용자 지표 callback에서 dispose한 경우 진행 중 계산이 돌아와도 캐시를 재연결하지 않습니다.
 
@@ -238,4 +285,55 @@ See [Atomic drawing style patches](DRAWING-STYLE.md) for `setDrawingsStyle(ids, 
 
 ### Optional drawing selection controls (web)
 
-[Explicit drawing selection controls](DRAWING-PANEL.md) adds a separate bounded selection controller and an opt-in paged checkbox panel using the existing group style/delete APIs. It does not change the chart's single pointer-selected drawing or workspace schema. Real-browser and assistive-technology QA remain pending.
+[Explicit drawing selection controls](DRAWING-PANEL.md) adds a separate bounded selection controller and an opt-in paged checkbox panel for group style/delete, visibility and duplication, with optional [style-only presets](DRAWING-STYLE-PRESETS.md). It does not change the chart's single pointer-selected drawing or workspace schema. The panel guide separates historical Mac style/delete focus checks from the newer modeled-only controls; recent controls and assistive-technology behavior still need real-platform QA.
+
+### Shared-model refresh and renderer teardown
+
+Sharing a model shares drawing records/history, but does not automatically redraw sibling renderers after drawing commands or previews. BarStore data notifications are separate. Use the [one-authority shared-model refresh recipe](SHARED-MODEL-REFRESH.md); it is host wiring with existing APIs, not an independent-model drawing synchronization service.
+
+
+Destroying a CanvasChart (including its GPUChart subclass) rolls back a drawing gesture only when that controller captured the currently active drawing transaction. An idle sibling, a pan/wait sibling, or a stale creator cannot cancel another controller's or a later manual transaction. The dying controller still clears its own pointers and viewport gesture state. Explicit controller/native cancellation retains its existing semantics. A shared model also shares view, crosshair and drawing state; this does not provide independent views or simultaneous independent drawing transactions. Keep `disposeModel:false` while another renderer uses the model. Node fake-DOM and generated core VM regressions cover this ownership rule; device/browser resource lifetime is a separate validation scope.
+
+Shared-model web input errors and tracked pointer cancellation also roll back only the receiving controller's captured drawing transaction. A second chart trying to begin while another drawing transaction is active receives the existing busy error; the first drawing survives and the second chart can try again after completion. A failed controller setup after its own begin rolls back that same transaction before propagating the error. Late pointercancel from an untracked pointer is ignored. Explicit core/native cancellation and intentionally shared model state retain their existing contracts.
+
+A two-pointer pinch takeover likewise rolls back only a create/edit transaction belonging to that controller. A sibling pan becoming pinch preserves another chart's drawing transaction. Since the view is shared, an actual pinch zoom still changes the common projection; an ongoing drawing's existing projection-change cancellation applies on its next movement. This is ownership isolation, not independent shared-model viewports.
+
+Renderer fallback follows the same drawing ownership rule as destroy: switching a sibling chart to Canvas does not cancel another chart's active transaction, while the owning chart's create/edit is rolled back. Existing source-canvas/controller reentry guards and explicit onFallback callback behavior are retained. This is tested by calling the actual fallback method under modeled DOM; it does not certify a physical GPU context-loss event.
+
+If an explicit shared-model command cancels or replaces a controller's drawing transaction, its next pointer move or up retires only that stale local gesture and its tracked pointers. It cannot edit, roll back or commit the replacement transaction, including a replacement using the same drawing ID. The drawing move path rechecks ownership after layout creation. No immediate subscription-based cancellation is implied; a fresh pointer down is required to begin another gesture. Explicit cancel, tool/target changes and keyboard commands retain their documented shared/global behavior.
+
+`setDrawingMagnet({mode: 'off' | 'weak' | 'strong', radiusPx?: number})` configures
+per-controller OHLC snapping for drawing creation/individual handles. Default Off;
+Weak defaults to 8 logical pixels (1–32), Strong selects nearest visible bar X
+then nearest on-screen OHLC Y. See [drawing magnet](DRAWING-MAGNET.md) for axis
+eligibility, tie rules, ownership, exclusions and native facade coverage.
+
+`setCrosshairSnap({mode: 'free' | 'close' | 'ohlc', target?: DrawingTarget | null})`
+configures a pointer crosshair independently of drawing magnet.
+`crosshairSnapshot(width,height)` returns detached raw/resolved coordinates and
+exact OHLC source metadata, or explicit unsnapped fields. Default Free preserves
+legacy behavior and `crosshairValues` shape. See [crosshair snapping](CROSSHAIR-SNAP.md)
+for eligibility, prepared-layout versus fresh-query costs, local/remote cursor
+ownership, keyboard interaction and validation limits.
+
+Long/short chart-only risk/reward annotations: [position drawings](POSITION-DRAWINGS.md),
+including four semantic anchors, document v3, and read-only `positionMetrics(id)`.
+
+`setDrawingVisibility(id, boolean)` and `setDrawingsVisibility(ids, boolean)` return `{changed, invalidationFailed}` with one atomic undo. Hidden drawings retain storage/history but are excluded from rendering and canvas selection. Locks permit visibility changes. See [visibility and v4 persistence](DRAWING-VISIBILITY.md).
+
+`duplicateDrawing(id, {deltaTimeMs, deltaPrice})` / `duplicateDrawings(ids, options)` create unlocked chart-local copies with new IDs, an immutable source→copy receipt and one undo. Visibility is preserved. Both raw deltas are mandatory; see [duplication contract](DRAWING-DUPLICATION.md).
+
+## Style-only drawing presets
+
+`DrawingStylePresets` is an optional host-owned registry with explicit standalone JSON persistence. Capture stored portable style fields and apply a nonempty partial patch through the existing atomic drawing-style API. See [limits, receipts, panel usage and native boundaries](DRAWING-STYLE-PRESETS.md).
+
+`saveBoundDrawings(chartAPI, identity)` and
+`loadBoundDrawings(chartAPI, text, expectedIdentity)` provide opt-in exact
+host-declared identity matching for primary-price drawings. They reject
+secondary-axis/series bindings and unlabelled legacy documents; they do not
+authenticate market data. Existing drawing/workspace formats and native commands
+are unchanged. See [identity fields, compatibility, limits and callback semantics](BOUND-DRAWINGS.md).
+
+## Manual bar replay
+
+`BarReplay` is a separate synchronous core session with a copied host source, prefix-only fresh models with isolated forward study reuse, explicit start/step/seek/pause/reset, and detached frame/query results. It has no mutable model or live-feed attachment. See [BAR-REPLAY.md](BAR-REPLAY.md) for lifecycle, limits, staging/cold rebuild costs and the manual web example.

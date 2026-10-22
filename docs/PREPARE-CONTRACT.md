@@ -17,6 +17,10 @@ engine별 max1 active async 작업을 기존 정책(Apple busy / Android superse
 * nativeAsyncStep(maxBars=4096): JSON progress {phase:'generate'|'validate'|'store-index'|'calculate'|'indices'|'ready',done,total,complete}. seed generator는 기존seededColumns와 bit-exact. 검증/트리/계산은 취소 가능한 step 경계로 나눕니다.
 * nativeAsyncFinish(latestUIJSON): ready 상태와 요청 binding을 검증해 새 model/API/Input을 설치할 준비. 오류는 원본을 덮어쓰지 않습니다. 기존 sourceCheck/UI/Release helper를 공유합니다.
 
+`nativePrepareCreate`는 정적으로 연결된 지표 factory를 호출하는 정의 검증 전에 target admission을 예약합니다. 생성 중에는 prepare/correction/workspace/params의 네 Create entrypoint가 모두 `Async target busy`로 거부됩니다. 생성자가 실패하면 `finally`에서 예약을 해제하므로 재시도할 수 있고, workspace/params 전용 Dispose는 이 예약을 취소하지 않습니다. 기존 prepare/correction의 live-runtime admission과 buffer/step/finish 동작은 유지합니다.
+
+legacy prepare에는 별도 JS bridge Dispose API가 없습니다. 취소는 기존 host job flag, 협력형 중단 확인, worker runtime 정리 계약을 따릅니다. 이 생성 예약의 VM·독립 QuickJS 회귀 검사는 host 취소 flag나 Swift/Android runtime retirement를 검증하지 않습니다. 정적으로 연결한 신뢰된 factory의 재진입을 다루며, 입력 문서로 임의 코드를 실행하는 기능을 추가하지 않습니다.
+
 0.2.4 host 작업은 위 단일 문자열 UI 경로 대신 분할 전송을 씁니다. `nativeAsyncUIBegin(ticket)`는 도형 점이 없는 설정/header와 current/undo/redo frameCounts를 반환합니다. `nativeAsyncUINext(ticket)`는 최대64 references·새2048점·262144 UTF-16 chars의 chunk를 반환하고 immutable 도형 객체를 중복 전송하지 않습니다. freehand 한 개는 기존 계약대로 최대2048점입니다. 각 host는 UTF-8 1MiB 상한도 확인합니다. target worker의 `nativeAsyncUIImportBegin/Chunk/End`가 도형·history를 검사/복원하며 aggregate checkpoint parser에 전체 문서를 넣지 않습니다. worker가 멈춘 뒤 owner `nativeAsyncUICheck(ticket)`로 캡처 중 UI 변경을 확인하고 `nativeAsyncFinish('')`가 검증된 result를 설치합니다. UI가 전송 중 바뀌었으면 stale로 원본을 유지합니다. 계산 중 UI 변경은 전송 시작 시 최신 상태로 반영합니다.
 
 기존 internal `nativeAsyncUI`/one-string codec는 작은 fixture·저수준 호환용으로 남아 있으며 큰 문서 전송 경로가 아닙니다. UI JSON의 총 크기, chunk 최대치, owner capture와 worker import 시간을 별도로 기록합니다. 소유권이 있는 UI 참조는 모든 terminal 경로에서 source ticket과 함께 해제합니다. 큰 문서를 그리는 scene/renderer와 동기 save/inspect의 비용까지 분할하는 기능은 아닙니다.

@@ -84,7 +84,7 @@ test('Swift static: zero changed bypasses both targeted and generic mutation not
     assert.equal((swReceipt.match(/notifyChanges\(\)/g) || []).length, 1);
     assert.match(flat(swCommand), /\}elseifoperation=="translateDrawings"\{/);
     const after = swCommand.slice(swCommand.indexOf('if operation == "translateDrawings"'));
-    assert.match(flat(after), /ifcount>0\{notifyChanges\(\)\}\}elseif!\["inspect"/);
+    assert.match(flat(after), /ifcount>0\{notifyChanges\(\)\}\}elseifoperation=="setDrawingsStyle"/);
     assert.match(flat(after), /returnresult$/);
 });
 
@@ -123,7 +123,7 @@ test('Java static: receipt object and required changed field are validated befor
 test('Java static: zero changed bypasses generic mutation notification', () => {
     assert.match(flat(jCommand), /\}elseif\("translateDrawings"\.equals\(operation\)\)\{/);
     const after = jCommand.slice(jCommand.indexOf('if("translateDrawings".equals(operation))'));
-    assert.match(flat(after), /if\(DrawingTranslationReceipt.changed\(\(\(JSONObject\)result\).get\("changed"\)\)\)notifyChanges\(\);\}elseif\(!operation.equals\("inspect"\)/);
+    assert.match(flat(after), /if\(DrawingTranslationReceipt.changed\(\(\(JSONObject\)result\).get\("changed"\)\)\)notifyChanges\(\);\}elseif\("setDrawingsStyle".equals\(operation\)\)/);
     assert.match(flat(after), /returnresult;$/);
 });
 

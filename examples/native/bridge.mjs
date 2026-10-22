@@ -1,6 +1,6 @@
 let nativeLatestLayout=null,nativeLatestLayoutModel=null;
-let nativeWorkspaceSource=null,nativeWorkspaceRegistration=0;
-let nativeAsyncCapture=null,nativeAsyncTicket=0,nativeAsyncPrepared=null,nativeAsyncUIImport=null,nativeAsyncUIPrepared=null;
+let nativeWorkspaceSource=null,nativeWorkspaceRegistration=0,nativeWorkspaceTargetCreating=null;
+let nativeAsyncCapture=null,nativeAsyncTicket=0,nativeAsyncPrepared=null,nativePrepareTargetCreating=false,nativeAsyncUIImport=null,nativeAsyncUIPrepared=null;
 function nativeCapture(ticket){if(!nativeAsyncCapture||nativeAsyncCapture.ticket!==ticket||nativeAsyncCapture.capture.model!==globalThis.nativeModel)throw new Error('Async stale: source replaced/released');nativeAsyncCapture.capture.check();return nativeAsyncCapture.capture;}
 globalThis.nativeAsyncBegin=function(eventJSON){if(nativeAsyncCapture||nativeWorkspaceSource||nativeParamsSource)throw new Error('Async capture busy');const capture=new AsyncCapture(globalThis.nativeModel,JSON.parse(eventJSON)),ticket=++nativeAsyncTicket;nativeAsyncCapture={ticket,capture};return JSON.stringify({ticket,metadataJSON:capture.metadataJSON,buffers:capture.buffers.map((a,slot)=>({slot,length:a.length})),checkpoints:capture.checkpoints.map((row,entry)=>({entry,total:row.keys.length,maxRows:row.maxRows}))});};
 globalThis.nativePrepareBegin=function(requestJSON){if(nativeAsyncCapture||nativeWorkspaceSource||nativeParamsSource)throw new Error('Async capture busy');const capture=new PrepareCapture(globalThis.nativeModel,JSON.parse(requestJSON)),ticket=++nativeAsyncTicket;nativeAsyncCapture={ticket,capture};return JSON.stringify({ticket,metadataJSON:capture.metadataJSON,buffers:[],checkpoints:[]});};
@@ -11,13 +11,28 @@ globalThis.nativeDataAsyncBegin=function(kind,requestJSON){
 // A retained closed Swift engine deliberately retains its raw JSContext. Retire
 // the opt-in ring without changing that legacy raw-data/context ownership rule.
 globalThis.nativeReleaseDataIngestion=function(){const session=globalThis.nativeModel?.dataIngestion;const cancelled=session?.count??0;session?.dispose();return {cancelled,pendingEvents:0,ownedBytes:0};};
-globalThis.nativePrepareCreate=function(metadataJSON){if(nativeAsyncPrepared||nativeParamsTarget||nativeParamsTargetCreating)throw new Error('Async target busy');nativeAsyncPrepared=new PreparedData(metadataJSON);return true;};
+globalThis.nativePrepareCreate=function(metadataJSON){
+ if(nativeAsyncPrepared||nativePrepareTargetCreating||nativeWorkspaceTargetCreating||nativeParamsTarget||nativeParamsTargetCreating)throw new Error('Async target busy');
+ // Definition validation calls trusted linked factories before a target exists.
+ // Legacy prepare cancellation remains owned by the host job/runtime lifecycle.
+ nativePrepareTargetCreating=true;
+ try{nativeAsyncPrepared=new PreparedData(metadataJSON);return true;}
+ finally{nativePrepareTargetCreating=false;}
+};
 // Internal target-only workspace protocol. Host source capture/publication is
 // separate; reject use in an already initialized live runtime.
 function nativeWorkspaceTargetVacant(){if(!Object.isExtensible(globalThis))throw new Error('Workspace target global is not extensible');for(const key of ['nativeModel','nativeAPI','nativeInput','nativeSize']){const d=Object.getOwnPropertyDescriptor(globalThis,key);if(d&&(!Object.hasOwn(d,'value')||d.value!==undefined||!d.configurable))throw new Error('Workspace target requires an isolated empty runtime');}}
-globalThis.nativeWorkspaceTargetCreate=function(metadataJSON){if(nativeAsyncPrepared||nativeParamsTarget||nativeParamsTargetCreating||nativeAsyncUIImport||nativeAsyncUIPrepared)throw new Error('Async target busy');nativeWorkspaceTargetVacant();const target=new NativeWorkspacePrepared(metadataJSON);try{nativeWorkspaceTargetVacant();nativeAsyncPrepared=target;return true;}catch(error){target.dispose();throw error;}};
+globalThis.nativeWorkspaceTargetCreate=function(metadataJSON){
+ if(nativeAsyncPrepared||nativePrepareTargetCreating||nativeWorkspaceTargetCreating||nativeParamsTarget||nativeParamsTargetCreating||nativeAsyncUIImport||nativeAsyncUIPrepared)throw new Error('Async target busy');
+ nativeWorkspaceTargetVacant();const token={};nativeWorkspaceTargetCreating=token;let target;
+ // Linked factories may reenter: reserve before construction and never let a
+ // cancelled constructor overwrite a target admitted by its callback.
+ try{target=new NativeWorkspacePrepared(metadataJSON);nativeWorkspaceTargetVacant();if(nativeWorkspaceTargetCreating!==token)throw new Error('Workspace target creation cancelled');nativeAsyncPrepared=target;return true;}
+ catch(error){target?.dispose();throw error;}
+ finally{if(nativeWorkspaceTargetCreating===token)nativeWorkspaceTargetCreating=null;}
+};
 globalThis.nativeWorkspaceTargetFinish=function(){if(!(nativeAsyncPrepared instanceof NativeWorkspacePrepared))throw new Error('Workspace target missing');const target=nativeAsyncPrepared;let result;try{nativeWorkspaceTargetVacant();result=target.finish();nativeWorkspaceTargetVacant();const input=new InteractionController(result.model,()=>globalThis.nativeSize),api=new ChartAPI(result.model,{controller:input});Object.defineProperties(globalThis,{nativeSize:{value:result.size,writable:true,configurable:true,enumerable:true},nativeModel:{value:result.model,writable:true,configurable:true,enumerable:true},nativeInput:{value:input,writable:true,configurable:true,enumerable:true},nativeAPI:{value:api,writable:true,configurable:true,enumerable:true}});nativeLatestLayout=null;nativeLatestLayoutModel=null;nativeAsyncPrepared=null;return {schema:'aster.native-workspace-target-ready',version:1,status:'target-ready',hostPublished:false,plan:result.plan};}catch(error){try{result?.model.dispose();}finally{try{target.dispose();}finally{if(nativeAsyncPrepared===target)nativeAsyncPrepared=null;}}throw error;}};
-globalThis.nativeWorkspaceTargetDispose=function(){if(nativeAsyncPrepared instanceof NativeWorkspacePrepared){const target=nativeAsyncPrepared;try{target.dispose();}finally{if(nativeAsyncPrepared===target)nativeAsyncPrepared=null;}return true;}return false;};
+globalThis.nativeWorkspaceTargetDispose=function(){if(nativeWorkspaceTargetCreating){nativeWorkspaceTargetCreating=null;return true;}if(nativeAsyncPrepared instanceof NativeWorkspacePrepared){const target=nativeAsyncPrepared;try{target.dispose();}finally{if(nativeAsyncPrepared===target)nativeAsyncPrepared=null;}return true;}return false;};
 function nativeWorkspaceSourceOwner(row){if(workspaceSlot(globalThis,'nativeModel')!==row.model||workspaceSlot(globalThis,'nativeAPI')!==row.api||workspaceSlot(globalThis,'nativeInput')!==row.input||workspaceSlot(globalThis,'nativeSize')!==row.size||workspaceSlot(row.api,'model')!==row.model||workspaceSlot(row.api,'controller')!==row.input||workspaceSlot(row.input,'model')!==row.model)throw new Error('Workspace source stale: native owner replaced');}
 function nativeWorkspaceSourceRow(ticket){const row=nativeWorkspaceSource;if(!row||row.ticket!==ticket)throw new Error('Workspace source ticket missing/released');return row;}
 function nativeWorkspaceSourceDrop(row){try{row.capture?.dispose();}finally{if(nativeWorkspaceSource===row)nativeWorkspaceSource=null;}}
@@ -38,7 +53,7 @@ globalThis.nativeAsyncUIBegin=function(ticket){const capture=nativeCapture(ticke
 globalThis.nativeAsyncUINext=function(ticket){nativeCapture(ticket);if(!nativeAsyncCapture.ui)throw new Error('Async UI capture missing');return nativeAsyncCapture.ui.next();};
 globalThis.nativeAsyncUICheck=function(ticket){nativeCapture(ticket);if(!nativeAsyncCapture.ui||!nativeAsyncCapture.ui.lastComplete)throw new Error('Async UI incomplete source transfer');return nativeAsyncCapture.ui.check(globalThis.nativeInput,globalThis.nativeSize);};
 globalThis.nativeAsyncRelease=function(ticket){if(nativeWorkspaceSource?.ticket===ticket)nativeWorkspaceSourceDrop(nativeWorkspaceSource);if(nativeAsyncCapture?.ticket===ticket){nativeAsyncCapture.capture.release();nativeAsyncCapture=null;}return true;};
-globalThis.nativeAsyncCreate=function(metadataJSON){if(nativeAsyncPrepared||nativeParamsTarget||nativeParamsTargetCreating)throw new Error('Async target busy');nativeAsyncPrepared=new AsyncPrepared(metadataJSON);return true;};
+globalThis.nativeAsyncCreate=function(metadataJSON){if(nativeAsyncPrepared||nativePrepareTargetCreating||nativeWorkspaceTargetCreating||nativeParamsTarget||nativeParamsTargetCreating)throw new Error('Async target busy');nativeAsyncPrepared=new AsyncPrepared(metadataJSON);return true;};
 globalThis.nativeAsyncTargetBuffer=function(slot,offset,count){if(nativeParamsSource)return nativeParamsWrite(slot,offset,count);if(nativeParamsTarget)return nativeParamsTarget.target(slot,offset,count);if(!nativeAsyncPrepared)throw new Error('Async target missing');return nativeAsyncPrepared.target(slot,offset,count);};
 globalThis.nativeAsyncCheckpointImport=function(entry,text){if(!nativeAsyncPrepared)throw new Error('Async target missing');nativeAsyncPrepared.checkpoint(entry,text);return true;};
 globalThis.nativeAsyncStart=function(){if(!nativeAsyncPrepared)throw new Error('Async target missing');nativeAsyncPrepared.start();return true;};

@@ -17,12 +17,20 @@ function installVWAP(api,anchor){
 }
 function mount(){
  const $=id=>document.getElementById(id),status=text=>$('status').textContent=text;let model=createAnalysisModel(),chart=createChart($('chart'),model,{renderer:'canvas',onError:e=>status(e.message)}),busy=false;
- const perform=fn=>async()=>{if(busy)return;try{await fn();chart.drawNow();}catch(e){status('변경을 적용하지 못했습니다: '+e.message);}};
+ const controls=['anchor','fit','correct','asof','query','save','load','setup'];
+ const syncControls=()=>{
+  const entry=model.indicators.entries.get('vwap'),params=entry?.params,session=vwapParams(false),anchor=vwapParams(true);
+  const matches=expected=>params&&Object.keys(params).length===Object.keys(expected).length&&Object.keys(expected).every(key=>Object.is(params[key],expected[key]));
+  const mode=entry?.name==='vwap'?(matches(session)?'session':matches(anchor)?'anchor':'custom'):'custom';
+  $('anchor').value=mode;for(const id of controls)$(id).disabled=busy;
+  $('chart').setAttribute('aria-busy',String(busy));
+ };
+ const perform=fn=>async()=>{if(busy){syncControls();return;}try{await fn();chart.drawNow();}catch(e){status('변경을 적용하지 못했습니다: '+e.message);}finally{syncControls();}};
  $('fit').onclick=perform(()=>chart.api.fit());$('anchor').onchange=perform(()=>{setAnalysisAnchor(chart.api,$('anchor').value==='anchor');status('기존 선 스타일과 도형을 유지하고 VWAP 기준을 변경했습니다.');});
  $('query').onclick=perform(()=>{const asOfIndex=Number($('asof').value),point=chart.api.indicatorValueAt('pressure','signed',asOfIndex,{mode:'plot',asOfIndex});$('reading').textContent=point.sourceIndex===null?'음수 이동된 값은 이 시점에 아직 관측되지 않았습니다.':JSON.stringify(point);});
  $('save').onclick=perform(()=>{$('setup').value=chart.api.saveStudies();status('지표 설정을 JSON에 저장했습니다.');});
  $('load').onclick=perform(()=>{const next=createAnalysisModel({studies:false}),api=new ChartAPI(next);try{api.loadStudies($('setup').value);}catch(e){next.dispose();throw e;}chart.destroy({disposeModel:true});model=next;chart=createChart($('chart'),model,{renderer:'canvas',onError:e=>status(e.message)});window.analysisExample.model=model;window.analysisExample.chart=chart;status('새 지표 컨테이너에 설정을 불러왔습니다.');});
- $('correct').onclick=perform(async()=>{busy=true;$('correct').disabled=true;try{const bar=model.store.at(160);await recomputeInWorker(model,{kind:'correction',bar:{...bar,volume:bar.volume+4321}},{workerURL:new URL('./analysis-worker.mjs',import.meta.url)});status('과거 거래량 수정과 지표 재계산을 Worker에서 적용했습니다.');}finally{busy=false;$('correct').disabled=false;}});
- const cleanup=()=>chart.destroy({disposeModel:true});window.addEventListener('pagehide',e=>{if(!e.persisted)cleanup();});window.analysisExample={model,chart,cleanup};chart.drawNow();status('뉴욕 현지 09:30–16:00. 금요일과 월요일의 UTC 개장 시각은 DST 때문에 한 시간 다릅니다.');
+ $('correct').onclick=perform(async()=>{busy=true;syncControls();status('과거 봉 수정과 지표 재계산 중입니다…');try{const bar=model.store.at(160);await recomputeInWorker(model,{kind:'correction',bar:{...bar,volume:bar.volume+4321}},{workerURL:new URL('./analysis-worker.mjs',import.meta.url)});status('과거 거래량 수정과 지표 재계산을 Worker에서 적용했습니다.');}finally{busy=false;syncControls();}});
+ const cleanup=()=>chart.destroy({disposeModel:true});window.addEventListener('pagehide',e=>{if(!e.persisted)cleanup();});window.analysisExample={model,chart,cleanup};syncControls();chart.drawNow();status('뉴욕 현지 09:30–16:00. 금요일과 월요일의 UTC 개장 시각은 DST 때문에 한 시간 다릅니다.');
 }
 if(typeof document!=='undefined'&&document.body.dataset.demo==='analysis')mount();

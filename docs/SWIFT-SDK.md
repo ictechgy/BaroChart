@@ -1,5 +1,9 @@
 # SwiftPM SDK 소비 경로
 
+Opt-in [unchanged batch overloads](NATIVE-BATCH-UNCHANGED.md) preserve default notifications and expose exact final-value deduplication.
+
+Opt-in native bar selection and explicit value reads are available through four experimental methods; see [native data exploration](NATIVE-DATA-EXPLORATION.md). No automatic keyboard or platform accessibility wiring is included.
+
 새 `setIndicatorParamsAsync`는 Apple 플랫폼에서 아직 검증하지 않은 실험적
 소스 API입니다. 원본 엔진을 유지하며 지표 한 개만
 교체합니다. Swift 컴파일/JSC 실행 전이며 정적 계약 검사만 수행했습니다.

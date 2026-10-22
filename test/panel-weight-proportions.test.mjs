@@ -1,0 +1,12 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {BarStore,ChartModel,createLayout,buildScene} from '../src/core/index.mjs';
+function model(t,weights){const store=new BarStore(Array.from({length:4},(_,i)=>({time:1700000000000+i*60000,open:1,high:3,low:0,close:2,volume:1}))),m=new ChartModel({store,panels:weights.map((weight,i)=>({id:'panel'+i,weight}))});weights.forEach((_,i)=>m.addSeries({id:'series'+i,panel:'panel'+i,type:'candles'}));t.after(()=>m.dispose());return m;}
+const close=(actual,expected)=>assert.ok(Number.isFinite(actual)&&Math.abs(actual-expected)<=Math.max(1,Math.abs(expected))*1e-12,`${actual} != ${expected}`);
+function compare(t,large,ordinary){const a=model(t,large),b=model(t,ordinary),layout=createLayout(a,800,480),reference=createLayout(b,800,480);assert.equal(layout.panels.length,reference.panels.length);for(let i=0;i<layout.panels.length;i++){const p=layout.panels[i],q=reference.panels[i];for(const key of ['left','right','top','bottom'])close(p[key],q[key]);assert.ok(p.bottom>p.top);for(const price of [0,1,2,3])close(p.y(price),q.y(price));}const scene=buildScene(a,800,480);for(const c of scene.commands){for(const key of ['x','y','w','h','baseline'])if(c[key]!==undefined)assert.ok(Number.isFinite(c[key]),key);for(const key of ['coords','points','clip','labelBounds'])if(c[key])assert.ok(c[key].every(Number.isFinite),key);}return layout;}
+test('a single finite maximum weight has the same layout as weight 1',t=>compare(t,[Number.MAX_VALUE],[1]));
+test('equal weights whose sum would overflow retain equal panel proportions',t=>compare(t,[Number.MAX_VALUE,Number.MAX_VALUE],[1,1]));
+test('extreme 4:2:1 weights preserve ordinary proportions without product overflow',t=>compare(t,[Number.MAX_VALUE,Number.MAX_VALUE/2,Number.MAX_VALUE/4],[4,2,1]));
+test('positive subnormal weights retain 1:2:4 proportions',t=>compare(t,[Number.MIN_VALUE,Number.MIN_VALUE*2,Number.MIN_VALUE*4],[1,2,4]));
+test('32 maximum-weight panels preserve the permitted bounded layout',t=>compare(t,Array(32).fill(Number.MAX_VALUE),Array(32).fill(1)));
+test('setPanel to proportional extreme weights retains finite usable geometry',t=>{const m=model(t,[4,2,1]),before=createLayout(m,800,480);[Number.MAX_VALUE,Number.MAX_VALUE/2,Number.MAX_VALUE/4].forEach((weight,i)=>m.setPanel('panel'+i,{weight}));const after=createLayout(m,800,480);after.panels.forEach((p,i)=>{close(p.top,before.panels[i].top);close(p.bottom,before.panels[i].bottom);});assert.doesNotThrow(()=>buildScene(m,800,480));});

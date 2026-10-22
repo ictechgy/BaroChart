@@ -64,6 +64,25 @@ function panelTitle(model,panel) {
  return [panel.label??panel.id,...new Set(labels)].join(' · ');
 }
 
+// Package-internal snapshot; deliberately not exported through the core barrel.
+function snapshotDataBatchOptions(options,storeLimits=true) {
+ if(!options||typeof options!=='object'||Array.isArray(options)||![Object.prototype,null].includes(Object.getPrototypeOf(options)))throw new TypeError('Data batch options plain data record required');
+ const keys=storeLimits?['maxBars','maxStoreBytes','skipUnchanged']:['skipUnchanged'],copy={};
+ for(const key of Reflect.ownKeys(options)){
+  const descriptor=Object.getOwnPropertyDescriptor(options,key);
+  if(typeof key!=='string'||!keys.includes(key)||!descriptor?.enumerable||!Object.hasOwn(descriptor,'value'))throw new TypeError('Data batch options unsupported field or accessor data property');
+  copy[key]=descriptor.value;
+ }
+ if(copy.skipUnchanged!==undefined&&typeof copy.skipUnchanged!=='boolean')throw new TypeError('Data batch skipUnchanged must be boolean');
+ return copy;
+}
+
+// Capture typed-array metadata/copy intrinsics, avoiding caller length getters
+// and subarray/constructor species during the column bulk-copy path.
+const dataColumnPrototype=Object.getPrototypeOf(Float64Array.prototype);
+const dataColumnSlot=key=>Object.getOwnPropertyDescriptor(dataColumnPrototype,key).get;
+const dataColumnLength=dataColumnSlot('length'),dataColumnBuffer=dataColumnSlot('buffer'),dataColumnOffset=dataColumnSlot('byteOffset'),dataColumnTag=dataColumnSlot(Symbol.toStringTag),dataColumnSet=Float64Array.prototype.set;
+const dataColumnConstructors=new Map([Float64Array,Float32Array,Int32Array,Uint32Array,Int16Array,Uint16Array,Int8Array,Uint8Array,Uint8ClampedArray,...(typeof globalThis.Float16Array==='function'?[globalThis.Float16Array]:[])].map(Type=>[Type.name,Type]));
 let storeSerial=0;
 const FIELDS = ['time', 'open', 'high', 'low', 'close', 'volume'];
 function readBar(bar,target={}) {if(!bar||typeof bar!=='object')throw new TypeError('OHLCV object required');for(const k of FIELDS)target[k]=bar[k];return target;}
@@ -156,20 +175,45 @@ class BarStore {
   #internalListeners = new Set();
   constructor(bars = [], {timeframeMs = 60000, timeOrigin = 0,maxBars=RESOURCE_LIMITS.maxBars,onListenerError=null} = {}) { if (!Number.isFinite(timeframeMs) || timeframeMs <= 0 || !Number.isFinite(timeOrigin)||onListenerError!==null&&typeof onListenerError!=='function') throw new RangeError('Virtual timeframe/origin or listener error callback');sizeLimit(maxBars,RESOURCE_LIMITS.maxBars,'Bar limit');this.geometryIdentity=++storeSerial;this.maxBars=maxBars;this.onListenerError=onListenerError;this.listenerErrors=[];this.pendingChanges=[];this.notifying=false; this.timeframeMs = timeframeMs; this.timeOrigin = timeOrigin; this.listeners = new Set(); this.version = 0;this.timeVersion=0; this.setData(bars); }
   setData(bars) {
-    if(!Array.isArray(bars))throw new TypeError('OHLCV array required');sizeLimit(bars.length,this.maxBars,'Bar count');
-    let capacity=16;while(capacity<bars.length)capacity*=2;
+    if(!Array.isArray(bars))throw new TypeError('OHLCV array required');const count=bars.length;sizeLimit(count,this.maxBars,'Bar count');
+    let capacity=16;while(capacity<count)capacity*=2;
     const columns=Object.fromEntries(FIELDS.map(k=>[k,new Float64Array(capacity)])),scratch={};
     let previous = -Infinity;
-    for(let i=0;i<bars.length;i++){readBar(bars[i],scratch);validateBar(scratch,previous);previous=scratch.time;for(const k of FIELDS)columns[k][i]=scratch[k];}
-    const index=new RangeIndex(bars.length,columns.low,columns.high,columns.volume,capacity);
-    Object.assign(this,{length:bars.length,capacity,columns,index});this.changed(0,'reset');
+    for(let i=0;i<count;i++){readBar(bars[i],scratch);validateBar(scratch,previous);previous=scratch.time;for(const k of FIELDS)columns[k][i]=scratch[k];}
+    // Row/index getters may mutate the input array. Never expand the admitted
+    // work or publish a different count after the initial capacity/budget check.
+    if(bars.length!==count)throw new RangeError('OHLCV array length changed during snapshot');
+    const index=new RangeIndex(count,columns.low,columns.high,columns.volume,capacity);
+    Object.assign(this,{length:count,capacity,columns,index});this.changed(0,'reset');
   }
   // Fast column load avoids a million transient bar objects. Validates atomically.
-  setColumns(input, length = input?.time?.length, event = {kind: 'reset'}) {
+  setColumns(input, length, event = {kind: 'reset'}) {
+    if(length!==undefined)sizeLimit(length,this.maxBars,'Bar count');
+    const sources=FIELDS.map(k=>input?.[k]);
+    if(length===undefined){const time=sources[0];length=Array.isArray(time)?time.length:ArrayBuffer.isView(time)?dataColumnLength.call(time):undefined;}
     sizeLimit(length,this.maxBars,'Bar count');
-    if(FIELDS.some(k=>!input?.[k]||!(Array.isArray(input[k])||ArrayBuffer.isView(input[k])&&!(input[k] instanceof DataView))||input[k].length<length))throw new TypeError('Numeric column arrays required');
+    const types=sources.map(source=>{
+      if(Array.isArray(source)){if(source.length<length)throw new TypeError('Numeric column arrays required');return null;}
+      if(!ArrayBuffer.isView(source))throw new TypeError('Numeric column arrays required');
+      const Type=dataColumnConstructors.get(dataColumnTag.call(source));
+      if(!Type||dataColumnLength.call(source)<length)throw new TypeError('Numeric column arrays required');return Type;
+    });
     let capacity=16;while(capacity<length)capacity*=2;
-    const columns=Object.fromEntries(FIELDS.map(k=>{const a=new Float64Array(capacity),source=input[k];if(ArrayBuffer.isView(source))a.set(Float64Array.prototype.subarray.call(source,0,length));else for(let i=0;i<length;i++){const value=source[i];if(typeof value!=='number'||!Number.isFinite(value))throw new TypeError('Numeric column values required');a[i]=value;}return [k,a];}));
+    const columns=Object.fromEntries(FIELDS.map((k,j)=>{
+      const source=sources[j],a=new Float64Array(capacity);
+      if(Array.isArray(source)){
+        if(source.length<length)throw new TypeError('Numeric column arrays required');
+        for(let i=0;i<length;i++){const value=source[i];if(typeof value!=='number'||!Number.isFinite(value))throw new TypeError('Numeric column values required');a[i]=value;}
+      }else{
+        const Type=types[j];
+        if(dataColumnLength.call(source)<length)throw new TypeError('Numeric column arrays required');
+        // A fresh built-in view preserves the captured source's actual type and
+        // logical byte range without consulting its constructor or species.
+        const view=new Type(dataColumnBuffer.call(source),dataColumnOffset.call(source),length);
+        dataColumnSet.call(a,view);
+      }
+      return [k,a];
+    }));
     let previous = -Infinity;
     // Hot input path validates columns directly; no per-bar object allocation.
     const {time, open, high, low, close, volume} = columns;
@@ -222,8 +266,8 @@ class BarStore {
     const current=()=>{
       if(this.columns!==source.columns||this.index!==source.index||this.length!==source.length||this.capacity!==source.capacity||this.maxBars!==source.maxBars||FIELDS.some((key,i)=>this.columns[key]!==arrays[i])||this.timeVersion!==source.timeVersion||this.version!==source.version){const error=new Error('Data batch source changed during snapshot; stale transaction discarded');error.code='SOURCE_CHANGED';throw error;}
     };
-    const limits=batchRecord(options,['maxBars','maxStoreBytes'],'Data batch options',[]),copied=batchEvents(events);
-    if(beforeNotify!==null&&typeof beforeNotify!=='function')throw new TypeError('Internal data batch ledger function required');
+    const limits=snapshotDataBatchOptions(options),copied=batchEvents(events);
+    if(beforeNotify!==null&&(typeof beforeNotify!=='function'||limits.skipUnchanged===true))throw new TypeError('Internal data batch ledger requires unconditional publication');
     current();
     const maxBars=batchBudget(limits.maxBars===undefined?source.maxBars:limits.maxBars,source.maxBars,'bar'),maxBytes=batchBudget(limits.maxStoreBytes===undefined?96*RESOURCE_LIMITS.maxBars:limits.maxStoreBytes,96*RESOURCE_LIMITS.maxBars,'store byte');
     const appended=copied.reduce((n,event)=>n+Number(event.kind==='append'),0),length=source.length+appended;
@@ -259,11 +303,16 @@ class BarStore {
       for(let p=leaf>>1;p;p>>=1){const l=p*2,r=l+1,left=nodes.get(l),right=nodes.get(r);stage(p,Math.min(left?left.min:index.min[l],right?right.min:index.min[r]),Math.max(left?left.max:index.max[l],right?right.max:index.max[r]),(left?left.sum:index.sum[l])+(right?right.sum:index.sum[r]));}
       values.set(operation.index,b);
     }
+    // All intermediate rows, capacity limits and tree arithmetic were validated.
+    // Compare the final replacements, never infer freshness or collapse events.
+    let unchanged=limits.skipUnchanged===true&&appended===0;
+    if(unchanged)for(const [i,b] of values)if(FIELDS.some(key=>!Object.is(source.columns[key][i],b[key]))){unchanged=false;break;}
+    if(unchanged){current();return Object.freeze({events:copied.length,appended,from,to,version:source.version,length,capacity,bytes:96*capacity,unchanged:true});}
     let columns=source.columns;
     if(capacity!==source.capacity){
       columns=Object.fromEntries(FIELDS.map(key=>{const array=new Float64Array(capacity);Float64Array.prototype.set.call(array,source.columns[key]);return [key,array];}));
     }
-    const receipt=Object.freeze({events:copied.length,appended,from,to,version:source.version+1,length,capacity,bytes:96*capacity});
+    const receipt=Object.freeze({events:copied.length,appended,from,to,version:source.version+1,length,capacity,bytes:96*capacity,...(limits.skipUnchanged===true?{unchanged:false}:{})});
     current();
     // Validation and capacity allocation finish before this guarded publication;
     // the writes below use only owned rows, tree nodes and numeric typed arrays.
@@ -283,7 +332,9 @@ class BarStore {
   }
   update(i, bar) {
     if (!Number.isInteger(i) || i < 0 || i >= this.length) throw new RangeError('Bar index');
+    const version=this.version,columns=this.columns,index=this.index,length=this.length;
     bar=readBar(bar);validateBar(bar);
+    if(this.version!==version||this.columns!==columns||this.index!==index||this.length!==length)throw new Error('Bar store changed during update snapshot');
     if (bar.time !== this.columns.time[i]) throw new RangeError('An edit cannot change time; reload to insert/reorder');
     this.index.update(i,bar.low,bar.high,bar.volume);for(const k of FIELDS)this.columns[k][i]=bar[k];this.changed(i,'update');
   }
@@ -386,9 +437,28 @@ function validateSymbol(symbol) {
   zonedParts(0, symbol.timezone); return Object.freeze({...symbol});
 }
 function formatPrice(value, symbol) {return value.toFixed(symbol.priceDecimals);}
+// Timestamp strings use decimal arithmetic before conversion to binary64. Bounds
+// prevent unbounded coefficient/exponent expansion; OHLCV values remain Number.
+function decimalTime(value, timeUnit) {
+  if(value.length>128)throw new RangeError('Timestamp text limit 128 characters');
+  const match=/^([+-]?)(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/.exec(value.trim());
+  if(!match)throw new TypeError('Timestamp string must use decimal notation');
+  const exponent=Number(match[5]??0);
+  if(!Number.isSafeInteger(exponent)||Math.abs(exponent)>10000)throw new RangeError('Timestamp exponent limit 10000');
+  const fraction=match[3]??match[4]??'';
+  let digits=((match[2]??'')+fraction).replace(/^0+/,'');
+  if(!digits)return match[1]==='-'?-0:0;
+  let shift=exponent-fraction.length+(timeUnit==='s'?3:0);
+  while(shift<0&&digits.endsWith('0')){digits=digits.slice(0,-1);shift++;}
+  if(shift<0)throw new RangeError('Time must be an exact UTC millisecond integer');
+  if(digits.length+shift>16)throw new RangeError('Time must be in the Date range');
+  const time=Number(digits+'0'.repeat(shift))*(match[1]==='-'?-1:1);
+  if(Math.abs(time)>8640000000000000)throw new RangeError('Time must be in the Date range');
+  return time;
+}
 function normalizeOHLCV(rows, {timeUnit = 'ms', format = 'objects'} = {}) {
   if (!['ms', 's'].includes(timeUnit) || !['objects', 'tuples'].includes(format)) throw new TypeError('Explicit format/time unit required');
-  return rows.map(row => {const b = Object.fromEntries(FIELDS.map((k, i) => {const value = format === 'tuples' ? row[i] : row[k]; if (typeof value !== 'number' && (typeof value !== 'string' || !value.trim())) throw new TypeError('Numeric fields or nonempty numeric strings required'); return [k, Number(value)];})); if (timeUnit === 's') b.time *= 1000; validateBar(b); return b;});
+  return rows.map(row => {const b = Object.fromEntries(FIELDS.map((k, i) => {const value = format === 'tuples' ? row[i] : row[k]; if(k==='time'&&typeof value==='string')return [k,decimalTime(value,timeUnit)]; if (typeof value !== 'number' && (typeof value !== 'string' || !value.trim())) throw new TypeError('Numeric fields or nonempty numeric strings required'); return [k, k==='time' ? value*(timeUnit==='s'?1000:1) : Number(value)];})); validateBar(b); return b;});
 }
 
 /** Exact timestamp join onto an existing timeline. Unmatched values remain NaN.
@@ -436,7 +506,13 @@ class SessionCalendar {
   invalidate() {this.cache.clear();calendarAnchors.get(this).clear();}
   sessions(date) {
     if (!this.cache.has(date)) {
-      const windows = this.provider(date).map(s => ({date, kind: s.kind ?? 'regular', open: zonedEpoch(date, s.open, this.timezone), close: zonedEpoch(s.close <= s.open ? shiftDate(date, 1) : date, s.close, this.timezone)}));
+      const windows = this.provider(date).map(s => {
+        const kind=s.kind??'regular',open=s.open,close=s.close;
+        // Match zonedEpoch's HH:mm / HH:mm:ss equivalence before deciding
+        // whether the close belongs to the next local date (not UTC +24h).
+        const openClock=open.length===5?open+':00':open,closeClock=close.length===5?close+':00':close;
+        return {date,kind,open:zonedEpoch(date,open,this.timezone),close:zonedEpoch(closeClock<=openClock?shiftDate(date,1):date,close,this.timezone)};
+      });
       if (windows.some(s => s.close <= s.open) || windows.some((s, i) => i && s.open < windows[i - 1].close)) throw new RangeError('Ordered nonoverlapping sessions required');
       this.cache.set(date, windows);
       if (this.cache.size > this.maxCachedDays) this.cache.delete(this.cache.keys().next().value);
@@ -1103,14 +1179,53 @@ class IndicatorEngine {
   dispose() {try{this.unsubscribe(); const entries=this.entries;entries.clear();retireNativeEntriesAfterClear(entries);}finally{unregisterStoreOwner(this);}}
 }
 
+// Chart annotations only: no position sizing, orders, fills or account state.
+function isPositionDrawing(type){return type==='longposition'||type==='shortposition';}
+function positionMetricsFor(d){
+ const [entry,stop,target,extent]=d.points,direction=d.type==='longposition'?'long':'short',sign=direction==='long'?1:-1;
+ const risk=(entry.price-stop.price)*sign,reward=(target.price-entry.price)*sign,ratio=reward/risk;
+ if(stop.time!==entry.time||target.time!==entry.time||extent.price!==entry.price||!(extent.time>entry.time))throw new RangeError('Position anchors require shared start/entry and positive time extent');
+ if(!(risk>0&&reward>0&&ratio>0)||![risk,reward,ratio].every(Number.isFinite))throw new RangeError('Position requires ordered entry/stop/target and finite positive risk, reward and ratio');
+ const percent=value=>{const n=value/Math.abs(entry.price)*100;return Number.isFinite(n)?n:null;};
+ return {direction,startTime:entry.time,endTime:extent.time,entry:entry.price,stop:stop.price,target:target.price,risk,reward,riskPercent:percent(risk),rewardPercent:percent(reward),ratio};
+}
+function positionPointsValid(type,points){
+ if(points.length!==4||points.some(p=>!Number.isFinite(p.time)||Math.abs(p.time)>8640000000000000||!Number.isFinite(p.price)))return false;
+ try{positionMetricsFor({type,points});return true;}catch{return false;}
+}
+// Four stable semantic handles: entry/start, stop, target, extent/entry.
+function positionHandlePoints(points,handle,point){
+ const next=points.map(p=>({...p}));
+ if(handle===0){next[0]={...point};next[1].time=next[2].time=point.time;next[3].price=point.price;}
+ else if(handle===1||handle===2)next[handle].price=point.price;
+ else if(handle===3)next[3].time=point.time;
+ return next;
+}
+function initialPositionPoints(type,point,layout,target){
+ const axis=layout.axis(target.panel,target.axisId),screen=layout.toScreen(point,target.panel,target.axisId);
+ if(!axis)return null;
+ const a=axis.price(screen.y-40),b=axis.price(screen.y+40),low=Math.min(a,b),high=Math.max(a,b),long=type==='longposition';
+ const points=[{...point},{time:point.time,price:long?low:high},{time:point.time,price:long?high:low},{time:layout.fromScreen(screen.x+80,screen.y,target.panel,target.axisId).time,price:point.price}];
+ return positionPointsValid(type,points)?points:null;
+}
+// New semantics must never be silently represented as a legacy document.
+function drawingDocumentVersion(items){return items.some(d=>d.visible!==undefined)?4:items.some(d=>isPositionDrawing(d.type))?3:items.some(d=>d.axisId!=null||d.seriesId!=null)?2:1;}
+function validateDrawingDocumentVersion(d,version){
+ if(d.visible!==undefined&&version<4)throw new TypeError('Drawing visibility requires document version 4');
+ if(isPositionDrawing(d.type)&&version<3)throw new TypeError('Position drawings require document version 3');
+ if(version===1&&(d.axisId!=null||d.seriesId!=null))throw new TypeError('Bound drawings require document version 2');
+}
+
 // Shared structural validation; callers retain their existing copy/commit policy.
-const DRAWING_TYPES = ['trendline', 'horizontal', 'fibonacci', 'rectangle', 'ellipse', 'text', 'ray', 'extendedline', 'channel', 'fibextension', 'fibfan', 'fibtimezones', 'freehand', 'measurement'];
-function drawingPointCount(type) {return ['horizontal','text'].includes(type)?1:['channel','fibextension'].includes(type)?3:2;}
+const DRAWING_TYPES = ['trendline', 'horizontal', 'fibonacci', 'rectangle', 'ellipse', 'text', 'ray', 'extendedline', 'channel', 'fibextension', 'fibfan', 'fibtimezones', 'freehand', 'measurement', 'longposition', 'shortposition'];
+function drawingPointCount(type) {return isPositionDrawing(type)?4:['horizontal','text'].includes(type)?1:['channel','fibextension'].includes(type)?3:2;}
 function validateDrawing(d) {
-  optionRecord(d,['id','type','panel','points','style','text','locked','axisId','seriesId'],'Drawing');identifier(d.id,'Drawing id');identifier(d.panel,'Drawing panel');for(const key of ['axisId','seriesId'])if(d[key]!==undefined&&d[key]!==null)identifier(d[key],'Drawing '+key);
+  optionRecord(d,['id','type','panel','points','style','text','locked','visible','axisId','seriesId'],'Drawing');identifier(d.id,'Drawing id');identifier(d.panel,'Drawing panel');for(const key of ['axisId','seriesId'])if(d[key]!==undefined&&d[key]!==null)identifier(d[key],'Drawing '+key);
   if(!DRAWING_TYPES.includes(d.type))throw new TypeError('Drawing type');const count=drawingPointCount(d.type);
   if(!Array.isArray(d.points)||(d.type==='freehand'?d.points.length<2||d.points.length>2048:d.points.length!==count))throw new TypeError('Drawing anchors');
   for(const point of d.points){optionRecord(point,['time','price'],'Anchor');if(!Number.isFinite(point.time)||Math.abs(point.time)>8640000000000000||!Number.isFinite(point.price))throw new TypeError('Anchor time/price must be finite and within Date range');}
+  if(isPositionDrawing(d.type))positionMetricsFor(d);
+  if(d.visible!==undefined&&typeof d.visible!=='boolean')throw new TypeError('Drawing visible must be boolean');
   if(d.text!==undefined)boundedText(d.text,2000,'Drawing text',true);if(d.locked!==undefined&&typeof d.locked!=='boolean')throw new TypeError('Locked must be boolean');
   if(d.style!==undefined){optionRecord(d.style,['color','fill','width','font'],'Drawing style');if(d.style.width!==undefined&&(!Number.isFinite(d.style.width)||d.style.width<.1||d.style.width>50))throw new RangeError('Stroke width');for(const key of ['color','fill'])if(d.style[key]!==undefined)boundedText(d.style[key],128,'Color');if(d.style.font!==undefined)portableFont(d.style.font);}
 }
@@ -1118,6 +1233,8 @@ function validateDrawing(d) {
 const copyDrawing = x => JSON.parse(JSON.stringify(x, (key,value)=>['axisId','seriesId'].includes(key)&&value===null?undefined:value));
 
 const frozenDrawing=d=>{for(const point of d.points)Object.freeze(point);Object.freeze(d.points);if(d.style)Object.freeze(d.style);return Object.freeze(d);};
+// Import and export use the same canonical, minimal-version document budget.
+const drawingDocument=(items,limit)=>boundedText(JSON.stringify({schema:'aster.drawings',version:drawingDocumentVersion(items),drawings:items}),limit,'Drawing document',true);
 const drawingWeights=new WeakMap();
 function drawingWeight(d){let weight=drawingWeights.get(d);if(weight===undefined){weight=JSON.stringify(d).length*2;drawingWeights.set(d,weight);}return weight;}
 class DrawingStore {
@@ -1131,22 +1248,22 @@ class DrawingStore {
   trim(){let bytes=[...this.undoStack,...this.redoStack].reduce((n,s)=>n+this.weight(s),0);while(this.undoStack.length>this.historyLimit||bytes>this.historyBytes){const old=this.undoStack.length?this.undoStack.shift():this.redoStack.shift();if(!old)break;bytes-=this.weight(old);}this.retainedHistoryBytes=bytes;}
   begin(){if(this.transaction)throw new Error('A drawing transaction is already active');this.transaction=this.items.slice();}
   commit(){if(!this.transaction)return;const before=this.transaction;this.transaction=null;if(before.length!==this.items.length||before.some((d,i)=>d!==this.items[i])){this.undoStack.push(before);this.redoStack=[];this.trim();}}
-  cancel(){if(this.transaction){this.items=this.transaction.slice();this.transaction=null;if(!this.items.some(x=>x.id===this.selected))this.selected=null;}}
+  cancel(){if(this.transaction){this.items=this.transaction.slice();this.transaction=null;if(!this.items.some(x=>x.id===this.selected&&x.visible!==false))this.selected=null;}}
   mutate(fn){const own=!this.transaction;if(own)this.begin();try{fn();if(own)this.commit();}catch(error){if(own)this.cancel();throw error;}}
   // ChartAPI may preflight against the committed snapshot, then cancel pointer
   // ownership only after validation succeeds. Pointer/manual callers use the
   // default current items and retain their existing transaction grouping.
   // Validate the JSON-normalized copy too: nested getters/toJSON may change
   // values after the initial caller-shape check but before publication.
-  add(input,{items=this.items,beforeMutation=null}={}){optionRecord(input,['id','type','panel','points','style','text','locked','axisId','seriesId'],'Drawing');let id=input.id,serial=this.serial;if(!id){do{id=`drawing-${++serial}`;}while(items.some(d=>d.id===id));}const d={id,panel:'price',locked:false,style:{color:'#f5b85a',width:1.5},...input,id};validateDrawing(d);const copy=copyDrawing(d);validateDrawing(copy);frozenDrawing(copy);if(items.some(x=>x.id===id))throw new Error('Duplicate drawing id');const next=[...items,copy];this.budget(next);beforeMutation?.();this.mutate(()=>{this.items=next;});this.serial=serial;this.selected=id;return id;}
-  edit(id,patch,{items=this.items,beforeMutation=null}={}){optionRecord(patch,['type','panel','points','style','text','locked','axisId','seriesId'],'Drawing patch');const i=items.findIndex(x=>x.id===id);if(i<0)throw new Error('Missing drawing');const previous=items[i];if(previous.locked&&Object.keys(patch).some(k=>k!=='locked'))throw new Error('Drawing is locked');const next={...previous,...patch};validateDrawing(next);if(JSON.stringify(previous)===JSON.stringify(next)){beforeMutation?.();return;}const copy=copyDrawing(next);validateDrawing(copy);frozenDrawing(copy);const changed=items.slice();changed[i]=copy;this.budget(changed);beforeMutation?.();this.mutate(()=>{this.items=changed;});}
+  add(input,{items=this.items,beforeMutation=null}={}){optionRecord(input,['id','type','panel','points','style','text','locked','visible','axisId','seriesId'],'Drawing');let id=input.id,serial=this.serial;if(!id){do{id=`drawing-${++serial}`;}while(items.some(d=>d.id===id));}const d={id,panel:'price',locked:false,style:{color:'#f5b85a',width:1.5},...input,id};validateDrawing(d);const copy=copyDrawing(d);validateDrawing(copy);frozenDrawing(copy);if(items.some(x=>x.id===id))throw new Error('Duplicate drawing id');const next=[...items,copy];this.budget(next);beforeMutation?.();this.mutate(()=>{this.items=next;});this.serial=serial;if(copy.visible!==false)this.selected=id;return id;}
+  edit(id,patch,{items=this.items,beforeMutation=null}={}){optionRecord(patch,['type','panel','points','style','text','locked','visible','axisId','seriesId'],'Drawing patch');const i=items.findIndex(x=>x.id===id);if(i<0)throw new Error('Missing drawing');const previous=items[i];if(previous.locked&&Object.keys(patch).some(k=>!['locked','visible'].includes(k)))throw new Error('Drawing is locked');const next={...previous,...patch};validateDrawing(next);if(JSON.stringify(previous)===JSON.stringify(next)){beforeMutation?.();return;}const copy=copyDrawing(next);validateDrawing(copy);frozenDrawing(copy);const changed=items.slice();changed[i]=copy;this.budget(changed);beforeMutation?.();this.mutate(()=>{this.items=changed;if(copy.visible===false&&this.selected===id)this.selected=null;});}
   remove(id,{items=this.items,beforeMutation=null}={}){const d=items.find(x=>x.id===id);if(!d||d.locked)return false;const next=items.filter(x=>x.id!==id);beforeMutation?.();this.mutate(()=>{this.items=next;});if(this.selected===id)this.selected=null;return true;}
   undo(){if(this.transaction)this.cancel();if(!this.undoStack.length)return false;this.redoStack.push(this.items.slice());this.items=this.undoStack.pop().slice();this.selected=null;this.trim();return true;}
   redo(){if(this.transaction)this.cancel();if(!this.redoStack.length)return false;this.undoStack.push(this.items.slice());this.items=this.redoStack.pop().slice();this.selected=null;this.trim();return true;}
-  save(){if(this.transaction)throw new Error('Commit or cancel before saving');return boundedText(JSON.stringify({schema:'aster.drawings',version:this.items.some(d=>d.axisId!=null||d.seriesId!=null)?2:1,drawings:this.items}),this.maxDocumentChars,'Drawing document',true);}
+  save(){if(this.transaction)throw new Error('Commit or cancel before saving');return drawingDocument(this.items,this.maxDocumentChars);}
   load(text,{styleDecoder=null,validatePanel=null,validateBinding=null}={}) {
-    boundedText(text,this.maxDocumentChars,'Drawing document',true);const doc=JSON.parse(text);optionRecord(doc,['schema','version','drawings'],'Drawing document');if(doc.schema!=='aster.drawings'||![1,2].includes(doc.version)||!Array.isArray(doc.drawings)||doc.drawings.length>this.maxDrawings)throw new TypeError('Unsupported drawing document');
-    const items=doc.drawings.map(d=>{validateDrawing(d);if(doc.version===1&&(d.axisId!=null||d.seriesId!=null))throw new TypeError('Bound drawings require document version 2');if(validateBinding&&!validateBinding(d))throw new Error('Invalid drawing binding');if(validatePanel&&!validatePanel(d.panel))throw new Error('Missing drawing panel');const next=copyDrawing(d);if(styleDecoder&&next.style)next.style=styleDecoder(next.style);validateDrawing(next);return frozenDrawing(next);});this.budget(items);if(new Set(items.map(d=>d.id)).size!==items.length)throw new TypeError('Duplicate drawing ids');if(this.transaction)throw new Error('Cannot load during a gesture');this.mutate(()=>{this.items=items;});this.selected=null;
+    boundedText(text,this.maxDocumentChars,'Drawing document',true);const doc=JSON.parse(text);optionRecord(doc,['schema','version','drawings'],'Drawing document');if(doc.schema!=='aster.drawings'||![1,2,3,4].includes(doc.version)||!Array.isArray(doc.drawings)||doc.drawings.length>this.maxDrawings)throw new TypeError('Unsupported drawing document');
+    const items=doc.drawings.map(d=>{validateDrawing(d);validateDrawingDocumentVersion(d,doc.version);if(validateBinding&&!validateBinding(d))throw new Error('Invalid drawing binding');if(validatePanel&&!validatePanel(d.panel))throw new Error('Missing drawing panel');const next=copyDrawing(d);if(styleDecoder&&next.style)next.style=styleDecoder(next.style);validateDrawing(next);return frozenDrawing(next);});this.budget(items);if(new Set(items.map(d=>d.id)).size!==items.length)throw new TypeError('Duplicate drawing ids');if(this.transaction)throw new Error('Cannot load during a gesture');drawingDocument(items,this.maxDocumentChars);this.mutate(()=>{this.items=items;});this.selected=null;
   }
 }
 
@@ -1163,11 +1280,21 @@ function extendedSegment(a,b,p,ray=false) {
 // One geometry definition drives all renderers and hit testing. Fibonacci price
 // levels interpolate raw price, then apply the panel transform (including log).
 function calculateGeometry(d,layout) {
+ if(d.visible===false)return [];
  const p=layout.drawingAxis?layout.drawingAxis(d):layout.panels.find(p=>p.id===d.panel);if(!p)return [];
  const points=d.points.map(q=>layout.toScreen(q,d.panel,d.axisId));if(points.some(q=>!Number.isFinite(q.x)||!Number.isFinite(q.y)))return [];
  const [a,b=a,c=b]=points,commands=[],color=d.style?.color??'#f5b85a',width=d.style?.width??1.5,clip=[p.left,p.top,p.right-p.left,p.bottom-p.top];
  const line=(coords,dash=null)=>{if(coords.length)commands.push({op:'lines',coords,color,width,clip,dash});},label=(x,y,text)=>commands.push({op:'text',x,y,text,color,font:'12px monospace',clip});
- if(d.type==='horizontal')line([p.left,a.y,p.right,a.y]);
+ if(isPositionDrawing(d.type)){
+  const metrics=positionMetricsFor(d),extent=points[3],left=a.x,right=extent.x;
+  for(const [level,fill] of [[b,'#ef535044'],[c,d.style?.fill??'#26a69a44']])commands.push({op:'box',x:left,y:Math.min(a.y,level.y),w:right-left,h:Math.abs(a.y-level.y),fill,color,width,clip});
+  line([left,a.y,right,a.y]);
+  const number=n=>n.toPrecision(6),percent=n=>n===null?'n/a':number(n)+'%';
+  label(left+4,a.y-4,`${metrics.direction==='long'?'Long':'Short'} entry ${String(metrics.entry)} · R/R ${number(metrics.ratio)}`);
+  label(left+4,b.y-4,`Stop ${String(metrics.stop)} · Δ ${number(metrics.risk)} · ${percent(metrics.riskPercent)} of |entry|`);
+  label(left+4,c.y-4,`Target ${String(metrics.target)} · Δ ${number(metrics.reward)} · ${percent(metrics.rewardPercent)} of |entry|`);
+ }
+ else if(d.type==='horizontal')line([p.left,a.y,p.right,a.y]);
  else if(['trendline','measurement'].includes(d.type)){line([a.x,a.y,b.x,b.y]);if(d.type==='measurement'){const delta=d.points[1].price-d.points[0].price,percent=d.points[0].price===0?'n/a':(delta/d.points[0].price*100).toFixed(2)+'%',bars=layout.index(b.x)-layout.index(a.x),seconds=(d.points[1].time-d.points[0].time)/1000;label((a.x+b.x)/2,Math.min(a.y,b.y)-8,`Δ ${delta.toPrecision(6)} (${percent}) · ${bars.toFixed(1)} bars · ${seconds.toFixed(0)}s`);}}
  else if(d.type==='ray'||d.type==='extendedline')line(extendedSegment(a,b,p,d.type==='ray'));
  else if(d.type==='channel'){line(extendedSegment(a,b,p));line(extendedSegment(c,{x:c.x+b.x-a.x,y:c.y+b.y-a.y},p));line(extendedSegment({x:(a.x+c.x)/2,y:(a.y+c.y)/2},{x:(a.x+c.x)/2+b.x-a.x,y:(a.y+c.y)/2+b.y-a.y},p),[4,4]);}
@@ -1198,23 +1325,86 @@ function drawingHitTest(store, layout, x, y, tolerance = 8) {
   if(!Number.isFinite(tolerance)||tolerance<1||tolerance>32)throw new RangeError('Drawing hit tolerance must be 1..32 logical pixels');
   const panel = layout.panels.find(p => y >= p.top && y <= p.bottom && x >= p.left && x <= p.right); if (!panel) return null;
   // Selected handles precede other geometry; otherwise latest drawing wins.
-  const ordered = [...store.items].reverse(); const selected = ordered.find(d => d.id === store.selected);
+  const ordered = [...store.items].reverse().filter(d=>d.visible!==false).filter(d=>!isPositionDrawing(d.type)||d.points.every(point=>{const q=layout.toScreen(point,d.panel,d.axisId);return Number.isFinite(q.x)&&Number.isFinite(q.y);})); const selected = ordered.find(d => d.id === store.selected);
   if (selected && (!layout.drawingAxis||layout.drawingAxis(selected)) && !selected.locked && selected.panel === panel.id) {
     const points = selected.points.map(p => layout.toScreen(p, panel.id,selected.axisId));
     let handle=-1,distance=Infinity;for(let i=0;i<points.length;i++){const d=Math.hypot(points[i].x-x,points[i].y-y);if(d<=tolerance&&d<distance){handle=i;distance=d;}}if(handle>=0)return {id:selected.id,handle};
   }
   for (const d of ordered) {
-    if((layout.drawingAxis&&!layout.drawingAxis(d))||d.panel!==panel.id||!candidateBounds(d,layout,x,y,tolerance))continue; const a = layout.toScreen(d.points[0], d.panel,d.axisId), b = d.points[1] ? layout.toScreen(d.points[1], d.panel,d.axisId) : a;
+    // Keep the existing centerline allowance for thin strokes, but include the
+    // visible half-width of thick bodies. Handles/text retain their own radius.
+    const bodyTolerance=d.type==='text'?tolerance:Math.max(tolerance,(d.style?.width??1.5)/2);
+    if((layout.drawingAxis&&!layout.drawingAxis(d))||d.panel!==panel.id||!candidateBounds(d,layout,x,y,bodyTolerance))continue; const a = layout.toScreen(d.points[0], d.panel,d.axisId), b = d.points[1] ? layout.toScreen(d.points[1], d.panel,d.axisId) : a;
     let hit = false;
-    if (d.type === 'horizontal') hit = Math.abs(y - a.y) <= tolerance;
+    if(isPositionDrawing(d.type)){const c=layout.toScreen(d.points[2],d.panel,d.axisId),end=layout.toScreen(d.points[3],d.panel,d.axisId);hit=x>=a.x-bodyTolerance&&x<=end.x+bodyTolerance&&y>=Math.min(b.y,c.y)-bodyTolerance&&y<=Math.max(b.y,c.y)+bodyTolerance;}
+    else if (d.type === 'horizontal') hit = Math.abs(y - a.y) <= bodyTolerance;
     else if(d.type==='text'){const metrics=labelMetrics(d.style?.font??layout.geometryFont??'12px monospace');hit=x>=a.x-tolerance&&x<=a.x+labelWidth(d.text??'Note',metrics)+tolerance&&y>=a.y-metrics.ascent-tolerance&&y<=a.y+metrics.descent+tolerance;}
-    else if (!['rectangle','ellipse'].includes(d.type)) {for(const c of drawingGeometry(d,layout))if(c.op==='lines'){for(let i=0;i<c.coords.length;i+=4)if(segmentDistance(x,y,{x:c.coords[i],y:c.coords[i+1]},{x:c.coords[i+2],y:c.coords[i+3]})<=tolerance){hit=true;break;}if(hit)break;}}
-    else if (d.type === 'rectangle') {const l = Math.min(a.x, b.x), r = Math.max(a.x, b.x), t = Math.min(a.y, b.y), z = Math.max(a.y, b.y); hit = x >= l - tolerance && x <= r + tolerance && y >= t - tolerance && y <= z + tolerance && Math.min(Math.abs(x - l), Math.abs(x - r), Math.abs(y - t), Math.abs(y - z)) <= tolerance;}
-    else {const rx = Math.abs(b.x - a.x) / 2, ry = Math.abs(b.y - a.y) / 2; if (rx && ry) hit = Math.abs(Math.hypot((x - (a.x + b.x) / 2) / rx, (y - (a.y + b.y) / 2) / ry) - 1) * Math.min(rx, ry) <= tolerance;}
+    else if (!['rectangle','ellipse'].includes(d.type)) {for(const c of drawingGeometry(d,layout))if(c.op==='lines'){for(let i=0;i<c.coords.length;i+=4)if(segmentDistance(x,y,{x:c.coords[i],y:c.coords[i+1]},{x:c.coords[i+2],y:c.coords[i+3]})<=bodyTolerance){hit=true;break;}if(hit)break;}}
+    else if (d.type === 'rectangle') {const l = Math.min(a.x, b.x), r = Math.max(a.x, b.x), t = Math.min(a.y, b.y), z = Math.max(a.y, b.y); hit = x >= l - bodyTolerance && x <= r + bodyTolerance && y >= t - bodyTolerance && y <= z + bodyTolerance && Math.min(Math.abs(x - l), Math.abs(x - r), Math.abs(y - t), Math.abs(y - z)) <= bodyTolerance;}
+    else {
+      const rx = Math.abs(b.x - a.x) / 2, ry = Math.abs(b.y - a.y) / 2;
+      if (rx && ry) hit = Math.abs(Math.hypot((x - (a.x + b.x) / 2) / rx, (y - (a.y + b.y) / 2) / ry) - 1) * Math.min(rx, ry) <= bodyTolerance;
+      // One collapsed radius still draws an axis-aligned stroke. A point with
+      // both radii zero has no outline; only its existing selected handles hit.
+      else if (rx || ry) hit = segmentDistance(x, y, a, b) <= bodyTolerance;
+    }
     if (hit) return {id: d.id, handle: -1, locked: !!d.locked};
   }
   return null;
 }
+
+// Internal shared raw-price selection. Never queries indicators or creates layout.
+function nearestVisibleOHLC(model,layout,x,y,target,fields=['open','high','low','close']){
+ const axis=layout.axis(target.panel,target.axisId),store=model.store;
+ if(!axis||!store.length||x<axis.left||x>axis.right||y<axis.top||y>axis.bottom)return null;
+ const eligible=s=>s.visible!==false&&s.panel===target.panel&&(s.axisId??null)===(target.axisId??null)&&['candles','ohlc'].includes(s.type)&&!(s.offset??0)&&!s.indicator&&!s.values&&!s.source&&!s.symbolId;
+ const series=target.seriesId!=null?model.series.find(s=>s.id===target.seriesId&&eligible(s)):model.series.find(eligible);
+ if(!series)return null;
+ const first=Math.max(0,Math.ceil(model.view.from)),last=Math.min(store.length-1,Math.floor(model.view.to));
+ if(first>last)return null;
+ // Two adjacent visible centers; exact ties choose the earlier bar. Only that
+ // bar is inspected, with field-order ties. No fallback to a remote source bar.
+ const index=layout.index(x),a=Math.max(first,Math.min(last,Math.floor(index))),b=Math.max(first,Math.min(last,Math.ceil(index))),ax=layout.x(a),bx=layout.x(b),at=Math.abs(x-ax)<=Math.abs(x-bx)?a:b,sx=layout.x(at);
+ if(!Number.isFinite(sx)||sx<axis.left||sx>axis.right)return null;
+ let price,field,sy,dy=Infinity;
+ for(const key of fields){const value=store.columns[key][at],py=axis.y(value);if(!Number.isFinite(value)||!Number.isFinite(py)||py<axis.top||py>axis.bottom)continue;const distance=Math.abs(py-y);if(distance<dy){dy=distance;price=value;field=key;sy=py;}}
+ return price===undefined?null:{index:at,time:store.columns.time[at],price,field,x:sx,y:sy,axisId:target.axisId??null,seriesId:series.id};
+}
+
+
+// Metadata belongs to a particular raw pointer object, never the model's JSON
+// cursor shape. Weak keys and opaque owner tokens do not retain controllers.
+const pointerSnapRequests=new WeakMap();
+function crosshairSnapOptions(model,options){
+ optionRecord(options,['mode','target'],'Crosshair snap');const mode=options.mode;
+ if(!['free','close','ohlc'].includes(mode))throw new TypeError('Crosshair snap mode: free, close or ohlc required');
+ let target=null;
+ if(options.target!=null){optionRecord(options.target,['panel','axisId','seriesId'],'Crosshair snap target');const next={...options.target};identifier(next.panel,'Crosshair snap panel');if(next.seriesId!=null&&next.axisId===undefined){const series=model.series.find(s=>s.id===next.seriesId);if(series)next.axisId=series.axisId??null;}model.validateDrawingBinding(next);target=Object.freeze({panel:next.panel,axisId:next.axisId??null,seriesId:next.seriesId??null});}
+ return Object.freeze({mode,target});
+}
+function capturePointerCrosshair(controller,x,y){
+ const cursor={x,y};controller.model.crosshair=cursor;controller._crosshairPointer=cursor;
+ pointerSnapRequests.set(cursor,{model:controller.model,owner:controller._crosshairOwner,options:controller.crosshairSnap,x,y});
+}
+function updatePointerCrosshair(controller){
+ const cursor=controller._crosshairPointer,request=cursor&&pointerSnapRequests.get(cursor);
+ if(cursor===controller.model.crosshair&&request?.owner===controller._crosshairOwner&&Object.is(cursor.x,request.x)&&Object.is(cursor.y,request.y))request.options=controller.crosshairSnap;
+}
+function releasePointerCrosshair(controller){
+ const cursor=controller._crosshairPointer;if(cursor&&pointerSnapRequests.get(cursor)?.owner===controller._crosshairOwner)pointerSnapRequests.delete(cursor);controller._crosshairPointer=null;
+}
+// A prepared layout is required: selection itself performs no study calculation.
+// Fresh-layout public API queries retain the existing layout computation cost.
+function resolveCrosshairSnapshot(model,layout){
+ const cursor=model.crosshair;if(!cursor)return null;const {x,y}=cursor,panel=layout.panels.find(p=>x>=p.left&&x<=p.right&&y>=p.top&&y<=p.bottom);if(!panel)return null;
+ const stored=pointerSnapRequests.get(cursor),request=stored?.model===model&&Object.is(stored.x,x)&&Object.is(stored.y,y)?stored:null,mode=request?.options.mode??'free';
+ const result={mode,raw:{x,y},resolved:{x,y},panel:panel.id,snapped:false,reason:mode==='free'?'free':'no-eligible',index:null,time:null,field:null,price:null,axisId:null,seriesId:null,storeVersion:null};
+ if(mode==='free')return result;
+ const target=request.options.target??{panel:panel.id};if(target.panel!==panel.id)return result;
+ const snap=nearestVisibleOHLC(model,layout,x,y,target,mode==='close'?['close']:undefined);if(!snap)return result;
+ return {...result,resolved:{x:snap.x,y:snap.y},snapped:true,reason:'snapped',index:snap.index,time:snap.time,field:snap.field,price:snap.price,axisId:snap.axisId,seriesId:snap.seriesId,storeVersion:model.store.version};
+}
+function crosshairAxisPrice(snapshot,axis){return snapshot.snapped&&snapshot.axisId===(axis.axisId??null)?snapshot.price:axis.price(snapshot.resolved.y);}
 
 
 // Internal display-list parts shared by full/native scenes and browser layers.
@@ -1234,8 +1424,10 @@ function aggregateVolumeSeries(series) {
 function createDrawingCommands(model, layout) {
   const commands = [], theme = model.theme;
   for (const drawing of model.drawings.items) {
+    if(drawing.visible===false)continue;
     const panel = layout.drawingAxis(drawing);
     if (!panel) continue;
+    if(isPositionDrawing(drawing.type)&&drawing.points.some(point=>{const q=layout.toScreen(point,drawing.panel,drawing.axisId);return !Number.isFinite(q.x)||!Number.isFinite(q.y);}))continue;
     const a = layout.toScreen(drawing.points[0], drawing.panel,drawing.axisId), b = drawing.points[1] ? layout.toScreen(drawing.points[1], drawing.panel,drawing.axisId) : a;
     if (![a.x, a.y, b.x, b.y].every(Number.isFinite)) continue;
     const color = drawing.style?.color ?? '#f5b85a', clip = [panel.left, panel.top, panel.right - panel.left, panel.bottom - panel.top];
@@ -1251,13 +1443,12 @@ function createDrawingCommands(model, layout) {
 function createCrosshairCommands(model, layout) {
   const cursor = model.crosshair, commands = [], theme = model.theme;
   if (!cursor || !model.store.length) return commands;
-  const {x, y} = cursor, panel = layout.panels.find(p => y >= p.top && y <= p.bottom && x >= p.left && x <= p.right);
-  if (!panel) return commands;
+  const snapshot=resolveCrosshairSnapshot(model,layout);if(!snapshot)return commands;const {x,y}=snapshot.resolved,panel=layout.panels.find(p=>p.id===snapshot.panel);
   for (const p of layout.panels) commands.push({op: 'lines', coords: [x, p.top, x, p.bottom], color: theme.crosshair, width: 1, clip: null, dash: [4, 4]});
   commands.push({op: 'lines', coords: [panel.left, y, panel.right, y], color: theme.crosshair, width: 1, clip: null, dash: [4, 4]});
   const metrics=labelMetrics(theme.font),background=portableColor(theme.background).slice(0,7)+'ff';
   if(panel.bottom-panel.top>=metrics.height+8)for(const axis of panel.axes.filter(a=>a.visible)){
-    const clip=[axis.axisLeft,panel.top,axis.axisRight-axis.axisLeft,panel.bottom-panel.top],top=Math.max(panel.top+4,Math.min(panel.bottom-metrics.height-4,y-metrics.height/2)),command=labelCommand(formatAxisValue(model,axis,axis.price(y)),axis.axisLeft+4,top+metrics.ascent,axis.axisRight-axis.axisLeft-8,theme.font,theme.crosshair,clip,{role:'crosshair-price',panelId:panel.id,axisId:axis.axisId});
+    const clip=[axis.axisLeft,panel.top,axis.axisRight-axis.axisLeft,panel.bottom-panel.top],top=Math.max(panel.top+4,Math.min(panel.bottom-metrics.height-4,y-metrics.height/2)),command=labelCommand(formatAxisValue(model,axis,crosshairAxisPrice(snapshot,axis)),axis.axisLeft+4,top+metrics.ascent,axis.axisRight-axis.axisLeft-8,theme.font,theme.crosshair,clip,{role:'crosshair-price',panelId:panel.id,axisId:axis.axisId});
     if(command){commands.push({op:'box',x:axis.axisLeft,y:top-4,w:axis.axisRight-axis.axisLeft,h:metrics.height+8,fill:background,color:background,width:0,clip});commands.push(command);}
   }
   return commands;
@@ -1265,9 +1456,9 @@ function createCrosshairCommands(model, layout) {
 
 // Shared readout keeps native cached hover on the already prepared layout.
 function crosshairValuesAt(model,layout){
-  const c=model.crosshair;if(!c||!model.store.length)return null;const p=layout.panels.find(p=>c.x>=p.left&&c.x<=p.right&&c.y>=p.top&&c.y<=p.bottom);if(!p)return null;
-  const index=Math.round(layout.index(c.x));if(index<0||index>=model.store.length)return null;const store=model.store;
-  return {index,time:store.columns.time[index],primary:{symbolId:model.symbol?.id??null,bar:store.at(index)},series:model.series.filter(s=>s.visible!==false).map(s=>{const sourceIndex=index-(s.offset??0),array=s.values??(s.indicator?model.indicators.get(s.indicator).outputs[s.output??Object.keys(model.indicators.get(s.indicator).outputs)[0]]:store.columns[s.source??'close']),value=sourceIndex>=0&&sourceIndex<store.length?array[sourceIndex]:NaN,finite=Number.isFinite(value);return {id:s.id,label:s.label??s.id,symbolId:s.values?s.symbolId??null:model.symbol?.id??null,panel:s.panel,axisId:s.axisId??null,value:finite?value:null,sourceIndex,sourceTime:finite?store.columns.time[sourceIndex]:null};}),axes:p.axes.map(a=>({id:a.axisId,panel:p.id,value:a.price(c.y),formatted:formatAxisValue(model,a,a.price(c.y))}))};
+  const c=model.crosshair;if(!c||!model.store.length)return null;const snapshot=resolveCrosshairSnapshot(model,layout);if(!snapshot)return null;const p=layout.panels.find(p=>p.id===snapshot.panel);
+  const index=snapshot.snapped?snapshot.index:Math.round(layout.index(c.x));if(index<0||index>=model.store.length)return null;const store=model.store;
+  return {index,time:store.columns.time[index],primary:{symbolId:model.symbol?.id??null,bar:store.at(index)},series:model.series.filter(s=>s.visible!==false).map(s=>{const sourceIndex=index-(s.offset??0);let array=s.values;if(array==null){if(s.indicator){const data=model.indicators.get(s.indicator);array=data.outputs[s.output??Object.keys(data.outputs)[0]];}else array=store.columns[s.source??'close'];}const value=sourceIndex>=0&&sourceIndex<store.length?array[sourceIndex]:NaN,finite=Number.isFinite(value);return {id:s.id,label:s.label??s.id,symbolId:s.values?s.symbolId??null:model.symbol?.id??null,panel:s.panel,axisId:s.axisId??null,value:finite?value:null,sourceIndex,sourceTime:finite?store.columns.time[sourceIndex]:null};}),axes:p.axes.map(a=>({id:a.axisId,panel:p.id,value:crosshairAxisPrice(snapshot,a),formatted:formatAxisValue(model,a,crosshairAxisPrice(snapshot,a))}))};
 }
 
 
@@ -1292,7 +1483,9 @@ class ChartModel {
     if(!(store instanceof BarStore))throw new TypeError('BarStore required');optionRecord(theme,THEME_KEYS,'Theme');for(const value of Object.values(theme))boundedText(value,256,'Theme value');
     this.store = store; this.theme = {...DARK_THEME, ...theme}; this.panels = []; this.axes = []; this.series = []; this.seriesValueRevisions = new WeakMap(); this.axisWidth = axisWidth; this.precision = precision;
     this.view = {from: Math.max(-.5, store.length - visibleBars - .5), to: Math.max(visibleBars - .5, store.length - .5)}; this.crosshair = null; this.follow = true;
-    panels.forEach(p => this.addPanel(p));if(!Array.isArray(axes))throw new TypeError('Axes array required');axes.forEach(a=>this.addAxis(a));this.indicators=new IndicatorEngine(store);try{this.drawings=new DrawingStore(); this.unsubscribe = store._subscribeInternal(({kind, from, added, appended}) => {if(kind==='compact')return;if (kind === 'prepend') {this.view.from += added; this.view.to += added;} else if (kind === 'reset') this.fit(); if ((kind === 'append'||kind==='batch'&&appended>0) && this.follow) {const span = this.view.to - this.view.from; this.view.to = store.length + this.forwardOffset() - .5; this.view.from = this.view.to - span;} for (const s of this.series) s.dirtyFrom = Math.min(s.dirtyFrom ?? Infinity, from);});registerStoreOwner(this,store,'model');}catch(error){try{this.indicators.dispose();}catch{}throw error;}
+    // A nonempty backfill rebases existing anchors. First history has none:
+    // follow the tail like append, or retain an explicitly unfollowed view.
+    panels.forEach(p => this.addPanel(p));if(!Array.isArray(axes))throw new TypeError('Axes array required');axes.forEach(a=>this.addAxis(a));this.indicators=new IndicatorEngine(store);try{this.drawings=new DrawingStore(); this.unsubscribe = store._subscribeInternal(({kind, from, added, appended}) => {if(kind==='compact')return;if (kind === 'prepend' && store.length > added) {this.view.from += added; this.view.to += added;} else if (kind === 'reset') this.fit(); if ((kind === 'append'||kind==='batch'&&appended>0||kind==='prepend'&&added>0&&store.length===added) && this.follow) {const span = this.view.to - this.view.from; this.view.to = store.length + this.forwardOffset() - .5; this.view.from = this.view.to - span;} for (const s of this.series) s.dirtyFrom = Math.min(s.dirtyFrom ?? Infinity, from);});registerStoreOwner(this,store,'model');}catch(error){try{this.indicators.dispose();}catch{}throw error;}
   }
   addPanel(options) {optionRecord(options,PANEL_KEYS,'Panel');identifier(options.id,'Panel id');if(this.panels.length>=RESOURCE_LIMITS.maxPanels)throw new RangeError('Panel limit');if (!options?.id || this.panels.some(p => p.id === options.id) || !Number.isFinite(options.weight ?? 1) || (options.weight ?? 1) <= 0) throw new Error('Unique panel id and positive weight'); const p = {weight: 1, scale: 'linear', inverted: false, padding: .08, ...options}; this.validatePanel(p);if(this.drawings?.transaction)throw new Error('Panel layout change during drawing transaction'); this.panels.push(p); return p.id;}
   validatePanel(p) {if(p.axisVisible!==undefined&&typeof p.axisVisible!=='boolean'||p.axisSide!==undefined&&!['left','right'].includes(p.axisSide))throw new TypeError('Panel axis visibility/side');if(typeof p.inverted!=='boolean'||p.label!==undefined&&typeof p.label!=='string'||p.formatter!==undefined&&typeof p.formatter!=='function'||p.range&&(!Array.isArray(p.range)||p.range.length!==2))throw new TypeError('Panel label, inverted, formatter or range');if(p.label!==undefined)boundedText(p.label,256,'Panel label');if (!Number.isFinite(p.weight) || p.weight <= 0 || p.base !== undefined && !Number.isFinite(p.base) || !['linear', 'log', 'percent'].includes(p.scale) || !Number.isFinite(p.padding) || p.padding < 0 || p.padding > 1 || p.precision !== undefined && (!Number.isInteger(p.precision) || p.precision < 0 || p.precision > 18) || (p.range && (!Number.isFinite(p.range[0]) || !Number.isFinite(p.range[1]) || p.range[0] >= p.range[1] || p.scale === 'log' && p.range[0] <= 0)) || p.scale === 'percent' && p.base === 0) throw new RangeError('Panel scale/range');}
@@ -1347,7 +1540,9 @@ class ChartModel {
     if(this.disposed)throw new Error('Chart disposed');
     const blocked=values.length>=SERIES_BLOCK_THRESHOLD,policyMismatch=s.rangeIndex&&(s.rangeIndex instanceof BlockRangeIndex)!==blocked;
     // Rebuild only on data changes; pan/zoom uses O(log N) range queries.
-    if (s.dirtyFrom < Infinity || s.revision !== revision || !s.rangeIndex || s.rangeIndex.finiteCounts!==true || policyMismatch) {const start = Math.min(s.dirtyFrom ?? Infinity, computedFrom); if (s.indicator&&s.revision!==undefined&&revision>s.revision+1 || !s.rangeIndex || s.rangeIndex.finiteCounts!==true || policyMismatch || s.rangeIndex.size !== this.store.capacity || computedUntil - start > values.length / 4) s.rangeIndex = blocked?new BlockRangeIndex(values.length,values,this.store.capacity):new RangeIndex(values.length, values, values, null, this.store.capacity, true); else {if(s.rangeIndex instanceof BlockRangeIndex){for(let i=start;i<computedUntil;i+=s.rangeIndex.blockSize)s.rangeIndex.update(i);if(computedUntil>start)s.rangeIndex.update(computedUntil-1);}else for(let i=start;i<computedUntil;i++)s.rangeIndex.update(i,values[i]);}s.revision = revision;s.dirtyFrom = Infinity;}
+    // Extend a blocked index at the final dirty row first, so earlier appended
+    // blocks are rescanned with the complete length rather than a partial tail.
+    if (s.dirtyFrom < Infinity || s.revision !== revision || !s.rangeIndex || s.rangeIndex.finiteCounts!==true || policyMismatch) {const start = Math.min(s.dirtyFrom ?? Infinity, computedFrom); if (s.indicator&&s.revision!==undefined&&revision>s.revision+1 || !s.rangeIndex || s.rangeIndex.finiteCounts!==true || policyMismatch || s.rangeIndex.size !== this.store.capacity || computedUntil - start > values.length / 4) s.rangeIndex = blocked?new BlockRangeIndex(values.length,values,this.store.capacity):new RangeIndex(values.length, values, values, null, this.store.capacity, true); else {if(s.rangeIndex instanceof BlockRangeIndex){if(computedUntil>start)s.rangeIndex.update(computedUntil-1);for(let i=start;i<computedUntil;i+=s.rangeIndex.blockSize)s.rangeIndex.update(i);}else for(let i=start;i<computedUntil;i++)s.rangeIndex.update(i,values[i]);}s.revision = revision;s.dirtyFrom = Infinity;}
     return {values, index: s.rangeIndex};
   }
   forwardOffset() {return Math.max(0,...this.series.filter(s=>s.visible!==false).map(s=>s.offset??0));}
@@ -1374,20 +1569,27 @@ function axisRange(model, config, series, a, b, left, right, top, bottom) {
   if(min===max){const delta=Math.abs(min)*1e-12||1;min=Math.max(-Number.MAX_VALUE,min-delta);max=Math.min(Number.MAX_VALUE,max+delta);}if(config.scale==='log'&&min<=0)throw new RangeError('Log scale requires a strictly positive visible range (adjust padding/range)');
   const base=config.base??(model.store.length?model.store.columns.close[0]:1);if(config.scale==='percent'&&base===0)throw new RangeError('Percent base cannot be zero');
   const transform=config.scale==='log'?Math.log:config.scale==='percent'?v=>(v/base-1)*100:v=>v,inverse=config.scale==='log'?Math.exp:config.scale==='percent'?v=>(v/100+1)*base:v=>v;
-  const lo=transform(min),hi=transform(max);if(!Number.isFinite(lo)||!Number.isFinite(hi))throw new RangeError('Axis transform overflow');const magnitude=Math.max(Math.abs(lo),Math.abs(hi))||1,span=hi/magnitude-lo/magnitude;
-  if(!Number.isFinite(span)||span===0)throw new RangeError('Axis transform has no representable span');
-  const y=value=>{const coordinate=top+(config.inverted?(transform(value)/magnitude-lo/magnitude)/span:(hi/magnitude-transform(value)/magnitude)/span)*(bottom-top);return coordinate>=-3.4028234663852886e38&&coordinate<=3.4028234663852886e38?coordinate:NaN;};
+  const lo=transform(min),hi=transform(max);if(!Number.isFinite(lo)||!Number.isFinite(hi))throw new RangeError('Axis transform overflow');
+  const delta=hi-lo,direct=Number.isFinite(delta)&&delta!==0,magnitude=Math.max(Math.abs(lo),Math.abs(hi))||1,scaledLo=lo/magnitude,scaledHi=hi/magnitude,span=scaledHi-scaledLo;
+  if(!direct&&(!Number.isFinite(span)||span===0))throw new RangeError('Axis transform has no representable span');
+  // TwoDiff retains the low part of hi-lo for inverse interpolation across
+  // zero, without double-rounding subnormal weighted endpoint products.
+  const virtualLo=direct?hi-delta:0,deltaError=direct?(hi-(delta+virtualLo))+(virtualLo-lo):0;
+  // Subtract before scaling to retain narrow binary64 price differences. Very
+  // wide domains and off-range values still need the overflow-safe fallback.
+  const origin=config.inverted?lo:hi,extent=config.inverted?delta:-delta,scaledOrigin=config.inverted?scaledLo:scaledHi,scaledExtent=config.inverted?span:-span,pixels=bottom-top;
+  const y=direct?value=>{const mapped=transform(value),difference=mapped-origin,fraction=Number.isFinite(difference)?difference/extent:(mapped/magnitude-scaledOrigin)/scaledExtent,coordinate=top+fraction*pixels;return coordinate>=-3.4028234663852886e38&&coordinate<=3.4028234663852886e38?coordinate:NaN;}:value=>{const coordinate=top+(transform(value)/magnitude-scaledOrigin)/scaledExtent*pixels;return coordinate>=-3.4028234663852886e38&&coordinate<=3.4028234663852886e38?coordinate:NaN;};
   if(Number.isFinite(sourceMin)&&(!Number.isFinite(Math.fround(y(sourceMin)))||!Number.isFinite(Math.fround(y(sourceMax)))))throw new RangeError('Axis projection overflow for visible values');
-  const price=sy=>{const fraction=(sy-top)/(bottom-top),f=config.inverted?fraction:1-fraction;return inverse(((1-f)*(lo/magnitude)+f*(hi/magnitude))*magnitude);};
+  const price=sy=>{const fraction=(sy-top)/(bottom-top),f=config.inverted?fraction:1-fraction;let value=direct?(f<=.5?lo+f*delta:hi-(1-f)*delta):NaN;if(direct&&deltaError!==0)value+=f<=.5?f*deltaError:-(1-f)*deltaError;if(!Number.isFinite(value))value=((1-f)*scaledLo+f*scaledHi)*magnitude;return inverse(value);};
   return {...config,left,right,top,bottom,min,max,base,y,price,transform,inverse,lo,hi};
 }
 function createLayout(model,width,height) {
   if(!Number.isFinite(width)||!Number.isFinite(height)||width<100||height<80||width>RESOURCE_LIMITS.maxCanvasDimension||height>RESOURCE_LIMITS.maxCanvasDimension)throw new RangeError('Chart needs at least 100 × 80 CSS pixels');
   const configs=model.panels.map(p=>[{...p,axisId:null,side:p.axisSide??'right',visible:p.axisVisible!==false,width:model.axisWidth},...model.axes.filter(a=>a.panel===p.id).map(a=>({...a,axisId:a.id,width:a.width??model.axisWidth}))]);
   const [leftStrip,rightStrip]=axisStripWidths(model.panels,model.axes,model.axisWidth);
-  const factor=Math.min(1,(width-32)/(leftStrip+rightStrip||1)),left=12+leftStrip*factor,right=Math.max(left+20,width-rightStrip*factor),total=model.panels.reduce((n,p)=>n+p.weight,0),a=Math.min(model.store.length,Math.max(0,Math.floor(model.view.from))),b=Math.max(a,Math.min(model.store.length,Math.ceil(model.view.to+1)));
+  const factor=Math.min(1,(width-32)/(leftStrip+rightStrip||1)),left=12+leftStrip*factor,right=Math.max(left+20,width-rightStrip*factor),maxWeight=Math.max(...model.panels.map(p=>p.weight)),total=model.panels.reduce((n,p)=>n+p.weight/maxWeight,0),a=Math.min(model.store.length,Math.max(0,Math.floor(model.view.from))),b=Math.max(a,Math.min(model.store.length,Math.ceil(model.view.to+1)));
   const footer=Math.min(height-24,Math.max(38,Math.ceil(labelMetrics(model.theme.font).height+20))),panelSpace=height-footer;let top=12;
-  const panels=model.panels.map((p,i)=>{const row=panelSpace*p.weight/total,gap=Math.min(8,row/2),bottom=top+row-gap,series=model.series.filter(s=>s.panel===p.id&&s.visible!==false);let lx=left,rx=right;
+  const panels=model.panels.map((p,i)=>{const row=panelSpace*(p.weight/maxWeight/total),gap=Math.min(8,row/2),bottom=top+row-gap,series=model.series.filter(s=>s.panel===p.id&&s.visible!==false);let lx=left,rx=right;
     const axes=configs[i].map(config=>{const q=axisRange(model,config,series.filter(s=>(s.axisId??null)===config.axisId),a,b,left,right,top,bottom);const w=config.visible?config.width*factor:0;q.axisLeft=config.side==='left'?lx-w:rx;q.axisRight=q.axisLeft+w;q.textX=config.side==='left'?q.axisLeft+4:q.axisLeft+8;if(config.side==='left')lx-=w;else rx+=w;return q;});
     const result={...axes[0],axes};top=bottom+gap;return result;});
   const axis=(panelId,axisId=null)=>panels.find(p=>p.id===panelId)?.axes.find(a=>a.axisId===(axisId??null));
@@ -1451,7 +1653,7 @@ function buildScene(model, width, height, {crosshair = true, drawings = true} = 
           }
           const x=layout.x((a+b-1)/2+(s.offset??0)),v=values[end-1];
           if(s.type==='histogram')histogram(x,v,Math.max(1,(p.right-p.left)/count*.8));
-          else{const q=index.query(a,end);path.push(x,axis.y(v));if(b-a>1&&q.max!==q.min)coords.push(x,axis.y(q.min),x,axis.y(q.max));}
+          else{const q=b-a>1?index.query(a,end):null;path.push(x,axis.y(v));if(q&&q.max!==q.min)coords.push(x,axis.y(q.min),x,axis.y(q.max));}
         }
         flush();
         if (rects.length) commands.push({op: 'rects', coords: rects, color: s.color, clip});
@@ -1507,9 +1709,40 @@ class SceneCache {
 }
 
 
+// Pan/pinch snapshots own only one short-lived source reference and scalar view
+// state. Detect topology/external-view changes on input, without subscriptions.
+function viewportState(controller){const m=controller.model;return {store:m.store,identity:m.store.geometryIdentity,timeVersion:m.store.timeVersion,from:m.view.from,to:m.view.to,follow:m.follow};}
+function viewportCurrent(controller,g){const s=g?.viewport,m=controller.model;return !s||(s.store===m.store&&s.identity===m.store.geometryIdentity&&s.timeVersion===m.store.timeVersion&&Object.is(s.from,m.view.from)&&Object.is(s.to,m.view.to)&&s.follow===m.follow);}
+function stopStaleViewport(controller){const g=controller.gesture;if(g?.viewport&&!viewportCurrent(controller,g)){controller.gesture=controller.pointers.size?{kind:'wait',staleViewport:true}:null;return true;}return false;}
+
+// A shared-model command can retire this controller's drawing transaction.
+// Late pointer events must not cancel or commit a replacement owner's work.
+function stopStaleDrawing(controller){const g=controller.gesture;if(g?.transaction&&g.transaction!==controller.model.drawings.transaction){controller.gesture=null;controller.pointers.clear();return true;}return false;}
+
+// Own the begin-to-gesture setup window without claiming a foreign transaction.
+function beginDrawing(controller,setup){
+ const drawings=controller.model.drawings;drawings.begin();const transaction=drawings.transaction;
+ try{return setup(transaction);}catch(error){if(drawings.transaction===transaction)drawings.cancel();throw error;}
+}
+
+// Magnet is a pointer aid, not a data transform: persist exact source time and
+// raw OHLC prices. Only a visible raw-price binding on this precise axis is safe.
+function magnetDrawingPoint(controller,layout,x,y,target,type,free=layout.fromScreen(x,y,target.panel,target.axisId)){
+ const config=controller.drawingMagnet;
+ if(config.mode==='off'||type==='freehand')return free;
+ const snap=nearestVisibleOHLC(controller.model,layout,x,y,target);
+ if(!snap||config.mode==='weak'&&Math.hypot(snap.x-x,snap.y-y)>config.radiusPx)return free;
+ return {time:snap.time,price:snap.price};
+}
+
 // DOM-free pointer state machine shared by browser, native host, and tests.
 class InteractionController {
-  constructor(model, size, invalidate = () => {}) {this.model = model; this.size = size; this.invalidate = invalidate; this.pointers = new Map(); this.tool = 'select'; this.gesture = null; this.text = 'Note';this.drawingTarget=null;}
+  constructor(model, size, invalidate = () => {}) {this.model = model; this.size = size; this.invalidate = invalidate; this.pointers = new Map(); this.tool = 'select'; this.gesture = null; this.text = 'Note';this.drawingTarget=null;this._drawingMagnet=Object.freeze({mode:'off',radiusPx:8});this._crosshairSnap=Object.freeze({mode:'free',target:null});this._crosshairOwner={};this._crosshairPointer=null;}
+  get drawingMagnet(){return this._drawingMagnet;}
+  setDrawingMagnet(options,{notify=true}={}){optionRecord(options,['mode','radiusPx'],'Drawing magnet');const mode=options.mode,radiusPx=options.radiusPx===undefined?8:options.radiusPx;if(!['off','weak','strong'].includes(mode))throw new TypeError('Drawing magnet mode: off, weak or strong required');if(!Number.isFinite(radiusPx)||radiusPx<1||radiusPx>32)throw new RangeError('Drawing magnet radius must be 1..32 logical pixels');if(mode===this.drawingMagnet.mode&&radiusPx===this.drawingMagnet.radiusPx)return;this.cancel({notify:false,ownedDrawingsOnly:true});this._drawingMagnet=Object.freeze({mode,radiusPx});if(notify)this.invalidate();}
+  get crosshairSnap(){return this._crosshairSnap;}
+  setCrosshairSnap(options,{notify=true}={}){const next=crosshairSnapOptions(this.model,options),old=this.crosshairSnap;if(next.mode===old.mode&&next.target?.panel===old.target?.panel&&next.target?.axisId===old.target?.axisId&&next.target?.seriesId===old.target?.seriesId)return;this._crosshairSnap=next;updatePointerCrosshair(this);if(notify)this.invalidate('hover');}
+  releaseCrosshair(){releasePointerCrosshair(this);}
   layout() {const {width, height} = this.size(); return createLayout(this.model, width, height);}
   drawingProjection(layout,panel,axisId){const axis=layout.axis(panel,axisId);return axis?[axis.left,axis.right,axis.top,axis.bottom,axis.min,axis.max,axis.scale,axis.inverted,axis.base,this.model.view.from,this.model.view.to,this.model.store.geometryIdentity,this.model.store.timeVersion]:null;}
   setTool(tool,{notify=true}={}) {if (tool !== 'select' && !DRAWING_TYPES.includes(tool)) throw new Error('Unknown drawing tool'); this.cancel({notify:false}); this.tool = tool; if(notify)this.invalidate();}
@@ -1517,67 +1750,79 @@ class InteractionController {
   down(id, x, y, hitTolerance = 8) {
     if(!Number.isFinite(hitTolerance)||hitTolerance<1||hitTolerance>32)throw new RangeError('Pointer hit tolerance must be 1..32 logical pixels');
     if (![x, y].every(Number.isFinite)) return;
+    stopStaleViewport(this);
     if (this.pointers.size >= 2 && !this.pointers.has(id)) return;
     this.pointers.set(id, {x, y});
+    if(this.gesture?.staleViewport){this.invalidate();return;}
     if (this.pointers.size === 2) {
-      // Pinch takes ownership; any in-progress drawing/edit is restored.
-      this.model.drawings.cancel(); const [a, b] = [...this.pointers.values()];
-      this.gesture = {kind: 'pinch', distance: Math.hypot(b.x - a.x, b.y - a.y) || 1, view: {...this.model.view}, follow: this.model.follow, midpoint: (a.x + b.x) / 2}; this.invalidate(); return;
+      // Pinch restores only this controller's current drawing/edit transaction.
+      if(this.gesture?.transaction&&this.gesture.transaction===this.model.drawings.transaction)this.model.drawings.cancel(); if(stopStaleViewport(this)){this.invalidate();return;} const [a, b] = [...this.pointers.values()];
+      this.gesture = {kind: 'pinch', distance: Math.hypot(b.x - a.x, b.y - a.y) || 1, view: {...this.model.view}, follow: this.model.follow, midpoint: (a.x + b.x) / 2,viewport:viewportState(this)}; this.invalidate(); return;
     }
     if (this.pointers.size > 2) return;
     const layout = this.layout(), p = layout.panels.find(p => y >= p.top && y <= p.bottom && x >= p.left && x <= p.right); if (!p) {this.gesture = null; return;}
     if (this.tool !== 'select') {
-      const target=this.drawingTarget??{panel:p.id};if(target.panel!==p.id)return;this.model.validateDrawingBinding(target);const point=layout.fromScreen(x,y,p.id,target.axisId);this.model.drawings.begin();
-      const points=Array.from({length:drawingPointCount(this.tool)},()=>({...point}));
+      const target=this.drawingTarget??{panel:p.id};if(target.panel!==p.id)return;this.model.validateDrawingBinding(target);const point=magnetDrawingPoint(this,layout,x,y,target,this.tool),positionPoints=isPositionDrawing(this.tool)?initialPositionPoints(this.tool,point,layout,target):null;if(isPositionDrawing(this.tool)&&!positionPoints)return;beginDrawing(this,transaction=>{
+      const points=positionPoints??Array.from({length:drawingPointCount(this.tool)},()=>({...point}));
       const drawingId = this.model.drawings.add({type: this.tool, ...target,panel: p.id, points, ...(this.tool === 'text' ? {text: this.text} : {})});
-      this.gesture = {kind: 'create', id: drawingId,panel:p.id,axisId:target.axisId,seriesId:target.seriesId,type:this.tool,projection:this.drawingProjection(layout,p.id,target.axisId),lastX:x,lastY:y, moved:false};
+      this.gesture = {kind: 'create', transaction, id: drawingId,panel:p.id,axisId:target.axisId,seriesId:target.seriesId,type:this.tool,projection:this.drawingProjection(layout,p.id,target.axisId),lastX:x,lastY:y, moved:false};});
     } else {
       const hit = drawingHitTest(this.model.drawings, layout, x, y, hitTolerance); this.model.drawings.selected = hit?.id ?? null;
-      if (hit && !hit.locked) {const d = this.model.drawings.items.find(d => d.id === hit.id); this.model.drawings.begin(); this.gesture = {kind: 'edit', id: hit.id, handle: hit.handle, startX: x, startY: y, screenPoints: d.points.map(q => layout.toScreen(q,p.id,d.axisId)), points:d.points.map(p=>({...p})),panel:p.id,axisId:d.axisId,seriesId:d.seriesId,type:d.type,projection:this.drawingProjection(layout,p.id,d.axisId)};}
-      else this.gesture = {kind: 'pan', startX: x, view: {...this.model.view}, follow: this.model.follow, pixelWidth: p.right - p.left};
+      if (hit && !hit.locked) {const d = this.model.drawings.items.find(d => d.id === hit.id); beginDrawing(this,transaction=>{this.gesture = {kind: 'edit', transaction, id: hit.id, handle: hit.handle, startX: x, startY: y, screenPoints: d.points.map(q => layout.toScreen(q,p.id,d.axisId)), points:d.points.map(p=>({...p})),panel:p.id,axisId:d.axisId,seriesId:d.seriesId,type:d.type,projection:this.drawingProjection(layout,p.id,d.axisId)};});}
+      else this.gesture = {kind: 'pan', startX: x, view: {...this.model.view}, follow: this.model.follow, pixelWidth: p.right - p.left,viewport:viewportState(this)};
     }
     this.invalidate('drawings');
   }
   move(id, x, y) {
     if(![x,y].every(Number.isFinite))return;
-    this.model.crosshair = {x, y}; const g = this.gesture;
+    if(stopStaleDrawing(this)){this.invalidate('drawings');return;}
+    stopStaleViewport(this);
+    capturePointerCrosshair(this,x,y); const g = this.gesture;
     if (!this.pointers.has(id)) {this.invalidate('hover'); return;}
     this.pointers.set(id, {x, y});
     if (!g) return;
     if (g.kind === 'pinch') {
-      if (this.pointers.size !== 2) return; const [a, b] = [...this.pointers.values()], layout = this.layout(), p = layout.panels[0], span = g.view.to - g.view.from, factor = g.distance / (Math.hypot(b.x - a.x, b.y - a.y) || 1), anchor = Math.max(0, Math.min(1, (g.midpoint - p.left) / (p.right - p.left))), at = g.view.from + span * anchor, delta = ((a.x + b.x) / 2 - g.midpoint) / (p.right - p.left) * span * factor;
+      if (this.pointers.size !== 2) return; const [a, b] = [...this.pointers.values()], layout = this.layout();if(this.gesture!==g)return;if(stopStaleViewport(this)){this.invalidate();return;}const p = layout.panels[0], span = g.view.to - g.view.from, factor = g.distance / (Math.hypot(b.x - a.x, b.y - a.y) || 1), anchor = Math.max(0, Math.min(1, (g.midpoint - p.left) / (p.right - p.left))), at = g.view.from + span * anchor, delta = ((a.x + b.x) / 2 - g.midpoint) / (p.right - p.left) * span * factor;
       this.model.setVisibleRange(at - span * factor * anchor - delta, at + span * factor * (1 - anchor) - delta);
     } else if (g.kind === 'pan') {const delta = (g.startX - x) / g.pixelWidth * (g.view.to - g.view.from); this.model.setVisibleRange(g.view.from + delta, g.view.to + delta);}
     else if (g.kind !== 'wait') {
-      const layout = this.layout(), d = this.model.drawings.items.find(d => d.id === g.id);
-      if (!d || d.locked || !this.model.drawings.transaction || d.panel!==g.panel || (d.axisId??null)!==(g.axisId??null) || (d.seriesId??null)!==(g.seriesId??null) || d.type!==g.type || !layout.drawingAxis(d)) {this.cancel(); return;}
+      const layout = this.layout();if(this.gesture!==g)return;if(stopStaleDrawing(this)){this.invalidate('drawings');return;}const d = this.model.drawings.items.find(d => d.id === g.id);
+      if (!d || d.locked || d.visible===false || !this.model.drawings.transaction || d.panel!==g.panel || (d.axisId??null)!==(g.axisId??null) || (d.seriesId??null)!==(g.seriesId??null) || d.type!==g.type || !layout.drawingAxis(d)) {this.cancel(); return;}
       const projection=this.drawingProjection(layout,g.panel,g.axisId);
       if(!projection||!g.projection||g.projection.some((value,index)=>!Object.is(value,projection[index]))){this.cancel();return;}
-      const point = layout.fromScreen(x,y,g.panel,g.axisId);
+      const freePoint=layout.fromScreen(x,y,g.panel,g.axisId),point=g.kind==='create'||g.handle>=0?magnetDrawingPoint(this,layout,x,y,g,d.type,freePoint):freePoint;
       if (g.kind === 'create') {
         let points=d.points.length===1?[point]:[d.points[0],point];
-        if(d.type==='freehand'){if(Math.hypot(x-g.lastX,y-g.lastY)<1||d.points.length>=2048)return;points=g.moved?[...d.points,point]:points;g.moved=true;g.lastX=x;g.lastY=y;}
-        else if(drawingPointCount(d.type)===3)points.push(layout.fromScreen(x,y+40,g.panel,g.axisId));
+        if(isPositionDrawing(d.type)){points=d.points.map(p=>({...p}));points[2].price=point.price;points[3].time=point.time;if(!positionPointsValid(d.type,points)||points.some(p=>{const q=layout.toScreen(p,g.panel,g.axisId);return !Number.isFinite(q.x)||!Number.isFinite(q.y);})){this.invalidate('hover');return;}}
+        else if(d.type==='freehand'){if(Math.hypot(x-g.lastX,y-g.lastY)<1||d.points.length>=2048)return;points=g.moved?[...d.points,point]:points;g.moved=true;g.lastX=x;g.lastY=y;}
+        else if(drawingPointCount(d.type)===3){const anchor=point===freePoint?{x,y}:layout.toScreen(point,g.panel,g.axisId);points.push(layout.fromScreen(anchor.x,anchor.y+40,g.panel,g.axisId));}
         this.model.drawings.edit(g.id,{points});
       }
-      else {const points = g.points.map((p, i) => g.handle < 0 ? layout.fromScreen(g.screenPoints[i].x + x - g.startX, g.screenPoints[i].y + y - g.startY,g.panel,g.axisId) : i === g.handle ? point : {...p}); this.model.drawings.edit(g.id, {points});}
+      else {const points = isPositionDrawing(d.type)&&g.handle>=0?positionHandlePoints(g.points,g.handle,point):g.points.map((p, i) => g.handle < 0 ? layout.fromScreen(g.screenPoints[i].x + x - g.startX, g.screenPoints[i].y + y - g.startY,g.panel,g.axisId) : i === g.handle ? point : {...p}); if(isPositionDrawing(d.type)&&(!positionPointsValid(d.type,points)||points.some(p=>{const q=layout.toScreen(p,g.panel,g.axisId);return !Number.isFinite(q.x)||!Number.isFinite(q.y);}))) {this.invalidate('hover');return;}this.model.drawings.edit(g.id, {points});}
     }
+    if(this.gesture===g&&g.viewport)g.viewport=viewportState(this);
     this.invalidate(g.kind==='pan'||g.kind==='pinch'?'all':'drawings');
   }
   up(id) {
+    if(stopStaleDrawing(this)){this.invalidate('drawings');return;}
+    stopStaleViewport(this);
     if (!this.pointers.has(id)) return; this.pointers.delete(id);
-    if (this.gesture?.kind === 'pinch') {this.gesture = this.pointers.size ? {kind: 'wait'} : null;}
+    if(this.gesture?.staleViewport){if(!this.pointers.size)this.gesture=null;}
+    else if (this.gesture?.kind === 'pinch') {this.gesture = this.pointers.size ? {kind: 'wait'} : null;}
     else {if (['create', 'edit'].includes(this.gesture?.kind)) this.model.drawings.commit(); this.gesture = null;}
     this.invalidate();
   }
-  cancel({notify=true}={}) {this.model.drawings.cancel(); if (this.gesture?.view) {this.model.view = {...this.gesture.view}; this.model.follow = this.gesture.follow;} this.gesture = null; this.pointers.clear(); if(notify)this.invalidate();}
+  // Renderer teardown may only roll back its captured drawing transaction.
+  // Explicit/native cancel keeps its existing global cancellation contract.
+  cancel({notify=true,ownedDrawingsOnly=false}={}) {if(!ownedDrawingsOnly||this.gesture?.transaction&&this.gesture.transaction===this.model.drawings.transaction)this.model.drawings.cancel(); if (this.gesture?.view&&viewportCurrent(this,this.gesture)) {this.model.view = {...this.gesture.view}; this.model.follow = this.gesture.follow;} this.gesture = null; this.pointers.clear(); if(notify)this.invalidate();}
   wheel(delta, x) {if (this.gesture) return; const p = this.layout().panels[0]; this.model.zoom(Math.exp(Math.max(-1, Math.min(1, delta * .001))), (x - p.left) / (p.right - p.left)); this.invalidate();}
   key(key, {ctrl = false, shift = false} = {}) {
+    if(this.model.drawings.items.some(d=>d.id===this.model.drawings.selected&&d.visible===false))this.model.drawings.selected=null;
     const undo = ctrl && key.toLowerCase() === 'z' && !shift, redo = ctrl && (key.toLowerCase() === 'y' || key.toLowerCase() === 'z' && shift), deleting = ['Delete', 'Backspace'].includes(key);
     if(key==='Escape'){this.cancel();this.model.drawings.selected=null;this.model.crosshair=null;}
-    else if(['PageUp','PageDown'].includes(key)){this.cancel();const items=this.model.drawings.items;if(items.length){const at=items.findIndex(d=>d.id===this.model.drawings.selected),next=(at+(key==='PageUp'?-1:1)+items.length)%items.length;this.model.drawings.selected=items[next].id;}}
+    else if(['PageUp','PageDown'].includes(key)){this.cancel();const items=this.model.drawings.items.filter(d=>d.visible!==false);if(items.length){const at=items.findIndex(d=>d.id===this.model.drawings.selected),next=at<0?(key==='PageUp'?items.length-1:0):(at+(key==='PageUp'?-1:1)+items.length)%items.length;this.model.drawings.selected=items[next].id;}}
     else if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(key)){if(this.gesture)this.cancel();const d=this.model.drawings.items.find(d=>d.id===this.model.drawings.selected);
-      if(d&&!ctrl&&!d.locked&&this.layout().drawingAxis(d)){const layout=this.layout(),step=shift?10:1,dx=key==='ArrowLeft'?-step:key==='ArrowRight'?step:0,dy=key==='ArrowUp'?-step:key==='ArrowDown'?step:0;this.model.drawings.edit(d.id,{points:d.points.map(p=>{const q=layout.toScreen(p,d.panel,d.axisId);return layout.fromScreen(q.x+dx,q.y+dy,d.panel,d.axisId);})});}
+      if(d&&!ctrl&&!d.locked&&this.layout().drawingAxis(d)){const layout=this.layout(),step=shift?10:1,dx=key==='ArrowLeft'?-step:key==='ArrowRight'?step:0,dy=key==='ArrowUp'?-step:key==='ArrowDown'?step:0;const points=d.points.map(p=>{const q=layout.toScreen(p,d.panel,d.axisId);return layout.fromScreen(q.x+dx,q.y+dy,d.panel,d.axisId);});if(!isPositionDrawing(d.type)||positionPointsValid(d.type,points)&&points.every(p=>{const q=layout.toScreen(p,d.panel,d.axisId);return Number.isFinite(q.x)&&Number.isFinite(q.y);}))this.model.drawings.edit(d.id,{points});}
       else if(!d||ctrl){if(key==='ArrowLeft'||key==='ArrowRight')this.model.pan((key==='ArrowLeft'?-1:1)*(this.model.view.to-this.model.view.from)*.1);else this.model.zoom(key==='ArrowUp'?.9:1.1);}
     }
     else if(['+','=','-','_'].includes(key))this.model.zoom(key==='+'||key==='='?.8:1.25);
@@ -2205,6 +2450,16 @@ function compactData(api,options){
  return receipt;
 }
 
+// Shared by explicit group styling and portable presets. No renderer defaults.
+function drawingStylePatch(value){
+ if(!value||![Object.prototype,null].includes(Object.getPrototypeOf(value)))throw new TypeError('Drawing style plain record required');
+ const patch=Object.create(null),keys=Reflect.ownKeys(value);
+ if(!keys.length)throw new TypeError('Drawing style nonempty defined patch required');
+ for(const key of keys){if(!['color','fill','width','font'].includes(key))throw new TypeError('Drawing style fields');const d=Object.getOwnPropertyDescriptor(value,key);if(!d?.enumerable||!Object.hasOwn(d,'value'))throw new TypeError('Drawing style own data fields required');if(d.value===undefined||d.value===null)throw new TypeError('Drawing style nonempty defined patch required');patch[key]=d.value;}
+ const normalized=portableStyle(patch,['color','fill']);if(Object.hasOwn(normalized,'width')&&(!Number.isFinite(normalized.width)||normalized.width<.1||normalized.width>50))throw new RangeError('Stroke width');
+ return normalized;
+}
+
 
 const translationStringify=JSON.stringify,translationDefine=Object.defineProperty;
 function translationSlot(object,key,required=false){const d=Object.getOwnPropertyDescriptor(object,key);if(!d){if(required)throw new TypeError('Drawing group edit missing '+key);return undefined;}if(!Object.hasOwn(d,'value'))throw new TypeError('Drawing group edit own data properties required');return d.value;}
@@ -2215,7 +2470,7 @@ function translationCapture(object,keys,guards,writes=[]){if(!object||typeof obj
 function translationCapturedList(value,max,guards){const copy=translationList(value,max);guards.push(()=>{if(translationSlot(value,'length')!==copy.length)translationStale();for(let i=0;i<copy.length;i++)if(translationSlot(value,String(i))!==copy[i])translationStale();});return copy;}
 function translationDrawing(value){
  if(!Object.isFrozen(value))throw new TypeError('Drawing group edit requires immutable managed drawings');
- const d=translationRecord(value,['id','type','panel','points','style','text','locked','axisId','seriesId']);
+ const d=translationRecord(value,['id','type','panel','points','style','text','locked','visible','axisId','seriesId']);
  if(!Object.isFrozen(d.points))throw new TypeError('Drawing group edit immutable anchors required');
  d.points=translationList(d.points,2048).map(point=>{if(!Object.isFrozen(point))throw new TypeError('Drawing group edit immutable anchor required');return translationRecord(point,['time','price']);});
  if(d.style!==undefined){if(!Object.isFrozen(d.style))throw new TypeError('Drawing group edit immutable style required');d.style=translationRecord(d.style,['color','fill','width','font']);}
@@ -2231,8 +2486,13 @@ function translateDrawings(api,ids,options){return drawingGroupEdit(api,ids,opti
 function deleteDrawings(api,ids){return drawingGroupEdit(api,ids,null,true);}
 /** Partial portable style patch; mixed/orphan bindings require no live lookup. */
 function setDrawingsStyle(api,ids,patch){return drawingGroupEdit(api,ids,patch,false,true);}
-function drawingGroupEdit(api,ids,options,remove,styleEdit=false){
- const metadata=!(remove||styleEdit);
+/** Presentation visibility may change locked or orphan drawings, without live metadata. */
+function setDrawingsVisibility(api,ids,visible){return drawingGroupEdit(api,ids,visible,false,false,true);}
+/** Append unlocked copies in source z-order; zero offsets may retain orphan bindings. */
+function duplicateDrawings(api,ids,options){return drawingGroupEdit(api,ids,options,false,false,false,true);}
+function drawingGroupEdit(api,ids,options,remove,styleEdit=false,visibilityEdit=false,duplicateEdit=false){
+ const duplicateOptions=duplicateEdit?translationRecord(options,['deltaTimeMs','deltaPrice']):null;
+ const metadata=!(remove||styleEdit||visibilityEdit||duplicateEdit&&duplicateOptions.deltaTimeMs===0&&duplicateOptions.deltaPrice===0);
  const guards=[],a=translationCapture(api,['model','controller','invalidate'],guards),model=a.model;
  const m=translationCapture(model,!metadata?['disposed','drawings']:['disposed','drawings','panels','axes','series'],guards);
  if(m.disposed)throw new Error('Chart disposed');if(!(m.drawings instanceof DrawingStore))throw new TypeError('Drawing group edit managed store required');
@@ -2244,31 +2504,42 @@ function drawingGroupEdit(api,ids,options,remove,styleEdit=false){
  const panels=!metadata?null:translationCapturedList(m.panels,RESOURCE_LIMITS.maxPanels,guards).map(p=>translationCapture(p,['id'],guards));
  const axes=!metadata?null:translationCapturedList(m.axes,RESOURCE_LIMITS.maxAxes,guards).map(p=>translationCapture(p,['id','panel'],guards));
  const series=!metadata?null:translationCapturedList(m.series,RESOURCE_LIMITS.maxSeries,guards).map(p=>translationCapture(p,['id','panel','axisId'],guards));
- const keys=translationList(ids,128),o=remove?null:translationRecord(options,styleEdit?['color','fill','width','font']:['deltaTimeMs','deltaPrice']);
+ const keys=translationList(ids,128),o=duplicateOptions??(remove||visibilityEdit?null:translationRecord(options,styleEdit?['color','fill','width','font']:['deltaTimeMs','deltaPrice']));
  if(!keys.length)throw new RangeError('Drawing group edit requires 1..128 ids');
  const selected=new Set();for(const id of keys){identifier(id,'Drawing id');if(selected.has(id))throw new TypeError('Duplicate drawing id');selected.add(id);}
- if(!remove&&!styleEdit&&(!Number.isFinite(o.deltaTimeMs)||!Number.isFinite(o.deltaPrice)))throw new TypeError('Finite deltaTimeMs and deltaPrice required');
- let patch=null;if(styleEdit){const fields=Object.keys(o);if(!fields.length||fields.some(key=>o[key]===undefined||o[key]===null))throw new TypeError('Drawing style nonempty defined patch required');patch=portableStyle(o,['color','fill']);if(Object.hasOwn(patch,'width')&&(!Number.isFinite(patch.width)||patch.width<.1||patch.width>50))throw new RangeError('Stroke width');}
+ if(visibilityEdit&&typeof options!=='boolean')throw new TypeError('Drawing visibility boolean required');
+ if(!remove&&!styleEdit&&!visibilityEdit&&(!Number.isFinite(o.deltaTimeMs)||!Number.isFinite(o.deltaPrice)))throw new TypeError('Finite deltaTimeMs and deltaPrice required');
+ const patch=styleEdit?drawingStylePatch(o):null;
  for(const [key,max,min] of [['maxDrawings',10000,0],['maxPoints',2097152,0],['maxDocumentChars',RESOURCE_LIMITS.maxDocumentChars,0],['historyLimit',10000,1],['historyBytes',RESOURCE_LIMITS.maxHistoryBytes,0]])if(!Number.isSafeInteger(s[key])||s[key]<min||s[key]>max)throw new RangeError('Drawing group edit history/resource limit');
  const copies=new Map(),weights=new Map(),copy=value=>{let result=copies.get(value);if(!result){result=translationDrawing(value);copies.set(value,result);weights.set(value,2*translationChars(result));}return result;};
- let next=items.slice();const seen=new Set(),clearSelected=remove&&selected.has(s.selected);
- if(clearSelected){const writable=()=>{const descriptor=Object.getOwnPropertyDescriptor(d,'selected');if(!descriptor||!Object.hasOwn(descriptor,'value')||!descriptor.writable)throw new TypeError('Drawing group edit writable selection required');};writable();guards.push(writable);}
- let binding=null,changed=0,points=0,text=0;
+ let next=items.slice();const seen=new Set();let clearSelected=remove&&selected.has(s.selected);
+ let binding=null,changed=0,points=0,text=0,nextSerial=s.serial;const pendingCopies=[],created=[];
+ if(duplicateEdit){if(!Number.isSafeInteger(nextSerial)||nextSerial<0)throw new RangeError('Drawing duplication serial');const writable=()=>{const descriptor=Object.getOwnPropertyDescriptor(d,'serial');if(!descriptor||!Object.hasOwn(descriptor,'value')||!descriptor.writable)throw new TypeError('Drawing duplication writable serial required');};writable();guards.push(writable);}
  for(let i=0;i<items.length;i++){
   const rawPoints=translationSlot(items[i],'points',true);if(!Array.isArray(rawPoints))throw new TypeError('Drawing anchors');points+=translationSlot(rawPoints,'length',true);if(points>s.maxPoints)throw new RangeError('Drawing group edit point limit');
   const before=copy(items[i]);if(seen.has(before.id))throw new TypeError('Duplicate drawing id');seen.add(before.id);text+=before.text?.length??0;
   if(!selected.has(before.id))continue;
-  if(before.locked)throw new Error('Drawing is locked');
+  if(before.locked&&!visibilityEdit&&!duplicateEdit)throw new Error('Drawing is locked');
   if(remove){next[i]=null;changed++;continue;}
+  if(visibilityEdit){if((before.visible!==false)!==options){const candidate={...before,visible:options,points:translationSlot(items[i],'points')};if(before.style!==undefined)candidate.style=translationSlot(items[i],'style');validateDrawing(candidate);next[i]=translationFrozen(candidate);changed++;if(!options&&s.selected===before.id)clearSelected=true;}continue;}
   if(styleEdit){const previous=before.style??{},different=Object.keys(patch).some(key=>!Object.hasOwn(previous,key)||!Object.is(previous[key],patch[key]));if(different){const candidate={...before,points:translationSlot(items[i],'points'),style:{...previous,...patch}};validateDrawing(candidate);next[i]=translationFrozen(candidate);changed++;}continue;}
-  const b=[before.panel,before.axisId??null,before.seriesId??null];if(binding&&b.some((v,j)=>v!==binding[j]))throw new Error('Drawing group edit requires identical panel/axis/series binding');binding=b;
-  if(!panels.some(p=>p.id===b[0])||b[1]!==null&&!axes.some(p=>p.id===b[1]&&p.panel===b[0])||b[2]!==null&&!series.some(p=>p.id===b[2]&&p.panel===b[0]&&(p.axisId??null)===b[1]))throw new Error('Missing or mismatched drawing binding');
+  if(metadata){const b=[before.panel,before.axisId??null,before.seriesId??null];if(binding&&b.some((v,j)=>v!==binding[j]))throw new Error('Drawing group edit requires identical panel/axis/series binding');binding=b;
+  if(!panels.some(p=>p.id===b[0])||b[1]!==null&&!axes.some(p=>p.id===b[1]&&p.panel===b[0])||b[2]!==null&&!series.some(p=>p.id===b[2]&&p.panel===b[0]&&(p.axisId??null)===b[1]))throw new Error('Missing or mismatched drawing binding');}
   let moved=false;const anchors=before.points.map(p=>{const time=o.deltaTimeMs===0?p.time:p.time+o.deltaTimeMs,price=o.deltaPrice===0?p.price:p.price+o.deltaPrice;if(time!==p.time||price!==p.price)moved=true;return {time,price};});
-  const candidate={...before,points:anchors};if(before.style!==undefined)candidate.style=translationSlot(items[i],'style');validateDrawing(candidate);if(moved){next[i]=translationFrozen(candidate);changed++;}
+  const candidate={...before,points:duplicateEdit&&!metadata?translationSlot(items[i],'points'):anchors,...(duplicateEdit?{locked:false}:{})};if(before.style!==undefined)candidate.style=translationSlot(items[i],'style');validateDrawing(candidate);if(duplicateEdit){pendingCopies.push(candidate);changed++;}else if(moved){next[i]=translationFrozen(candidate);changed++;}
  }
  if(keys.some(id=>!seen.has(id)))throw new Error('Missing drawing');if(items.length>s.maxDrawings||points>s.maxPoints||text>1000000)throw new RangeError('Drawing group edit resource limit');
+ if(duplicateEdit){
+  for(const candidate of pendingCopies){points+=candidate.points.length;text+=candidate.text?.length??0;}
+  if(items.length+pendingCopies.length>s.maxDrawings||points>s.maxPoints||text>1000000)throw new RangeError('Drawing duplication resource limit');
+  // At most one collision for each existing/reserved ID; never scan a numeric range.
+  let attempts=0;for(const candidate of pendingCopies){let id;do{if(nextSerial===Number.MAX_SAFE_INTEGER||++attempts>items.length+pendingCopies.length)throw new RangeError('Drawing duplication ID exhaustion');id='drawing-'+(++nextSerial);}while(seen.has(id));seen.add(id);created.push(Object.freeze({sourceId:candidate.id,id}));next.push(translationFrozen({...candidate,id}));}
+  // Exact document admission is O(total stored content), only on this explicit API.
+  if(translationChars({schema:'aster.drawings',version:drawingDocumentVersion(next),drawings:next})>s.maxDocumentChars)throw new RangeError('Drawing duplication document limit');
+ }
  if(remove)next=next.filter(value=>value!==null);
- const receipt={changed,invalidationFailed:false};
+ if(clearSelected){const writable=()=>{const descriptor=Object.getOwnPropertyDescriptor(d,'selected');if(!descriptor||!Object.hasOwn(descriptor,'value')||!descriptor.writable)throw new TypeError('Drawing group edit writable selection required');};writable();guards.push(writable);}
+ const receipt={changed,...(duplicateEdit?{created:Object.freeze(created)}:{}),invalidationFailed:false};
  if(!changed){for(const check of guards)check();return receipt;}
  const snapshotWeight=snapshot=>{let n=snapshot.length*8;for(const value of snapshot){copy(value);n+=weights.get(value);}return n;};
  const priorWeight=snapshotWeight(items);if(priorWeight>s.historyBytes)throw new RangeError('Drawing group edit undo snapshot exceeds historyBytes');
@@ -2282,20 +2553,36 @@ function drawingGroupEdit(api,ids,options,remove,styleEdit=false){
  for(const check of guards)check();
  translationDefine(d,'items',{value:next});translationDefine(d,'undoStack',{value:nextUndo});translationDefine(d,'redoStack',{value:nextRedo});translationDefine(d,'retainedHistoryBytes',retained?{value:retainedBytes}:{value:retainedBytes,writable:true,enumerable:true,configurable:true});
  if(clearSelected)translationDefine(d,'selected',{value:null});
- try{a.invalidate.call(api);}catch{receipt.invalidationFailed=true;}
- return receipt;
+ if(duplicateEdit)translationDefine(d,'serial',{value:nextSerial});
+ try{if(visibilityEdit||duplicateEdit)a.invalidate.call(api,'drawings');else a.invalidate.call(api);}catch{receipt.invalidationFailed=true;}
+ return duplicateEdit?Object.freeze(receipt):receipt;
 }
 
 
 const PRESENTATION_KEYS=new Set(['color','fill','upColor','downColor','width','visible','label']);
 function style(options,colors=['color','fill','upColor','downColor']) {return portableStyle(options,colors);}
-function values(input) {
+const apiTypedPrototype=Object.getPrototypeOf(Float64Array.prototype),apiTypedSlot=key=>Object.getOwnPropertyDescriptor(apiTypedPrototype,key).get;
+const apiTypedLength=apiTypedSlot('length'),apiTypedBuffer=apiTypedSlot('buffer'),apiTypedOffset=apiTypedSlot('byteOffset');
+const apiIterator=Object.getOwnPropertyDescriptor(apiTypedPrototype,Symbol.iterator).value,apiIteratorPrototype=Object.getPrototypeOf(new Float64Array()[Symbol.iterator]()),apiIteratorNext=Object.getOwnPropertyDescriptor(apiIteratorPrototype,'next').value;
+const apiBufferLength=Object.getOwnPropertyDescriptor(ArrayBuffer.prototype,'byteLength').get,apiBufferResizable=Object.getOwnPropertyDescriptor(ArrayBuffer.prototype,'resizable')?.get;
+const apiColumnSet=Float64Array.prototype.set;
+const apiOwnValue=(object,key)=>Object.getOwnPropertyDescriptor(object,key)?.value;
+function columnPrefix(input,length){
+ if(!Number.isSafeInteger(length)||length<0)return null;
+ let buffer,offset;try{if(length>=apiTypedLength.call(input))return null;buffer=apiTypedBuffer.call(input);offset=apiTypedOffset.call(input);apiBufferLength.call(buffer);if(apiBufferResizable?.call(buffer))return null;}catch{return null;}
+ if(Object.getPrototypeOf(input)!==Float64Array.prototype||Object.hasOwn(input,Symbol.iterator)||Object.hasOwn(Float64Array.prototype,Symbol.iterator)||apiOwnValue(apiTypedPrototype,Symbol.iterator)!==apiIterator||apiOwnValue(apiIteratorPrototype,'next')!==apiIteratorNext)return null;
+ // Copy this column before reading the next input property. Keep full-tail
+ // validation above this path; only the temporary snapshot's extent shrinks.
+ const result=new Float64Array(length),view=new Float64Array(buffer,offset,length);apiColumnSet.call(result,view);return result;
+}
+function values(input,prefix) {
  if (!(input instanceof Float64Array)&&!Array.isArray(input)) throw new TypeError('Values must be Float64Array or a JSON array');
  for(const x of input) if(x!==null&&typeof x!=='number'||Number.isNaN(x)&&!(input instanceof Float64Array)||x===Infinity||x===-Infinity) throw new TypeError('Finite numbers or null gaps required');
- return Float64Array.from(input,x=>x===null?NaN:x);
+ if(prefix!==undefined&&!Array.isArray(input)){const copy=columnPrefix(input,prefix);if(copy)return copy;}
+ return Float64Array.from(input,x=>{if(x!==null&&typeof x!=='number'||Number.isNaN(x)&&!(input instanceof Float64Array)||x===Infinity||x===-Infinity)throw new TypeError('Finite numbers or null gaps required');return x===null?NaN:x;});
 }
-function columns(input) {return Object.fromEntries(FIELDS.map(key=>[key,values(input?.[key])]));}
-const COMMANDS=new Set(['compactData','setData','setColumns','applyDataEvent','applyDataEvents','configureDataIngestion','enqueueDataEvents','drainDataEvents','pauseDataIngestion','resumeDataIngestion','cancelDataEvents','dataIngestionStats','saveDataIngestion','loadDataIngestion','addPanel','setPanel','addAxis','setAxis','removeAxis','setDrawingTarget','crosshairValues','dataAt','addSeries','setSeries','setSeriesValues','removeSeries','addIndicator','setIndicatorParams','removeIndicator','indicatorValues','indicatorValueAt','registerIndicatorModule','saveStudies','loadStudies','addDrawing','editDrawing','translateDrawings','setDrawingsStyle','deleteDrawings','deleteDrawing','selectDrawing','saveDrawings','loadDrawings','undo','redo','setTool','setText','setTheme','setSymbol','setVisibleRange','fit','zoom','pan','inspect']);
+function columns(input,length) {return Object.fromEntries(FIELDS.map(key=>[key,values(input?.[key],length)]));}
+const COMMANDS=new Set(['compactData','setData','setColumns','applyDataEvent','applyDataEvents','configureDataIngestion','enqueueDataEvents','drainDataEvents','pauseDataIngestion','resumeDataIngestion','cancelDataEvents','dataIngestionStats','saveDataIngestion','loadDataIngestion','addPanel','setPanel','addAxis','setAxis','removeAxis','setDrawingTarget','setDrawingMagnet','setCrosshairSnap','crosshairSnapshot','crosshairValues','dataAt','addSeries','setSeries','setSeriesValues','removeSeries','addIndicator','setIndicatorParams','removeIndicator','indicatorValues','indicatorValueAt','registerIndicatorModule','saveStudies','loadStudies','addDrawing','positionMetrics','editDrawing','translateDrawings','setDrawingsStyle','setDrawingVisibility','setDrawingsVisibility','duplicateDrawing','duplicateDrawings','deleteDrawings','deleteDrawing','selectDrawing','saveDrawings','loadDrawings','undo','redo','setTool','setText','setTheme','setSymbol','setVisibleRange','fit','zoom','pan','inspect']);
 
 /** Shared web/JavaScriptCore/QuickJS facade. JSON arguments retain Double values.
  * Factories passed as source are trusted application code, never market data.
@@ -2304,15 +2591,15 @@ class ChartAPI {
  constructor(model,{controller=null,invalidate=()=>{}}={}) {this.model=model;this.controller=controller;this.invalidate=invalidate;}
  dispatch(operation,args=[]) {
   if(!COMMANDS.has(operation)||!Array.isArray(args))throw new TypeError('Unknown chart command or argument list');
-  const arity={compactData:1,setData:1,setColumns:2,applyDataEvent:1,applyDataEvents:1,configureDataIngestion:1,enqueueDataEvents:1,drainDataEvents:1,pauseDataIngestion:0,resumeDataIngestion:0,cancelDataEvents:0,dataIngestionStats:0,saveDataIngestion:0,loadDataIngestion:1,addPanel:1,setPanel:2,addAxis:1,setAxis:2,removeAxis:1,setDrawingTarget:1,crosshairValues:2,dataAt:2,addSeries:1,setSeries:2,setSeriesValues:2,removeSeries:1,addIndicator:3,setIndicatorParams:2,removeIndicator:1,indicatorValues:2,indicatorValueAt:4,registerIndicatorModule:2,saveStudies:0,loadStudies:1,addDrawing:1,editDrawing:2,translateDrawings:2,setDrawingsStyle:2,deleteDrawings:1,deleteDrawing:1,selectDrawing:1,saveDrawings:0,loadDrawings:1,undo:0,redo:0,setTool:1,setText:1,setTheme:1,setSymbol:1,setVisibleRange:2,fit:0,zoom:2,pan:1,inspect:0};if(args.length>arity[operation])throw new TypeError('Chart command argument count');
+  const arity={compactData:1,setData:1,setColumns:2,applyDataEvent:1,applyDataEvents:1,configureDataIngestion:1,enqueueDataEvents:1,drainDataEvents:1,pauseDataIngestion:0,resumeDataIngestion:0,cancelDataEvents:0,dataIngestionStats:0,saveDataIngestion:0,loadDataIngestion:1,addPanel:1,setPanel:2,addAxis:1,setAxis:2,removeAxis:1,setDrawingTarget:1,setDrawingMagnet:1,setCrosshairSnap:1,crosshairSnapshot:2,crosshairValues:2,dataAt:2,addSeries:1,setSeries:2,setSeriesValues:2,removeSeries:1,addIndicator:3,setIndicatorParams:2,removeIndicator:1,indicatorValues:2,indicatorValueAt:4,registerIndicatorModule:2,saveStudies:0,loadStudies:1,addDrawing:1,positionMetrics:1,editDrawing:2,translateDrawings:2,setDrawingsStyle:2,setDrawingVisibility:2,setDrawingsVisibility:2,duplicateDrawing:2,duplicateDrawings:2,deleteDrawings:1,deleteDrawing:1,selectDrawing:1,saveDrawings:0,loadDrawings:1,undo:0,redo:0,setTool:1,setText:1,setTheme:1,setSymbol:1,setVisibleRange:2,fit:0,zoom:2,pan:1,inspect:0};if(args.length>arity[operation])throw new TypeError('Chart command argument count');
   return this[operation](...args)??null;
  }
  changed(result) {this.invalidate();return result;}
  compactData(options){return compactData(this,options);}
  setData(bars) {this.model.store.setData(bars);return this.changed();}
- setColumns(data,length) {this.model.store.setColumns(columns(data),length);return this.changed();}
+ setColumns(data,length) {this.model.store.setColumns(columns(data,length),length);return this.changed();}
  applyDataEvent(event) {if(event?.kind==='batch')return this.applyDataEvents(event.events);const next=event?.kind==='reset'&&event.columns?{...event,columns:columns(event.columns)}:event;applyDataEvent(this.model.store,next);return this.changed();}
- applyDataEvents(events){const model=this.model;if(model.disposed)throw new Error('Chart disposed');const store=model.store,version=store.version,series=model.series,ingestion=model.dataIngestion,epoch=ingestion?.epoch,bindings=series.map(s=>[s,s.values]),snapshot=snapshotIngestionEvents(events);if(model.disposed||model.store!==store||store.version!==version||model.dataIngestion!==ingestion||ingestion?.epoch!==epoch||model.series!==series||series.length!==bindings.length||bindings.some(([s,v],i)=>series[i]!==s||s.values!==v))throw new IngestionError('SOURCE_CHANGED','Owner changed during batch snapshot');if(snapshot.some(e=>e.kind==='append')&&series.some(s=>s.values))throw new IngestionError('EXTERNAL_ALIGNMENT','Length-changing batches require host realignment of external values');return this.changed(store.applyEvents(snapshot,ingestion?{maxBars:ingestion.policy.maxStoredBars,maxStoreBytes:ingestion.policy.maxStoreBytes}:{}));}
+ applyDataEvents(events,options={}){const model=this.model;if(model.disposed)throw new Error('Chart disposed');const store=model.store,version=store.version,series=model.series,ingestion=model.dataIngestion,epoch=ingestion?.epoch,bindings=series.map(s=>[s,s.values]),limits=snapshotDataBatchOptions(options,false),snapshot=snapshotIngestionEvents(events);if(Object.getOwnPropertyDescriptor(this,'model')?.value!==model||model.disposed||model.store!==store||store.version!==version||model.dataIngestion!==ingestion||ingestion?.epoch!==epoch||model.series!==series||series.length!==bindings.length||bindings.some(([s,v],i)=>series[i]!==s||s.values!==v))throw new IngestionError('SOURCE_CHANGED','Owner changed during batch snapshot');if(snapshot.some(e=>e.kind==='append')&&series.some(s=>s.values))throw new IngestionError('EXTERNAL_ALIGNMENT','Length-changing batches require host realignment of external values');const receipt=store.applyEvents(snapshot,{...limits,...(ingestion?{maxBars:ingestion.policy.maxStoredBars,maxStoreBytes:ingestion.policy.maxStoreBytes}:{})});return receipt.unchanged===true?receipt:this.changed(receipt);}
  ingestion(){if(this.model.disposed)throw new Error('Chart disposed');if(!this.model.dataIngestion)throw new IngestionError('NOT_CONFIGURED','Configure data ingestion first');return this.model.dataIngestion;}
  configureDataIngestion(options){if(this.model.disposed)throw new Error('Chart disposed');assertDataIngestionIdle(this.model);const old=this.model.dataIngestion;old?.idle();if(old?.count)throw new IngestionError('PENDING_DATA','Drain or cancel pending data before reconfiguration');const candidate=new DataIngestion(this.model,options);try{assertDataIngestionIdle(this.model);old?.idle();if(this.model.dataIngestion!==old||old?.count)throw new IngestionError('SOURCE_CHANGED','Ingestion owner changed during configuration');this.model.dataIngestion=candidate;old?.dispose();return candidate.stats();}catch(error){candidate.dispose();throw error;}}
  enqueueDataEvents(packet){return this.ingestion().enqueue(packet);}
@@ -2329,7 +2616,10 @@ class ChartAPI {
  setAxis(id,patch){optionRecord(patch,AXIS_KEYS.filter(k=>k!=='id'&&k!=='panel'),'Axis patch');const next={...patch};if(next.range===null)next.range=undefined;if(next.base===null)next.base=undefined;this.model.setAxis(id,next);return this.changed();}
  removeAxis(id){this.model.removeAxis(id);if(this.controller?.drawingTarget?.axisId===id)this.controller.setDrawingTarget(null,{notify:false});return this.changed();}
  setDrawingTarget(target){if(!this.controller)throw new Error('Interaction controller required');this.controller.setDrawingTarget(target,{notify:false});return this.changed();}
+ setDrawingMagnet(options){if(!this.controller)throw new Error('Interaction controller required');this.controller.setDrawingMagnet(options,{notify:false});return this.changed();}
  dataAt(query,options={}){const d=Object.getOwnPropertyDescriptor(this,'model');if(!d||!Object.hasOwn(d,'value'))throw new TypeError('Data query own model required');const model=d.value,result=dataAt(model,query,options),current=Object.getOwnPropertyDescriptor(this,'model');if(!current||!Object.hasOwn(current,'value')||current.value!==model){const error=new Error('Data query API owner changed');error.name='StaleSourceError';throw error;}return result;}
+ setCrosshairSnap(options){if(!this.controller)throw new Error('Interaction controller required');this.controller.setCrosshairSnap(options,{notify:false});this.invalidate('hover');}
+ crosshairSnapshot(width,height){return resolveCrosshairSnapshot(this.model,createLayout(this.model,width,height));}
  crosshairValues(width,height){return crosshairValuesAt(this.model,createLayout(this.model,width,height));}
  seriesOptions(options) {
   optionRecord(options,SERIES_KEYS,'Series');const next=style(options);
@@ -2414,15 +2704,20 @@ class ChartAPI {
   const factory=Function('"use strict"; return ('+source+');')();if(typeof factory!=='function')throw new TypeError('Factory function required');
   return this.registerIndicator(name,factory);
  }
- drawingOptions(options) {optionRecord(options,['id','type','panel','points','style','text','locked','axisId','seriesId'],'Drawing');if(options.style)optionRecord(options.style,['color','fill','width','font'],'Drawing style');const next={...options,...(options.style?{style:style(options.style,['color','fill'])}:{})};if(next.seriesId!=null&&next.axisId===undefined){const s=this.model.series.find(s=>s.id===next.seriesId);if(s)next.axisId=s.axisId??null;}return next;}
+ drawingOptions(options) {optionRecord(options,['id','type','panel','points','style','text','locked','visible','axisId','seriesId'],'Drawing');if(options.style)optionRecord(options.style,['color','fill','width','font'],'Drawing style');const next={...options,...(options.style?{style:style(options.style,['color','fill'])}:{})};if(next.seriesId!=null&&next.axisId===undefined){const s=this.model.series.find(s=>s.id===next.seriesId);if(s)next.axisId=s.axisId??null;}return next;}
  drawingMutationContext(){const d=this.model.drawings,interactive=!!this.controller?.gesture;return {items:interactive&&d.transaction?d.transaction:d.items,beforeMutation:interactive?()=>this.controller.cancel({notify:false}):null};}
  addDrawing(options) {const next={panel:'price',...this.drawingOptions(options)};this.model.validateDrawingBinding(next);return this.changed(this.model.drawings.add(next,this.drawingMutationContext()));}
+ positionMetrics(id){const d=this.model.drawings.items.find(d=>d.id===id);if(!d||!isPositionDrawing(d.type))throw new TypeError('Position drawing required');return positionMetricsFor(d);}
+ duplicateDrawing(id,options){return duplicateDrawings(this,[id],options);}
+ duplicateDrawings(ids,options){return duplicateDrawings(this,ids,options);}
+ setDrawingVisibility(id,visible){return setDrawingsVisibility(this,[id],visible);}
+ setDrawingsVisibility(ids,visible){return setDrawingsVisibility(this,ids,visible);}
  setDrawingsStyle(ids,patch){return setDrawingsStyle(this,ids,patch);}
  deleteDrawings(ids){return deleteDrawings(this,ids);}
  translateDrawings(ids,options){return translateDrawings(this,ids,options);}
  editDrawing(id,patch) {const context=this.drawingMutationContext(),previous=context.items.find(d=>d.id===id);if(!previous)throw new Error('Missing committed drawing');const next=this.drawingOptions(patch);this.model.validateDrawingBinding({...previous,...next});this.model.drawings.edit(id,next,context);return this.changed();}
  deleteDrawing(id=this.model.drawings.selected) {const context=this.drawingMutationContext();if(this.controller?.gesture?.kind==='create'&&this.controller.gesture.id===id&&!context.items.some(d=>d.id===id)){this.controller.cancel({notify:false});return this.changed(false);}return this.changed(this.model.drawings.remove(id,context));}
- selectDrawing(id) {if(id!==null&&!this.model.drawings.items.some(d=>d.id===id))throw new Error('Missing drawing');if(id!==this.model.drawings.selected)this.controller?.cancel({notify:false});this.model.drawings.selected=id;return this.changed();}
+ selectDrawing(id) {if(id!==null&&!this.model.drawings.items.some(d=>d.id===id&&d.visible!==false))throw new Error('Missing or hidden drawing');if(id!==this.model.drawings.selected)this.controller?.cancel({notify:false});this.model.drawings.selected=id;return this.changed();}
  saveDrawings() {return this.model.drawings.save();}
  loadDrawings(text) {this.model.drawings.load(text,{styleDecoder:options=>portableStyle(options,['color','fill'],true),validatePanel:id=>this.model.panels.some(p=>p.id===id),validateBinding:d=>this.model.validateDrawingBinding(d)});return this.changed();}
  undo() {if(this.controller)this.controller.key('z',{ctrl:true});else this.model.drawings.undo();return this.changed();}
@@ -2442,13 +2737,132 @@ class ChartAPI {
  inspect() {return JSON.parse(JSON.stringify({view:this.model.view,theme:this.model.theme,panels:this.model.panels,axes:this.model.axes,drawingTarget:this.controller?.drawingTarget??null,series:this.model.series.map(({rangeIndex,values,revision,dirtyFrom,...s})=>({...s,...(values?{valueCount:values.length}:{})})),symbol:this.model.symbol,storedBars:this.model.store.length,lastBar:this.model.store.length?this.model.store.at(this.model.store.length-1):null,drawings:this.model.drawings.items,selected:this.model.drawings.selected,tool:this.controller?.tool??null,pointers:this.controller?.pointers.size??0,gesture:this.controller?.gesture?.kind??null}));}
 }
 
+
+const presetStringify=JSON.stringify,presetApply=ChartAPI.prototype.setDrawingsStyle;
+function presetOwn(value,key,required=true){const d=value&&Object.getOwnPropertyDescriptor(value,key);if(!d&&!required)return undefined;if(!d||!Object.hasOwn(d,'value'))throw new TypeError('Drawing preset own data fields required');return d.value;}
+function presetRecord(value,keys){if(!value||![Object.prototype,null].includes(Object.getPrototypeOf(value)))throw new TypeError('Drawing preset plain record required');const out=Object.create(null);for(const key of Reflect.ownKeys(value)){if(!keys.includes(key))throw new TypeError('Drawing preset fields');const d=Object.getOwnPropertyDescriptor(value,key);if(!d?.enumerable||!Object.hasOwn(d,'value'))throw new TypeError('Drawing preset enumerable data fields required');out[key]=d.value;}return out;}
+function presetName(value){if(typeof value!=='string'||value.length>128)throw new TypeError('Drawing preset name: string limit 128');const name=value.trim();if(!name.length||name.length>64||/[\u0000-\u001f\u007f-\u009f]/.test(value)||['__proto__','constructor','prototype'].includes(name))throw new TypeError('Drawing preset name: 1..64 trimmed characters, no controls/reserved names');return name;}
+function presetOptions(value){const o=presetRecord(value,['replace']);if(Object.hasOwn(o,'replace')&&typeof o.replace!=='boolean')throw new TypeError('Drawing preset replace boolean required');return o.replace===true;}
+function presetEntry(name,style){const patch=drawingStylePatch(style),ordered={};for(const key of ['color','fill','width','font'])if(Object.hasOwn(patch,key))ordered[key]=patch[key];return Object.freeze({name,style:Object.freeze(ordered)});}
+function presetEqual(a,b){return !!a&&['color','fill','width','font'].every(k=>Object.hasOwn(a.style,k)===Object.hasOwn(b.style,k)&&Object.is(a.style[k],b.style[k]));}
+function presetDocument(entries){return presetStringify({schema:'barochart.drawing-style-presets',version:1,presets:[...entries.values()]});}
+function presetAdmission(entries){if(entries.size>64)throw new RangeError('Drawing preset count limit 64');if(presetDocument(entries).length>65536)throw new RangeError('Drawing preset document limit 65536');}
+function presetReceipt(changed){return Object.freeze({changed});}
+
+/** Host-owned, style-only patch registry. Never stores a chart, defaults or callbacks. */
+class DrawingStylePresets {
+ #entries=new Map();
+ get(name){return this.#entries.get(presetName(name));}
+ list(){return Object.freeze([...this.#entries.values()]);}
+ set(name,style,options={}){const replace=presetOptions(options),entry=presetEntry(presetName(name),style);return this.#merge([entry],replace);}
+ #merge(entries,replace){const next=new Map(this.#entries);let changed=0;for(const entry of entries){const before=next.get(entry.name);if(before&&!replace)throw new Error('Drawing preset name already exists; explicit replace required');if(!presetEqual(before,entry)){next.set(entry.name,entry);changed++;}}presetAdmission(next);if(changed)this.#entries=next;return presetReceipt(changed);}
+ remove(name){name=presetName(name);if(!this.#entries.has(name))return presetReceipt(0);const next=new Map(this.#entries);next.delete(name);this.#entries=next;return presetReceipt(1);}
+ capture(api,id,name,options={}){
+  // Validate registry inputs before reading chart state; never capture a preview.
+  const replace=presetOptions(options),key=presetName(name);identifier(id,'Drawing id');
+  if(!(api instanceof ChartAPI))throw new TypeError('ChartAPI required');const model=presetOwn(api,'model'),store=presetOwn(model,'drawings'),controller=presetOwn(api,'controller',false);
+  if(presetOwn(model,'disposed',false))throw new Error('Chart disposed');if(!(store instanceof DrawingStore))throw new TypeError('Drawing preset managed store required');
+  if(controller&&presetOwn(controller,'model')!==model)throw new Error('Drawing preset controller owner mismatch');
+  if(presetOwn(store,'transaction',false)||controller&&presetOwn(controller,'gesture',false))throw new Error('Drawing preset capture requires no active gesture or transaction');
+  const items=presetOwn(store,'items');if(!Array.isArray(items)||Object.getPrototypeOf(items)!==Array.prototype||items.length>RESOURCE_LIMITS.maxDrawings||Reflect.ownKeys(items).length!==items.length+1)throw new TypeError('Drawing preset managed array required');
+  const seen=new Set();let source,sourceIndex;for(let i=0;i<items.length;i++){const drawing=presetOwn(items,String(i));if(!drawing||![Object.prototype,null].includes(Object.getPrototypeOf(drawing))||!Object.isFrozen(drawing))throw new TypeError('Drawing preset immutable drawing required');const current=presetOwn(drawing,'id');identifier(current,'Drawing id');if(seen.has(current))throw new TypeError('Duplicate drawing id');seen.add(current);if(current===id){source=drawing;sourceIndex=i;}}
+  if(!source)throw new Error('Missing drawing');const style=presetOwn(source,'style',false);if(!style||!Object.isFrozen(style))throw new TypeError('Drawing preset capture needs a nonempty portable stored style');const entry=presetEntry(key,style);
+  if(presetOwn(api,'model')!==model||presetOwn(model,'drawings')!==store||presetOwn(store,'items')!==items||presetOwn(model,'disposed',false)||presetOwn(api,'controller',false)!==controller||presetOwn(store,'transaction',false)||controller&&(presetOwn(controller,'model')!==model||presetOwn(controller,'gesture',false))||presetOwn(items,String(sourceIndex))!==source)throw new Error('Drawing preset capture owner changed');
+  return this.#merge([entry],replace);
+ }
+ apply(api,ids,name){const entry=this.#entries.get(presetName(name));if(!entry)throw new Error('Missing drawing preset');if(!(api instanceof ChartAPI))throw new TypeError('ChartAPI required');const receipt=presetApply.call(api,ids,entry.style);return Object.freeze({changed:receipt.changed,invalidationFailed:receipt.invalidationFailed});}
+ save(){return presetDocument(this.#entries);}
+ load(text,options={}){
+  const replace=presetOptions(options);if(typeof text!=='string'||text.length>65536)throw new TypeError('Drawing preset document: string limit 65536');
+  const doc=presetRecord(JSON.parse(text),['schema','version','presets']);if(doc.schema!=='barochart.drawing-style-presets'||doc.version!==1)throw new TypeError('Drawing preset schema/version');const rows=doc.presets;
+  if(!Array.isArray(rows)||rows.length>64)throw new RangeError('Drawing preset count limit 64');const entries=[],names=new Set();for(const row of rows){const r=presetRecord(row,['name','style']),entry=presetEntry(presetName(r.name),r.style);if(names.has(entry.name))throw new TypeError('Duplicate drawing preset name');names.add(entry.name);entries.push(entry);}return this.#merge(entries,replace);
+ }
+}
+
+
+
+const replayLimit=65536,replayFactories=new Map(['sma','ema','rsi'].map(name=>[name,resolveIndicatorFactory(name)]));
+function replayRecord(value,keys){if(!value||![Object.prototype,null].includes(Object.getPrototypeOf(value)))throw new TypeError('Replay plain record required');const out={};for(const key of Reflect.ownKeys(value)){const d=Object.getOwnPropertyDescriptor(value,key);if(!keys.includes(key)||!d?.enumerable||!Object.hasOwn(d,'value'))throw new TypeError('Replay own data fields required');out[key]=d.value;}return out;}
+function replayInteger(value,min,max,label){if(!Number.isSafeInteger(value)||value<min||value>max)throw new RangeError('Replay '+label+' must be '+min+'..'+max);return value;}
+function replayList(value,max){if(!Array.isArray(value)||Object.getPrototypeOf(value)!==Array.prototype||value.length>max||Reflect.ownKeys(value).length!==value.length+1)throw new TypeError('Replay dense bounded array required');const rows=[];for(let i=0;i<value.length;i++){const d=Object.getOwnPropertyDescriptor(value,String(i));if(!d?.enumerable||!Object.hasOwn(d,'value'))throw new TypeError('Replay array data properties required');rows.push(d.value);}return rows;}
+function replaySource(bars){const refs=replayList(bars,replayLimit),columns=Object.fromEntries(FIELDS.map(k=>[k,new Float64Array(refs.length)]));let previous=-Infinity;for(let i=0;i<refs.length;i++){const bar=replayRecord(refs[i],FIELDS);validateBar(bar,previous);previous=bar.time;for(const key of FIELDS)columns[key][i]=bar[key];}
+ // Reject ordinary row/array changes during capture; no getter is ever invoked.
+ if(bars.length!==refs.length)throw new Error('Replay source changed during capture');for(let i=0;i<refs.length;i++){if(Object.getOwnPropertyDescriptor(bars,String(i))?.value!==refs[i])throw new Error('Replay source changed during capture');const bar=replayRecord(refs[i],FIELDS);if(FIELDS.some(key=>!Object.is(bar[key],columns[key][i])))throw new Error('Replay source changed during capture');}return columns;}
+function replayOptions(value,total){const o=replayRecord(value,['initialCount','visibleBars','priceScale','inverted','volume','theme','indicators']),initialCount=replayInteger(o.initialCount??0,0,total,'initial count'),visibleBars=replayInteger(o.visibleBars??200,1,2048,'visible bars'),priceScale=o.priceScale??'linear',inverted=o.inverted??false,volume=o.volume??false;if(!['linear','log'].includes(priceScale)||typeof inverted!=='boolean'||typeof volume!=='boolean')throw new TypeError('Replay price scale/inverted/volume');for(const k of Object.keys(o))if(o[k]===undefined||o[k]===null)throw new TypeError('Replay options must be defined');const theme=portableStyle(replayRecord(o.theme??{},THEME_KEYS),['background','grid','text','up','down','crosshair']);const ids=new Set(),indicators=replayList(o.indicators??[],4).map(input=>{const s=replayRecord(input,['id','kind','period','color']);identifier(s.id,'Replay study id');if(ids.has(s.id)||!replayFactories.has(s.kind))throw new TypeError('Replay unique study id and sma/ema/rsi kind required');ids.add(s.id);replayInteger(s.period,1,256,'study period');if(Object.hasOwn(s,'color')&&typeof s.color!=='string')throw new TypeError('Replay study color');return Object.freeze({...s,...portableStyle({color:s.color??'#7898ff'},['color'])});});return Object.freeze({initialCount,visibleBars,priceScale,inverted,volume,theme:Object.freeze(theme),indicators:Object.freeze(indicators)});}
+function replayComplete(value,keys){const r=replayRecord(value,keys);if(keys.some(k=>!Object.hasOwn(r,k)))throw new TypeError('Replay session missing field');return r;}
+function replayBookmark(value,total){const b=replayComplete(value,['id','label','count']);identifier(b.id,'Replay bookmark id');boundedText(b.label,128,'Replay bookmark label');replayInteger(b.count,0,total,'bookmark count');return Object.freeze(b);}
+function replaySession(text){if(typeof text!=='string'||text.length>262144)throw new RangeError('Replay session text limit');const d=replayComplete(workspaceSnapshot(safeCheckpointParse(text)),['schema','version','dataset','total','options','count','bookmarks']);if(d.schema!=='barochart.replay-session'||d.version!==1)throw new TypeError('Replay session schema/version');d.dataset=workspaceBinding(d.dataset);replayInteger(d.total,0,replayLimit,'source total');replayInteger(d.count,0,d.total,'session count');replayComplete(d.options,['initialCount','visibleBars','priceScale','inverted','volume','theme','indicators']);d.options=replayOptions(d.options,d.total);const ids=new Set();d.bookmarks=replayList(d.bookmarks,128).map(row=>{const b=replayBookmark(row,d.total);if(ids.has(b.id))throw new TypeError('Duplicate replay bookmark');ids.add(b.id);return b;});return d;}
+// Frames deliberately omit layout closures and include detached finite data only.
+function replayData(value,depth=0){if(depth>12)throw new RangeError('Replay frame depth');if(value===null||typeof value==='string'||typeof value==='boolean')return value;if(typeof value==='number'){if(!Number.isFinite(value))throw new RangeError('Replay frame finite values required');return value;}if(Array.isArray(value))return value.map(v=>replayData(v,depth+1));if(value&&Object.getPrototypeOf(value)===Object.prototype){const out={};for(const key of Reflect.ownKeys(value)){const d=Object.getOwnPropertyDescriptor(value,key);if(typeof key!=='string'||!d?.enumerable||!Object.hasOwn(d,'value'))throw new TypeError('Replay frame data required');if(d.value!==undefined)out[key]=replayData(d.value,depth+1);}return out;}throw new TypeError('Replay frame data required');}
+function replayFrame(model,width,height){replayInteger(width,100,4096,'frame width');replayInteger(height,80,2160,'frame height');const scene=buildScene(model,width,height,{crosshair:false,drawings:false});return replayData({width,height,background:scene.background,commands:scene.commands,stats:scene.stats,axes:scene.layout.panels.map(p=>({id:p.id,min:p.min,max:p.max,scale:p.scale,inverted:p.inverted}))});}
+
+function replayGcd(a,b){while(b){const rest=a%b;a=b;b=rest;}return a;}
+function replayStateCopy(value){if(Array.isArray(value))return value.map(replayStateCopy);if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,replayStateCopy(v)]));return value;}
+// Replay-local adapter for IndicatorEngine's managed entry record. Eligibility
+// failure uses a fresh cold calculation, including canonical live states that
+// are valid at runtime but stricter serialized-checkpoint admission rejects.
+function replayForwardSeeds(previous,store,o){if(!previous)return null;const from=previous.store.length,n=store.length,cap=store.capacity,oldCap=previous.store.capacity;
+ if(!Number.isSafeInteger(from)||from<1||n<=from||n-from>256||cap<n||cap>replayLimit||oldCap<from||oldCap>replayLimit||o.indicators.length*cap*8>4*replayLimit*8)return null;
+ const seeds=new Map();for(const s of o.indicators){const old=previous.indicators.entries.get(s.id);
+  if(!old||old.name!==s.kind||previous.indicators.registry.get(s.kind)!==replayFactories.get(s.kind)||!isCanonicalBuiltinDefinition(s.kind,old.def)||
+   !old.params||Object.keys(old.params).length!==1||old.params.period!==s.period||old.def.outputs.length!==1||old.def.outputs[0]!=='value'||
+   old.dirty!==from||old.dirtyTo!==0||old.invalidated!==false||old.length!==from||old.arrays.length!==1||!(old.arrays[0] instanceof Float64Array)||old.arrays[0].length!==oldCap||
+   !old.checkpoints||Object.getPrototypeOf(old.checkpoints)!==Map.prototype||old.checkpoints.size!==1||!old.checkpoints.has(from))return null;
+  const state=replayStateCopy(old.checkpoints.get(from));try{validateCheckpointState(s.kind,{period:s.period},state,from);}catch{return null;}
+  seeds.set(s.id,{def:old.def,array:old.arrays[0],state,from});
+ }return seeds;
+}
+// Only the candidate receives managed records. Owned prefix vectors and copied
+// checkpoint state must never alias the prior model; keep these fields in sync
+// with IndicatorEngine and the exact-prefix/failure regressions.
+function replayStagedStudy(model,s,seeds){const n=model.store.length,engine=model.indicators,seed=seeds?.get(s.id);
+ if(!seed)engine.add(s.id,s.kind,{period:s.period});
+ else {const cap=model.store.capacity;if((engine.entries.size+1)*cap*8>engine.maxOutputBytes)throw new RangeError('Indicator output byte limit');
+  const array=new Float64Array(cap).fill(NaN);array.set(seed.array.subarray(0,seed.from));
+  engine.entries.set(s.id,{def:seed.def,name:s.kind,params:{period:s.period},dirty:seed.from,dirtyTo:n,invalidated:true,length:seed.from,arrays:[array],checkpoints:new Map([[seed.from,seed.state]]),revision:0});engine.get(s.id);
+ }
+ const entry=engine.entries.get(s.id);if(n&&!entry.checkpoints.has(n))throw new Error('Replay endpoint checkpoint missing');for(const key of entry.checkpoints.keys())if(key!==n)entry.checkpoints.delete(key);
+}
+
+function replayModel(columns,count,o,prior=null){const store=new BarStore([],{maxBars:replayLimit});store.setColumns(columns,count);const seeds=replayForwardSeeds(prior,store,o),previous=seeds?prior:null;const panels=[{id:'price',weight:3,scale:o.priceScale,inverted:o.inverted,padding:o.priceScale==='log'?0:.08}];if(o.volume)panels.push({id:'volume',weight:1});o.indicators.forEach((s,i)=>{if(s.kind==='rsi')panels.push({id:'replay-rsi-'+i,weight:1,range:[0,100]});});let model;
+ try{model=new ChartModel({store,theme:o.theme,panels,visibleBars:o.visibleBars});model.indicators.checkpointSize=previous?replayGcd(previous.store.length,count):Math.max(1,count);model.indicators.maxOutputBytes=4*replayLimit*8;model.indicators.registry=new Map(replayFactories);model.addSeries({id:'replay-price',type:'candles',panel:'price'});if(o.volume)model.addSeries({id:'replay-volume',type:'histogram',panel:'volume',source:'volume',color:'#7898ff'});o.indicators.forEach((s,i)=>{replayStagedStudy(model,s,seeds);model.addSeries({id:'replay-study-'+i,type:'line',panel:s.kind==='rsi'?'replay-rsi-'+i:'price',indicator:s.id,color:s.color});});model.view={from:Math.max(-.5,count-o.visibleBars-.5),to:Math.max(o.visibleBars-.5,count-.5)};model.follow=true;replayFrame(model,800,480);return model;}catch(error){model?.dispose();throw error;}}
+
+/** Manual, isolated prefix replay. No live model/API or scheduling is exposed. */
+class BarReplay {
+ #bookmarks=new Map();#columns;#options;#model;#count;#total;#paused=true;#generation=0;#disposed=false;#busy=false;
+ constructor(bars,options={}){const columns=replaySource(bars),o=replayOptions(options,columns.time.length),model=replayModel(columns,o.initialCount,o);this.#columns=columns;this.#options=o;this.#total=columns.time.length;this.#count=o.initialCount;this.#model=model;}
+ static restoreSession(bars,text,options){const o=replayComplete(options,['datasetBinding']),expected=workspaceBinding(o.datasetBinding),d=replaySession(text);if(!workspaceBindingSame(expected,d.dataset))throw new Error('Replay dataset binding mismatch');if(!Array.isArray(bars)||Object.getOwnPropertyDescriptor(bars,'length')?.value!==d.total)throw new Error('Replay source total mismatch');const candidate=new BarReplay(bars,{...d.options,initialCount:d.count});try{if(candidate.#total!==d.total)throw new Error('Replay source total mismatch');candidate.#options=d.options;candidate.#bookmarks=new Map(d.bookmarks.map(b=>[b.id,b]));return candidate;}catch(error){candidate.dispose();throw error;}}
+ #active(){if(this.#disposed)throw new Error('Replay disposed');if(this.#busy)throw new Error('Replay transition busy');}
+ snapshot(){this.#active();return Object.freeze({count:this.#count,total:this.#total,initialCount:this.#options.initialCount,lastTime:this.#count?this.#columns.time[this.#count-1]:null,paused:this.#paused,ended:this.#count===this.#total,generation:this.#generation});}
+ #change(count,paused,forward=false){this.#active();if(count===this.#count&&paused===this.#paused)return Object.freeze({changed:false,state:this.snapshot()});if(this.#generation===Number.MAX_SAFE_INTEGER)throw new RangeError('Replay generation limit');let next=null;this.#busy=true;try{if(count!==this.#count)next=replayModel(this.#columns,count,this.#options,forward?this.#model:null);const old=this.#model;if(next)this.#model=next;this.#count=count;this.#paused=paused;this.#generation++;if(next)old.dispose();}finally{this.#busy=false;}return Object.freeze({changed:true,state:this.snapshot()});}
+ start(){this.#active();return this.#change(this.#count,this.#count===this.#total);}
+ pause(){this.#active();return this.#change(this.#count,true);}
+ step(count=1){this.#active();replayInteger(count,1,256,'step count');if(this.#count===this.#total)return this.#change(this.#count,true);if(this.#paused)throw new Error('Start manual replay before stepping');const next=Math.min(this.#total,this.#count+count);return this.#change(next,next===this.#total,true);}
+ seek(count){this.#active();replayInteger(count,0,this.#total,'revealed count');return this.#change(count,true);}
+ reset(){this.#active();return this.#change(this.#options.initialCount,true);}
+ bookmarks(){this.#active();return Object.freeze([...this.#bookmarks.values()]);}
+ addBookmark(input){this.#active();this.#busy=true;try{const o=replayComplete(workspaceSnapshot(input),['id','label']),b=replayBookmark({...o,count:this.#count},this.#total);if(this.#bookmarks.has(b.id))throw new Error('Duplicate replay bookmark');if(this.#bookmarks.size>=128)throw new RangeError('Replay bookmark limit');this.#bookmarks.set(b.id,b);return b;}finally{this.#busy=false;}}
+ renameBookmark(id,label){this.#active();this.#busy=true;try{const input=workspaceSnapshot({id,label});identifier(input.id,'Replay bookmark id');boundedText(input.label,128,'Replay bookmark label');const previous=this.#bookmarks.get(input.id);if(!previous)throw new Error('Missing replay bookmark');const b=Object.freeze({...previous,label:input.label});this.#bookmarks.set(input.id,b);return b;}finally{this.#busy=false;}}
+ removeBookmark(id){this.#active();identifier(id,'Replay bookmark id');return this.#bookmarks.delete(id);}
+ seekBookmark(id){this.#active();identifier(id,'Replay bookmark id');const b=this.#bookmarks.get(id);if(!b)throw new Error('Missing replay bookmark');return this.seek(b.count);}
+ saveSession(datasetBinding){this.#active();this.#busy=true;try{const dataset=workspaceBinding(datasetBinding);const text=safeCheckpointStringify({schema:'barochart.replay-session',version:1,dataset,total:this.#total,options:this.#options,count:this.#count,bookmarks:[...this.#bookmarks.values()]});replaySession(text);return text;}finally{this.#busy=false;}}
+ barAt(index){this.#active();replayInteger(index,0,this.#count-1,'revealed bar index');return Object.freeze(Object.fromEntries(FIELDS.map(k=>[k,this.#columns[k][index]])));}
+ indicatorValues(id){this.#active();identifier(id,'Replay study id');if(!this.#options.indicators.some(s=>s.id===id))throw new Error('Missing replay study');return new Float64Array(this.#model.indicators.get(id).outputs.value);}
+ frame(width,height){this.#active();return replayFrame(this.#model,width,height);}
+ dispose(){if(this.#disposed)return;this.#active();this.#disposed=true;this.#model.dispose();this.#model=null;this.#columns=null;this.#options=null;this.#bookmarks.clear();}
+}
+
 // Portable workspace metadata only. Source bars and executable code stay host-owned.
 const WORKSPACE_CHARS=2097152,WORKSPACE_BYTES=4194304;
 const workspaceBindingKeys=['key','revision','adjustmentVersion','priceUnit','adjustment'];
 const workspaceSymbolKeys=['id','exchange','timezone','currency','volumeUnit','priceDecimals','tickSize','adjustment'];
+const workspaceSymbolOptionalKeys=['provider','adjustmentVersion'];
 function workspaceSlot(object,key){const d=Object.getOwnPropertyDescriptor(object,key);if(!d||!Object.hasOwn(d,'value'))throw new TypeError('Workspace own data slot: '+key);return d.value;}
 function workspacePick(object,keys){const out={};for(const key of keys){const d=Object.getOwnPropertyDescriptor(object,key);if(d){if(!Object.hasOwn(d,'value'))throw new TypeError('Workspace accessor: '+key);if(d.value!==undefined)Object.defineProperty(out,key,{value:d.value,enumerable:true,writable:true,configurable:true});}}return out;}
 function workspaceRecord(value,keys,required=keys){optionRecord(value,keys,'Workspace');if(required.some(k=>!Object.hasOwn(value,k)))throw new TypeError('Workspace missing field');return value;}
+// Omit only known optional undefined slots. Keep descriptors/prototype intact so
+// the normal walk still rejects accessors, symbols, hidden and unknown fields.
+function workspaceSymbolForSave(symbol){if(!symbol||typeof symbol!=='object')return symbol;const omitted=workspaceSymbolOptionalKeys.filter(key=>{const d=Object.getOwnPropertyDescriptor(symbol,key);return d?.enumerable&&Object.hasOwn(d,'value')&&d.value===undefined;});if(!omitted.length)return symbol;const descriptors=Object.getOwnPropertyDescriptors(symbol);for(const key of omitted)delete descriptors[key];return Object.create(Object.getPrototypeOf(symbol),descriptors);}
 // Count serialized scalar cost before materializing a potentially escape-heavy
 // document. This deliberately rejects accessors/toJSON rather than invoking them.
 function workspaceWalk(value,copy){let nodes=0,chars=0,bytes=0;const ancestors=new Set();const cost=(c,b=c)=>{chars+=c;bytes+=b;if(chars>WORKSPACE_CHARS||bytes>WORKSPACE_BYTES)throw new RangeError('Workspace document limit');};const string=s=>{cost(2);for(let i=0;i<s.length;i++){const n=s.charCodeAt(i);if(n===34||n===92)cost(2);else if(n<32)cost(6);else if(n<128)cost(1);else if(n<2048)cost(1,2);else if(n>=0xd800&&n<=0xdbff){const next=s.charCodeAt(++i);if(!(next>=0xdc00&&next<=0xdfff))throw new TypeError('Workspace Unicode scalar');cost(2,4);}else if(n>=0xdc00&&n<=0xdfff)throw new TypeError('Workspace Unicode scalar');else cost(1,3);}};
@@ -2464,7 +2878,7 @@ function validateWorkspaceDocument(doc){
  const source=workspaceRecord(doc.source,['length','firstTime','lastTime']);sizeLimit(source.length,RESOURCE_LIMITS.maxBars,'Workspace source length');if(source.length===0){if(source.firstTime!==null||source.lastTime!==null)throw new TypeError('Empty workspace endpoints');}else if(!Number.isSafeInteger(source.firstTime)||!Number.isSafeInteger(source.lastTime)||Math.abs(source.firstTime)>8640000000000000||Math.abs(source.lastTime)>8640000000000000||source.lastTime<source.firstTime||source.length===1&&source.firstTime!==source.lastTime||source.length>1&&source.firstTime===source.lastTime)throw new TypeError('Workspace source endpoints');
  const c=workspaceRecord(doc.chart,['panels','axes','theme','symbol','formatters','precision','axisWidth','view','follow']);if(!Array.isArray(c.panels)||!c.panels.length||c.panels.length>32||!Array.isArray(c.axes)||c.axes.length>64||!Number.isInteger(c.precision)||c.precision<0||c.precision>18||!Number.isFinite(c.axisWidth)||c.axisWidth<20||typeof c.follow!=='boolean'||!['default','symbol'].includes(c.formatters))throw new TypeError('Workspace chart configuration');workspaceRecord(c.view,['from','to']);if(!Number.isFinite(c.view.from)||!Number.isFinite(c.view.to)||c.view.to<=c.view.from)throw new RangeError('Workspace view');
  workspaceRecord(c.theme,THEME_KEYS);portableStyle(c.theme,['background','grid','text','up','down','crosshair'],true);
- if(c.symbol!==null){workspaceRecord(c.symbol,workspaceSymbolKeys);for(const k of ['id','exchange','timezone','currency','volumeUnit'])boundedText(c.symbol[k],128,'Workspace symbol');validateSymbol(c.symbol);if(c.symbol.currency!==doc.dataset.priceUnit||c.symbol.adjustment!==doc.dataset.adjustment)throw new TypeError('Workspace symbol dataset units/adjustment');}else if(c.formatters==='symbol')throw new TypeError('Workspace symbol formatter metadata');
+ if(c.symbol!==null){workspaceRecord(c.symbol,[...workspaceSymbolKeys,...workspaceSymbolOptionalKeys],workspaceSymbolKeys);for(const k of ['id','exchange','timezone','currency','volumeUnit',...workspaceSymbolOptionalKeys.filter(key=>Object.hasOwn(c.symbol,key))])boundedText(c.symbol[k],128,'Workspace symbol');validateSymbol(c.symbol);if(c.symbol.currency!==doc.dataset.priceUnit||c.symbol.adjustment!==doc.dataset.adjustment)throw new TypeError('Workspace symbol dataset units/adjustment');}else if(c.formatters==='symbol')throw new TypeError('Workspace symbol formatter metadata');
  if(!Array.isArray(doc.indicators)||doc.indicators.length>128||!Array.isArray(doc.series)||doc.series.length>256)throw new RangeError('Workspace study/series limit');
  const definitions=new Map();for(const e of doc.indicators){workspaceRecord(e,['id','name','params','module','outputs','plotOffsets'],['id','name','params','outputs','plotOffsets']);identifier(e.id,'Workspace indicator id');identifier(e.name,'Workspace indicator name');if(definitions.has(e.id))throw new TypeError('Duplicate workspace indicator');validateIndicatorParams(e.params);validateIndicatorModuleBinding(e.name,e.module);if(!Array.isArray(e.outputs)||!e.outputs.length||e.outputs.length>32||new Set(e.outputs).size!==e.outputs.length)throw new TypeError('Workspace output schema');for(const output of e.outputs)identifier(output,'Workspace output');workspaceRecord(e.plotOffsets,e.outputs,[]);for(const offset of Object.values(e.plotOffsets))if(!Number.isInteger(offset)||Math.abs(offset)>10000)throw new TypeError('Workspace output offset');definitions.set(e.id,e);}
  // Validate layout against an allocation-free facade. No indicator calculation,
@@ -2472,7 +2886,7 @@ function validateWorkspaceDocument(doc){
  const facade=Object.create(ChartModel.prototype);Object.assign(facade,{panels:[],axes:[],series:[],axisWidth:c.axisWidth,store:{length:source.length},indicators:{get(id){const e=definitions.get(id);if(!e)throw new Error('Missing workspace indicator');return {outputs:Object.fromEntries(e.outputs.map(k=>[k,null])),plotOffsets:e.plotOffsets};}}});
  for(const p of c.panels){workspaceRecord(p,PANEL_KEYS.filter(k=>k!=='formatter'),['id']);facade.addPanel(p);}for(const a of c.axes){workspaceRecord(a,AXIS_KEYS.filter(k=>k!=='formatter'),['id','panel']);facade.addAxis(a);}
  for(const s of doc.series){workspaceRecord(s,SERIES_KEYS.filter(k=>k!=='values'),['id','type','panel']);portableStyle(s,['color','fill','upColor','downColor'],true);facade.addSeries(s);}
- const drawings=workspaceRecord(doc.drawings,['schema','version','drawings']);if(drawings.schema!=='aster.drawings'||![1,2].includes(drawings.version)||!Array.isArray(drawings.drawings))throw new TypeError('Workspace drawing schema');const validator=new DrawingStore();if(drawings.drawings.length>validator.maxDrawings)throw new RangeError('Workspace drawing count');const ids=new Set();for(const d of drawings.drawings){validateDrawing(d);if(drawings.version===1&&(d.axisId!=null||d.seriesId!=null))throw new TypeError('Bound drawings require document version 2');facade.validateDrawingBinding(d);if(d.style)portableStyle(d.style,['color','fill'],true);if(ids.has(d.id))throw new TypeError('Duplicate drawing ids');ids.add(d.id);}validator.budget(drawings.drawings);
+ const drawings=workspaceRecord(doc.drawings,['schema','version','drawings']);if(drawings.schema!=='aster.drawings'||![1,2,3,4].includes(drawings.version)||!Array.isArray(drawings.drawings))throw new TypeError('Workspace drawing schema');const validator=new DrawingStore();if(drawings.drawings.length>validator.maxDrawings)throw new RangeError('Workspace drawing count');const ids=new Set();for(const d of drawings.drawings){validateDrawing(d);validateDrawingDocumentVersion(d,drawings.version);facade.validateDrawingBinding(d);if(d.style)portableStyle(d.style,['color','fill'],true);if(ids.has(d.id))throw new TypeError('Duplicate drawing ids');ids.add(d.id);}validator.budget(drawings.drawings);
  return doc;
 }
 function readWorkspaceDocument(text){boundedText(text,WORKSPACE_CHARS,'Workspace document',true);let bytes=0;for(let i=0;i<text.length;i++){const code=text.charCodeAt(i);bytes+=code<128?1:code<2048?2:code>=0xd800&&code<=0xdbff?(i++,4):3;if(bytes>WORKSPACE_BYTES)throw new RangeError('Workspace document byte limit');}const doc=workspaceWalk(safeCheckpointParse(text),false);return validateWorkspaceDocument(doc);}
@@ -2481,7 +2895,7 @@ function saveWorkspace(chart,datasetBinding){
  const store=model.store;if(!(store instanceof BarStore))throw new TypeError('Actual BarStore required');const version=workspaceSlot(store,'version'),columns=workspaceSlot(store,'columns'),length=workspaceSlot(store,'length');
  const indicators=[];for(const [id,e] of model.indicators.entries){requirePortableFactory(e.name,model.indicators.registry.get(e.name));indicators.push({id,name:e.name,params:workspacePick(e.params,Object.keys(e.params)),...((indicatorModule(e.name))?{module:indicatorModule(e.name)}:{}),outputs:e.def.outputs,plotOffsets:e.def.plotOffsets??{}});}
  const series=model.series.map(s=>{if(Object.hasOwn(s,'values')&&workspaceSlot(s,'values')!==undefined)throw new TypeError('Workspace external values unsupported');return workspacePick(s,SERIES_KEYS.filter(k=>k!=='values'));});
- const doc=workspaceSnapshot({schema:'aster.workspace',version:1,dataset:datasetBinding,source:{length,firstTime:length?columns.time[0]:null,lastTime:length?columns.time[length-1]:null},chart:{panels:model.panels.map(p=>workspacePick(p,PANEL_KEYS)),axes:model.axes.map(a=>workspacePick(a,AXIS_KEYS)),theme:model.theme,symbol:model.symbol??null,formatters:model.priceFormatter||model.timeFormatter?'symbol':'default',precision:model.precision,axisWidth:model.axisWidth,view:model.view,follow:model.follow},indicators,series,drawings:{schema:'aster.drawings',version:model.drawings.items.some(d=>d.axisId!=null||d.seriesId!=null)?2:1,drawings:model.drawings.items}});
+ const doc=workspaceSnapshot({schema:'aster.workspace',version:1,dataset:datasetBinding,source:{length,firstTime:length?columns.time[0]:null,lastTime:length?columns.time[length-1]:null},chart:{panels:model.panels.map(p=>workspacePick(p,PANEL_KEYS)),axes:model.axes.map(a=>workspacePick(a,AXIS_KEYS)),theme:model.theme,symbol:workspaceSymbolForSave(model.symbol??null),formatters:model.priceFormatter||model.timeFormatter?'symbol':'default',precision:model.precision,axisWidth:model.axisWidth,view:model.view,follow:model.follow},indicators,series,drawings:{schema:'aster.drawings',version:drawingDocumentVersion(model.drawings.items),drawings:model.drawings.items}});
  validateWorkspaceDocument(doc);const text=safeCheckpointStringify(doc);readWorkspaceDocument(text);if(model.disposed||chart.model!==model||model.store!==store||store.version!==version||store.columns!==columns||store.length!==length||model.drawings.transaction||controller&&(controller.gesture||controller.pointers?.size))throw new Error('Workspace owner changed during save');return text;
 }
 function installWorkspaceConfiguration(model,doc){
@@ -2580,12 +2994,12 @@ class AsyncPrepared {
   axisValidator.series=model.series.map(s=>({...s,...patches.get(s.id)}));let drawingTarget=ui.drawingTarget??null;if(drawingTarget!==null){optionRecord(drawingTarget,['panel','axisId','seriesId'],'Async drawing target');identifier(drawingTarget.panel,'Async drawing target panel');axisValidator.validateDrawingBinding(drawingTarget,{allowOrphanSeries:true});const linked=drawingTarget.seriesId?axisValidator.series.find(s=>s.id===drawingTarget.seriesId):null;if(drawingTarget.seriesId&&(!linked||linked.panel!==drawingTarget.panel||(linked.axisId??null)!==(drawingTarget.axisId??null)))drawingTarget=null;else axisValidator.validateDrawingBinding(drawingTarget);}
   optionRecord(ui.drawings,['limits','items','undo','redo','selected','serial'],'Async drawings');const store=restoredDrawings??new DrawingStore(ui.drawings.limits),memo=new Map();
   if(!Array.isArray(ui.drawings.undo)||!Array.isArray(ui.drawings.redo)||ui.drawings.undo.length>store.historyLimit||ui.drawings.redo.length>store.historyLimit)throw new TypeError('Async drawing history');
-  const restore=items=>{const key=safeCheckpointStringify(items);if(memo.has(key))return memo.get(key);const temp=new DrawingStore(ui.drawings.limits);temp.load(JSON.stringify({schema:'aster.drawings',version:items.some(d=>d.axisId!=null||d.seriesId!=null)?2:1,drawings:items}),{styleDecoder:style=>portableStyle(style,['color','fill'],true),validatePanel:id=>panels.some(p=>p.id===id),validateBinding:d=>axisValidator.validateDrawingBinding(d,{allowOrphanSeries:true})});const records=temp.items;memo.set(key,records);return records;};
-  if(!restoredDrawings){store.items=restore(ui.drawings.items);store.undoStack=ui.drawings.undo.map(restore);store.redoStack=ui.drawings.redo.map(restore);}if(ui.drawings.selected!==null&&!store.items.some(d=>d.id===ui.drawings.selected))throw new TypeError('Async selection');sizeLimit(ui.drawings.serial,Number.MAX_SAFE_INTEGER,'Async drawing serial');store.selected=ui.drawings.selected;store.serial=ui.drawings.serial;store.trim();
+  const restore=items=>{const key=safeCheckpointStringify(items);if(memo.has(key))return memo.get(key);const temp=new DrawingStore(ui.drawings.limits);temp.load(JSON.stringify({schema:'aster.drawings',version:drawingDocumentVersion(items),drawings:items}),{styleDecoder:style=>portableStyle(style,['color','fill'],true),validatePanel:id=>panels.some(p=>p.id===id),validateBinding:d=>axisValidator.validateDrawingBinding(d,{allowOrphanSeries:true})});const records=temp.items;memo.set(key,records);return records;};
+  if(!restoredDrawings){store.items=restore(ui.drawings.items);store.undoStack=ui.drawings.undo.map(restore);store.redoStack=ui.drawings.redo.map(restore);}if(ui.drawings.selected!==null&&!store.items.some(d=>d.id===ui.drawings.selected&&d.visible!==false))throw new TypeError('Async selection');sizeLimit(ui.drawings.serial,Number.MAX_SAFE_INTEGER,'Async drawing serial');store.selected=ui.drawings.selected;store.serial=ui.drawings.serial;store.trim();
   // Legacy preparation can replace history outside this opt-in admission
   // budget; preserve the empty policy/ledger across VM swap without eviction.
   const ingestion=ui.dataIngestion===undefined?null:restoreDataIngestion(model,ui.dataIngestion,{allowBudgetMismatch:this.metadata.event.kind!=='batch'});if(ingestion?.count){ingestion.dispose();throw new Error('Async ingestion payload must be empty');}
-  for(const s of model.series)Object.assign(s,patches.get(s.id));model.dataIngestion?.dispose();model.dataIngestion=ingestion;model.drawings=store;model.panels=panels;model.axes=axes;model.theme=theme;model.precision=ui.precision;model.axisWidth=ui.axisWidth;model.view={...ui.view};model.follow=ui.follow;model.crosshair=ui.crosshair;const event=this.metadata.event;if(event.kind==='prepend'){model.view.from+=event.bars.length;model.view.to+=event.bars.length;}else if(event.kind==='reset')model.fit();else if((event.kind==='append'||event.kind==='batch'&&event.events.some(e=>e.kind==='append'))&&model.follow){const span=model.view.to-model.view.from;model.view.to=model.store.length+model.forwardOffset()-.5;model.view.from=model.view.to-span;}return {model,ui:{...ui,drawingTarget}};
+  for(const s of model.series)Object.assign(s,patches.get(s.id));model.dataIngestion?.dispose();model.dataIngestion=ingestion;model.drawings=store;model.panels=panels;model.axes=axes;model.theme=theme;model.precision=ui.precision;model.axisWidth=ui.axisWidth;model.view={...ui.view};model.follow=ui.follow;model.crosshair=ui.crosshair;const event=this.metadata.event;if(event.kind==='prepend'&&this.metadata.store.length>0){model.view.from+=event.bars.length;model.view.to+=event.bars.length;}else if(event.kind==='reset')model.fit();else if((event.kind==='append'||event.kind==='batch'&&event.events.some(e=>e.kind==='append')||event.kind==='prepend'&&event.bars.length>0&&this.metadata.store.length===0)&&model.follow){const span=model.view.to-model.view.from;model.view.to=model.store.length+model.forwardOffset()-.5;model.view.from=model.view.to-span;}return {model,ui:{...ui,drawingTarget}};
  }
  dispose(){this.model?.dispose();this.model=null;this.buffers=[];this.checkpoints=[];}
 }
@@ -2630,7 +3044,7 @@ const NATIVE_WORKSPACE_RESTORE_BYTES=805306368;
 function nativeTargetInteger(n,min,max,label){if(!Number.isSafeInteger(n)||n<min||n>max)throw new RangeError('Native workspace '+label);return n;}
 function nativeTargetEqual(a,b){if(Object.is(a,b))return true;if(!a||!b||typeof a!=='object'||typeof b!=='object'||Array.isArray(a)!==Array.isArray(b))return false;const keys=Object.keys(a);return keys.length===Object.keys(b).length&&keys.every(k=>Object.hasOwn(b,k)&&nativeTargetEqual(a[k],b[k]));}
 function nativeTargetPick(value,keys){const out={};for(const k of keys){const d=Object.getOwnPropertyDescriptor(value,k);if(d){if(!Object.hasOwn(d,'value'))throw new TypeError('Native workspace target accessor');if(d.value!==undefined)out[k]=d.value;}}return out;}
-function nativeTargetNormalized(doc){const definitions=new Map(doc.indicators.map(e=>[e.id,e])),facade=Object.create(ChartModel.prototype);Object.assign(facade,{panels:[],axes:[],series:[],axisWidth:doc.chart.axisWidth,store:{length:doc.source.length},indicators:{get(id){const e=definitions.get(id);if(!e)throw new Error('Native workspace indicator binding');return {outputs:Object.fromEntries(e.outputs.map(k=>[k,null])),plotOffsets:e.plotOffsets};}}});for(const p of doc.chart.panels)facade.addPanel(p);for(const a of doc.chart.axes)facade.addAxis(a);for(const item of doc.series)facade.addSeries(item);return {...doc,drawings:{...doc.drawings,version:doc.drawings.drawings.some(d=>d.axisId!=null||d.seriesId!=null)?2:1},chart:{...doc.chart,panels:facade.panels.map(p=>nativeTargetPick(p,PANEL_KEYS.filter(k=>k!=='formatter'))),axes:facade.axes.map(a=>nativeTargetPick(a,AXIS_KEYS.filter(k=>k!=='formatter')))},series:facade.series.map(e=>nativeTargetPick(e,SERIES_KEYS.filter(k=>k!=='values')))};}
+function nativeTargetNormalized(doc){const definitions=new Map(doc.indicators.map(e=>[e.id,e])),facade=Object.create(ChartModel.prototype);Object.assign(facade,{panels:[],axes:[],series:[],axisWidth:doc.chart.axisWidth,store:{length:doc.source.length},indicators:{get(id){const e=definitions.get(id);if(!e)throw new Error('Native workspace indicator binding');return {outputs:Object.fromEntries(e.outputs.map(k=>[k,null])),plotOffsets:e.plotOffsets};}}});for(const p of doc.chart.panels)facade.addPanel(p);for(const a of doc.chart.axes)facade.addAxis(a);for(const item of doc.series)facade.addSeries(item);return {...doc,drawings:{...doc.drawings,version:drawingDocumentVersion(doc.drawings.drawings)},chart:{...doc.chart,panels:facade.panels.map(p=>nativeTargetPick(p,PANEL_KEYS.filter(k=>k!=='formatter'))),axes:facade.axes.map(a=>nativeTargetPick(a,AXIS_KEYS.filter(k=>k!=='formatter')))},series:facade.series.map(e=>nativeTargetPick(e,SERIES_KEYS.filter(k=>k!=='values')))};}
 function nativeTargetSpec(text){
  if(typeof text!=='string'||text.length>8388608)throw new RangeError('Native workspace target metadata');const m=safeCheckpointParse(text);optionRecord(m,['schema','version','document','datasetBinding','source','size','retainedBytes','maxBytes','dataIngestion'],'Native workspace target');if(m.schema!=='aster.native-workspace-target'||m.version!==1)throw new TypeError('Native workspace target protocol');
  const doc=readWorkspaceDocument(m.document);if(!workspaceBindingSame(doc.dataset,workspaceBinding(m.datasetBinding)))throw new TypeError('Native workspace target dataset binding');
@@ -2888,12 +3302,49 @@ class AsyncUIImport {
  constructor(text,prepared){const header=safeCheckpointParse(text);optionRecord(header,['schema','protocol','state'],'Async UI header');if(header.schema!=='aster.async.ui'||header.protocol!==1||!header.state||typeof header.state!=='object')throw new TypeError('Async UI protocol');this.state=header.state;this.prepared=prepared;const d=this.state.drawings;optionRecord(d,['limits','frameCounts','undoCount','redoCount','selected','serial'],'Async drawing header');optionRecord(d.limits,uiLimitKeys,'Async drawing limits');this.store=new DrawingStore(d.limits);sizeLimit(d.undoCount,this.store.historyLimit,'Async undo count');sizeLimit(d.redoCount,this.store.historyLimit,'Async redo count');sizeLimit(d.serial,Number.MAX_SAFE_INTEGER,'Async drawing serial');if(!Array.isArray(d.frameCounts)||d.frameCounts.length!==1+d.undoCount+d.redoCount)throw new TypeError('Async UI frame counts');let references=0;for(const n of d.frameCounts){sizeLimit(n,this.store.maxDrawings,'Async UI frame size');references+=n;}if(references>this.store.maxDrawings+Math.floor(this.store.historyBytes/8))throw new RangeError('Async UI history reference budget');this.counts=d.frameCounts;this.frames=this.counts.map(()=>[]);this.records=[];this.used=new Set();this.frame=0;this.offset=0;this.finished=false;this.newPoints=0;this.newText=0;}
  skipEmpty(){while(this.frame<this.counts.length&&this.offset===this.counts[this.frame]){const frame=this.frames[this.frame];this.store.budget(frame);if(new Set(frame.map(d=>d.id)).size!==frame.length)throw new TypeError('Async duplicate drawing ids');this.store.weight(frame);this.frame++;this.offset=0;}}
  chunk(text){if(this.finished)throw new Error('Async UI import finished');if(typeof text!=='string'||text.length>262144)throw new RangeError('Async UI chunk text');const p=safeCheckpointParse(text);optionRecord(p,['complete','frame','offset','refs','records'],'Async UI chunk');this.skipEmpty();if(p.complete!==false||p.frame!==this.frame||p.offset!==this.offset||!Array.isArray(p.refs)||!p.refs.length||p.refs.length>64||!Array.isArray(p.records)||p.records.length>64||this.frame>=this.counts.length||this.offset+p.refs.length>this.counts[this.frame])throw new TypeError('Async UI chunk order/offset');
-  let points=0;for(const row of p.records){optionRecord(row,['slot','drawing'],'Async UI record');if(row.slot!==this.records.length)throw new TypeError('Async UI record slot');const temp=new DrawingStore({...this.state.drawings.limits,maxDocumentChars:RESOURCE_LIMITS.maxDocumentChars}),bindingModel=Object.create(this.prepared.model);Object.assign(bindingModel,{panels:this.state.panels,axes:this.state.axes??[],series:this.state.series});temp.load(JSON.stringify({schema:'aster.drawings',version:row.drawing.axisId!=null||row.drawing.seriesId!=null?2:1,drawings:[row.drawing]}),{styleDecoder:s=>portableStyle(s,['color','fill'],true),validatePanel:id=>Array.isArray(this.state.panels)&&this.state.panels.some(p=>p.id===id),validateBinding:d=>bindingModel.validateDrawingBinding(d,{allowOrphanSeries:true})});const drawing=temp.items[0];points+=drawing.points.length;this.newPoints+=drawing.points.length;this.newText+=JSON.stringify(drawing).length;if(points>2048||this.newPoints>this.store.maxPoints+Math.floor(this.store.historyBytes/32)||this.newText>this.store.maxPoints*96+this.store.maxDrawings*3072+Math.floor(this.store.historyBytes/2))throw new RangeError('Async UI unique record budget');this.records.push(drawing);}
+  let points=0;for(const row of p.records){optionRecord(row,['slot','drawing'],'Async UI record');if(row.slot!==this.records.length)throw new TypeError('Async UI record slot');const temp=new DrawingStore({...this.state.drawings.limits,maxDocumentChars:RESOURCE_LIMITS.maxDocumentChars}),bindingModel=Object.create(this.prepared.model);Object.assign(bindingModel,{panels:this.state.panels,axes:this.state.axes??[],series:this.state.series});temp.load(JSON.stringify({schema:'aster.drawings',version:drawingDocumentVersion([row.drawing]),drawings:[row.drawing]}),{styleDecoder:s=>portableStyle(s,['color','fill'],true),validatePanel:id=>Array.isArray(this.state.panels)&&this.state.panels.some(p=>p.id===id),validateBinding:d=>bindingModel.validateDrawingBinding(d,{allowOrphanSeries:true})});const drawing=temp.items[0];points+=drawing.points.length;this.newPoints+=drawing.points.length;this.newText+=JSON.stringify(drawing).length;if(points>2048||this.newPoints>this.store.maxPoints+Math.floor(this.store.historyBytes/32)||this.newText>this.store.maxPoints*96+this.store.maxDrawings*3072+Math.floor(this.store.historyBytes/2))throw new RangeError('Async UI unique record budget');this.records.push(drawing);}
   const added=p.refs.map(slot=>{sizeLimit(slot,this.records.length-1,'Async UI reference slot');const drawing=this.records[slot];if(!drawing)throw new TypeError('Async UI reference slot');this.used.add(slot);return drawing;});this.frames[this.frame].push(...added);this.offset+=added.length;
  }
  finish(){if(this.finished)throw new Error('Async UI import finished');this.skipEmpty();if(this.frame!==this.frames.length)throw new Error('Async UI incomplete transfer');if(this.used.size!==this.records.length)throw new TypeError('Async UI unused record');const d=this.state.drawings;this.store.items=this.frames[0];this.store.undoStack=this.frames.slice(1,1+d.undoCount);this.store.redoStack=this.frames.slice(1+d.undoCount);this.store.selected=d.selected;this.store.serial=d.serial;const state={...this.state,drawings:{limits:d.limits,items:this.store.items,undo:this.store.undoStack,redo:this.store.redoStack,selected:d.selected,serial:d.serial}};const result=this.prepared.finishUI(state,this.store);this.finished=true;return result;}
 }
 
+const NativeKeyboardDataExplorer=(()=>{const lowerBound=BarStore.prototype.lowerBound;
+// DOM-free keyboard selection. Only read() invokes potentially expensive dataAt.
+const LIMIT=4096;
+const stale=()=>{const error=new Error('Keyboard exploration owner changed');error.name='StaleSourceError';return error;};
+const number=value=>Object.is(value,-0)?'-0':String(value);
+class KeyboardDataExplorer {
+ constructor(api){this.api=api;this.model=api.model;this.active=false;this.time=null;this.seriesId=null;this.phase='off';this.text='';this.generation=0;this.busy=false;this.disposed=false;}
+ owner(){if(this.disposed||this.model.disposed)throw new Error('Chart disposed');if(this.api.model!==this.model)throw stale();return this.model;}
+ rows(){const rows=this.model.series.filter(s=>s.visible!==false);if(rows.length>256)throw new RangeError('Exploration series limit');return rows;}
+ index(){const store=this.model.store;if(this.time===null)return -1;const index=lowerBound.call(store,this.time);return index<store.length&&store.columns.time[index]===this.time?index:-1;}
+ selectionText(){const index=this.index();if(!this.model.store.length)return 'No stored bars. Home or End selects a bar after data arrives.';if(index<0)return 'Selected bar is no longer available. Press Home or End to select a stored bar.';const rows=this.rows(),row=rows.find(s=>s.id===this.seriesId);return `Bar ${index+1} of ${this.model.store.length}; stored time ${this.time} UTC ms. ${row?`Series ${row.id}; panel ${row.panel}; axis ${row.axisId??'default'}.`:'No visible series.'} ${this.phase==='changed'?'Data or display changed. ':''}Press Enter to read current plotted values.`.slice(0,LIMIT);}
+ snapshot(){return {active:this.active,time:this.time,index:this.active?this.index():null,seriesId:this.seriesId,phase:this.phase,text:this.text};}
+ setActive(active){this.owner();if(typeof active!=='boolean')throw new TypeError('Exploration mode boolean');this.generation++;this.active=active;this.phase=active?'selected':'off';this.time=null;this.seriesId=null;this.text='';if(active){const n=this.model.store.length;if(n){const index=Math.max(0,Math.min(n-1,Math.floor(this.model.view.to)));this.time=this.model.store.columns.time[index];}this.seriesId=this.rows()[0]?.id??null;this.text=this.selectionText();}return this.snapshot();}
+ changed(){if(!this.active||this.disposed)return false;this.owner();this.generation++;const rows=this.rows();if(!rows.some(s=>s.id===this.seriesId))this.seriesId=rows[0]?.id??null;this.phase=this.index()<0?'missing':'changed';this.text=this.selectionText();return true;}
+ key(key){this.owner();if(!this.active)return false;if(key==='Escape'){this.setActive(false);return true;}if(key==='Enter'){this.read();return true;}
+  if(!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'].includes(key))return false;
+  this.generation++;const store=this.model.store,rows=this.rows(),index=this.index();
+  if(key==='Home'||key==='End'){this.time=store.length?store.columns.time[key==='Home'?0:store.length-1]:null;}
+  else if(key==='ArrowLeft'||key==='ArrowRight'){if(index>=0)this.time=store.columns.time[Math.max(0,Math.min(store.length-1,index+(key==='ArrowLeft'?-1:1)))];}
+  else{const at=rows.findIndex(s=>s.id===this.seriesId),next=Math.max(0,Math.min(rows.length-1,Math.max(0,at)+(key==='ArrowUp'?-1:1)));this.seriesId=rows[next]?.id??null;}
+  if(!rows.some(s=>s.id===this.seriesId))this.seriesId=rows[0]?.id??null;
+  this.phase=this.index()<0?'missing':'selected';this.text=this.selectionText();return true;
+ }
+ read(){this.owner();if(!this.active)throw new Error('Enable data exploration first');if(this.busy)throw new Error('Exploration read already running');const generation=this.generation;
+  if(this.index()<0){this.phase='missing';this.text=this.selectionText();return this.snapshot();}
+  this.busy=true;try{const result=this.api.dataAt({time:this.time,match:'exact'});this.owner();if(!this.active||this.generation!==generation)throw stale();if(!result){this.phase='missing';this.text=this.selectionText();return this.snapshot();}
+   const row=result.series.find(s=>s.id===this.seriesId),b=result.primary.bar;
+   const symbol=result.primary.symbol;
+   const text=`${symbol?`${symbol.id}; currency ${symbol.currency}; volume unit ${symbol.volumeUnit}. `:''}Bar ${result.index+1}; stored time ${result.time} UTC ms. Open ${number(b.open)}; high ${number(b.high)}; low ${number(b.low)}; close ${number(b.close)}; volume ${number(b.volume)}. ${row?`Series ${row.id}; panel ${row.panel}; axis ${row.axisId??'default'}; ${row.status}; value ${row.value===null?'unavailable':number(row.value)}; plot offset ${row.offset}; source index ${row.sourceIndex??'none'}; source time ${row.sourceTime??'none'} UTC ms.`:'No visible series.'} Current plotted values, cutoff ${result.asOfIndex}; revised data, not historical arrival-time truth.`;
+   this.phase='read';this.text=text.slice(0,LIMIT);return this.snapshot();
+  }catch(error){if(!this.disposed&&this.active&&this.generation===generation){this.phase='error';this.text='Value read failed. Press Enter to retry.';}throw error;}finally{this.busy=false;}
+ }
+ dispose(){if(this.disposed)return;this.disposed=true;this.generation++;this.active=false;this.time=null;this.seriesId=null;this.phase='off';this.text='';this.api=null;this.model=null;}
+}
+function explorerInputAllowed(event,canvas){return event.target===canvas&&!event.defaultPrevented&&!event.isComposing&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.shiftKey;}
+
+return KeyboardDataExplorer;})();
 // Private native display transport. Source OHLCV/indicator arrays are never
 // converted or transferred here; these are renderer-neutral CSS coordinates.
 const nativePacketLimits={numbers:8388608,metadataBytes:1048576,commands:65536,strings:65536};
@@ -2951,10 +3402,10 @@ function packNativeCommands(layers,{mode,width,height,background,stats}){
  return {metadata,numbers};
 }
 
-globalThis.Aster={RESOURCE_LIMITS,optionRecord,boundedText,sizeLimit,identifier,PANEL_KEYS,AXIS_KEYS,SERIES_KEYS,THEME_KEYS,rememberSymbolFormatters,hasPortableFormatters,portableColor,portableFont,portableStyle,labelMetrics,labelWidth,fitLabel,labelCommand,panelTitle,FIELDS,validateBar,RangeIndex,BarStore,seededColumns,BlockRangeIndex,zonedParts,marketDate,shiftDate,zonedEpoch,validateSymbol,formatPrice,normalizeOHLCV,alignSeriesByTime,SessionCalendar,TickAggregator,applyDataEvent,DEMO_SYMBOLS,demoCalendar,validateResamplePlan,resamplePlanResolver,resampleOHLCV,resampleFromSessions,alignConfirmedByTime,validateIndicatorParams,UnsupportedIndicatorError,defineIndicatorModule,portableIndicatorFactory,portableIndicatorFactories,indicatorModule,requirePortableIndicator,indicatorModuleDefinitions,validateIndicatorModuleBinding,validateModuleCheckpoint,portableSessionCalendar,vwapDefinition,pivotsDefinition,validateSessionCheckpoint,builtinIndicators,isCanonicalBuiltinDefinition,resolveIndicatorFactory,requirePortableFactory,IndicatorEngine,DRAWING_TYPES,drawingPointCount,validateDrawing,DrawingStore,drawingGeometry,drawingHitTest,formatAxisValue,aggregateVolumeSeries,createDrawingCommands,createCrosshairCommands,crosshairValuesAt,SERIES_BLOCK_THRESHOLD,DARK_THEME,LIGHT_THEME,ChartModel,createLayout,buildScene,SceneCache,InteractionController,safeCheckpointStringify,safeCheckpointParse,validateCheckpointState,NATIVE_CHECKPOINT_RECORD_BYTES,nativeCheckpointFootprint,NativeCheckpointBudget,NativeCheckpointMap,NativeCheckpointEntries,IngestionError,assertDataIngestionIdle,acquireDataIngestionLease,dataIngestionBatchLimits,snapshotIngestionEvents,DataIngestion,restoreDataIngestion,saveStudySetup,setStudyParams,loadStudySetup,dataAt,ChartAPI,WORKSPACE_CHARS,workspaceSlot,workspaceSnapshot,workspaceBinding,workspaceBindingSame,validateWorkspaceDocument,readWorkspaceDocument,saveWorkspace,installWorkspaceConfiguration,nativeWorkspacePreflight,asyncConfigurationKey,AsyncCapture,AsyncPrepared,PrepareCapture,PreparedData,NATIVE_WORKSPACE_RESTORE_BYTES,nativeWorkspaceTargetPlan,NativeWorkspacePrepared,NativeWorkspaceCapture,NativeParamsTarget,NativeParamsImport,NativeParamsCapture,AsyncUICapture,AsyncUIImport};
+globalThis.Aster={RESOURCE_LIMITS,optionRecord,boundedText,sizeLimit,identifier,PANEL_KEYS,AXIS_KEYS,SERIES_KEYS,THEME_KEYS,rememberSymbolFormatters,hasPortableFormatters,portableColor,portableFont,portableStyle,labelMetrics,labelWidth,fitLabel,labelCommand,panelTitle,FIELDS,validateBar,RangeIndex,BarStore,seededColumns,BlockRangeIndex,zonedParts,marketDate,shiftDate,zonedEpoch,validateSymbol,formatPrice,normalizeOHLCV,alignSeriesByTime,SessionCalendar,TickAggregator,applyDataEvent,DEMO_SYMBOLS,demoCalendar,validateResamplePlan,resamplePlanResolver,resampleOHLCV,resampleFromSessions,alignConfirmedByTime,validateIndicatorParams,UnsupportedIndicatorError,defineIndicatorModule,portableIndicatorFactory,portableIndicatorFactories,indicatorModule,requirePortableIndicator,indicatorModuleDefinitions,validateIndicatorModuleBinding,validateModuleCheckpoint,portableSessionCalendar,vwapDefinition,pivotsDefinition,validateSessionCheckpoint,builtinIndicators,isCanonicalBuiltinDefinition,resolveIndicatorFactory,requirePortableFactory,IndicatorEngine,DRAWING_TYPES,drawingPointCount,validateDrawing,DrawingStore,drawingGeometry,drawingHitTest,formatAxisValue,aggregateVolumeSeries,createDrawingCommands,createCrosshairCommands,crosshairValuesAt,SERIES_BLOCK_THRESHOLD,DARK_THEME,LIGHT_THEME,ChartModel,createLayout,buildScene,SceneCache,InteractionController,safeCheckpointStringify,safeCheckpointParse,validateCheckpointState,NATIVE_CHECKPOINT_RECORD_BYTES,nativeCheckpointFootprint,NativeCheckpointBudget,NativeCheckpointMap,NativeCheckpointEntries,IngestionError,assertDataIngestionIdle,acquireDataIngestionLease,dataIngestionBatchLimits,snapshotIngestionEvents,DataIngestion,restoreDataIngestion,saveStudySetup,setStudyParams,loadStudySetup,dataAt,ChartAPI,DrawingStylePresets,BarReplay,WORKSPACE_CHARS,workspaceSlot,workspaceSnapshot,workspaceBinding,workspaceBindingSame,validateWorkspaceDocument,readWorkspaceDocument,saveWorkspace,installWorkspaceConfiguration,nativeWorkspacePreflight,asyncConfigurationKey,AsyncCapture,AsyncPrepared,PrepareCapture,PreparedData,NATIVE_WORKSPACE_RESTORE_BYTES,nativeWorkspaceTargetPlan,NativeWorkspacePrepared,NativeWorkspaceCapture,NativeParamsTarget,NativeParamsImport,NativeParamsCapture,AsyncUICapture,AsyncUIImport};
 let nativeLatestLayout=null,nativeLatestLayoutModel=null;
-let nativeWorkspaceSource=null,nativeWorkspaceRegistration=0;
-let nativeAsyncCapture=null,nativeAsyncTicket=0,nativeAsyncPrepared=null,nativeAsyncUIImport=null,nativeAsyncUIPrepared=null;
+let nativeWorkspaceSource=null,nativeWorkspaceRegistration=0,nativeWorkspaceTargetCreating=null;
+let nativeAsyncCapture=null,nativeAsyncTicket=0,nativeAsyncPrepared=null,nativePrepareTargetCreating=false,nativeAsyncUIImport=null,nativeAsyncUIPrepared=null;
 function nativeCapture(ticket){if(!nativeAsyncCapture||nativeAsyncCapture.ticket!==ticket||nativeAsyncCapture.capture.model!==globalThis.nativeModel)throw new Error('Async stale: source replaced/released');nativeAsyncCapture.capture.check();return nativeAsyncCapture.capture;}
 globalThis.nativeAsyncBegin=function(eventJSON){if(nativeAsyncCapture||nativeWorkspaceSource||nativeParamsSource)throw new Error('Async capture busy');const capture=new AsyncCapture(globalThis.nativeModel,JSON.parse(eventJSON)),ticket=++nativeAsyncTicket;nativeAsyncCapture={ticket,capture};return JSON.stringify({ticket,metadataJSON:capture.metadataJSON,buffers:capture.buffers.map((a,slot)=>({slot,length:a.length})),checkpoints:capture.checkpoints.map((row,entry)=>({entry,total:row.keys.length,maxRows:row.maxRows}))});};
 globalThis.nativePrepareBegin=function(requestJSON){if(nativeAsyncCapture||nativeWorkspaceSource||nativeParamsSource)throw new Error('Async capture busy');const capture=new PrepareCapture(globalThis.nativeModel,JSON.parse(requestJSON)),ticket=++nativeAsyncTicket;nativeAsyncCapture={ticket,capture};return JSON.stringify({ticket,metadataJSON:capture.metadataJSON,buffers:[],checkpoints:[]});};
@@ -2965,13 +3416,28 @@ globalThis.nativeDataAsyncBegin=function(kind,requestJSON){
 // A retained closed Swift engine deliberately retains its raw JSContext. Retire
 // the opt-in ring without changing that legacy raw-data/context ownership rule.
 globalThis.nativeReleaseDataIngestion=function(){const session=globalThis.nativeModel?.dataIngestion;const cancelled=session?.count??0;session?.dispose();return {cancelled,pendingEvents:0,ownedBytes:0};};
-globalThis.nativePrepareCreate=function(metadataJSON){if(nativeAsyncPrepared||nativeParamsTarget||nativeParamsTargetCreating)throw new Error('Async target busy');nativeAsyncPrepared=new PreparedData(metadataJSON);return true;};
+globalThis.nativePrepareCreate=function(metadataJSON){
+ if(nativeAsyncPrepared||nativePrepareTargetCreating||nativeWorkspaceTargetCreating||nativeParamsTarget||nativeParamsTargetCreating)throw new Error('Async target busy');
+ // Definition validation calls trusted linked factories before a target exists.
+ // Legacy prepare cancellation remains owned by the host job/runtime lifecycle.
+ nativePrepareTargetCreating=true;
+ try{nativeAsyncPrepared=new PreparedData(metadataJSON);return true;}
+ finally{nativePrepareTargetCreating=false;}
+};
 // Internal target-only workspace protocol. Host source capture/publication is
 // separate; reject use in an already initialized live runtime.
 function nativeWorkspaceTargetVacant(){if(!Object.isExtensible(globalThis))throw new Error('Workspace target global is not extensible');for(const key of ['nativeModel','nativeAPI','nativeInput','nativeSize']){const d=Object.getOwnPropertyDescriptor(globalThis,key);if(d&&(!Object.hasOwn(d,'value')||d.value!==undefined||!d.configurable))throw new Error('Workspace target requires an isolated empty runtime');}}
-globalThis.nativeWorkspaceTargetCreate=function(metadataJSON){if(nativeAsyncPrepared||nativeParamsTarget||nativeParamsTargetCreating||nativeAsyncUIImport||nativeAsyncUIPrepared)throw new Error('Async target busy');nativeWorkspaceTargetVacant();const target=new NativeWorkspacePrepared(metadataJSON);try{nativeWorkspaceTargetVacant();nativeAsyncPrepared=target;return true;}catch(error){target.dispose();throw error;}};
+globalThis.nativeWorkspaceTargetCreate=function(metadataJSON){
+ if(nativeAsyncPrepared||nativePrepareTargetCreating||nativeWorkspaceTargetCreating||nativeParamsTarget||nativeParamsTargetCreating||nativeAsyncUIImport||nativeAsyncUIPrepared)throw new Error('Async target busy');
+ nativeWorkspaceTargetVacant();const token={};nativeWorkspaceTargetCreating=token;let target;
+ // Linked factories may reenter: reserve before construction and never let a
+ // cancelled constructor overwrite a target admitted by its callback.
+ try{target=new NativeWorkspacePrepared(metadataJSON);nativeWorkspaceTargetVacant();if(nativeWorkspaceTargetCreating!==token)throw new Error('Workspace target creation cancelled');nativeAsyncPrepared=target;return true;}
+ catch(error){target?.dispose();throw error;}
+ finally{if(nativeWorkspaceTargetCreating===token)nativeWorkspaceTargetCreating=null;}
+};
 globalThis.nativeWorkspaceTargetFinish=function(){if(!(nativeAsyncPrepared instanceof NativeWorkspacePrepared))throw new Error('Workspace target missing');const target=nativeAsyncPrepared;let result;try{nativeWorkspaceTargetVacant();result=target.finish();nativeWorkspaceTargetVacant();const input=new InteractionController(result.model,()=>globalThis.nativeSize),api=new ChartAPI(result.model,{controller:input});Object.defineProperties(globalThis,{nativeSize:{value:result.size,writable:true,configurable:true,enumerable:true},nativeModel:{value:result.model,writable:true,configurable:true,enumerable:true},nativeInput:{value:input,writable:true,configurable:true,enumerable:true},nativeAPI:{value:api,writable:true,configurable:true,enumerable:true}});nativeLatestLayout=null;nativeLatestLayoutModel=null;nativeAsyncPrepared=null;return {schema:'aster.native-workspace-target-ready',version:1,status:'target-ready',hostPublished:false,plan:result.plan};}catch(error){try{result?.model.dispose();}finally{try{target.dispose();}finally{if(nativeAsyncPrepared===target)nativeAsyncPrepared=null;}}throw error;}};
-globalThis.nativeWorkspaceTargetDispose=function(){if(nativeAsyncPrepared instanceof NativeWorkspacePrepared){const target=nativeAsyncPrepared;try{target.dispose();}finally{if(nativeAsyncPrepared===target)nativeAsyncPrepared=null;}return true;}return false;};
+globalThis.nativeWorkspaceTargetDispose=function(){if(nativeWorkspaceTargetCreating){nativeWorkspaceTargetCreating=null;return true;}if(nativeAsyncPrepared instanceof NativeWorkspacePrepared){const target=nativeAsyncPrepared;try{target.dispose();}finally{if(nativeAsyncPrepared===target)nativeAsyncPrepared=null;}return true;}return false;};
 function nativeWorkspaceSourceOwner(row){if(workspaceSlot(globalThis,'nativeModel')!==row.model||workspaceSlot(globalThis,'nativeAPI')!==row.api||workspaceSlot(globalThis,'nativeInput')!==row.input||workspaceSlot(globalThis,'nativeSize')!==row.size||workspaceSlot(row.api,'model')!==row.model||workspaceSlot(row.api,'controller')!==row.input||workspaceSlot(row.input,'model')!==row.model)throw new Error('Workspace source stale: native owner replaced');}
 function nativeWorkspaceSourceRow(ticket){const row=nativeWorkspaceSource;if(!row||row.ticket!==ticket)throw new Error('Workspace source ticket missing/released');return row;}
 function nativeWorkspaceSourceDrop(row){try{row.capture?.dispose();}finally{if(nativeWorkspaceSource===row)nativeWorkspaceSource=null;}}
@@ -2992,7 +3458,7 @@ globalThis.nativeAsyncUIBegin=function(ticket){const capture=nativeCapture(ticke
 globalThis.nativeAsyncUINext=function(ticket){nativeCapture(ticket);if(!nativeAsyncCapture.ui)throw new Error('Async UI capture missing');return nativeAsyncCapture.ui.next();};
 globalThis.nativeAsyncUICheck=function(ticket){nativeCapture(ticket);if(!nativeAsyncCapture.ui||!nativeAsyncCapture.ui.lastComplete)throw new Error('Async UI incomplete source transfer');return nativeAsyncCapture.ui.check(globalThis.nativeInput,globalThis.nativeSize);};
 globalThis.nativeAsyncRelease=function(ticket){if(nativeWorkspaceSource?.ticket===ticket)nativeWorkspaceSourceDrop(nativeWorkspaceSource);if(nativeAsyncCapture?.ticket===ticket){nativeAsyncCapture.capture.release();nativeAsyncCapture=null;}return true;};
-globalThis.nativeAsyncCreate=function(metadataJSON){if(nativeAsyncPrepared||nativeParamsTarget||nativeParamsTargetCreating)throw new Error('Async target busy');nativeAsyncPrepared=new AsyncPrepared(metadataJSON);return true;};
+globalThis.nativeAsyncCreate=function(metadataJSON){if(nativeAsyncPrepared||nativePrepareTargetCreating||nativeWorkspaceTargetCreating||nativeParamsTarget||nativeParamsTargetCreating)throw new Error('Async target busy');nativeAsyncPrepared=new AsyncPrepared(metadataJSON);return true;};
 globalThis.nativeAsyncTargetBuffer=function(slot,offset,count){if(nativeParamsSource)return nativeParamsWrite(slot,offset,count);if(nativeParamsTarget)return nativeParamsTarget.target(slot,offset,count);if(!nativeAsyncPrepared)throw new Error('Async target missing');return nativeAsyncPrepared.target(slot,offset,count);};
 globalThis.nativeAsyncCheckpointImport=function(entry,text){if(!nativeAsyncPrepared)throw new Error('Async target missing');nativeAsyncPrepared.checkpoint(entry,text);return true;};
 globalThis.nativeAsyncStart=function(){if(!nativeAsyncPrepared)throw new Error('Async target missing');nativeAsyncPrepared.start();return true;};
@@ -3203,12 +3669,65 @@ globalThis.nativeParamsSourcePrepare=function(ticket,revision){return nativePara
 globalThis.nativeParamsSourcePublish=function(ticket,revision){const row=nativeParamsRow(ticket);try{nativeParamsOwner(row);const receipt=row.capture.publish(revision);/* No host/user callback after commit. Update the preallocated terminal record. */row.receipt=receipt;row.status=receipt.status;row.capture=null;row.arm=null;nativeParamsSource=null;row.model=null;row.api=null;row.input=null;row.size=null;return nativeParamsStatusValue(row);}catch(error){if(nativeParamsSource===row)nativeParamsDrop(row,'failed');throw error;}};
 globalThis.nativeParamsSourceStatus=function(registration){nativeParamsToken(registration);return nativeParamsStatusValue(nativeParamsRecords.get(registration));};
 globalThis.nativeParamsSourceAbort=function(registration){nativeParamsToken(registration);const row=nativeParamsRecords.get(registration);if(row&&nativeParamsSource===row)nativeParamsDrop(row,'aborted');return nativeParamsStatusValue(row);};
-globalThis.nativeParamsTargetCreate=function(text){if(nativeParamsTarget||nativeParamsTargetCreating||nativeAsyncPrepared||nativeAsyncUIImport||nativeAsyncUIPrepared)throw new Error('Async target busy');nativeWorkspaceTargetVacant();const token={};nativeParamsTargetCreating=token;let target;try{target=new NativeParamsTarget(text);nativeWorkspaceTargetVacant();if(nativeParamsTargetCreating!==token)throw new Error('Params target creation cancelled');nativeParamsTarget=target;nativeParamsTargetCreating=null;return true;}catch(error){target?.dispose();if(nativeParamsTargetCreating===token)nativeParamsTargetCreating=null;throw error;}};
+globalThis.nativeParamsTargetCreate=function(text){if(nativeParamsTarget||nativeParamsTargetCreating||nativePrepareTargetCreating||nativeWorkspaceTargetCreating||nativeAsyncPrepared||nativeAsyncUIImport||nativeAsyncUIPrepared)throw new Error('Async target busy');nativeWorkspaceTargetVacant();const token={};nativeParamsTargetCreating=token;let target;try{target=new NativeParamsTarget(text);nativeWorkspaceTargetVacant();if(nativeParamsTargetCreating!==token)throw new Error('Params target creation cancelled');nativeParamsTarget=target;nativeParamsTargetCreating=null;return true;}catch(error){target?.dispose();if(nativeParamsTargetCreating===token)nativeParamsTargetCreating=null;throw error;}};
 function nativeParamsWorker(){if(!nativeParamsTarget)throw new Error('Params target missing');return nativeParamsTarget;}
 globalThis.nativeParamsTargetStart=function(){nativeParamsWorker().start();return true;};
 globalThis.nativeParamsTargetStep=function(maxBars){return nativeParamsWorker().step(maxBars);};
 globalThis.nativeParamsTargetDescriptor=function(){return safeCheckpointStringify(nativeParamsWorker().descriptor());};
 globalThis.nativeParamsTargetCheckpoint=function(ordinal){return nativeParamsWorker().checkpoint(ordinal);};
 globalThis.nativeParamsTargetDispose=function(){const target=nativeParamsTarget;if(nativeParamsTargetCreating){nativeParamsTargetCreating=null;return true;}if(!target)return false;try{target.dispose();}finally{if(nativeParamsTarget===target)nativeParamsTarget=null;}return true;};
+
+// Ephemeral, explicit semantic selection; no subscriptions or chart invalidation.
+const nativeExplorers=new WeakMap();
+function nativeExplorationSlot(owner,key){const d=Object.getOwnPropertyDescriptor(owner,key);if(!d||!Object.hasOwn(d,'value'))throw new TypeError('Exploration owner data property required');return d.value;}
+function nativeExplorationDisposed(model){const d=Object.getOwnPropertyDescriptor(model,'disposed');if(d&&!Object.hasOwn(d,'value'))throw new TypeError('Exploration disposed data property required');return d?.value===true;}
+function nativeExplorationStale(){const error=new Error('Native exploration owner/source changed');error.name='StaleSourceError';return error;}
+globalThis.nativeDataExploration=function(action,argument){
+ if(!['setActive','navigate','refresh','read'].includes(action))throw new TypeError('Exploration action');
+ if(action==='setActive'&&typeof argument!=='boolean')throw new TypeError('Exploration active boolean');
+ if(action==='navigate'&&!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'].includes(argument))throw new TypeError('Exploration navigation key');
+ if((action==='refresh'||action==='read')&&argument!==undefined&&argument!==null)throw new TypeError('Exploration action takes no argument');
+ const model=nativeExplorationSlot(globalThis,'nativeModel'),api=nativeExplorationSlot(globalThis,'nativeAPI'),input=nativeExplorationSlot(globalThis,'nativeInput');
+ const store=nativeExplorationSlot(model,'store'),version=nativeExplorationSlot(store,'version');
+ const check=()=>{if(nativeExplorationSlot(globalThis,'nativeModel')!==model||nativeExplorationSlot(globalThis,'nativeAPI')!==api||nativeExplorationSlot(globalThis,'nativeInput')!==input||nativeExplorationSlot(api,'model')!==model||nativeExplorationSlot(api,'controller')!==input||nativeExplorationSlot(input,'model')!==model||nativeExplorationDisposed(model)||nativeExplorationSlot(model,'store')!==store||nativeExplorationSlot(store,'version')!==version)throw nativeExplorationStale();};
+ check();if(action==='setActive'&&argument&&nativeExplorationSlot(input,'gesture'))throw new Error('Exploration requires an idle gesture');
+ let owner=nativeExplorers.get(api);
+ if(owner&&owner.model!==model){owner.explorer.dispose();nativeExplorers.delete(api);owner=null;}
+ if(!owner){owner={model,explorer:new NativeKeyboardDataExplorer(api),busy:false};nativeExplorers.set(api,owner);}
+ if(owner.busy)throw new Error('Exploration operation already running');owner.busy=true;
+ try{
+  let state;
+  if(action==='setActive')state=owner.explorer.setActive(argument);
+  else{
+   owner.explorer.changed();
+   if(action==='read')state=owner.explorer.read();
+   else{if(action==='navigate'&&!owner.explorer.key(argument))throw new Error('Enable data exploration first');state=owner.explorer.snapshot();}
+  }
+  check();return {schema:'aster.native-data-exploration',version:1,...state};
+ }finally{owner.busy=false;}
+};
+
+// Additive opt-in endpoint. Existing generic command/default ingestion stays intact.
+const nativeBatchApply=ChartAPI.prototype.applyDataEvents;
+function nativeBatchData(owner,key){const d=Object.getOwnPropertyDescriptor(owner,key);if(!d||!Object.hasOwn(d,'value'))throw new TypeError('Native batch own data required');return d.value;}
+function nativeBatchDisposed(model){const d=Object.getOwnPropertyDescriptor(model,'disposed');if(d&&!Object.hasOwn(d,'value'))throw new TypeError('Native batch disposed data required');return d?.value===true;}
+function nativeBatchOwnerError(){const error=new Error('Native batch owner/source changed');error.name='StaleSourceError';return error;}
+globalThis.nativeApplyUnchangedDataEvents=function(events){
+ const api=nativeBatchData(globalThis,'nativeAPI'),model=nativeBatchData(globalThis,'nativeModel'),input=nativeBatchData(globalThis,'nativeInput');
+ const store=nativeBatchData(model,'store'),beforeVersion=nativeBatchData(store,'version'),columns=nativeBatchData(store,'columns'),index=nativeBatchData(store,'index'),length=nativeBatchData(store,'length'),capacity=nativeBatchData(store,'capacity');
+ const vectors=FIELDS.map(key=>nativeBatchData(columns,key)),count=Array.isArray(events)?Object.getOwnPropertyDescriptor(events,'length')?.value:null;
+ const owner=()=>{if(nativeBatchData(globalThis,'nativeAPI')!==api||nativeBatchData(globalThis,'nativeModel')!==model||nativeBatchData(globalThis,'nativeInput')!==input||nativeBatchData(api,'model')!==model||nativeBatchData(api,'controller')!==input||nativeBatchData(input,'model')!==model||nativeBatchData(model,'store')!==store||nativeBatchDisposed(model))throw nativeBatchOwnerError();};
+ owner();
+ const receipt=nativeBatchApply.call(api,events,{skipUnchanged:true});
+ owner();
+ const copy={};for(const key of ['events','appended','from','to','version','length','capacity','bytes','unchanged'])copy[key]=nativeBatchData(receipt,key);
+ const afterVersion=nativeBatchData(store,'version');
+ const integer=(v,min,max)=>Number.isSafeInteger(v)&&v>=min&&v<=max;
+ if(typeof copy.unchanged!=='boolean'||(!integer(copy.events,1,4096)||copy.events!==count)||!integer(copy.appended,0,copy.events)||!integer(copy.length,0,4194304)||!integer(copy.capacity,1,4194304)||copy.capacity<copy.length||(copy.capacity&(copy.capacity-1))!==0||copy.bytes!==96*copy.capacity||!integer(copy.from,0,copy.length)||!integer(copy.to,copy.from+1,copy.length)||!integer(beforeVersion,0,Number.MAX_SAFE_INTEGER)||!integer(afterVersion,beforeVersion,Number.MAX_SAFE_INTEGER)||!integer(copy.version,beforeVersion,afterVersion))throw new TypeError('Native batch receipt invalid');
+ if(copy.unchanged){
+  if(copy.appended!==0||FIELDS.some((key,i)=>nativeBatchData(columns,key)!==vectors[i])||copy.version!==beforeVersion||afterVersion!==beforeVersion||copy.length!==length||copy.capacity!==capacity||nativeBatchData(store,'columns')!==columns||nativeBatchData(store,'index')!==index||nativeBatchData(store,'length')!==length||nativeBatchData(store,'capacity')!==capacity)throw nativeBatchOwnerError();
+ }else if(copy.version!==beforeVersion+1)throw new TypeError('Native batch publication version');
+ owner();return Object.freeze({schema:'aster.native-data-batch',version:1,beforeVersion,afterVersion,unchanged:copy.unchanged,receipt:Object.freeze(copy)});
+};
 
 })();

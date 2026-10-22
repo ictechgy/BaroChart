@@ -157,7 +157,23 @@ public final class AsterEngine implements AutoCloseable {
         }else if("setDrawingsStyle".equals(operation)){
             if(!(result instanceof JSONObject))throw new JSONException("Drawing style receipt object required");
             if(DrawingTranslationReceipt.changed(((JSONObject)result).get("changed")))notifyChanges();
-        }else if(!operation.equals("inspect")&&!operation.equals("indicatorValues")&&!operation.equals("saveDrawings")&&!operation.equals("crosshairValues")&&!operation.equals("dataAt")&&!operation.equals("saveStudies")&&!operation.equals("indicatorValueAt")&&!operation.equals("dataIngestionStats")&&!operation.equals("saveDataIngestion"))notifyChanges();return result;
+        }else if("setDrawingVisibility".equals(operation)||"setDrawingsVisibility".equals(operation)){
+            if(!(result instanceof JSONObject))throw new JSONException("Drawing visibility receipt object required");
+            Object value=((JSONObject)result).get("changed");boolean changed=DrawingTranslationReceipt.changed(value);
+            if("setDrawingVisibility".equals(operation)&&((Number)value).doubleValue()>1)throw new JSONException("Single drawing visibility receipt range");
+            if(changed)notifyChanges();
+        }else if("duplicateDrawing".equals(operation)||"duplicateDrawings".equals(operation)){
+            if(!(result instanceof JSONObject))throw new JSONException("Drawing duplication receipt object required");
+            JSONObject receipt=(JSONObject)result;Object value=receipt.get("changed"),created=receipt.get("created");
+            if(!DrawingTranslationReceipt.changed(value)||!(created instanceof JSONArray)||!(receipt.get("invalidationFailed") instanceof Boolean))throw new JSONException("Drawing duplication receipt shape");
+            int count=((Number)value).intValue();if("duplicateDrawing".equals(operation)&&count!=1)throw new JSONException("Single drawing duplication receipt range");
+            JSONArray rows=(JSONArray)created;if(rows.length()!=count)throw new JSONException("Drawing duplication receipt count");
+            java.util.Set<String> sources=new java.util.HashSet<>(),ids=new java.util.HashSet<>();
+            for(int i=0;i<count;i++){Object item=rows.get(i);if(!(item instanceof JSONObject))throw new JSONException("Drawing duplication row object");JSONObject row=(JSONObject)item;Object source=row.get("sourceId"),id=row.get("id");
+                if(row.length()!=2||!(source instanceof String)||!(id instanceof String))throw new JSONException("Drawing duplication row fields");String a=(String)source,b=(String)id;
+                if(a.isEmpty()||a.length()>128||b.isEmpty()||b.length()>128||a.equals(b)||!sources.add(a)||!ids.add(b))throw new JSONException("Drawing duplication row identifiers");}
+            notifyChanges();
+        }else if(!operation.equals("inspect")&&!operation.equals("indicatorValues")&&!operation.equals("saveDrawings")&&!operation.equals("positionMetrics")&&!operation.equals("crosshairValues")&&!operation.equals("crosshairSnapshot")&&!operation.equals("dataAt")&&!operation.equals("saveStudies")&&!operation.equals("indicatorValueAt")&&!operation.equals("dataIngestionStats")&&!operation.equals("saveDataIngestion"))notifyChanges();return result;
     }
     private void notifyChanges(){revision++;pendingNotifications++;if(notifying)return;notifying=true;observerErrors.clear();try{while(pendingNotifications>0){pendingNotifications--;for(Runnable observer:new java.util.ArrayList<>(observers)){try{observer.run();}catch(RuntimeException error){if(observerErrors.size()<32)observerErrors.add(error);try{if(onObserverError!=null)onObserverError.accept(error);}catch(RuntimeException reporting){if(observerErrors.size()<32)observerErrors.add(reporting);}}}}}finally{notifying=false;}}
     public java.util.List<Throwable> observerErrors(){check();return new java.util.ArrayList<>(observerErrors);}
@@ -171,6 +187,39 @@ public final class AsterEngine implements AutoCloseable {
     public void applyDataEvent(JSONObject event) throws JSONException {command("applyDataEvent",event);}
     /** Atomic, explicitly ordered burst; legacy scalar errors remain unchanged. */
     public JSONObject applyDataEvents(JSONArray events) throws JSONException {return (JSONObject)command("applyDataEvents",events);}
+    static final class DataBatchReceipt {
+        private DataBatchReceipt() {}
+        static double integer(Object value,double max) throws JSONException {
+            if(!(value instanceof Number))throw new JSONException("Data batch numeric receipt");
+            double n=((Number)value).doubleValue();
+            if(!Double.isFinite(n)||n!=Math.rint(n)||n<0||n>max)throw new JSONException("Data batch integer receipt");return n;
+        }
+        static boolean unchanged(Object schema,Object... v) throws JSONException {
+            if(!"aster.native-data-batch".equals(schema)||v.length!=13||integer(v[0],1)!=1||!(v[3] instanceof Boolean)||!(v[4] instanceof Boolean)||!v[3].equals(v[4]))throw new JSONException("Data batch envelope");
+            double before=integer(v[1],9007199254740991d),after=integer(v[2],9007199254740991d),events=integer(v[5],4096),appended=integer(v[6],4096),from=integer(v[7],4194304),to=integer(v[8],4194304),version=integer(v[9],9007199254740991d),length=integer(v[10],4194304),capacity=integer(v[11],4194304),bytes=integer(v[12],402653184);
+            int cap=(int)capacity;boolean same=((Boolean)v[3]).booleanValue();
+            if(events<1||appended>events||capacity<1||capacity<length||(cap&(cap-1))!=0||bytes!=96*capacity||from>=to||to>length||after<before||version<before||version>after||(same?(appended!=0||version!=before||after!=before):(version!=before+1)))throw new JSONException("Data batch inconsistent receipt");return same;
+        }
+    }
+    /** Opt-in exact final-value deduplication. False preserves the legacy path.
+     * A failed true-path response can follow commit: do not automatically retry.
+     */
+    public JSONObject applyDataEvents(JSONArray events,boolean skipUnchanged) throws JSONException {
+        if(!skipUnchanged)return applyDataEvents(events);
+        check();if(closing)throw new IllegalStateException("Engine closing");
+        final long source=handle,beforeRevision=revision;final JSONObject receipt;final boolean unchanged;
+        try {
+            Object raw=invoke("nativeApplyUnchangedDataEvents",events);
+            if(!(raw instanceof JSONObject))throw new JSONException("Data batch envelope object");
+            JSONObject envelope=(JSONObject)raw;Object payload=envelope.get("receipt");
+            if(!(payload instanceof JSONObject))throw new JSONException("Data batch receipt object");receipt=(JSONObject)payload;
+            unchanged=DataBatchReceipt.unchanged(envelope.get("schema"),envelope.get("version"),envelope.get("beforeVersion"),envelope.get("afterVersion"),envelope.get("unchanged"),receipt.get("unchanged"),receipt.get("events"),receipt.get("appended"),receipt.get("from"),receipt.get("to"),receipt.get("version"),receipt.get("length"),receipt.get("capacity"),receipt.get("bytes"));
+            if(closing||handle!=source)throw new IllegalStateException("Data batch owner changed");
+        } catch(JSONException|RuntimeException|Error error) {
+            if(!closing&&handle==source&&source!=0)try{notifyChanges();}catch(Throwable notification){if(notification!=error)error.addSuppressed(notification);}throw error;
+        }
+        if(!unchanged||revision!=beforeRevision)notifyChanges();return receipt;
+    }
     /** Synchronous retained-window maintenance. Requires explicit studyHistory:"restart".
      * Pause/drain upstream first; large copies can block the owner thread.
      * A zero-removal receipt changes neither host revision nor notifications.
@@ -186,6 +235,12 @@ public final class AsterEngine implements AutoCloseable {
     /** Partial portable style merge, one core undo; zero stored changes do not notify.
      * Receipt/transport failure after execution does not imply rollback. */
     public JSONObject setDrawingsStyle(JSONArray ids,JSONObject patch) throws JSONException {return (JSONObject)command("setDrawingsStyle",ids,patch);}
+    /** Presentation-only visibility may change locked drawings. Active gestures reject. */
+    public JSONObject setDrawingVisibility(String id,boolean visible) throws JSONException {return (JSONObject)command("setDrawingVisibility",id,visible);}
+    public JSONObject setDrawingsVisibility(JSONArray ids,boolean visible) throws JSONException {return (JSONObject)command("setDrawingsVisibility",ids,visible);}
+    /** Chart-local unlocked copies; explicit raw offsets and one atomic core undo. */
+    public JSONObject duplicateDrawing(String id,double deltaTimeMs,double deltaPrice) throws JSONException {return (JSONObject)command("duplicateDrawing",id,new JSONObject().put("deltaTimeMs",deltaTimeMs).put("deltaPrice",deltaPrice));}
+    public JSONObject duplicateDrawings(JSONArray ids,double deltaTimeMs,double deltaPrice) throws JSONException {return (JSONObject)command("duplicateDrawings",ids,new JSONObject().put("deltaTimeMs",deltaTimeMs).put("deltaPrice",deltaPrice));}
     /** Explicit group deletion with one core undo. Empty/missing/locked IDs reject. */
     public JSONObject deleteDrawings(JSONArray ids) throws JSONException {return (JSONObject)command("deleteDrawings",ids);}
     public JSONObject configureDataIngestion(JSONObject policy) throws JSONException {return (JSONObject)command("configureDataIngestion",policy);}
@@ -204,6 +259,19 @@ public final class AsterEngine implements AutoCloseable {
         Object result=command("dataAt",query,options);if(result==JSONObject.NULL)return null;
         if(!(result instanceof JSONObject))throw new JSONException("Data query object receipt");return (JSONObject)result;
     }
+    /** Explicit exploration only: navigation never requests redraw or lazy values. */
+    private JSONObject dataExploration(String action,Object argument) throws JSONException {
+        check();if(closing)throw new IllegalStateException("Exploration engine closing");final long source=handle;
+        Object result=invoke("nativeDataExploration",action,argument);
+        check();if(closing||handle!=source)throw new IllegalStateException("Exploration engine changed");
+        if(!(result instanceof JSONObject))throw new JSONException("Exploration object receipt");
+        return (JSONObject)result;
+    }
+    public JSONObject setDataExploration(boolean active) throws JSONException {return dataExploration("setActive",active);}
+    public JSONObject navigateDataExploration(String key) throws JSONException {return dataExploration("navigate",key);}
+    public JSONObject refreshDataExploration() throws JSONException {return dataExploration("refresh",JSONObject.NULL);}
+    /** May synchronously calculate every visible dirty indicator through dataAt. */
+    public JSONObject readDataExploration() throws JSONException {return dataExploration("read",JSONObject.NULL);}
     public void addPanel(JSONObject options) throws JSONException {command("addPanel",options);}
     public void setPanel(String id,JSONObject patch) throws JSONException {command("setPanel",id,patch);}
     public void addSeries(JSONObject options) throws JSONException {command("addSeries",options);}
@@ -237,11 +305,22 @@ public final class AsterEngine implements AutoCloseable {
     /** mode raw/plot; asOfIndex hides unavailable value/sourceIndex/sourceTime. */
     public JSONObject indicatorValueAt(String id,String output,int index,JSONObject options) throws JSONException {return (JSONObject)command("indicatorValueAt",id,output,index,options==null?new JSONObject():options);}
     public String addDrawing(JSONObject options) throws JSONException {return (String)command("addDrawing",options);}
+    /** Raw annotation metrics only; no source or indicator calculation and no notification. */
+    public JSONObject positionMetrics(String id) throws JSONException {
+        Object result=command("positionMetrics",id);if(!(result instanceof JSONObject))throw new JSONException("Position metrics receipt");return (JSONObject)result;
+    }
     public void editDrawing(String id,JSONObject patch) throws JSONException {command("editDrawing",id,patch);}
     public boolean deleteDrawing(String id) throws JSONException {return (Boolean)command("deleteDrawing",id);}
     public void selectDrawing(String id) throws JSONException {command("selectDrawing",id);}
     public void setTheme(JSONObject patch) throws JSONException {command("setTheme",patch);}
     public void setSymbol(JSONObject symbol) throws JSONException {command("setSymbol",symbol);}
+    public void setCrosshairSnap(JSONObject options) throws JSONException {command("setCrosshairSnap",options);}
+    /** Fresh layout may calculate dirty studies; read-only, no change notification. */
+    public JSONObject crosshairSnapshot(double width,double height) throws JSONException {
+        Object result=command("crosshairSnapshot",width,height);if(result==JSONObject.NULL)return null;
+        if(!(result instanceof JSONObject))throw new JSONException("Crosshair snapshot object receipt");return (JSONObject)result;
+    }
+    public void setDrawingMagnet(JSONObject options) throws JSONException {command("setDrawingMagnet",options);}
     public void setTool(String tool) throws JSONException {command("setTool",tool);}
     public void setText(String text) throws JSONException {command("setText",text);}
     public void undo() throws JSONException {command("undo");}

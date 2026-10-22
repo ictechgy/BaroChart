@@ -1,6 +1,8 @@
+import {drawingStylePatch} from './drawing-style-patch.mjs';
 import {DrawingStore} from './drawings.mjs';
+import {drawingDocumentVersion} from './position-drawing.mjs';
 import {validateDrawing} from './drawing-validation.mjs';
-import {identifier,RESOURCE_LIMITS,portableStyle} from './contracts.mjs';
+import {identifier,RESOURCE_LIMITS} from './contracts.mjs';
 
 const translationStringify=JSON.stringify,translationDefine=Object.defineProperty;
 function translationSlot(object,key,required=false){const d=Object.getOwnPropertyDescriptor(object,key);if(!d){if(required)throw new TypeError('Drawing group edit missing '+key);return undefined;}if(!Object.hasOwn(d,'value'))throw new TypeError('Drawing group edit own data properties required');return d.value;}
@@ -11,7 +13,7 @@ function translationCapture(object,keys,guards,writes=[]){if(!object||typeof obj
 function translationCapturedList(value,max,guards){const copy=translationList(value,max);guards.push(()=>{if(translationSlot(value,'length')!==copy.length)translationStale();for(let i=0;i<copy.length;i++)if(translationSlot(value,String(i))!==copy[i])translationStale();});return copy;}
 function translationDrawing(value){
  if(!Object.isFrozen(value))throw new TypeError('Drawing group edit requires immutable managed drawings');
- const d=translationRecord(value,['id','type','panel','points','style','text','locked','axisId','seriesId']);
+ const d=translationRecord(value,['id','type','panel','points','style','text','locked','visible','axisId','seriesId']);
  if(!Object.isFrozen(d.points))throw new TypeError('Drawing group edit immutable anchors required');
  d.points=translationList(d.points,2048).map(point=>{if(!Object.isFrozen(point))throw new TypeError('Drawing group edit immutable anchor required');return translationRecord(point,['time','price']);});
  if(d.style!==undefined){if(!Object.isFrozen(d.style))throw new TypeError('Drawing group edit immutable style required');d.style=translationRecord(d.style,['color','fill','width','font']);}
@@ -27,8 +29,13 @@ export function translateDrawings(api,ids,options){return drawingGroupEdit(api,i
 export function deleteDrawings(api,ids){return drawingGroupEdit(api,ids,null,true);}
 /** Partial portable style patch; mixed/orphan bindings require no live lookup. */
 export function setDrawingsStyle(api,ids,patch){return drawingGroupEdit(api,ids,patch,false,true);}
-function drawingGroupEdit(api,ids,options,remove,styleEdit=false){
- const metadata=!(remove||styleEdit);
+/** Presentation visibility may change locked or orphan drawings, without live metadata. */
+export function setDrawingsVisibility(api,ids,visible){return drawingGroupEdit(api,ids,visible,false,false,true);}
+/** Append unlocked copies in source z-order; zero offsets may retain orphan bindings. */
+export function duplicateDrawings(api,ids,options){return drawingGroupEdit(api,ids,options,false,false,false,true);}
+function drawingGroupEdit(api,ids,options,remove,styleEdit=false,visibilityEdit=false,duplicateEdit=false){
+ const duplicateOptions=duplicateEdit?translationRecord(options,['deltaTimeMs','deltaPrice']):null;
+ const metadata=!(remove||styleEdit||visibilityEdit||duplicateEdit&&duplicateOptions.deltaTimeMs===0&&duplicateOptions.deltaPrice===0);
  const guards=[],a=translationCapture(api,['model','controller','invalidate'],guards),model=a.model;
  const m=translationCapture(model,!metadata?['disposed','drawings']:['disposed','drawings','panels','axes','series'],guards);
  if(m.disposed)throw new Error('Chart disposed');if(!(m.drawings instanceof DrawingStore))throw new TypeError('Drawing group edit managed store required');
@@ -40,31 +47,42 @@ function drawingGroupEdit(api,ids,options,remove,styleEdit=false){
  const panels=!metadata?null:translationCapturedList(m.panels,RESOURCE_LIMITS.maxPanels,guards).map(p=>translationCapture(p,['id'],guards));
  const axes=!metadata?null:translationCapturedList(m.axes,RESOURCE_LIMITS.maxAxes,guards).map(p=>translationCapture(p,['id','panel'],guards));
  const series=!metadata?null:translationCapturedList(m.series,RESOURCE_LIMITS.maxSeries,guards).map(p=>translationCapture(p,['id','panel','axisId'],guards));
- const keys=translationList(ids,128),o=remove?null:translationRecord(options,styleEdit?['color','fill','width','font']:['deltaTimeMs','deltaPrice']);
+ const keys=translationList(ids,128),o=duplicateOptions??(remove||visibilityEdit?null:translationRecord(options,styleEdit?['color','fill','width','font']:['deltaTimeMs','deltaPrice']));
  if(!keys.length)throw new RangeError('Drawing group edit requires 1..128 ids');
  const selected=new Set();for(const id of keys){identifier(id,'Drawing id');if(selected.has(id))throw new TypeError('Duplicate drawing id');selected.add(id);}
- if(!remove&&!styleEdit&&(!Number.isFinite(o.deltaTimeMs)||!Number.isFinite(o.deltaPrice)))throw new TypeError('Finite deltaTimeMs and deltaPrice required');
- let patch=null;if(styleEdit){const fields=Object.keys(o);if(!fields.length||fields.some(key=>o[key]===undefined||o[key]===null))throw new TypeError('Drawing style nonempty defined patch required');patch=portableStyle(o,['color','fill']);if(Object.hasOwn(patch,'width')&&(!Number.isFinite(patch.width)||patch.width<.1||patch.width>50))throw new RangeError('Stroke width');}
+ if(visibilityEdit&&typeof options!=='boolean')throw new TypeError('Drawing visibility boolean required');
+ if(!remove&&!styleEdit&&!visibilityEdit&&(!Number.isFinite(o.deltaTimeMs)||!Number.isFinite(o.deltaPrice)))throw new TypeError('Finite deltaTimeMs and deltaPrice required');
+ const patch=styleEdit?drawingStylePatch(o):null;
  for(const [key,max,min] of [['maxDrawings',10000,0],['maxPoints',2097152,0],['maxDocumentChars',RESOURCE_LIMITS.maxDocumentChars,0],['historyLimit',10000,1],['historyBytes',RESOURCE_LIMITS.maxHistoryBytes,0]])if(!Number.isSafeInteger(s[key])||s[key]<min||s[key]>max)throw new RangeError('Drawing group edit history/resource limit');
  const copies=new Map(),weights=new Map(),copy=value=>{let result=copies.get(value);if(!result){result=translationDrawing(value);copies.set(value,result);weights.set(value,2*translationChars(result));}return result;};
- let next=items.slice();const seen=new Set(),clearSelected=remove&&selected.has(s.selected);
- if(clearSelected){const writable=()=>{const descriptor=Object.getOwnPropertyDescriptor(d,'selected');if(!descriptor||!Object.hasOwn(descriptor,'value')||!descriptor.writable)throw new TypeError('Drawing group edit writable selection required');};writable();guards.push(writable);}
- let binding=null,changed=0,points=0,text=0;
+ let next=items.slice();const seen=new Set();let clearSelected=remove&&selected.has(s.selected);
+ let binding=null,changed=0,points=0,text=0,nextSerial=s.serial;const pendingCopies=[],created=[];
+ if(duplicateEdit){if(!Number.isSafeInteger(nextSerial)||nextSerial<0)throw new RangeError('Drawing duplication serial');const writable=()=>{const descriptor=Object.getOwnPropertyDescriptor(d,'serial');if(!descriptor||!Object.hasOwn(descriptor,'value')||!descriptor.writable)throw new TypeError('Drawing duplication writable serial required');};writable();guards.push(writable);}
  for(let i=0;i<items.length;i++){
   const rawPoints=translationSlot(items[i],'points',true);if(!Array.isArray(rawPoints))throw new TypeError('Drawing anchors');points+=translationSlot(rawPoints,'length',true);if(points>s.maxPoints)throw new RangeError('Drawing group edit point limit');
   const before=copy(items[i]);if(seen.has(before.id))throw new TypeError('Duplicate drawing id');seen.add(before.id);text+=before.text?.length??0;
   if(!selected.has(before.id))continue;
-  if(before.locked)throw new Error('Drawing is locked');
+  if(before.locked&&!visibilityEdit&&!duplicateEdit)throw new Error('Drawing is locked');
   if(remove){next[i]=null;changed++;continue;}
+  if(visibilityEdit){if((before.visible!==false)!==options){const candidate={...before,visible:options,points:translationSlot(items[i],'points')};if(before.style!==undefined)candidate.style=translationSlot(items[i],'style');validateDrawing(candidate);next[i]=translationFrozen(candidate);changed++;if(!options&&s.selected===before.id)clearSelected=true;}continue;}
   if(styleEdit){const previous=before.style??{},different=Object.keys(patch).some(key=>!Object.hasOwn(previous,key)||!Object.is(previous[key],patch[key]));if(different){const candidate={...before,points:translationSlot(items[i],'points'),style:{...previous,...patch}};validateDrawing(candidate);next[i]=translationFrozen(candidate);changed++;}continue;}
-  const b=[before.panel,before.axisId??null,before.seriesId??null];if(binding&&b.some((v,j)=>v!==binding[j]))throw new Error('Drawing group edit requires identical panel/axis/series binding');binding=b;
-  if(!panels.some(p=>p.id===b[0])||b[1]!==null&&!axes.some(p=>p.id===b[1]&&p.panel===b[0])||b[2]!==null&&!series.some(p=>p.id===b[2]&&p.panel===b[0]&&(p.axisId??null)===b[1]))throw new Error('Missing or mismatched drawing binding');
+  if(metadata){const b=[before.panel,before.axisId??null,before.seriesId??null];if(binding&&b.some((v,j)=>v!==binding[j]))throw new Error('Drawing group edit requires identical panel/axis/series binding');binding=b;
+  if(!panels.some(p=>p.id===b[0])||b[1]!==null&&!axes.some(p=>p.id===b[1]&&p.panel===b[0])||b[2]!==null&&!series.some(p=>p.id===b[2]&&p.panel===b[0]&&(p.axisId??null)===b[1]))throw new Error('Missing or mismatched drawing binding');}
   let moved=false;const anchors=before.points.map(p=>{const time=o.deltaTimeMs===0?p.time:p.time+o.deltaTimeMs,price=o.deltaPrice===0?p.price:p.price+o.deltaPrice;if(time!==p.time||price!==p.price)moved=true;return {time,price};});
-  const candidate={...before,points:anchors};if(before.style!==undefined)candidate.style=translationSlot(items[i],'style');validateDrawing(candidate);if(moved){next[i]=translationFrozen(candidate);changed++;}
+  const candidate={...before,points:duplicateEdit&&!metadata?translationSlot(items[i],'points'):anchors,...(duplicateEdit?{locked:false}:{})};if(before.style!==undefined)candidate.style=translationSlot(items[i],'style');validateDrawing(candidate);if(duplicateEdit){pendingCopies.push(candidate);changed++;}else if(moved){next[i]=translationFrozen(candidate);changed++;}
  }
  if(keys.some(id=>!seen.has(id)))throw new Error('Missing drawing');if(items.length>s.maxDrawings||points>s.maxPoints||text>1000000)throw new RangeError('Drawing group edit resource limit');
+ if(duplicateEdit){
+  for(const candidate of pendingCopies){points+=candidate.points.length;text+=candidate.text?.length??0;}
+  if(items.length+pendingCopies.length>s.maxDrawings||points>s.maxPoints||text>1000000)throw new RangeError('Drawing duplication resource limit');
+  // At most one collision for each existing/reserved ID; never scan a numeric range.
+  let attempts=0;for(const candidate of pendingCopies){let id;do{if(nextSerial===Number.MAX_SAFE_INTEGER||++attempts>items.length+pendingCopies.length)throw new RangeError('Drawing duplication ID exhaustion');id='drawing-'+(++nextSerial);}while(seen.has(id));seen.add(id);created.push(Object.freeze({sourceId:candidate.id,id}));next.push(translationFrozen({...candidate,id}));}
+  // Exact document admission is O(total stored content), only on this explicit API.
+  if(translationChars({schema:'aster.drawings',version:drawingDocumentVersion(next),drawings:next})>s.maxDocumentChars)throw new RangeError('Drawing duplication document limit');
+ }
  if(remove)next=next.filter(value=>value!==null);
- const receipt={changed,invalidationFailed:false};
+ if(clearSelected){const writable=()=>{const descriptor=Object.getOwnPropertyDescriptor(d,'selected');if(!descriptor||!Object.hasOwn(descriptor,'value')||!descriptor.writable)throw new TypeError('Drawing group edit writable selection required');};writable();guards.push(writable);}
+ const receipt={changed,...(duplicateEdit?{created:Object.freeze(created)}:{}),invalidationFailed:false};
  if(!changed){for(const check of guards)check();return receipt;}
  const snapshotWeight=snapshot=>{let n=snapshot.length*8;for(const value of snapshot){copy(value);n+=weights.get(value);}return n;};
  const priorWeight=snapshotWeight(items);if(priorWeight>s.historyBytes)throw new RangeError('Drawing group edit undo snapshot exceeds historyBytes');
@@ -78,6 +96,7 @@ function drawingGroupEdit(api,ids,options,remove,styleEdit=false){
  for(const check of guards)check();
  translationDefine(d,'items',{value:next});translationDefine(d,'undoStack',{value:nextUndo});translationDefine(d,'redoStack',{value:nextRedo});translationDefine(d,'retainedHistoryBytes',retained?{value:retainedBytes}:{value:retainedBytes,writable:true,enumerable:true,configurable:true});
  if(clearSelected)translationDefine(d,'selected',{value:null});
- try{a.invalidate.call(api);}catch{receipt.invalidationFailed=true;}
- return receipt;
+ if(duplicateEdit)translationDefine(d,'serial',{value:nextSerial});
+ try{if(visibilityEdit||duplicateEdit)a.invalidate.call(api,'drawings');else a.invalidate.call(api);}catch{receipt.invalidationFailed=true;}
+ return duplicateEdit?Object.freeze(receipt):receipt;
 }

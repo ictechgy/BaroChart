@@ -69,6 +69,13 @@ installs model/API/controller/size in that target runtime and returns
 `aster.native-workspace-target-ready` v1, `status: "target-ready"`,
 `hostPublished: false`. Source runtime globals are untouched.
 `nativeWorkspaceTargetDispose()` drops an unpublished target; it is idempotent.
+Construction reserves that same exclusive admission before calling trusted linked
+factories, blocking workspace, params, prepare and async target creation. Disposal
+during a constructor callback cancels its reservation; the outer create rejects
+after the callback/constructor returns and disposes its own result. A replacement
+target admitted after cancellation remains owned. Constructor or cleanup failure
+releases only the failing constructor's reservation. This does not preempt trusted
+callbacks or roll back their unrelated side effects.
 A live runtime, accessor/non-configurable publication slots and duplicate jobs
 are rejected. Host code must still transfer the successful target runtime's
 ownership and retire the old runtime safely; no Swift/Java method does this yet.

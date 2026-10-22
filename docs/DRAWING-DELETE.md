@@ -4,7 +4,7 @@
 
 An active controller gesture or manual `drawings.begin()` transaction rejects the call. It does not implicitly cancel either. Every selected drawing must be unlocked even when the other IDs are valid.
 
-Unlike raw-coordinate translation, deletion accepts mixed panel/axis/series bindings and existing orphan bindings. There is no price-unit transformation or live binding lookup; panel/axis/series metadata, formatters and indicators are not queried. All 14 stored drawing types use the same deletion rule. This computation-free claim concerns validation/planning; a host invalidation observer or subsequent redraw may calculate dirty studies.
+Unlike raw-coordinate translation, deletion accepts mixed panel/axis/series bindings and existing orphan bindings. There is no price-unit transformation or live binding lookup; panel/axis/series metadata, formatters and indicators are not queried. All 16 stored drawing types use the same deletion rule. This computation-free claim concerns validation/planning; a host invalidation observer or subsequent redraw may calculate dirty studies.
 
 ## Publication, selection and history
 

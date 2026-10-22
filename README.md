@@ -10,9 +10,10 @@ Financial charts built around your own data: a DOM-free Float64 core, Canvas and
 
 - Candlestick, OHLC, line, area and histogram charts with multiple panels, independent price axes, pan/zoom and streaming updates.
 - Studies using **35 built-in indicators**, including SMA, EMA, RSI, MACD, Bollinger Bands, ATR, Ichimoku and session-aware VWAP. Numerical seeds, warm-up and undefined values have [documented contracts](docs/INDICATORS.md).
-- Annotations using **14 drawing tools**, with time/price anchors, selection, editing, locking and undo/redo.
+- Annotations using **16 drawing tools**, including [long/short risk-reward annotations](docs/POSITION-DRAWINGS.md), with time/price anchors, selection, editing, locking and undo/redo.
 - Data-driven views with historical corrections, ordered ingestion batches, screen-independent queries and explicit session-based OHLCV resampling.
 - Portable chart configuration, drawings and study settings, with explicit dataset ownership and validation.
+- [Manual prefix-only bar replay](docs/BAR-REPLAY.md) from host-supplied snapshots, with isolated forward-study staging and detached frame queries.
 
 The core and web renderers have no npm runtime dependencies. React is an optional peer used only by the `/react` entry point. Market data feeds, exchange calendars and trading execution belong to the host application.
 
@@ -28,14 +29,22 @@ npm run demo
 
 Open [http://127.0.0.1:5173/examples/web/](http://127.0.0.1:5173/examples/web/). The demo uses deterministic **synthetic data**, including stock-like and small-price fixtures. It lets you explore renderers, indicators, drawings, themes and live-update simulation.
 
+Drawing file loads use [demo-local asynchronous ownership checks](docs/DRAWING-FILE-IMPORT.md) so an obsolete read does not overwrite a newer import or changed drawing context.
+Optional [web UI / UX customization](docs/WEB-CUSTOMIZATION.md) adds configurable HTML tools, live input preferences and a separate appearance/layout demo. Shortcut remapping, arbitrary panel docking, preference persistence and native UI parity are not included.
+
+The demo also [resumes interrupted first-load preparation on persisted page restoration](docs/DEMO-PAGE-LIFECYCLE.md), without replaying a deliberate Cancel or later chart operations.
+
 Other examples on the same server:
 
+- [Manual bar replay](http://127.0.0.1:5173/examples/web/bar-replay.html): explicit step/seek, isolated prefix data and studies; no autoplay.
 - [Independent price axes](http://127.0.0.1:5173/examples/web/axes.html)
+- [Explicit-baseline relative comparison](http://127.0.0.1:5173/examples/web/comparison.html): example-local signed percent change, exact alignment and raw-value provenance.
 - [Financial coordinates and time alignment](http://127.0.0.1:5173/examples/web/financial.html)
 - [Session studies and custom modules](http://127.0.0.1:5173/examples/web/analysis.html)
 - [Linked time cursors](http://127.0.0.1:5173/examples/web/linked-cursors.html)
 - [Linked time ranges](http://127.0.0.1:5173/examples/web/linked-ranges.html): opt-in stored-time view synchronization; [API contract](docs/TIME-RANGE.md).
 - [Drawing group selection and batch edits](http://127.0.0.1:5173/examples/web/drawing-groups.html)
+- [Manual ingestion queue](http://127.0.0.1:5173/examples/web/ingestion-queue.html): synthetic enqueue/drain, budget rejection and explicit recovery; [guide](docs/INGESTION-DEMO.md).
 
 Run tests separately:
 
@@ -43,6 +52,17 @@ Run tests separately:
 npm test
 # Runs: node --test --test-concurrency=1 test/*.test.mjs
 ```
+
+## Executed example screens
+
+These are actual browser captures with synthetic data, taken on macOS Chrome 155.0.8059.79 on 2026-10-14 at source revision `e3284e54`. They are historical execution examples; later source changes are not implicitly verified by these images.
+
+![Running linked time-range charts in Chrome](assets/screenshots/web-linked-ranges.png)
+
+![Running drawing-group example after Undo](assets/screenshots/web-drawing-groups.png)
+
+[Open the platform gallery and run instructions](docs/EXAMPLE-SCREENSHOTS.md) for linked cursors, React, macOS, iOS and Android. Verified native/React screenshots have not been retained; their status and required environments are listed explicitly. The browser images do not represent native SDK execution.
+
 
 ## Your first chart
 
@@ -164,6 +184,8 @@ Use those API names as documented. Do not rename saved schema identifiers to mat
 
 ## Documentation
 
+- [Shared-model refresh recipe](docs/SHARED-MODEL-REFRESH.md): one input authority, shared history and explicit sibling redraw.
+- [Style-only drawing presets](docs/DRAWING-STYLE-PRESETS.md): bounded host-owned registry and optional panel.
 - [API, drawing tools and lifecycle](docs/API.md) · [independent price axes](docs/INDEPENDENT-AXES.md)
 - [Data queries](docs/DATA-EXPLORER.md) · [ordered ingestion](docs/INGESTION.md)
 - [Indicator parameter edits](docs/INDICATOR-PARAMETERS.md) · [async parameter edits](docs/ASYNC-INDICATOR-PARAMS.md) · [custom modules](docs/INDICATOR-MODULES.md)
@@ -174,6 +196,8 @@ Use those API names as documented. Do not rename saved schema identifiers to mat
 Some detailed contract documents retain historical version notes and Aster-era names. The public validation summary distinguishes those older results from the current preview.
 
 ## Validation and limitations
+
+At source `381fb00fc41c49aadfb72f45fb0c0a66f500d62c` (2026-10-18), **4,870/4,870 Node tests**, 513 ESM syntax checks, strict TypeScript 5.9.3 and an offline packed-consumer check passed. These are cloud Node/modeled-host results; no new browser/native SDK run is implied. See the [dated validation entries](docs/PUBLIC-VALIDATION.md) for scope and retained earlier failures.
 
 The pre-branding Linux/Node baseline passed **2,551 of 2,552 tests**. One dry-run CLI hit a 15-second watchdog; its unchanged test file then passed **131/131** in isolation. The full-suite failure remains unresolved. This is not an all-green release certification.
 

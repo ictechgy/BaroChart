@@ -221,6 +221,8 @@ public final class AsterChartView: UIView {
     public override func touchesCancelled(_ touches: Set<UITouch>,with event: UIEvent?) {cancelInteraction(clearCrosshair: false);setNeedsDisplay()}
     public override func willMove(toWindow newWindow: UIWindow?) {if newWindow == nil {cancelInteraction(clearCrosshair: true);detachResources()};super.willMove(toWindow: newWindow)}
     public override func didMoveToWindow() {super.didMoveToWindow();if window != nil {attachResources()}}
+    public func setCrosshairSnap(_ options: [String: Any]) {guard !isDisposed,!disposing else {return};do {try engine.setCrosshairSnap(options);setNeedsDisplay()} catch {lastError = String(describing: error)}}
+    public func setDrawingMagnet(_ options: [String: Any]) {guard !isDisposed,!disposing else {return};do {try engine.setDrawingMagnet(options);setNeedsDisplay()} catch {lastError = String(describing: error)}}
     public func setTool(_ tool: String) {guard !isDisposed,!disposing else {return};do {try engine.setTool(tool);setNeedsDisplay()} catch {lastError = String(describing: error)}}
 }
 #endif

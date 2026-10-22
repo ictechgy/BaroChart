@@ -134,7 +134,7 @@ function poison(f, object, key, getter) {
   f.restores.push(() => before ? Object.defineProperty(object, key, before) : delete object[key]);
 }
 
-test('deletion oracle: all 14 types filter atomically, preserve survivors, and form exactly one undo unit', t => {
+test('deletion oracle: all 14 legacy types filter atomically, preserve survivors, and form exactly one undo unit', t => {
   const f = fixture(t), ids = [];
   for (const [type, count] of TYPES) {
     f.store.add(horizontal({id: `keep-${type}`, text: 'survivor'}));

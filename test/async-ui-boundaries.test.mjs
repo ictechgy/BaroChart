@@ -89,7 +89,7 @@ test('size boundary commits only included slots and serializes a deferred drawin
 });
 test('mixed every drawing type retains complete deduplicated undo/redo graph at boundaries',()=>{
  const x=setup();try{
-  notes(x,'\0'.repeat(2000));for(const type of DRAWING_TYPES)x.api.addDrawing({id:'type-'+type,type,points:Array.from({length:type==='freehand'?2048:drawingPointCount(type)},(_,i)=>({time:1700000000000+i*60000,price:100+i*.01})),text:'"\\가🚀'.repeat(250)});
+  notes(x,'\0'.repeat(2000));for(const type of DRAWING_TYPES)x.api.addDrawing({id:'type-'+type,type,points:['longposition','shortposition'].includes(type)?[{time:1700000000000,price:100},{time:1700000000000,price:type==='longposition'?90:110},{time:1700000000000,price:type==='longposition'?120:80},{time:1700000060000,price:100}]:Array.from({length:type==='freehand'?2048:drawingPointCount(type)},(_,i)=>({time:1700000000000+i*60000,price:100+i*.01})),text:'"\\가🚀'.repeat(250)});
   x.api.editDrawing('note-63',{text:'new note'});x.api.undo();x.api.selectDrawing('type-freehand');const q=roundtrip(x);
   assert(q.expected.frames.length>2);assert(q.expected.frames.flat().length>q.expected.records.length);
  }finally{x.dispose();}

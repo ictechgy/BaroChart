@@ -1,9 +1,23 @@
 # Bounded interaction measurement pilot
 
-This harness has **not yet been executed in a real browser**. Node regressions
-exercise the shipped Chart module with modeled DOM/raster/RAF primitives, the
-measurement ledger, fake CDP failures, and an actual Node worker adapter. They
-are wiring/correctness checks, not browser performance results.
+A historical real-browser pilot ran on **2026-10-14** at source commit
+`d2c3e3c2ac2b7b68355090b338a57fec4bccdb31`: Apple M4 Pro, macOS arm64,
+Chrome **155.0.8059.79 headless**, 10,000 synthetic OHLCV bars, seed42,
+candles plus EMA20, 200 visible bars, 1200×700 logical pixels and DPR1.
+All ten fresh-page cases passed (Canvas/WebGL2 × pan, wheel zoom, stream,
+synchronous parameters and asynchronous parameters): 136 measured requests
+and 34 warmups were rendered, with no coalesced, timed-out, rejected,
+unrendered, pending or unissued requests. Correctness checks ran outside timing.
+The recorded execution plus cleanup took 19.031 seconds; this is tool wall time,
+not a latency score. Raw measurement records are not included in this document.
+
+This was one fixed-order, single-chart-per-page pilot of that historical source.
+It does not validate the current revision or simultaneous multi-chart performance.
+Small samples, especially four measured parameter changes per case, do not
+establish stable tail latency. Cleanup observations are bounded end-of-run checks,
+not proof of long-term leak freedom. No new browser run accompanied this update.
+Node regressions additionally exercise modeled DOM/raster/RAF, ledger and failure
+handling; those remain wiring/correctness checks rather than browser measurements.
 
 The endpoint is **input/event or feed request → CPU submission of a matching
 chart state**. It is not compositor presentation, physical display paint, FPS,
@@ -24,7 +38,7 @@ results must not be presented as measurements of a visible desktop window.
 The harness installs
 nothing, does not weaken browser security flags, and does not use a user profile.
 
-The first execution should be the default 10k pilot, only after the operator
+A new execution should start with the default 10k pilot, only after the operator
 has approved the bounded browser workload. Prior functional browser QA does not
 constitute a run of this benchmark. A 100k case requires explicit `--large` (or
 both `bars:100000,large:true` in `--config`); it is not a default follow-up.

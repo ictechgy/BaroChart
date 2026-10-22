@@ -28,11 +28,11 @@
 | 내장 지표 | `addIndicator(id,name,params)`, `removeIndicator(id)` | 동일35종 계산; add는 `{outputs,plotOffsets}`만 반환하고 자동 plot 안 함 | 기존33종 수치/parity; 새 facade 대표 RSI/Supertrend |
 | 지표 값 조회 | `indicatorValues(id,output?)` | 원본 정렬 배열, warm-up/NaN은 JSON `null` | 웹 batch parity, Swift·QuickJS custom 값 |
 | 사용자 지표 | 웹 `registerIndicator(name,factory)` / `registerIndicatorSource(name,source)` | native는 신뢰하는 JS factory 표현식 등록, 최대64KiB | Node·JSCore·QuickJS의 동일 `close*2` custom 계산 |
-| 도형 CRUD | `addDrawing`, `editDrawing`, `deleteDrawing`, `selectDrawing` | 기존14종, 잠금/핸들/시간·가격 anchor; panel 존재 검사 | 공유14종 tests; host text 잠금/편집/저장, 기존 native channel/freehand gesture |
-| 도형 저장·축 바인딩 | `saveDrawings()`, `loadDrawings(text)`, `setDrawingTarget(target)` | v1/v2·atomic load, axisId/seriesId 및 raw price/UTC 보존 | 웹/Swift/Java 정확한 왕복·orphan/reconnect·undo/redo |
+| 도형 CRUD | `addDrawing`, `editDrawing`, `deleteDrawing`, `selectDrawing` | 16종, 잠금/핸들/시간·가격 anchor; panel 존재 검사 | 기존14종 host 검사, 새 롱/숏은 Node/VM 검사; host text 잠금/편집/저장, 기존 native channel/freehand gesture |
+| 도형 저장·축 바인딩 | `saveDrawings()`, `loadDrawings(text)`, `setDrawingTarget(target)` | v1/v2/v3/v4·atomic load, axisId/seriesId 및 raw price/UTC 보존 | 기존 v1/v2 웹/Swift/Java 왕복·orphan/reconnect·undo/redo; 새 v3/v4는 Node 및 생성 JS VM 검사, 실제 SDK 재실행 미완료 |
 | 커서 값 조회 | `crosshairValues(width,height)` | primary OHLCV·각 시리즈 price/gap/sourceTime·축별 연속 가격 분리 | 읽기 revision/observer 유지, 합성 세션 exact UTC join |
 | Undo/Redo | `undo()`, `redo()` | controller를 통해 진행 중 gesture 취소 정책 유지 | 기존 stale gesture 회귀 + facade exact geometry |
-| 입력 도구·문자 | `setTool(name)`, `setText(text)` | select+14종, 다음 text 생성용 문자 최대2000 | 공유 controller/native gesture; programmatic Unicode text |
+| 입력 도구·문자 | `setTool(name)`, `setText(text)` | select+16종, 다음 text 생성용 문자 최대2000 | 공유 controller/native gesture; programmatic Unicode text |
 | 테마·폰트 | `setTheme(patch)` | 아래 portable 색/폰트 계약, native 크기·bold·italic·family 적용 | 웹 scene/font, Swift·Android 실제 text pixel coverage |
 | 도형 글꼴 | `style.font` | theme font 기본값, 개별 text/label font 우선 | Node 저장, 웹 scene, native renderer font fixture |
 | 시장 표시 | `setSymbol(metadata)` | 검증된 priceDecimals/tickSize/adjustment 계약, IANA zone, `YYYY-MM-DD HH:mm` 시각 표기 | Node·Swift·Java 설정, 기존 DST host checks |
@@ -107,7 +107,7 @@ engine.command("fit");
 * 외부 종목은 기준 UTC에 정렬된 일반 시리즈 값입니다. 별도 OHLCV 저장소·자동 합집합 시간축·기업행동/환율·자동 재정렬은 제공하지 않습니다. `crosshairValues`는 새 layout/range 조회를 수행하며 cached hover의 무계산 경로와 비용이 다릅니다.
 * native JSON scene은 copy/encode/decode 경계입니다. GPU는 웹 WebGL2 경로이며 별도 native Metal/Vulkan/WebGPU renderer는 없습니다.
 * 완전한 문자 shaping·같은 OS font·동일 AA/joins, native 접근성 데이터 표, 모든 font의 동일 glyph layout, 전체 chart snapshot, framework adapter, 자동 데이터 provider는 제공하지 않습니다.
-* macOS/iOS 데모 toolbar는 일부 도구만 표시하고 Android toolbar는14종을 모두 표시합니다. 모든 native 도구는 setTool로 호출 가능합니다. 실제 시스템 입력과 직접 controller 호출의 최신 구분은 CYCLE10-VALIDATION.md에 있습니다. 실기기·다른 Android ABI/최소 OS 실제 실행과 장시간 lifecycle은 여전히 미검증입니다. 공통35/14 코드가 같은 runtime에 있다고 해서 모든 도구/지표의 모바일 입력·픽셀을 각각 실측했다고 계산하지 않습니다.
+* macOS/iOS 데모 toolbar는 일부 도구만 표시하고 Android toolbar는 기존14종을 표시합니다. 롱/숏은 공통 setTool API와 웹 데모에 추가되었습니다. 모든 native 도구는 setTool로 호출 가능합니다. 실제 시스템 입력과 직접 controller 호출의 최신 구분은 CYCLE10-VALIDATION.md에 있습니다. 실기기·다른 Android ABI/최소 OS 실제 실행과 장시간 lifecycle은 여전히 미검증입니다. 공통 계산 코드가 같은 runtime에 있다고 해서 모든 도구/지표의 모바일 입력·픽셀을 각각 실측했다고 계산하지 않습니다.
 
 이 범위에는 새 플랫폼 선택이나 계정 접근 권한이 필요하지 않았습니다. 실기기/추가 ABI 검증은 실제 기기와 해당 빌드·서명 환경이 있어야 진행할 수 있습니다.
 
@@ -124,3 +124,5 @@ Swift prepareColumnsAsync/prepareSeededAsync와 Java prepareColumns/prepareSeede
 축·시리즈·도형 바인딩과 portable tick 형식은 worker 및 native correction context 전달에서 보존합니다. async/prepare의 임의 formatter와 사용 중인 custom factory 제한은 유지합니다. 초기 prepare는 외부 borrowed values를 거절하며, 성공한 correction은 외부 배열과 orphan 도형 이력을 보존합니다. [독립 축 계약](INDEPENDENT-AXES.md)에 v1/v2 migration과 remove/reconnect 의미를 기록했습니다.
 
 Apple·Android renderer는 코어의 base/drawing/hover frame 계약을 사용합니다. Android View는 main-thread 공유 bitmap pool과 enable/budget/metrics API를 추가합니다. 보관 bitmap byte budget, 압박 시 direct rendering, 실패 후 재시도와 엔진 close 규칙은 [ANDROID-HOVER.md](ANDROID-HOVER.md)에 있습니다. JSON bridge는 전체 장면이 바뀔 때 여전히 encode/decode하며 GPU 완료나 물리 presentation을 측정한 기능이 아닙니다.
+
+롱/숏 `positionMetrics(id)`의 읽기 전용 API·수치·문서 버전 및 검증 범위는 [POSITION-DRAWINGS.md](POSITION-DRAWINGS.md)를 참고하세요.

@@ -5,18 +5,26 @@ import {ChartModel} from '../core/model.mjs';
 import {FIELDS} from '../core/data.mjs';
 import {optionRecord} from '../core/contracts.mjs';
 import {CanvasChart} from '../renderers/canvas.mjs';
+import {interactionOptions} from '../renderers/interaction-options.mjs';
 import {createChart} from '../renderers/webgl.mjs';
 
 const useCommitEffect=typeof window==='undefined'?useEffect:useLayoutEffect;
 const defaultModel=()=>{const model=new ChartModel();model.addSeries({id:'price',type:'candles',panel:'price'});return model;};
 const asError=error=>error instanceof Error?error:new Error(String(error));
+const interactionKeys=['pointer','wheelZoom','keyboardShortcuts','hitTolerancePx'];
+// Descriptor fingerprint: do not evaluate accessor-backed values during render
+// or repeatedly report the same rejected props from an onError-driven render.
+function interactionKey(value){
+ if(!value||typeof value!=='object')return[typeof value,value];
+ const key=[Object.getPrototypeOf(value)];for(const name of Reflect.ownKeys(value)){const d=Object.getOwnPropertyDescriptor(value,name);key.push(name,d.value,d.get,d.set);}return key;
+}
 const themeKeys=['background','grid','text','up','down','crosshair','font'];
 
 /** Renderer ownership follows React; borrowed models remain owned by the caller. */
 export const AsterChart=forwardRef(function AsterChart(props,ref){
  const {model,createModel,data,dataRevision,theme,renderer='canvas',options,resetKey,tool,text,drawingTarget,visibleRange,
   onReady,onRender,onState,onError,onFallback,onDispose,style,children,...hostProps}=props;
- const host=useRef(null),active=useRef(null),committed=useRef(props),handle=useRef(null);
+ const host=useRef(null),active=useRef(null),committed=useRef(props),handle=useRef(null),retryInitialization=useRef(null);
  if(handle.current===null)handle.current={get chart(){return active.current?.chart??null;},get model(){return active.current?.model??null;},get api(){return active.current?.chart.api??null;}};
  useImperativeHandle(ref,()=>handle.current,[]);
  useCommitEffect(()=>{committed.current=props;});
@@ -36,6 +44,16 @@ export const AsterChart=forwardRef(function AsterChart(props,ref){
    record.themeValues=values;
    try{if(p.theme!==undefined){optionRecord(p.theme,themeKeys,'Theme');record.chart.api.setTheme(Object.fromEntries(Object.entries(p.theme).filter(([,value])=>value!==undefined)));}}catch(error){report(error);}
   }
+  const interaction=p.options?.interaction;
+  if(interaction===undefined){record.inputKey=undefined;record.inputValues=undefined;}
+  else {const key=interactionKey(interaction);
+   if(!record.inputKey||key.length!==record.inputKey.length||key.some((value,index)=>!Object.is(value,record.inputKey[index]))){
+    record.inputKey=key;
+    try{const next=interactionOptions(interaction),values=interactionKeys.map(key=>next[key]);
+     if(!record.inputValues||values.some((value,index)=>!Object.is(value,record.inputValues[index]))){record.chart.setInteractionOptions(next);record.inputValues=values;}
+    }catch(error){report(error);}
+   }
+  }
   if(p.tool===undefined)record.tool=undefined;
   else if(!Object.is(p.tool,record.tool)){record.tool=p.tool;try{record.chart.api.setTool(p.tool);}catch(error){report(error);}}
   if(p.text===undefined)record.text=undefined;
@@ -51,6 +69,8 @@ export const AsterChart=forwardRef(function AsterChart(props,ref){
   }else record.rangeSet=false;
  }
  useEffect(()=>{
+  let closed=false,attempted,disposeAttempt=()=>{};
+  const initialize=()=>{
   let record,readyCleanup,disposed=false;
   const container=host.current;
   const renderEvent=event=>{if(active.current===record&&event.target===record.chart.canvas)notify('onRender',record.context,event);};
@@ -77,7 +97,17 @@ export const AsterChart=forwardRef(function AsterChart(props,ref){
    else if(result!==undefined){report(new TypeError('onReady must return a synchronous cleanup function or undefined'));Promise.resolve(result).catch(report);}
   }catch(error){cleanup();report(error);}
   return cleanup;
+  };
+  const retry=()=>{
+   if(closed||active.current)return;
+   const key=interactionKey(committed.current.options?.interaction);
+   if(attempted&&key.length===attempted.length&&key.every((value,index)=>Object.is(value,attempted[index])))return;
+   // Record before application callbacks, including an onError-driven rerender.
+   attempted=key;disposeAttempt();disposeAttempt=initialize();
+  };
+  retryInitialization.current=retry;retry();
+  return()=>{closed=true;if(retryInitialization.current===retry)retryInitialization.current=null;disposeAttempt();};
  },[model,renderer,resetKey,options?.dpr,options?.interactive,options?.observeResize,options?.layerCaching,options?.maxCachedPixels,options?.rasterCaching,options?.cacheBudget]);
- useEffect(()=>{if(active.current)synchronize(active.current,committed.current);},[data,dataRevision,theme,...themeKeys.map(key=>theme?.[key]),tool,text,drawingTarget,visibleRange?.[0],visibleRange?.[1],visibleRange===null]);
+ useEffect(()=>{if(active.current)synchronize(active.current,committed.current);else retryInitialization.current?.();});
  return createElement('div',{...hostProps,ref:host,style:{height:320,...style}});
 });

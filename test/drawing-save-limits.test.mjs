@@ -51,6 +51,91 @@ function populateHistory(store) {
   return id;
 }
 
+// Valid JSON can grow when numbers and public portable colors are normalized.
+// Admission must measure the exact document the writer will subsequently emit.
+function importedDocument(version, {color = 'red', compactNumbers = true} = {}) {
+  const drawing = {
+    id: 'imported', type: version >= 3 ? 'longposition' : 'horizontal', panel: 'price',
+    points: version >= 3
+      ? [{time: 1e10, price: 1e20}, {time: 1e10, price: 9e19}, {time: 1e10, price: 2e20}, {time: 2e10, price: 1e20}]
+      : [{time: 1e10, price: 1e20}],
+    style: {color}, ...(version >= 2 ? {axisId: 'other', seriesId: 'price-series'} : {}),
+    ...(version === 4 ? {visible: false, locked: true} : {}),
+  };
+  let text = JSON.stringify({schema: 'aster.drawings', version, drawings: [drawing]});
+  if (compactNumbers) text = text.replaceAll('100000000000000000000', '1e20')
+    .replaceAll('90000000000000000000', '9e19').replaceAll('200000000000000000000', '2e20')
+    .replaceAll('10000000000', '1e10').replaceAll('20000000000', '2e10');
+  return text;
+}
+function importModel(t, limit) {
+  const model = new ChartModel();
+  t.after(() => model.dispose());
+  model.drawings = new DrawingStore({maxDocumentChars: limit});
+  model.addAxis({id: 'other', panel: 'price'});
+  model.addSeries({id: 'price-series', type: 'line', panel: 'price', axisId: 'other'});
+  return model;
+}
+for (const version of [1, 2, 3, 4]) {
+  for (const compactNumbers of [false, true]) {
+    test(`v${version} normalized ${compactNumbers ? 'numeric/color' : 'color'} overflow rejects before any import mutation`, t => {
+      const text = importedDocument(version, {compactNumbers});
+      const reference = importModel(t, 8388608), referenceAPI = new ChartAPI(reference);
+      referenceAPI.loadDrawings(text);
+      const canonical = referenceAPI.saveDrawings();
+      assert.ok(canonical.length > text.length, 'fixture expands after normalization');
+      for (const limit of [text.length, canonical.length - 1]) {
+        const model = importModel(t, limit);
+        populateHistory(model.drawings);
+        let invalidations = 0;
+        const api = new ChartAPI(model, {invalidate() { invalidations++; }});
+        const unchanged = captureState(model.drawings);
+        assertDocumentLimit(() => api.loadDrawings(text), model.drawings);
+        unchanged();
+        assert.equal(invalidations, 0, 'rejected import never announces a change');
+      }
+    });
+  }
+  test(`v${version} normalized import at exact output budget saves and undoes in one step`, t => {
+    const text = importedDocument(version);
+    const reference = importModel(t, 8388608), api = new ChartAPI(reference);
+    api.loadDrawings(text);
+    const canonical = api.saveDrawings();
+    const model = importModel(t, canonical.length), receiver = new ChartAPI(model);
+    populateHistory(model.drawings);
+    const previous = model.drawings.items.slice(), depth = model.drawings.undoStack.length;
+    receiver.loadDrawings(text);
+    assert.equal(receiver.saveDrawings(), canonical);
+    assert.equal(model.drawings.undoStack.length, depth + 1);
+    assert.equal(model.drawings.selected, null);
+    assert.ok(model.drawings.items.every(Object.isFrozen));
+    model.drawings.undo(); assert.deepEqual(model.drawings.items, previous);
+    model.drawings.redo(); assert.equal(receiver.saveDrawings(), canonical);
+  });
+}
+test('direct DrawingStore import accounts for canonical numeric expansion without a style decoder', () => {
+  const text = importedDocument(1, {color: '#ff0000ff'});
+  const store = new DrawingStore({maxDocumentChars: text.length});
+  populateHistory(store);
+  const unchanged = captureState(store);
+  assertDocumentLimit(() => store.load(text), store);
+  unchanged();
+});
+test('normalized import keeps the existing active-transaction error and pending state', () => {
+  const text = importedDocument(1), store = new DrawingStore({maxDocumentChars: text.length});
+  const id = populateHistory(store);
+  store.begin(); store.edit(id, {text: 'pending'});
+  const unchanged = captureState(store);
+  assert.throws(() => store.load(text), {message: 'Cannot load during a gesture'});
+  unchanged();
+});
+test('higher incoming schema saves with the minimal version, using that exact size', () => {
+  const text = '{"schema":"aster.drawings","version":4,"drawings":[]}';
+  const store = new DrawingStore({maxDocumentChars: text.length});
+  store.load(text);
+  assert.equal(store.save(), '{"schema":"aster.drawings","version":1,"drawings":[]}');
+});
+
 const emptyDocument = JSON.stringify({schema: 'aster.drawings', version: 1, drawings: []});
 test('empty document succeeds at the exact character limit and round-trips', () => {
   const store = new DrawingStore({maxDocumentChars: emptyDocument.length});

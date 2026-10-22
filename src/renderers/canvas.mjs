@@ -1,3 +1,15 @@
+import {captureTradeMarkerFrame,commitTradeMarkerFrame,invalidateTradeMarkerFrame,disposeTradeMarkers} from './trade-markers.mjs';
+export {attachTradeMarkers} from './trade-markers.mjs';
+import {notifyChartState} from './state-notification.mjs';
+import {interactionOptions} from './interaction-options.mjs';
+export {saveChartUI,readChartUI,createChartUIPreset} from './chart-ui.mjs';
+import {disposeChartToolbars} from './chart-toolbar.mjs';
+import {disposeChartOverlays} from './chart-overlays.mjs';
+export {attachChartOverlays} from './chart-overlays.mjs';
+import {disposeChartNavigators} from './chart-navigator.mjs';
+export {attachChartNavigator} from './chart-navigator.mjs';
+export {attachChartToolbar} from './chart-toolbar.mjs';
+import {resolveCrosshairSnapshot} from '../core/crosshair-snap.mjs';
 import {registerTimeRangeHost,disposeTimeRangeHost,refreshTimeRange} from './time-range.mjs';
 export {TimeRangeGroup} from './time-range.mjs';
 import {disposeDrawingPanels} from './drawing-panel.mjs';
@@ -35,19 +47,20 @@ function drawCanvasCommands(ctx, scene, dpr, clear) {
 }
 
 export class CanvasChart {
-  constructor(container, model, {dpr = () => window.devicePixelRatio || 1, interactive = true, observeResize = true, rendererFactory = null, onFallback = null,onError=null,layerCaching=true,maxCachedPixels=8388608,rasterCaching='auto',cacheBudget=defaultLayerCacheBudget,dataExplorer=null} = {}) {
+  constructor(container, model, {dpr = () => window.devicePixelRatio || 1, interactive = true, observeResize = true, rendererFactory = null, onFallback = null,onError=null,layerCaching=true,maxCachedPixels=8388608,rasterCaching='auto',cacheBudget=defaultLayerCacheBudget,dataExplorer=null,interaction={}} = {}) {
+    this._interaction=interactionOptions(interaction);
     if(typeof dpr!=='function'||onError!==null&&typeof onError!=='function')throw new TypeError('DPR/error callback');this.onError=onError;this.lastError=null;
     if(typeof layerCaching!=='boolean'||!Number.isSafeInteger(maxCachedPixels)||maxCachedPixels<0||maxCachedPixels>RESOURCE_LIMITS.maxCanvasPixels)throw new RangeError('Layer cache options');
     if(!['auto','always','never'].includes(rasterCaching)||!(cacheBudget instanceof LayerCacheBudget))throw new TypeError('Raster cache policy/budget');this.rasterCaching=rasterCaching;this.cacheBudget=cacheBudget;this.rasterPolicy=null;this.failedRasterKey=null;
-    if (!container || !model) throw new TypeError('Container and model required'); this.container = container; this.model = model; this.dpr = dpr; this.disposed = false; this.listeners = []; this.frame = null; this.timings = [];
+    if (!container || !model) throw new TypeError('Container and model required'); this.container = container; this.model = model; this.dpr = dpr; this.disposed = false; this.drawGeneration=0;this.invalidationGeneration=0; this.listeners = []; this.frame = null; this.timings = [];
     this.interactive = interactive; this.onFallback = onFallback;this.layerCaching=layerCaching;this.maxCachedPixels=maxCachedPixels;this.sceneCache=new SceneCache();this.fullDirty=true;this.layerSurfaces=null;this.lastRatio=null;this.renderMetrics=null;
-    this.canvas = document.createElement('canvas'); this.canvas.tabIndex = 0; this.canvas.setAttribute('role', 'group');this.canvas.setAttribute('aria-roledescription','Financial chart'); this.canvas.setAttribute('aria-label', 'Financial chart. Arrows pan or move the selected drawing; +/- zoom; Page Up/Down select drawings; Escape cancels; Delete deletes.'); this.canvas.style.cssText = 'width:100%;height:100%;display:block;touch-action:none;outline-offset:-2px;'; container.append(this.canvas);
+    this.canvas = document.createElement('canvas'); this.canvas.tabIndex = 0; this.canvas.setAttribute('role', 'group');this.canvas.setAttribute('aria-roledescription','Financial chart'); this.canvas.setAttribute('aria-label', 'Financial chart. Arrows pan or move the selected drawing; +/- zoom; Page Up/Down select drawings; Escape cancels; Delete deletes.'); this.canvas.style.cssText = 'width:100%;height:100%;display:block;touch-action:none;outline-offset:-2px;'; this.applyInteractionPresentation(); container.append(this.canvas);
     if (rendererFactory) {try {this.renderer = rendererFactory(this.canvas, reason => this.fallback(reason));} catch (e) {this.fallback(e.message);}}
     if (!this.renderer) {this.ctx = this.canvas.getContext('2d', {alpha: false}); if (!this.ctx) {this.canvas.remove(); throw new Error('Canvas 2D unavailable');}}
     this.rendererKind = this.renderer?.kind ?? 'canvas';
     try {
     this.controller = new InteractionController(model, () => this.size(), kind => this.invalidate(kind));
-    this.api = new ChartAPI(model,{controller:this.controller,invalidate:()=>this.invalidate()});
+    this.api = new ChartAPI(model,{controller:this.controller,invalidate:kind=>this.invalidate(kind)});
     this.setupDataExplorer(dataExplorer);
     if (interactive) this.bind();
     if (observeResize) {this.observer = new ResizeObserver(() => this.invalidate()); this.observer.observe(container);}
@@ -60,7 +73,7 @@ export class CanvasChart {
     if(this.explorer?.active)this.setDataExploration(false);
     if(!current())return;clearTimeCursorOrigin(this,'pointer',sourcePointerToken);if(!current())return;this.timeLayout=null;
     if(!current())return;
-    this.controller?.cancel();if(!current())return;
+    this.controller?.cancel({ownedDrawingsOnly:true});if(!current())return;
     this.renderer?.dispose();if(!current())return;this.renderer = null;
     this.releaseLayers();this.sceneCache?.clear();this.fullDirty=true;
     for (const [type, fn, options] of this.listeners) this.canvas.removeEventListener(type, fn, options); this.listeners = [];
@@ -68,18 +81,42 @@ export class CanvasChart {
     if (!this.ctx) throw new Error('Canvas fallback unavailable');
     if(this.controller&&this.interactive)this.bind();try{this.onFallback?.(reason);}catch(error){this.reportError(error);}if(this.controller)this.invalidate();
   }
+  get interactionOptions(){return this._interaction;}
+  applyInteractionPresentation(){
+    const policy=this._interaction;
+    this.canvas.style.touchAction=this.interactive&&policy.pointer?'none':'auto';
+    this.canvas.setAttribute('aria-label',this.interactive&&policy.keyboardShortcuts?'Financial chart. Arrows pan or move the selected drawing; +/- zoom; Page Up/Down select drawings; Escape cancels; Delete deletes.':'Financial chart. Ordinary keyboard shortcuts disabled.');
+  }
+  setInteractionOptions(patch){
+    if(this.disposed)throw new Error('Chart disposed');
+    const next=interactionOptions(patch,this._interaction),previous=this._interaction;
+    if(Object.keys(next).every(key=>next[key]===previous[key]))return previous;
+    const canvas=this.canvas,controller=this.controller,token=this.timePointerToken,ids=[...controller.pointers.keys()];
+    this._interaction=next;
+    const current=()=>!this.disposed&&this.canvas===canvas&&this.controller===controller&&this._interaction===next;
+    if(previous.pointer&&!next.pointer){
+      controller.cancel({notify:false,ownedDrawingsOnly:true});
+      if(controller._crosshairPointer===this.model.crosshair)this.model.crosshair=null;
+      controller.releaseCrosshair();
+      // Retire old captures before notifications; never release an ID acquired
+      // by a newer reentrant gesture on this same controller.
+      for(const id of ids)if(!controller.pointers.has(id)){try{canvas.releasePointerCapture?.(id);}catch{}}
+      clearTimeCursorOrigin(this,'pointer',token);if(!current())return this._interaction;
+    }
+    this.applyInteractionPresentation();if(current())this.invalidate();return this._interaction;
+  }
   size() {return {width: Math.max(100, this.container.clientWidth), height: Math.max(80, this.container.clientHeight)};}
   bind() {
-    const boundCanvas=this.canvas,input=fn=>e=>{if(this.disposed||this.canvas!==boundCanvas)return;try{fn(e);}catch(error){if(this.disposed)return;const canvas=this.canvas,controller=this.controller;if(!this.explorer?.active)controller.cancel();if(this.disposed||this.canvas!==canvas||this.controller!==controller)return;this.reportError(error);}};
+    const boundCanvas=this.canvas,input=fn=>e=>{if(this.disposed||this.canvas!==boundCanvas)return;try{fn(e);}catch(error){if(this.disposed)return;const canvas=this.canvas,controller=this.controller;if(!this.explorer?.active)controller.cancel({ownedDrawingsOnly:true});if(this.disposed||this.canvas!==canvas||this.controller!==controller)return;this.reportError(error);}};
     const on = (type, fn, options) => {this.canvas.addEventListener(type, fn, options); this.listeners.push([type, fn, options]);}, point = e => {const b = this.canvas.getBoundingClientRect(); return [e.clientX - b.left, e.clientY - b.top];};
-    on('pointerdown',input(e=>{if(e.button!==0)return;const canvas=this.canvas,controller=this.controller;if(this.explorer?.active)this.setDataExploration(false);if(this.disposed||this.canvas!==canvas||this.controller!==controller)return;this.canvas.focus();if(this.disposed||this.canvas!==canvas||this.controller!==controller)return;this.canvas.setPointerCapture(e.pointerId);this.controller.down(e.pointerId,...point(e));}));
-    on('pointermove',input(e=>{if(!this.explorer?.active){const canvas=this.canvas,controller=this.controller,[x,y]=point(e);controller.move(e.pointerId,x,y);if(!this.disposed&&this.canvas===canvas&&this.controller===controller&&!controller.pointers.size)this.publishPointerTime(x,y);}}));
-    on('pointerup',input(e=>this.controller.up(e.pointerId)));on('pointercancel',input(()=>this.controller.cancel()));
-    on('lostpointercapture', e => {if (this.controller.pointers.has(e.pointerId)) this.controller.cancel();});
-    on('pointerleave', input(() => {if (!this.controller.pointers.size) {this.model.crosshair = null;clearTimeCursorOrigin(this,'pointer',this.timePointerToken);if(!this.disposed)this.invalidate('hover');}}));
-    on('wheel',input(e=>{const canvas=this.canvas,controller=this.controller;if(this.explorer?.active)this.setDataExploration(false);if(this.disposed||this.canvas!==canvas||this.controller!==controller)return;e.preventDefault();this.controller.wheel(e.deltaY*(e.deltaMode===1?16:1),point(e)[0]);}),{passive:false});
+    on('pointerdown',input(e=>{if(e.button!==0||!this._interaction.pointer)return;const policy=this._interaction,canvas=this.canvas,controller=this.controller;if(this.explorer?.active)this.setDataExploration(false);if(this.disposed||this.canvas!==canvas||this.controller!==controller||this._interaction!==policy)return;this.canvas.focus();if(this.disposed||this.canvas!==canvas||this.controller!==controller||this._interaction!==policy)return;this.canvas.setPointerCapture(e.pointerId);if(this.disposed||this.canvas!==canvas||this.controller!==controller||this._interaction!==policy){if(!controller.pointers.has(e.pointerId))try{canvas.releasePointerCapture?.(e.pointerId);}catch{}return;}this.controller.down(e.pointerId,...point(e),policy.hitTolerancePx);}));
+    on('pointermove',input(e=>{if(this._interaction.pointer&&!this.explorer?.active){const policy=this._interaction,canvas=this.canvas,controller=this.controller,[x,y]=point(e);controller.move(e.pointerId,x,y);if(!this.disposed&&this.canvas===canvas&&this.controller===controller&&this._interaction===policy&&!controller.pointers.size)this.publishPointerTime(x,y);}}));
+    on('pointerup',input(e=>{if(this._interaction.pointer)this.controller.up(e.pointerId);}));on('pointercancel',input(e=>{if(this.controller.pointers.has(e.pointerId))this.controller.cancel({ownedDrawingsOnly:true});}));
+    on('lostpointercapture', input(e => {if (this.controller.pointers.has(e.pointerId)) this.controller.cancel({ownedDrawingsOnly:true});}));
+    on('pointerleave', input(() => {if (this._interaction.pointer&&!this.controller.pointers.size) {this.model.crosshair = null;clearTimeCursorOrigin(this,'pointer',this.timePointerToken);if(!this.disposed)this.invalidate('hover');}}));
+    on('wheel',input(e=>{if(!this._interaction.wheelZoom)return;const policy=this._interaction,canvas=this.canvas,controller=this.controller;if(this.explorer?.active)this.setDataExploration(false);if(this.disposed||this.canvas!==canvas||this.controller!==controller||this._interaction!==policy)return;e.preventDefault();this.controller.wheel(e.deltaY*(e.deltaMode===1?16:1),point(e)[0]);}),{passive:false});
     on('focusout',e=>this.explorerFocusOut(e));
-    on('keydown',input(e=>{if(e.defaultPrevented||e.isComposing||e.target!==this.canvas)return;if(this.explorer?.active){if(document.activeElement!==undefined&&document.activeElement!==this.canvas)return;if(!explorerInputAllowed(e,this.canvas))return;if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End','Enter','Escape'].includes(e.key)){e.preventDefault();const explorer=this.explorer,generation=explorer.generation,canvas=this.canvas;try{explorer.key(e.key);if(!this.disposed&&this.explorer===explorer&&this.canvas===canvas)this.publishExploration(true);}catch(error){if(!this.disposed&&this.explorer===explorer&&this.canvas===canvas&&explorer.generation===generation)this.publishExploration(true);throw error;}}return;}if(['Escape','Delete','Backspace','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','PageUp','PageDown','Home','End','+','=','-','_'].includes(e.key)||(e.ctrlKey||e.metaKey)&&['z','y'].includes(e.key.toLowerCase())){e.preventDefault();this.controller.key(e.key,{ctrl:e.ctrlKey||e.metaKey,shift:e.shiftKey});}}));
+    on('keydown',input(e=>{if(e.defaultPrevented||e.isComposing||e.target!==this.canvas)return;if(this.explorer?.active){if(document.activeElement!==undefined&&document.activeElement!==this.canvas)return;if(!explorerInputAllowed(e,this.canvas))return;if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End','Enter','Escape'].includes(e.key)){e.preventDefault();const explorer=this.explorer,generation=explorer.generation,canvas=this.canvas;try{explorer.key(e.key);if(!this.disposed&&this.explorer===explorer&&this.canvas===canvas)this.publishExploration(true);}catch(error){if(!this.disposed&&this.explorer===explorer&&this.canvas===canvas&&explorer.generation===generation)this.publishExploration(true);throw error;}}return;}if(!this._interaction.keyboardShortcuts)return;if(e.altKey||(e.ctrlKey||e.metaKey)&&!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','z','y'].includes(e.key.length===1?e.key.toLowerCase():e.key))return;if(['Escape','Delete','Backspace','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','PageUp','PageDown','Home','End','+','=','-','_'].includes(e.key)||(e.ctrlKey||e.metaKey)&&['z','y'].includes(e.key.toLowerCase())){e.preventDefault();this.controller.key(e.key,{ctrl:e.ctrlKey||e.metaKey,shift:e.shiftKey});}}));
   }
   setupDataExplorer(options){
     if(options===null)return;
@@ -94,7 +131,7 @@ export class CanvasChart {
   }
   get timeCursor(){return timeCursorState(this);}
   timeProjectionMatches(prior){const model=this.model;return prior.axisWidth===model.axisWidth&&prior.font===model.theme.font&&prior.panels.length===model.panels.length&&prior.axes.length===model.axes.length&&prior.panels.every((p,i)=>p===model.panels[i])&&prior.axes.every((a,i)=>a===model.axes[i]);}
-  publishPointerTime(x,y){const prior=this.timeLayout,size=this.size(),model=this.model;if(!prior||this.disposed||prior.canvas!==this.canvas||prior.version!==model.store.version||prior.store!==model.store||prior.from!==model.view.from||prior.to!==model.view.to||prior.width!==size.width||prior.height!==size.height||!this.timeProjectionMatches(prior)||this.fullDirty)return;const layout=prior.layout;if(!layout.panels.some(p=>x>=p.left&&x<=p.right&&y>=p.top&&y<=p.bottom))return;const index=Math.round(layout.index(x));if(index<0||index>=model.store.length)return;const token=publishTimeCursor(this,model.store.columns.time[index],'pointer');if(timeCursorState(this)?.generation===token)this.timePointerToken=token;}
+  publishPointerTime(x,y){const prior=this.timeLayout,size=this.size(),model=this.model;if(!prior||this.disposed||prior.canvas!==this.canvas||prior.version!==model.store.version||prior.store!==model.store||prior.from!==model.view.from||prior.to!==model.view.to||prior.width!==size.width||prior.height!==size.height||!this.timeProjectionMatches(prior)||this.fullDirty)return;const layout=prior.layout;if(!layout.panels.some(p=>x>=p.left&&x<=p.right&&y>=p.top&&y<=p.bottom))return;const snapshot=resolveCrosshairSnapshot(model,layout),index=snapshot?.snapped&&snapshot.raw.x===x&&snapshot.raw.y===y?snapshot.index:Math.round(layout.index(x));if(index<0||index>=model.store.length)return;const token=publishTimeCursor(this,model.store.columns.time[index],'pointer');if(timeCursorState(this)?.generation===token)this.timePointerToken=token;}
   get dataExploration(){return this.explorer?.snapshot()??{active:false,time:null,index:null,seriesId:null,phase:'off',text:''};}
   setDataExploration(active){
     if(this.disposed)throw new Error('Chart disposed');if(!this.explorer)throw new Error('Configure dataExplorer output elements first');
@@ -127,7 +164,7 @@ export class CanvasChart {
     for(const node of [nodes.readout,nodes.live])if(explorerNodeOwners.get(node)===nodes.token){explorerNodeOwners.delete(node);node.textContent='';}
   }
   reportError(error){const next=error instanceof Error?error:new Error('Chart error'),changed=this.lastError?.message!==next.message;this.lastError=next;if(changed)try{this.onError?.(next);}catch{} }
-  invalidate(kind='all') {if(this.disposed)return;refreshTimeRange(this);if(this.disposed)return;if(kind!=='hover')refreshTimeCursor(this);if(kind!=='hover'&&this.explorer?.active){this.explorer.changed();this.publishExploration(false);if(this.disposed)return;}if(kind!=='hover'&&kind!=='drawings')this.fullDirty=true;this.canvas.dispatchEvent(new Event('aster:state',{bubbles:true}));if(this.disposed||this.frame!==null)return; this.frame = requestAnimationFrame(() => {this.frame = null;try{this.drawNow(FRAME_RENDER);}catch(error){this.reportError(error);}});}
+  invalidate(kind='all') {if(this.disposed)return;++this.invalidationGeneration;refreshTimeRange(this);if(this.disposed)return;if(kind!=='hover')refreshTimeCursor(this);if(kind!=='hover'&&this.explorer?.active){this.explorer.changed();this.publishExploration(false);if(this.disposed)return;}if(kind!=='hover'&&kind!=='drawings')this.fullDirty=true;notifyChartState(this.canvas,kind);if(this.disposed||this.frame!==null)return; this.frame = requestAnimationFrame(() => {this.frame = null;try{this.drawNow(FRAME_RENDER);}catch{}});}
   renderScene(scene,ratio){if(this.renderer)this.renderer.render(scene,ratio);else renderCanvas(this.ctx,scene,ratio);}
   canCacheLayers(pixels){return pixels*8<=100663296;}
   cachedLayerBytes(pixels){return pixels*8;}
@@ -145,29 +182,46 @@ export class CanvasChart {
     return {baseRedrawn:baseChanged,drawingsRedrawn:drawingsChanged,cachedPixelBytes:w*h*8,hoverCommands:frame.hover.commands.length};
   }
   drawNow(frameToken) {
+    if(this.disposed)return;
+    const generation=++this.drawGeneration,invalidation=this.invalidationGeneration,canvas=this.canvas,model=this.model,controller=this.controller,renderer=this.renderer;
+    const current=()=>!this.disposed&&generation===this.drawGeneration&&invalidation===this.invalidationGeneration&&canvas===this.canvas&&model===this.model&&controller===this.controller&&renderer===this.renderer;
     try{
-    if (this.disposed) return; const start = performance.now(), size = this.size(), ratio = this.dpr();
-    // Application callbacks may synchronously destroy this chart. Do not
-    // recreate pixels, cached scenes or scheduled work after teardown.
-    if (this.disposed) return; const w = Math.round(size.width * ratio), h = Math.round(size.height * ratio);
+    const start=performance.now(),size=this.size(),ratio=this.dpr();
+    if(!current())return;const w=Math.round(size.width*ratio),h=Math.round(size.height*ratio);
     if(!Number.isFinite(ratio)||ratio<=0||ratio>8||w>RESOURCE_LIMITS.maxCanvasDimension||h>RESOURCE_LIMITS.maxCanvasDimension||w*h>RESOURCE_LIMITS.maxCanvasPixels)throw new RangeError('Canvas size/DPR limit');
-    if (this.canvas.width !== w || this.canvas.height !== h) {this.canvas.width = w; this.canvas.height = h;}
-    const binding={canvas:this.canvas,store:this.model.store,version:this.model.store.version,from:this.model.view.from,to:this.model.view.to,width:size.width,height:size.height,axisWidth:this.model.axisWidth,font:this.model.theme.font,panels:this.model.panels.slice(),axes:this.model.axes.slice()};let scene;
+    if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;}
+    const markerFrame=captureTradeMarkerFrame(this,size.width,size.height);
+    const binding={canvas,store:model.store,version:model.store.version,from:model.view.from,to:model.view.to,width:size.width,height:size.height,axisWidth:model.axisWidth,font:model.theme.font,panels:model.panels.slice(),axes:model.axes.slice()};let scene,metrics,prepared;
     if(this.layerCaching){
-      const frame=this.sceneCache.frame(this.model,size.width,size.height,{forceBase:frameToken!==FRAME_RENDER||this.fullDirty||ratio!==this.lastRatio});
-      const synced=timeCursorCommands(this,frame.scene.layout);if(synced.length){frame.hover={...frame.hover,commands:frame.hover.commands.concat(synced)};frame.scene={...frame.scene,commands:frame.scene.commands.concat(synced),stats:{...frame.scene.stats,commandCount:frame.scene.commands.length+synced.length}};}
+      // Formatter/renderer callbacks can invalidate, replace, nest or destroy a
+      // draw. Never publish their obsolete outer cache or output over its owner.
+      prepared=Object.assign(new SceneCache(),this.sceneCache);
+      const frame=prepared.frame(model,size.width,size.height,{forceBase:frameToken!==FRAME_RENDER||this.fullDirty||ratio!==this.lastRatio});
+      if(!current())return;
+      const synced=timeCursorCommands(this,frame.scene.layout);if(!current())return;
+      if(synced.length){frame.hover={...frame.hover,commands:frame.hover.commands.concat(synced)};frame.scene={...frame.scene,commands:frame.scene.commands.concat(synced),stats:{...frame.scene.stats,commandCount:frame.scene.commands.length+synced.length}};}
       const key=[w,h,this.rendererKind,this.cacheBudget.generation].join('/'),bytes=this.cachedLayerBytes(w*h);
       const raster=this.wantsRaster(frame)&&w*h<=this.maxCachedPixels&&this.canCacheLayers(w*h)&&this.failedRasterKey!==key&&this.cacheBudget.reserve(this,bytes,()=>{this.releaseLayers();this.invalidate('hover');});
-      let rendered=false;
-      if(raster)try{this.renderMetrics={...this.renderLayers(frame,ratio),cacheMode:'raster'};rendered=this.cacheBudget.reserve(this,this.renderMetrics.cachedPixelBytes,()=>{this.releaseLayers();this.invalidate('hover');});if(!rendered)this.failedRasterKey=key;}catch(error){if(!(error instanceof CacheAllocationError))throw error;this.failedRasterKey=key;this.releaseLayers();}
-      if(!rendered){this.releaseLayers();this.renderScene(frame.scene,ratio);this.renderMetrics={baseRedrawn:frame.baseChanged,drawingsRedrawn:frame.drawingsChanged,cachedPixelBytes:0,hoverCommands:frame.hover.commands.length,cacheMode:'scene'};}
+      if(!current())return;let rendered=false;
+      if(raster)try{metrics={...this.renderLayers(frame,ratio),cacheMode:'raster'};if(!current())return;rendered=this.cacheBudget.reserve(this,metrics.cachedPixelBytes,()=>{this.releaseLayers();this.invalidate('hover');});if(!current())return;if(!rendered)this.failedRasterKey=key;}catch(error){if(!current())throw error;if(!(error instanceof CacheAllocationError))throw error;this.failedRasterKey=key;this.releaseLayers();}
+      if(!current())return;
+      if(!rendered){this.releaseLayers();if(!current())return;this.renderScene(frame.scene,ratio);if(!current())return;metrics={baseRedrawn:frame.baseChanged,drawingsRedrawn:frame.drawingsChanged,cachedPixelBytes:0,hoverCommands:frame.hover.commands.length,cacheMode:'scene'};}
       scene=frame.scene;
-    }else{this.releaseLayers();this.sceneCache.clear();scene=buildScene(this.model,size.width,size.height);const synced=timeCursorCommands(this,scene.layout);if(synced.length)scene={...scene,commands:scene.commands.concat(synced),stats:{...scene.stats,commandCount:scene.commands.length+synced.length}};this.renderScene(scene,ratio);this.renderMetrics={baseRedrawn:true,drawingsRedrawn:true,cachedPixelBytes:0,hoverCommands:0};}
-    this.fullDirty=false;this.lastRatio=ratio;this.lastScene=scene;this.timeLayout=!this.disposed&&binding.canvas===this.canvas&&binding.store===this.model.store&&binding.version===this.model.store.version&&binding.from===this.model.view.from&&binding.to===this.model.view.to&&this.timeProjectionMatches(binding)?{...binding,layout:scene.layout}:null;this.lastError=null;
-    this.timings.push(performance.now()-start);if(this.timings.length>300)this.timings.shift();this.canvas.dispatchEvent(new Event('aster:render',{bubbles:true}));return scene.stats;
-    }catch(error){this.fullDirty=true;this.sceneCache.clear();this.reportError(error);throw error;}
+    }else{
+      this.releaseLayers();if(!current())return;
+      scene=buildScene(model,size.width,size.height);if(!current())return;
+      const synced=timeCursorCommands(this,scene.layout);if(!current())return;
+      if(synced.length)scene={...scene,commands:scene.commands.concat(synced),stats:{...scene.stats,commandCount:scene.commands.length+synced.length}};
+      this.renderScene(scene,ratio);if(!current())return;metrics={baseRedrawn:true,drawingsRedrawn:true,cachedPixelBytes:0,hoverCommands:0};
+    }
+    if(!current())return;
+    if(prepared)Object.assign(this.sceneCache,prepared);else this.sceneCache.clear();
+    this.renderMetrics=metrics;this.fullDirty=false;this.lastRatio=ratio;this.lastScene=scene;this.timeLayout=binding.store===model.store&&binding.version===model.store.version&&binding.from===model.view.from&&binding.to===model.view.to&&this.timeProjectionMatches(binding)?{...binding,layout:scene.layout}:null;this.lastError=null;
+    commitTradeMarkerFrame(this,markerFrame,scene.layout);
+    this.timings.push(performance.now()-start);if(this.timings.length>300)this.timings.shift();canvas.dispatchEvent(new Event('aster:render',{bubbles:true}));return scene.stats;
+    }catch(error){if(current()){this.fullDirty=true;this.sceneCache.clear();invalidateTradeMarkerFrame(this);if(current())this.reportError(error);}throw error;}
   }
   setTool(tool) {this.controller.setTool(tool);}
   resize() {this.invalidate();}
-  destroy({disposeModel = false} = {}) {if (this.disposed) return; this.disposed = true;disposeTimeRangeHost(this);disposeDrawingPanels(this);disposeTimeCursorHost(this);this.timeLayout=null; this.disposeDataExplorer();this.controller.cancel(); if (this.frame !== null) cancelAnimationFrame(this.frame); this.frame = null; this.observer?.disconnect(); this.unsubscribe(); for (const [type, fn, options] of this.listeners) this.canvas.removeEventListener(type, fn, options); this.listeners = [];this.releaseLayers();this.sceneCache.clear(); this.renderer?.dispose(); this.canvas.remove();this.canvas.width=this.canvas.height=0; this.lastScene = null;this.renderMetrics=null; this.timings = []; if (disposeModel) this.model.dispose();}
+  destroy({disposeModel = false} = {}) {if (this.disposed) return; this.disposed = true;disposeTimeRangeHost(this);disposeDrawingPanels(this);disposeChartToolbars(this);disposeChartOverlays(this);disposeChartNavigators(this);disposeTradeMarkers(this);disposeTimeCursorHost(this);this.timeLayout=null; this.disposeDataExplorer();this.controller.releaseCrosshair();this.controller.cancel({ownedDrawingsOnly:true}); if (this.frame !== null) cancelAnimationFrame(this.frame); this.frame = null; this.observer?.disconnect(); this.unsubscribe(); for (const [type, fn, options] of this.listeners) this.canvas.removeEventListener(type, fn, options); this.listeners = [];this.releaseLayers();this.sceneCache.clear(); this.renderer?.dispose(); this.canvas.remove();this.canvas.width=this.canvas.height=0; this.lastScene = null;this.renderMetrics=null; this.timings = []; if (disposeModel) this.model.dispose();}
 }

@@ -113,7 +113,7 @@ function poison(f, object, key, getter) {
   f.restores.push(() => before ? Object.defineProperty(object, key, before) : delete object[key]);
 }
 
-test('style oracle: all 14 types merge normalized keys in one undo unit, preserving anchors, order and unrelated records', t => {
+test('style oracle: all 14 legacy types merge normalized keys in one undo unit, preserving anchors, order and unrelated records', t => {
   const f = fixture(t), ids = [];
   for (const [type, count] of TYPES) {
     f.store.add(horizontal({id: `keep-${type}`, text: 'locked survivor', locked: true}));

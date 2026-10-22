@@ -117,7 +117,7 @@ function fixture(t, {n = 550, rich = true, symbol = true, sign = -0} = {}) {
         first + 42 * 60000 + .5, last + 240000.25];
       api.addDrawing({id: 'anchor-' + type, type, panel: 'price',
         ...(index % 3 === 0 ? {seriesId: 'own-line'} : index % 3 === 1 ? {axisId: 'percent'} : {}),
-        points: Array.from({length: count}, (_, j) => ({time: times[j], price: 92.125 + index + j * 3.375})),
+        points: ['longposition','shortposition'].includes(type)?[{time:times[0],price:100},{time:times[0],price:type==='longposition'?90:110},{time:times[0],price:type==='longposition'?120:80},{time:times[1],price:100}]:Array.from({length: count}, (_, j) => ({time: times[j], price: 92.125 + index + j * 3.375})),
         text: type === 'text' ? '한국 🚀 exact anchors' : '', locked: type === 'measurement',
         style: {color: '#ffcc88ff', fill: '#33445522', width: 1.75, font: '12px monospace'}});
     });
@@ -450,4 +450,10 @@ test('empty-study workspace preserves default configuration and future-offset fo
   assert.equal(restored.view.to, store.length + 7 - .5);
   assert.equal(restored.view.to - restored.view.from, span);
   assert.deepEqual(restored.view, model.view); await w.clean();
+});
+
+test('host record composes exact workspace and detached web UI through a real Worker',async t=>{
+ const f=fixture(t),w=workers(t),record=JSON.parse(JSON.stringify({schema:'host.saved-chart',version:1,workspace:save(f.api),ui:root.saveChartUI({interaction:{pointer:false,hitTolerancePx:22.5},toolbar:{tools:['select','text'],actions:[]}})}));
+ const ui=root.readChartUI(record.ui),ready=await prepare(f.store,record.workspace,{workerFactory:w.factory});t.after(()=>ready.dispose());
+ assert.equal(save(new ChartAPI(ready)),record.workspace);assert.deepEqual(outputs(ready),outputs(f.model));assert.deepEqual(ready.drawings.items,f.model.drawings.items);assert.deepEqual(ready.view,f.model.view);assert.equal(ready.follow,f.model.follow);assert(Object.is(ready.indicators.entries.get('ema').params.negativeZero,-0));assert.equal(ui.interaction.pointer,false);assert.equal(ui.interaction.hitTolerancePx,22.5);assert.deepEqual(ui.toolbar.actions,[]);assert.equal(root.saveChartUI(ui),record.ui);assert.notEqual(ready,f.model);assert(!f.model.disposed);await w.clean();
 });

@@ -1540,7 +1540,25 @@ public final class AsterEngine {
             let count=changed.toDouble()
             guard count.isFinite,count.rounded(.towardZero)==count,count>=0,count<=128 else {throw AsterError.invalidScene}
             if count>0 {notifyChanges()}
-        } else if !["inspect", "indicatorValues", "indicatorValueAt", "saveStudies", "saveDrawings", "crosshairValues", "dataAt", "dataIngestionStats", "saveDataIngestion"].contains(operation) {
+        } else if ["setDrawingVisibility", "setDrawingsVisibility"].contains(operation) {
+            guard result.isObject,let changed=result.forProperty("changed"),changed.isNumber else {throw AsterError.invalidScene}
+            let count=changed.toDouble(),maximum=operation == "setDrawingVisibility" ? 1.0 : 128.0
+            guard count.isFinite,count.rounded(.towardZero)==count,count>=0,count<=maximum else {throw AsterError.invalidScene}
+            if count>0 {notifyChanges()}
+        } else if ["duplicateDrawing", "duplicateDrawings"].contains(operation) {
+            guard result.isObject,let changed=result.forProperty("changed"),changed.isNumber else {throw AsterError.invalidScene}
+            let count=changed.toDouble(),maximum=operation == "duplicateDrawing" ? 1.0 : 128.0
+            guard count.isFinite,count.rounded(.towardZero)==count,count>=1,count<=maximum,
+                  let created=result.forProperty("created"),created.isArray,let rows=created.toArray() as? [[String: Any]],rows.count==Int(count),
+                  let failed=result.forProperty("invalidationFailed"),failed.isBoolean else {throw AsterError.invalidScene}
+            var sources=Set<String>(),ids=Set<String>()
+            for row in rows {
+                guard row.count==2,let source=row["sourceId"] as? String,let id=row["id"] as? String,
+                      !source.isEmpty,source.utf16.count<=128,!id.isEmpty,id.utf16.count<=128,source != id,
+                      sources.insert(source).inserted,ids.insert(id).inserted else {throw AsterError.invalidScene}
+            }
+            notifyChanges()
+        } else if !["inspect", "indicatorValues", "indicatorValueAt", "saveStudies", "saveDrawings", "positionMetrics", "crosshairValues", "crosshairSnapshot", "dataAt", "dataIngestionStats", "saveDataIngestion"].contains(operation) {
             notifyChanges()
         }
         return result
@@ -1562,6 +1580,55 @@ public final class AsterEngine {
     /// burst before one data publication; it never sorts, merges or evicts rows.
     @discardableResult public func applyDataEvents(_ events: [[String: Any]]) throws -> [String: Any] {
         try ingestionCommand("applyDataEvents",[events])
+    }
+    /// Opt-in final-value deduplication. False retains the legacy command path.
+    /// A true-path response failure does not prove rollback; do not auto-retry.
+    @discardableResult public func applyDataEvents(_ events: [[String: Any]], skipUnchanged: Bool) throws -> [String: Any] {
+        if !skipUnchanged {return try applyDataEvents(events)}
+        guard Thread.current === owner else {throw AsterError.wrongThread}
+        guard !closed, !closing, let identity = contextBacking.map(ObjectIdentifier.init) else {throw AsterAsyncError.engineClosed}
+        let beforeRevision = revision
+        let outcome: ([String: Any], Bool)
+        do {
+            outcome = try unchangedDataBatch(events)
+            guard !closed, !closing, contextBacking.map(ObjectIdentifier.init) == identity else {throw AsterError.invalidScene}
+        } catch {
+            // Source/worker aliases and retirement lease are already released.
+            if !closed, !closing, contextBacking.map(ObjectIdentifier.init) == identity {notifyChanges()}
+            throw error
+        }
+        if !outcome.1 || revision != beforeRevision {notifyChanges()}
+        return outcome.0
+    }
+    private func unchangedDataBatch(_ events: [[String: Any]]) throws -> ([String: Any], Bool) {
+        let runtime = contextRuntime
+        if let runtime = runtime, !runtime.acquireCaptureLease() {throw AsterAsyncError.engineClosed}
+        defer {runtime?.releaseCaptureLease()}
+        return try autoreleasepool { () throws -> ([String: Any], Bool) in
+            guard let source = contextBacking else {throw AsterAsyncError.engineClosed}
+            guard let function = source.objectForKeyedSubscript("nativeApplyUnchangedDataEvents"), !function.isUndefined,
+                  let value = function.call(withArguments: [events]) else {throw AsterError.invalidScene}
+            if let exception = source.exception {source.exception = nil;throw AsterError.javaScript(exception.toString() ?? "Data batch error")}
+            let object = value.toDictionary()
+            if let exception = source.exception {source.exception = nil;throw AsterError.javaScript(exception.toString() ?? "Data batch conversion error")}
+            guard !closed, !closing, contextBacking === source,
+                  let envelope = object as? [String: Any], let receipt = envelope["receipt"] as? [String: Any],
+                  envelope["schema"] as? String == "aster.native-data-batch" else {throw AsterError.invalidScene}
+            func integer(_ value: Any?,_ max: Double) throws -> Double {
+                guard let n = value as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID() else {throw AsterError.invalidScene}
+                let d = n.doubleValue;guard d.isFinite,d.rounded(.towardZero)==d,d>=0,d<=max else {throw AsterError.invalidScene};return d
+            }
+            func boolean(_ value: Any?) throws -> Bool {
+                guard let n = value as? NSNumber, CFGetTypeID(n) == CFBooleanGetTypeID() else {throw AsterError.invalidScene};return n.boolValue
+            }
+            let format = try integer(envelope["version"],1),before = try integer(envelope["beforeVersion"],9007199254740991),after = try integer(envelope["afterVersion"],9007199254740991)
+            let unchanged = try boolean(envelope["unchanged"]),same = try boolean(receipt["unchanged"])
+            let count = try integer(receipt["events"],4096),appended = try integer(receipt["appended"],4096),from = try integer(receipt["from"],4194304),to = try integer(receipt["to"],4194304),version = try integer(receipt["version"],9007199254740991),length = try integer(receipt["length"],4194304),capacity = try integer(receipt["capacity"],4194304),bytes = try integer(receipt["bytes"],402653184)
+            let cap = Int(capacity)
+            guard format==1,unchanged==same,count>=1,appended<=count,capacity>=1,capacity>=length,(cap & (cap-1))==0,bytes==96*capacity,from<to,to<=length,after>=before,version>=before,version<=after else {throw AsterError.invalidScene}
+            guard unchanged ? (appended==0 && version==before && after==before) : version==before+1 else {throw AsterError.invalidScene}
+            return (receipt,unchanged)
+        }
     }
     /// Synchronous retained-window maintenance with explicit studyHistory:"restart".
     /// Large copies block the owner; pause/drain upstream before this call.
@@ -1617,7 +1684,45 @@ public final class AsterEngine {
         guard let result = value.toDictionary() as? [String: Any] else {throw AsterError.invalidScene}
         return result
     }
+    /// Explicit selection/readout; no chart mutation notification or redraw.
+    private func dataExploration(_ action: String, _ argument: Any = NSNull()) throws -> [String: Any] {
+        guard Thread.current === owner else {throw AsterError.wrongThread}
+        guard !closed, !closing else {throw AsterAsyncError.engineClosed}
+        let runtime = contextRuntime
+        if let runtime = runtime, !runtime.acquireCaptureLease() {throw AsterAsyncError.engineClosed}
+        // All JS aliases/autoreleases leave the pool before creator retirement.
+        defer {runtime?.releaseCaptureLease()}
+        return try autoreleasepool { () throws -> [String: Any] in
+            guard let source = contextBacking else {throw AsterAsyncError.engineClosed}
+            guard let function = source.objectForKeyedSubscript("nativeDataExploration"), !function.isUndefined,
+                  let value = function.call(withArguments: [action, argument]) else {throw AsterError.invalidScene}
+            if let exception = source.exception {
+                source.exception = nil
+                throw AsterError.javaScript(exception.toString() ?? "Exploration error")
+            }
+            let dictionary = value.toDictionary()
+            if let exception = source.exception {
+                source.exception = nil
+                throw AsterError.javaScript(exception.toString() ?? "Exploration conversion error")
+            }
+            guard !closed, !closing, contextBacking === source else {throw AsterError.invalidScene}
+            guard let result = dictionary as? [String: Any] else {throw AsterError.invalidScene}
+            return result
+        }
+    }
+    public func setDataExploration(_ active: Bool) throws -> [String: Any] {try dataExploration("setActive", active)}
+    public func navigateDataExploration(_ key: String) throws -> [String: Any] {try dataExploration("navigate", key)}
+    public func refreshDataExploration() throws -> [String: Any] {try dataExploration("refresh")}
+    /// Explicit read may synchronously calculate all visible dirty studies.
+    public func readDataExploration() throws -> [String: Any] {try dataExploration("read")}
     public func crosshairValues(width: Double, height: Double) throws -> [String: Any]? {try command("crosshairValues", [width, height]).toDictionary() as? [String: Any]}
+    /// Fresh layout may calculate dirty studies; the snapshot contains raw OHLC identity.
+    public func crosshairSnapshot(width: Double, height: Double) throws -> [String: Any]? {
+        let value = try command("crosshairSnapshot", [width, height])
+        if value.isNull {return nil}
+        guard let result = value.toDictionary() as? [String: Any] else {throw AsterError.invalidScene}
+        return result
+    }
     public func addSeries(_ options: [String: Any]) throws {try command("addSeries", [options])}
     public func setSeries(_ id: String, _ patch: [String: Any]) throws {try command("setSeries", [id, patch])}
     public func removeSeries(_ id: String) throws {try command("removeSeries", [id])}
@@ -1662,6 +1767,11 @@ public final class AsterEngine {
     }
     public func registerIndicatorSource(_ name: String, _ source: String) throws {try call("nativeRegisterIndicatorSource",[name,source]);notifyChanges()}
     @discardableResult public func addDrawing(_ options: [String: Any]) throws -> String {try command("addDrawing", [options]).toString() ?? ""}
+    /// Raw annotation metrics only; no source data, indicator work or redraw notification.
+    public func positionMetrics(_ id: String) throws -> [String: Any] {
+        guard let result = try command("positionMetrics", [id]).toDictionary() as? [String: Any] else {throw AsterError.invalidScene}
+        return result
+    }
     public func editDrawing(_ id: String, _ patch: [String: Any]) throws {try command("editDrawing", [id, patch])}
     /// Raw-coordinate group edit with one core undo. A zero-change receipt does not notify.
     /// Receipt conversion failure after execution does not imply rollback.
@@ -1674,6 +1784,20 @@ public final class AsterEngine {
     @discardableResult public func setDrawingsStyle(_ ids: [String], patch: [String: Any]) throws -> [String: Any] {
         try ingestionCommand("setDrawingsStyle",[ids,patch])
     }
+    /// Visibility is presentation-only, including locked drawings. No-op receipts do not notify.
+    @discardableResult public func setDrawingVisibility(_ id: String, visible: Bool) throws -> [String: Any] {
+        try ingestionCommand("setDrawingVisibility",[id,visible])
+    }
+    @discardableResult public func setDrawingsVisibility(_ ids: [String], visible: Bool) throws -> [String: Any] {
+        try ingestionCommand("setDrawingsVisibility",[ids,visible])
+    }
+    /// Chart-local unlocked copies; explicit raw offsets and one atomic core undo.
+    @discardableResult public func duplicateDrawing(_ id: String, deltaTimeMs: Double, deltaPrice: Double) throws -> [String: Any] {
+        try ingestionCommand("duplicateDrawing",[id,["deltaTimeMs":deltaTimeMs,"deltaPrice":deltaPrice]])
+    }
+    @discardableResult public func duplicateDrawings(_ ids: [String], deltaTimeMs: Double, deltaPrice: Double) throws -> [String: Any] {
+        try ingestionCommand("duplicateDrawings",[ids,["deltaTimeMs":deltaTimeMs,"deltaPrice":deltaPrice]])
+    }
     /// Explicit group deletion, one core undo; empty/missing/locked IDs reject.
     @discardableResult public func deleteDrawings(_ ids: [String]) throws -> [String: Any] {
         try ingestionCommand("deleteDrawings",[ids])
@@ -1681,6 +1805,8 @@ public final class AsterEngine {
     public func selectDrawing(_ id: String?) throws {try command("selectDrawing", [id as Any? ?? NSNull()])}
     public func setTheme(_ patch: [String: Any]) throws {try command("setTheme", [patch])}
     public func setSymbol(_ symbol: [String: Any]) throws {try command("setSymbol", [symbol])}
+    public func setCrosshairSnap(_ options: [String: Any]) throws { try command("setCrosshairSnap", [options]) }
+    public func setDrawingMagnet(_ options: [String: Any]) throws { try command("setDrawingMagnet", [options]) }
     public func setTool(_ tool: String) throws {try command("setTool", [tool])}
     public func setText(_ text: String) throws {try command("setText", [text])}
     public func undo() throws {try command("undo")}

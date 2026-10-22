@@ -8,6 +8,16 @@ import org.json.JSONObject;
 /** Compile-only application API usage. Never loads or runs the JNI-backed Engine. */
 public final class WorkspaceConsumer {
     private WorkspaceConsumer() {}
+    public static JSONObject unchangedBatch(AsterEngine engine, JSONArray events) throws JSONException {return engine.applyDataEvents(events,true);}
+    public static JSONObject explore(AsterEngine engine) throws JSONException {
+        engine.setDataExploration(true);
+        engine.navigateDataExploration("ArrowLeft");
+        engine.refreshDataExploration();
+        JSONObject result=engine.readDataExploration();
+        engine.setDataExploration(false);
+        return result;
+    }
+
     public static AsterEngine.WorkspaceJob restore(AsterEngine engine, String document,
             JSONObject binding, AsterEngine.AsyncListener listener) throws JSONException {
         return engine.restoreWorkspaceAsync(document, binding,

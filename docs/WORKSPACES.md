@@ -39,6 +39,11 @@ restore and native host restore facades are not supplied in this slice.
   ordered output schema and effective default plot offsets. Parameter `-0` retains
   its sign through the numeric codec.
 - Symbol metadata, precision, axis width, exact index-based view and follow state.
+  Optional `provider` and `adjustmentVersion` strings are preserved when present;
+  each must be nonempty and at most128 UTF-16 code units in a workspace. Undefined
+  optional fields are omitted on save. Required-only symbol documents remain valid.
+  Symbol `adjustmentVersion` is independent of the required dataset binding field;
+  it does not replace that assertion or introduce an equality check between them.
   `setSymbol`'s known formatter pair is recreated first, then the saved precision
   override/view/follow are restored. The current known pair uses fixed decimal
   price formatting and the symbol timezone; there are no hidden locale/options
@@ -138,7 +143,7 @@ blocking bound. Large document save/parse remains synchronous owner work.
 
 ## Validation scope
 
-Node tests exercise actual worker_threads transport, all14 drawing tool anchors,
+Node tests exercise actual worker_threads transport, all16 drawing tool anchors,
 canonical save/restore/save and complete scene parity, own-key static-module outputs,
 negative zero, hidden studies, incremental update/append/correction against a fresh
 oracle, shared-store disposal, stale/cancel/deadline cleanup and hostile packets.
@@ -256,3 +261,7 @@ not turn a bounded synchronous parser into a preemptible or guaranteed low-laten
 operation. The large document still has roughly90ms owner preflight and can exceed
 100ms timer gaps. No fixture-specific threshold or alternate validation policy was
 introduced. Raw data lives in `cycle26-node-workspace-owned-parse`.
+
+## Optional web UI composition
+
+[Versioned UI preferences](WEB-UI-STATE.md) can be stored alongside this unchanged workspace text in one host-owned record. The UI codec does not extend workspace v1 or alter its dataset/source checks.

@@ -19,7 +19,7 @@ model.addSeries({id:'b',type:'line',panel:'price',values});
 
 예제의 A 기준은 2026-02-06/09 New York의 09:30·10:00·10:30·11:00·11:30·13:00·13:30·14:00·14:30·15:00입니다. B 세션은 09:45–11:45와 13:30–15:15입니다. B 16점 중 정확히 일치하는 12점을 표시하고, A 위치 8개는 공백이며, 기준에 없는 B 4점은 제외됩니다. OHLC의 없는 봉은 생성하지 않습니다.
 
-데이터 append/prepend/reset으로 기준 길이가 바뀌면 호스트가 다시 정렬하고 `setSeriesValues`해야 합니다. API는 저장소 시간 기준을 공유하는 general series를 지원하며 독립적인 여러 OHLCV 저장소의 자동 결합은 지원하지 않습니다. 기본 x축은 거래 봉 순서이며 주말·세션 간 공백을 같은 봉 간격으로 압축합니다. 경과 시간에 비례하는 x축과 crosshair snapping은 미구현입니다.
+데이터 append/prepend/reset으로 기준 길이가 바뀌면 호스트가 다시 정렬하고 `setSeriesValues`해야 합니다. API는 저장소 시간 기준을 공유하는 general series를 지원하며 독립적인 여러 OHLCV 저장소의 자동 결합은 지원하지 않습니다. 기본 x축은 거래 봉 순서이며 주말·세션 간 공백을 같은 봉 간격으로 압축합니다. 경과 시간에 비례하는 x축은 미구현입니다. 기본 crosshair는 Free이며, 선택형 close/OHLC snapping은 [별도 계약](CROSSHAIR-SNAP.md)으로 구현되어 있습니다. 이 금융 좌표 예제는 Free 모드를 유지합니다.
 
 ## 분할·야간 세션과 기간 앵커
 
@@ -38,10 +38,16 @@ model.addSeries({id:'b',type:'line',panel:'price',values});
 
 ## 축과 도형의 해석
 
-크로스헤어 y값은 커서의 연속 축 좌표를 역변환한 값이며 최근 봉의 close에 snap한 값이 아닙니다. percent 축 라벨의 10%와 원래 가격 110(base 100)을 구분합니다. 예제는 `layout.index(x)`를 반올림하고 저장된 범위로 clamp하여 가장 가까운 **실제 봉**의 time/OHLCV와 같은 시각의 B 값을 따로 표시합니다. 관측점 사이의 보간한 timestamp나 가상의 봉을 만들지 않습니다. 예를 들어 x=logical 1.4, cursor price=110은 실제 2026-02-06 15:00Z 봉(A close=100.8, B=102.6)을 선택하지만 커서 축값은10%입니다. x=4.1에서는 실제16:30Z 봉을 선택하고 B는 공백입니다. 이 선택은 예제 readout 규칙이며 core crosshair 자체를 snap시키지 않습니다.
+이 예제의 기본 Free 크로스헤어 y값은 커서의 연속 축 좌표를 역변환한 값이며 최근 봉의 close에 snap한 값이 아닙니다. percent 축 라벨의 10%와 원래 가격 110(base 100)을 구분합니다. 예제는 `layout.index(x)`를 반올림하고 저장된 범위로 clamp하여 가장 가까운 **실제 봉**의 time/OHLCV와 같은 시각의 B 값을 따로 표시합니다. 관측점 사이의 보간한 timestamp나 가상의 봉을 만들지 않습니다. 예를 들어 x=logical 1.4, cursor price=110은 실제 2026-02-06 15:00Z 봉(A close=100.8, B=102.6)을 선택하지만 커서 축값은10%입니다. x=4.1에서는 실제16:30Z 봉을 선택하고 B는 공백입니다. 이 선택은 예제 readout 규칙이며 core crosshair 자체를 snap시키지 않습니다.
 
-원본 가격과 도형 앵커는 Float64이며 log 축에서 양의 범위가 필요합니다. percent는 `(value/base−1)×100`입니다. 기본 base는 저장된 첫 close이므로 기준을 보존하려면 `base`를 명시하세요. 예제는 A와 B 모두 공통 가격 100을 사용합니다. 이는 종목별 첫 관측 가격을 기준으로 한 상대 성과가 아닙니다. 종목별 기준이 필요하면 호스트가 수익률 값을 계산해 general series로 넣거나 별도 패널을 사용하세요.
+원본 가격과 도형 앵커는 Float64이며 log 축에서 양의 범위가 필요합니다. percent는 `(value/base−1)×100`입니다. 기본 base는 저장된 첫 close이므로 기준을 보존하려면 `base`를 명시하세요. 예제는 A와 B 모두 공통 가격 100을 사용합니다. 이는 종목별 첫 관측 가격을 기준으로 한 상대 성과가 아닙니다. 종목별 기준이 필요하면 호스트가 정규화한 값을 general series로 넣을 수 있습니다. [명시적 기준 상대 변화 예제](RELATIVE-COMPARISON.md)는 각 시리즈의 같은 UTC 시각 값을 기준으로 계산하고, 하나의 공통 선형 퍼센트 변화 축을 사용합니다. 기존 이 예제의 공통 raw base 100 의미는 바뀌지 않습니다.
 
 도형은 UTC time·raw price·panel을 저장합니다. 로그·퍼센트·반전 축에서 좌표를 역변환하고, 주말 압축 상태에서도 각 앵커를 유지합니다. Fibonacci 가격 수준은 raw price의 산술 보간입니다. save/load는 완료된 도형 문서를 옮기며 진행 중 gesture·undo history·심볼·통화·수정주가 버전을 저장하지 않습니다. 여러 종목과 adjustment 버전은 호스트가 별도 journal로 분리해야 합니다.
 
-검증: `node --test test/financial-calendar.test.mjs test/financial-series.test.mjs test/markets.test.mjs test/extended-drawings.test.mjs`. 고정 UTC 전후 1ms의 현지 날짜, 분할 세션 공백, 야간 날짜, 정확한 join 및 14종 도형의 log/percent/inverted 저장·읽기/좌표 왕복을 확인합니다. 이 문서의 계약은 모든 거래소의 실제 캘린더를 인증하거나 모든 브라우저 tzdb의 동일 버전을 보장하지 않습니다.
+검증: `node --test test/financial-calendar.test.mjs test/financial-series.test.mjs test/markets.test.mjs test/extended-drawings.test.mjs`. 고정 UTC 전후 1ms의 현지 날짜, 분할 세션 공백, 야간 날짜, 정확한 join 및 16종 도형의 log/percent/inverted 저장·읽기/좌표 왕복을 확인합니다. 이 문서의 계약은 모든 거래소의 실제 캘린더를 인증하거나 모든 브라우저 tzdb의 동일 버전을 보장하지 않습니다.
+
+## Narrow stored-price ranges
+
+Linear price axes preserve small differences between distinct stored binary64 values by subtracting endpoints before normalization when that subtraction is finite. Inverse interpolation retains the finite difference's low-order residual, including asymmetric ranges crossing zero. Overflow-safe normalized fallbacks remain for wide domains, off-domain values and inverse extrapolation. This applies to primary and independent axes, automatic zero-padding ranges and explicit ranges, including inversion.
+
+For example, the stored values `100`, `100.00000000000001` and `100.00000000000003` have an exact binary64 midpoint. That midpoint should occupy the center of a zero-padding linear range; normalizing the values separately first previously displaced it. These are properties of the stored Number values, not recovery of the original decimal input, arbitrary-precision arithmetic or a universally correctly-rounded inverse. Nonrepresentable fractional subnormal results still round, and a log/percent transform can lose distinctions before interpolation.

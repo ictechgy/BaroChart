@@ -10,8 +10,9 @@
 
 - 캔들, OHLC, 선, 영역, 히스토그램 시리즈와 다중 패널, 독립 가격축, 이동·확대·실시간 갱신
 - SMA, EMA, RSI, MACD, Bollinger Bands, ATR, Ichimoku, 세션 기반 VWAP 등을 포함한 **35종 기본 지표**
-- 시간·가격 앵커를 사용하는 **14종 그리기 도구**, 선택·편집·잠금·undo/redo
+- 시간·가격 앵커를 사용하는 **16종 그리기 도구**([롱/숏 위험·보상](docs/POSITION-DRAWINGS.md) 포함), 선택·편집·잠금·undo/redo
 - 과거 봉 수정, 순서가 있는 수집 배치, 화면과 독립적인 데이터 조회, 세션 기준 OHLCV 리샘플링
+- [수동 봉 리플레이](docs/BAR-REPLAY.md): 호스트 데이터 snapshot의 공개된 prefix만 표시하며, 자동 재생 없이 step/seek합니다.
 - 데이터 소유권과 검증 규칙을 명시한 차트 구성·도형·지표 설정 저장
 
 코어와 웹 렌더러에는 외부 npm 런타임 의존성이 없습니다. React는 `/react`를 사용할 때만 필요한 선택형 peer입니다. 시세 공급자 연결, 거래소 캘린더와 주문 실행은 호스트 앱이 담당합니다.
@@ -30,12 +31,15 @@ npm run demo
 
 같은 서버의 다른 예제:
 
+- [수동 봉 리플레이](http://127.0.0.1:5173/examples/web/bar-replay.html): 명시적 step/seek, 공개된 prefix 데이터와 지표.
+- [명시적 기준 상대 변화](http://127.0.0.1:5173/examples/web/comparison.html): 예제 내부의 signed percent change, 정확한 시각 정렬과 원시 값 출처.
 - [독립 가격축](http://127.0.0.1:5173/examples/web/axes.html)
 - [금융 좌표·시간 정렬](http://127.0.0.1:5173/examples/web/financial.html)
 - [세션 분석·사용자 모듈](http://127.0.0.1:5173/examples/web/analysis.html)
 - [차트 간 시간 커서 연결](http://127.0.0.1:5173/examples/web/linked-cursors.html)
 - [시간 범위 연결 예제](http://127.0.0.1:5173/examples/web/linked-ranges.html): 저장된 봉 시간으로 뷰 범위를 동기화합니다. [API 계약](docs/TIME-RANGE.md).
 - [도형 그룹 선택과 일괄 편집](http://127.0.0.1:5173/examples/web/drawing-groups.html)
+- [수동 데이터 수집 큐](http://127.0.0.1:5173/examples/web/ingestion-queue.html): 합성 데이터의 수락·drain·예산 거절·명시적 복구; [사용법](docs/INGESTION-DEMO.md).
 
 테스트는 별도로 실행합니다.
 
@@ -45,6 +49,17 @@ npm test
 ```
 
 직접 차트를 만드는 실행 예제는 [영문 README의 첫 차트 예제](README.md#your-first-chart)에 있습니다. 저장소 상대 경로로 import하므로 npm 게시를 기다릴 필요가 없습니다. 차트를 넣는 요소에는 실제 높이를 지정하세요.
+
+## 실제 실행 예시 화면
+
+2026-10-14 macOS의 Chrome 155.0.8059.79에서 합성 데이터로 실행한 실제 브라우저 캡처입니다. 기준 소스는 `e3284e54`이며, 이후 소스 변경까지 이 화면으로 검증한 것은 아닙니다.
+
+![Chrome에서 실행한 시간 범위 연결 차트](assets/screenshots/web-linked-ranges.png)
+
+![Undo 후 실제 도형 그룹 예제 화면](assets/screenshots/web-drawing-groups.png)
+
+[플랫폼별 화면과 실행 방법](docs/EXAMPLE-SCREENSHOTS.md)에서 커서 연결 예제와 React·macOS·iOS·Android 실행 경로를 확인할 수 있습니다. 검증된 네이티브·React 전용 스크린샷은 보존되어 있지 않아 해당 상태와 필요한 실행 환경을 명시했습니다. 브라우저 화면을 네이티브 SDK 실행 화면으로 표시하지 않습니다.
+
 
 ## 앱에서 사용하기
 
@@ -120,11 +135,15 @@ Canvas가 기본 렌더러입니다. `renderer: 'webgl2'`로 GPU 경로를 선�
 - [지표 설정 변경](docs/INDICATOR-PARAMETERS.md) · [비동기 설정 변경](docs/ASYNC-INDICATOR-PARAMS.md) · [사용자 모듈](docs/INDICATOR-MODULES.md)
 - [OHLCV 리샘플링](docs/RESAMPLING.md) · [비동기 리샘플링](docs/ASYNC-RESAMPLING.md)
 - [아키텍처](docs/ARCHITECTURE.md) · [렌더 레이어](docs/RENDER-LAYERS.md)
+- [공유 모델 새로 그리기](docs/SHARED-MODEL-REFRESH.md): 하나의 입력 주체, 공유 이력과 명시적인 sibling redraw.
+- [스타일 전용 도형 프리셋](docs/DRAWING-STYLE-PRESETS.md): 호스트 소유 레지스트리와 선택형 패널.
 - [현재 검증 범위](docs/PUBLIC-VALIDATION.md) · [기여 가이드](CONTRIBUTING.md)
 
 일부 상세 문서에는 이전 버전 실행 기록과 Aster 이름이 남아 있습니다. 현재 검증 요약에서 과거 결과와 이번 프리뷰의 검증 범위를 구분합니다.
 
 ## 검증 범위와 한계
+
+2026-10-18 소스 `381fb00fc41c49aadfb72f45fb0c0a66f500d62c`에서 **Node 4,870/4,870**, ESM 구문 513개, strict TypeScript 5.9.3 및 offline packed-consumer 검사를 통과했습니다. cloud Node/모델링된 호스트 결과이며 새 브라우저·네이티브 SDK 실행을 뜻하지 않습니다. [날짜별 검증 기록](docs/PUBLIC-VALIDATION.md)에서 범위와 이전 실패를 구분합니다.
 
 공개 이름 변경 전 Linux/Node 전체 테스트는 **2,552개 중 2,551개 통과**했습니다. 한 dry-run CLI가 15초 watchdog 제한에 걸렸고, 같은 파일을 수정 없이 단독 재실행했을 때는 **131/131 통과**했습니다. 전체 실행에서 발생한 실패 원인은 해결되지 않았으므로 전체 통과로 표기하지 않습니다.
 
@@ -143,3 +162,5 @@ TSC_PATH=/absolute/path/to/typescript/lib/tsc.js npm run check:package
 ## 라이선스
 
 BaroChart는 [Apache License 2.0](LICENSE)으로 제공합니다. 귀속과 별도 라이선스 구성 요소는 [NOTICE](NOTICE)와 [라이선스·출처](docs/LICENSING.md)를 확인하세요. npm registry 배포 준비 전까지 패키지의 `private: true`를 유지합니다.
+
+웹 UI / UX: [선택형 도구 모음과 입력 설정](docs/WEB-CUSTOMIZATION.md), [커스터마이징 데모](examples/web/customization.html). 색상·글자·도구 순서/위치·간격·입력 켜기/끄기·패널 비중/축 위치를 조절합니다. 단축키 재지정, 패널 도킹, UI 설정 영구 저장과 네이티브 UI 동등 지원은 포함하지 않습니다.

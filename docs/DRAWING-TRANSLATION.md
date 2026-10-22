@@ -6,10 +6,11 @@ Both finite deltas are required. Supply a dense plain array of 1–128 distinct 
 
 All selected drawings must be unlocked, exist, and share the same `(panel, axisId ?? null, seriesId ?? null)` binding. That binding must still reference existing panel/axis/series metadata. Different series are rejected even on the same axis: raw price units cannot be inferred to be interchangeable. No layout, indicator or formatter computation is needed for this validation.
 
-All 14 drawing types move by transforming every stored anchor:
+All 16 drawing types move by transforming every stored anchor:
 
 - `time += deltaTimeMs`, preserving fractional timestamps and raw calendar gaps; no session snapping or nearest-bar conversion.
 - `price += deltaPrice` in the bound axis's raw units; finite prices and timestamps within ±8,640,000,000,000,000 milliseconds are required.
+- Position drawings additionally retain strict level ordering and positive extent; Float64 collapse/overflow rejects the entire group. See [position drawings](POSITION-DRAWINGS.md).
 - Measurement and Fibonacci geometry remains derived from the translated anchors. Type, text, style, binding and selected ID remain unchanged.
 
 An active controller gesture or manual drawing transaction rejects the call. This first version does not implicitly cancel either. Missing, locked, mixed-binding, malformed or overflowing candidates reject the entire group before publication. Validated zero deltas (including −0) and changes rounded away by Float64 are no-ops. Locked drawings still reject a zero-delta call. A no-op preserves undo, redo, selection and notification count.

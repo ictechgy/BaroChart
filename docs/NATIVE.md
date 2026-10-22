@@ -4,6 +4,18 @@
 
 코어는 같은 ECMAScript 소스입니다. Apple은 OS JavaScriptCore에서, Android는 NDK로 컴파일한 QuickJS에서 실행합니다. 렌더러는 JSON 장면을 CoreGraphics 또는 Android Canvas/Skia에 제출합니다. 웹페이지·WKWebView·Android WebView를 사용하지 않습니다. 웹 Canvas/WebGL2를 WebView에 넣는 것은 별도 통합 경로이며 이번 네이티브 검증으로 계산하지 않습니다.
 
+SwiftPM과 Android 빌드는 저장소의 `native/Resources/aster-core.js`를 기본으로
+포함합니다. 코어나 bridge 변경 후에는 다음 명령으로 이 생성 파일도 갱신하세요.
+이 명령은 JavaScript만 생성하며 Swift/Android SDK를 컴파일하지 않습니다.
+
+```sh
+node scripts/build-native.mjs --bundle-only --output native/Resources/aster-core.js
+node --test test/native-resource-freshness.test.mjs
+```
+
+일반 Node 테스트에서도 생성 결과와 저장된 파일의 바이트 일치를 검사합니다.
+VM/독립 QuickJS 검사 통과는 실제 JavaScriptCore, JNI, SDK 또는 기기 검증이 아닙니다.
+
 ## Apple
 
 설치된 Swift 6.4/Xcode, iOS 27 SDK/runtime, macOS arm64를 사용했습니다. Swift Package는 macOS13/iOS17 target입니다. 지원 OS 선언은 모든 버전의 실행 검증을 뜻하지 않습니다.

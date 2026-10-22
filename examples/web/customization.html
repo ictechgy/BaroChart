@@ -1,0 +1,22 @@
+<!doctype html><html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BaroChart UI / UX customization</title><link rel="stylesheet" href="./customization.css"></head><body>
+<main id="customization-demo" data-theme="dark" data-placement="left" data-density="comfortable">
+<a href="./">← 기본 데모</a><h1>내 차트 UI / UX</h1>
+<p>웹 호스트용 선택 기능입니다. 기본 데모는 그대로이며, 자동 복원하지 않으므로 새로고침하면 초기화됩니다. 입력·도구 모음만 아래 버튼으로 명시적으로 저장하고 불러올 수 있습니다. 도형 저장 파일에는 UI 설정이 포함되지 않습니다.</p>
+<details open><summary>커스터마이징 설정</summary>
+<div class="settings-grid">
+<fieldset><legend>모양</legend><label>프리셋 <select id="preset"><option value="dark">다크</option><option value="light">라이트</option></select></label>
+<div id="colors"></div><label>차트 글자 크기 <select id="font-size"><option>10</option><option selected>12</option><option>14</option><option>16</option><option>20</option><option>24</option></select> px</label><button id="reset-appearance" type="button">모양만 초기화</button></fieldset>
+<fieldset><legend>도구 모음</legend><label>위치 <select id="placement"><option value="left">왼쪽</option><option value="top">위쪽</option><option value="right">오른쪽</option></select></label><label>간격 <select id="density"><option value="comfortable">편안하게</option><option value="compact">촘촘하게</option></select></label><label>구성 <select id="tool-set"><option value="basic">기본</option><option value="analysis">분석</option><option value="all">모든 도구</option><option value="custom" disabled>저장한 사용자 구성</option></select></label><p>아래 목록에서 표시 여부와 순서를 조정하세요. 선택 / 팬은 항상 유지됩니다.</p><div id="tool-choices"></div></fieldset>
+<fieldset><legend>입력 동작</legend><label>기기 프리셋 적용 <select id="device-preset"><option value="" selected>선택…</option><option value="desktop">데스크톱</option><option value="mobile">모바일</option></select></label><p>모바일은 24px 선택 반경·44px 최소 버튼 높이·휠 줌 꺼짐을 사용합니다. 기기를 자동 감지하지 않습니다.</p><label><input id="pointer" type="checkbox" checked> 포인터 · 드래그 · 핀치</label><label><input id="wheelZoom" type="checkbox" checked> 휠 줌</label><label><input id="keyboardShortcuts" type="checkbox" checked> 차트 단축키</label><label>선택 허용 거리 <input id="hitTolerancePx" type="number" min="1" max="32" step="1" value="8"> px</label><p>끄면 해당 입력을 소비하지 않습니다. API와 도구 모음은 계속 사용할 수 있으며, 별도의 데이터 탐색 모드는 단축키 설정과 독립적입니다.</p></fieldset>
+<fieldset><legend>차트 패널</legend><label>가격 패널 비중 <input id="price-weight" type="number" min="0.5" max="8" step="0.5" value="3.5"></label><label>거래량 패널 비중 <input id="volume-weight" type="number" min="0.5" max="8" step="0.5" value="1"></label><label>가격 축 위치 <select id="axis-side"><option value="right">오른쪽</option><option value="left">왼쪽</option></select></label><p>패널 높이 비율과 축 위치만 바꿉니다. 패널 드래그 재배치나 네이티브 UI 설정은 아닙니다.</p></fieldset>
+</div></details>
+<p><label><input id="show-navigator" type="checkbox"> 선택형 navigator 표시</label> 전체 구간의 종가 표본과 현재 범위를 보여줍니다. 최소 범위는 기존 차트의 10봉 규칙을 따릅니다.</p>
+<p><label><input id="show-trade-markers" type="checkbox"> 외부 tradeID 표시 예시</label> 합성 데이터의 표시 전용 마커이며 클릭하면 호스트 콜백에 ID만 전달합니다. 주문·체결 수집·저널 저장은 하지 않습니다.</p>
+<p><label><input id="show-overlays" type="checkbox"> 선택형 overlay slots 예시 표시</label> 고정 모서리 슬롯이며 가격·시간 앵커나 자유 도킹이 아닙니다.</p>
+<p><button id="save-ui" type="button">입력·도구 모음 저장</button> <button id="load-ui" type="button">입력·도구 모음 불러오기</button> 이 브라우저의 로컬 저장소를 사용합니다. 색상·패널·위치·드로잉·데이터는 이 버튼으로 저장하지 않습니다.</p>
+<p id="customization-status" role="status" aria-live="polite">준비 중…</p>
+<div id="customization-workspace"><aside id="customization-toolbar" aria-label="도구 모음"></aside><div id="customization-chart"></div></div>
+<div id="customization-navigator"></div>
+<p>도구는 Tab으로 이동합니다. 차트에 포커스하면 화살표 팬, +/− 줌, Esc 취소, Ctrl/Cmd+Z 되돌리기를 사용할 수 있습니다. 임의 색상은 대비를 자동 보정하지 않으므로 직접 확인하세요.</p>
+<p>새 컨트롤은 Node의 모의 DOM으로 검증했습니다. 실제 브라우저 레이아웃·터치·스크린 리더 검증은 아직 수행하지 않았습니다.</p>
+</main><script type="module" src="./customization.mjs"></script></body></html>

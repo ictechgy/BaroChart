@@ -10,6 +10,8 @@
 
 `InteractionController.down(id,x,y,hitTolerance=8)`은 1~32 논리 픽셀의 반경을 받을 수 있습니다. 기존 웹/마우스 기본값은 8입니다. UIKit 손가락은 22pt, Android finger는 24dp로 호출합니다. 시각적 손잡이 크기와 hit 영역은 별개이며, 겹친 선택 도형 손잡이는 가장 가까운 점을 선택합니다. 텍스트 도형의 몸체 선택도 현재 drawing/theme font 영역을 사용합니다. 실제 시스템 입력과 controller 직접 호출은 검증 보고서에서 구분합니다.
 
+굵은 선의 몸체 선택 반경은 중심선 기준 `max(hitTolerance, strokeWidth / 2)`입니다. 따라서 폭 50의 몸체는 중심선에서 25 논리 픽셀까지 선택되며, 기본 반경 8에서 폭 16 이하의 기존 동작은 같습니다. 후보 영역 검사에도 같은 반경을 사용합니다. 선택 손잡이와 텍스트는 기존 반경을 유지하고, 패널 밖 선택·숨겨진 축·잠금·겹침 순서 정책도 그대로입니다. 이는 renderer별 cap/anti-alias 픽셀 마스크 판정이 아니며, 타원의 기존 근사 거리 계산도 유지합니다. 새 회귀는 core/controller 및 생성 native bundle VM에서 검증했으며 실제 장치 입력 검증은 별도입니다.
+
 UIKit의 `adjustsFontForContentSizeCategory`, Android의 `setSystemFontScaleEnabled`는 기본 false인 opt-in입니다. 호출자 글꼴을 기준으로 플랫폼 배율을 적용하며 scene에 전달된 논리 글꼴을 renderer가 다시 확대하지 않습니다. disable/detach는 여전히 해당 뷰가 소유하는 적용값일 때만 원래 글꼴을 복원합니다. 사용자 theme 변경은 새 기준이 됩니다. 원시 네이티브 엔진과 interactive view의 thread/ownership 제약은 [Swift SDK](SWIFT-SDK.md), [Android SDK](ANDROID-SDK.md)를 참조하세요.
 
 코어 회귀 검증:

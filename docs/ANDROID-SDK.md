@@ -1,5 +1,9 @@
 # Android AAR와 Kotlin 소비 앱
 
+Opt-in [unchanged batch overloads](NATIVE-BATCH-UNCHANGED.md) preserve default notifications and expose exact final-value deduplication.
+
+Opt-in native bar selection and explicit value reads are available through four experimental methods; see [native data exploration](NATIVE-DATA-EXPLORATION.md). No automatic keyboard or platform accessibility wiring is included.
+
 The thin `deleteDrawings` method forwards explicit IDs using the ordinary checked
 command and existing mutation notification. See [atomic group deletion](DRAWING-DELETE.md)
 for undo, failure and current platform-verification limits.

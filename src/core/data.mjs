@@ -1,4 +1,11 @@
+import {snapshotDataBatchOptions} from './data-batch-options.mjs';
 import {RESOURCE_LIMITS,sizeLimit} from './contracts.mjs';
+// Capture typed-array metadata/copy intrinsics, avoiding caller length getters
+// and subarray/constructor species during the column bulk-copy path.
+const dataColumnPrototype=Object.getPrototypeOf(Float64Array.prototype);
+const dataColumnSlot=key=>Object.getOwnPropertyDescriptor(dataColumnPrototype,key).get;
+const dataColumnLength=dataColumnSlot('length'),dataColumnBuffer=dataColumnSlot('buffer'),dataColumnOffset=dataColumnSlot('byteOffset'),dataColumnTag=dataColumnSlot(Symbol.toStringTag),dataColumnSet=Float64Array.prototype.set;
+const dataColumnConstructors=new Map([Float64Array,Float32Array,Int32Array,Uint32Array,Int16Array,Uint16Array,Int8Array,Uint8Array,Uint8ClampedArray,...(typeof globalThis.Float16Array==='function'?[globalThis.Float16Array]:[])].map(Type=>[Type.name,Type]));
 let storeSerial=0;
 export const FIELDS = ['time', 'open', 'high', 'low', 'close', 'volume'];
 function readBar(bar,target={}) {if(!bar||typeof bar!=='object')throw new TypeError('OHLCV object required');for(const k of FIELDS)target[k]=bar[k];return target;}
@@ -91,20 +98,45 @@ export class BarStore {
   #internalListeners = new Set();
   constructor(bars = [], {timeframeMs = 60000, timeOrigin = 0,maxBars=RESOURCE_LIMITS.maxBars,onListenerError=null} = {}) { if (!Number.isFinite(timeframeMs) || timeframeMs <= 0 || !Number.isFinite(timeOrigin)||onListenerError!==null&&typeof onListenerError!=='function') throw new RangeError('Virtual timeframe/origin or listener error callback');sizeLimit(maxBars,RESOURCE_LIMITS.maxBars,'Bar limit');this.geometryIdentity=++storeSerial;this.maxBars=maxBars;this.onListenerError=onListenerError;this.listenerErrors=[];this.pendingChanges=[];this.notifying=false; this.timeframeMs = timeframeMs; this.timeOrigin = timeOrigin; this.listeners = new Set(); this.version = 0;this.timeVersion=0; this.setData(bars); }
   setData(bars) {
-    if(!Array.isArray(bars))throw new TypeError('OHLCV array required');sizeLimit(bars.length,this.maxBars,'Bar count');
-    let capacity=16;while(capacity<bars.length)capacity*=2;
+    if(!Array.isArray(bars))throw new TypeError('OHLCV array required');const count=bars.length;sizeLimit(count,this.maxBars,'Bar count');
+    let capacity=16;while(capacity<count)capacity*=2;
     const columns=Object.fromEntries(FIELDS.map(k=>[k,new Float64Array(capacity)])),scratch={};
     let previous = -Infinity;
-    for(let i=0;i<bars.length;i++){readBar(bars[i],scratch);validateBar(scratch,previous);previous=scratch.time;for(const k of FIELDS)columns[k][i]=scratch[k];}
-    const index=new RangeIndex(bars.length,columns.low,columns.high,columns.volume,capacity);
-    Object.assign(this,{length:bars.length,capacity,columns,index});this.changed(0,'reset');
+    for(let i=0;i<count;i++){readBar(bars[i],scratch);validateBar(scratch,previous);previous=scratch.time;for(const k of FIELDS)columns[k][i]=scratch[k];}
+    // Row/index getters may mutate the input array. Never expand the admitted
+    // work or publish a different count after the initial capacity/budget check.
+    if(bars.length!==count)throw new RangeError('OHLCV array length changed during snapshot');
+    const index=new RangeIndex(count,columns.low,columns.high,columns.volume,capacity);
+    Object.assign(this,{length:count,capacity,columns,index});this.changed(0,'reset');
   }
   // Fast column load avoids a million transient bar objects. Validates atomically.
-  setColumns(input, length = input?.time?.length, event = {kind: 'reset'}) {
+  setColumns(input, length, event = {kind: 'reset'}) {
+    if(length!==undefined)sizeLimit(length,this.maxBars,'Bar count');
+    const sources=FIELDS.map(k=>input?.[k]);
+    if(length===undefined){const time=sources[0];length=Array.isArray(time)?time.length:ArrayBuffer.isView(time)?dataColumnLength.call(time):undefined;}
     sizeLimit(length,this.maxBars,'Bar count');
-    if(FIELDS.some(k=>!input?.[k]||!(Array.isArray(input[k])||ArrayBuffer.isView(input[k])&&!(input[k] instanceof DataView))||input[k].length<length))throw new TypeError('Numeric column arrays required');
+    const types=sources.map(source=>{
+      if(Array.isArray(source)){if(source.length<length)throw new TypeError('Numeric column arrays required');return null;}
+      if(!ArrayBuffer.isView(source))throw new TypeError('Numeric column arrays required');
+      const Type=dataColumnConstructors.get(dataColumnTag.call(source));
+      if(!Type||dataColumnLength.call(source)<length)throw new TypeError('Numeric column arrays required');return Type;
+    });
     let capacity=16;while(capacity<length)capacity*=2;
-    const columns=Object.fromEntries(FIELDS.map(k=>{const a=new Float64Array(capacity),source=input[k];if(ArrayBuffer.isView(source))a.set(Float64Array.prototype.subarray.call(source,0,length));else for(let i=0;i<length;i++){const value=source[i];if(typeof value!=='number'||!Number.isFinite(value))throw new TypeError('Numeric column values required');a[i]=value;}return [k,a];}));
+    const columns=Object.fromEntries(FIELDS.map((k,j)=>{
+      const source=sources[j],a=new Float64Array(capacity);
+      if(Array.isArray(source)){
+        if(source.length<length)throw new TypeError('Numeric column arrays required');
+        for(let i=0;i<length;i++){const value=source[i];if(typeof value!=='number'||!Number.isFinite(value))throw new TypeError('Numeric column values required');a[i]=value;}
+      }else{
+        const Type=types[j];
+        if(dataColumnLength.call(source)<length)throw new TypeError('Numeric column arrays required');
+        // A fresh built-in view preserves the captured source's actual type and
+        // logical byte range without consulting its constructor or species.
+        const view=new Type(dataColumnBuffer.call(source),dataColumnOffset.call(source),length);
+        dataColumnSet.call(a,view);
+      }
+      return [k,a];
+    }));
     let previous = -Infinity;
     // Hot input path validates columns directly; no per-bar object allocation.
     const {time, open, high, low, close, volume} = columns;
@@ -157,8 +189,8 @@ export class BarStore {
     const current=()=>{
       if(this.columns!==source.columns||this.index!==source.index||this.length!==source.length||this.capacity!==source.capacity||this.maxBars!==source.maxBars||FIELDS.some((key,i)=>this.columns[key]!==arrays[i])||this.timeVersion!==source.timeVersion||this.version!==source.version){const error=new Error('Data batch source changed during snapshot; stale transaction discarded');error.code='SOURCE_CHANGED';throw error;}
     };
-    const limits=batchRecord(options,['maxBars','maxStoreBytes'],'Data batch options',[]),copied=batchEvents(events);
-    if(beforeNotify!==null&&typeof beforeNotify!=='function')throw new TypeError('Internal data batch ledger function required');
+    const limits=snapshotDataBatchOptions(options),copied=batchEvents(events);
+    if(beforeNotify!==null&&(typeof beforeNotify!=='function'||limits.skipUnchanged===true))throw new TypeError('Internal data batch ledger requires unconditional publication');
     current();
     const maxBars=batchBudget(limits.maxBars===undefined?source.maxBars:limits.maxBars,source.maxBars,'bar'),maxBytes=batchBudget(limits.maxStoreBytes===undefined?96*RESOURCE_LIMITS.maxBars:limits.maxStoreBytes,96*RESOURCE_LIMITS.maxBars,'store byte');
     const appended=copied.reduce((n,event)=>n+Number(event.kind==='append'),0),length=source.length+appended;
@@ -194,11 +226,16 @@ export class BarStore {
       for(let p=leaf>>1;p;p>>=1){const l=p*2,r=l+1,left=nodes.get(l),right=nodes.get(r);stage(p,Math.min(left?left.min:index.min[l],right?right.min:index.min[r]),Math.max(left?left.max:index.max[l],right?right.max:index.max[r]),(left?left.sum:index.sum[l])+(right?right.sum:index.sum[r]));}
       values.set(operation.index,b);
     }
+    // All intermediate rows, capacity limits and tree arithmetic were validated.
+    // Compare the final replacements, never infer freshness or collapse events.
+    let unchanged=limits.skipUnchanged===true&&appended===0;
+    if(unchanged)for(const [i,b] of values)if(FIELDS.some(key=>!Object.is(source.columns[key][i],b[key]))){unchanged=false;break;}
+    if(unchanged){current();return Object.freeze({events:copied.length,appended,from,to,version:source.version,length,capacity,bytes:96*capacity,unchanged:true});}
     let columns=source.columns;
     if(capacity!==source.capacity){
       columns=Object.fromEntries(FIELDS.map(key=>{const array=new Float64Array(capacity);Float64Array.prototype.set.call(array,source.columns[key]);return [key,array];}));
     }
-    const receipt=Object.freeze({events:copied.length,appended,from,to,version:source.version+1,length,capacity,bytes:96*capacity});
+    const receipt=Object.freeze({events:copied.length,appended,from,to,version:source.version+1,length,capacity,bytes:96*capacity,...(limits.skipUnchanged===true?{unchanged:false}:{})});
     current();
     // Validation and capacity allocation finish before this guarded publication;
     // the writes below use only owned rows, tree nodes and numeric typed arrays.
@@ -218,7 +255,9 @@ export class BarStore {
   }
   update(i, bar) {
     if (!Number.isInteger(i) || i < 0 || i >= this.length) throw new RangeError('Bar index');
+    const version=this.version,columns=this.columns,index=this.index,length=this.length;
     bar=readBar(bar);validateBar(bar);
+    if(this.version!==version||this.columns!==columns||this.index!==index||this.length!==length)throw new Error('Bar store changed during update snapshot');
     if (bar.time !== this.columns.time[i]) throw new RangeError('An edit cannot change time; reload to insert/reorder');
     this.index.update(i,bar.low,bar.high,bar.volume);for(const k of FIELDS)this.columns[k][i]=bar[k];this.changed(i,'update');
   }

@@ -55,7 +55,7 @@ export function buildScene(model, width, height, {crosshair = true, drawings = t
           }
           const x=layout.x((a+b-1)/2+(s.offset??0)),v=values[end-1];
           if(s.type==='histogram')histogram(x,v,Math.max(1,(p.right-p.left)/count*.8));
-          else{const q=index.query(a,end);path.push(x,axis.y(v));if(b-a>1&&q.max!==q.min)coords.push(x,axis.y(q.min),x,axis.y(q.max));}
+          else{const q=b-a>1?index.query(a,end):null;path.push(x,axis.y(v));if(q&&q.max!==q.min)coords.push(x,axis.y(q.min),x,axis.y(q.max));}
         }
         flush();
         if (rects.length) commands.push({op: 'rects', coords: rects, color: s.color, clip});

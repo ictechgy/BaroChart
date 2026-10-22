@@ -15,3 +15,7 @@ export {portableSessionCalendar} from './session-studies.mjs';
 export {IngestionError} from './ingestion-error.mjs';
 
 export {saveWorkspace} from './workspace.mjs';
+export {saveBoundDrawings,loadBoundDrawings} from './bound-drawings.mjs';
+
+export {DrawingStylePresets} from './drawing-style-presets.mjs';
+export {BarReplay} from './bar-replay.mjs';

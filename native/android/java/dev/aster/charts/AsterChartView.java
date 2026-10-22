@@ -46,6 +46,8 @@ public final class AsterChartView extends View {
     public AsterChartView(Context context,AsterEngine engine){super(context);this.engine=engine;density=getResources().getDisplayMetrics().density;touchSlop=ViewConfiguration.get(context).getScaledTouchSlop();baseBitmapPaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.SRC));setFocusable(true);setClickable(true);setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_YES);setContentDescription("Financial chart");}
     private static int color(String s){if(s.matches("#[0-9a-fA-F]{8}"))s="#"+s.substring(7,9)+s.substring(1,7);return Color.parseColor(s);}
     public void fire(String name,Object... args){inputDepth++;try{engine.invoke(name,args);}catch(Exception e){lastError=e.toString();}finally{inputDepth--;}invalidate();}
+    public void setCrosshairSnap(JSONObject options){try{engine.setCrosshairSnap(options);lastError=null;}catch(Exception e){lastError=e.toString();}}
+    public void setDrawingMagnet(JSONObject options){try{engine.setDrawingMagnet(options);lastError=null;}catch(Exception e){lastError=e.toString();}}
     public void setTool(String tool){try{engine.setTool(tool);lastError=null;}catch(Exception e){lastError=e.toString();}}
     /** Opt in to system fontScale by updating the engine's logical theme font.
      * One View may own scaling per engine. A caller theme font becomes the new base.

@@ -66,3 +66,7 @@ host는 기본 높이 320px인 div입니다. style/className/HTML 속성을 전�
 SSR import/render는 모델·DOM을 생성하지 않고 빈 host markup을 반환합니다. plain ReactDOM의 서버 렌더와 실제 브라우저 hydration을 검사합니다. `'use client'` 표시가 있지만 Next.js/RSC 전체 실행이나 모든 SSR framework를 검증한 것은 아닙니다.
 
 이번 생략·재제어·target 교정·완료 observer·실제 Worker 결과는 0.2.9 웹 QA (not included in this source distribution), 보존된 실제 tarball 소비자의 버전·StrictMode·스트리밍·실패·정리 결과는 0.2.8 React QA (not included in this source distribution), DOM 없는 타입·tree shaking·optional peer·worker와 bundle bytes는 패키지 검증 (not included in this source distribution)에 기록합니다. Vite 기본 worker와 esbuild 별도 worker 출력은 서로 다른 통합 방법입니다. 이번 native transaction/idle 검사도 각 Apple/Android fixture에서 별도로 실행합니다. React 통과를 native 검사로 합산하지 않습니다.
+
+## Live web input preferences
+
+`options.interaction` synchronizes through `setInteractionOptions` without rebuilding the renderer or owned model. See [web customization](WEB-CUSTOMIZATION.md) for defaults, strict validation and omitted-key semantics. This change has modeled hooks/DOM tests only, not a new actual React/StrictMode/browser run. The setter is not a read-only boundary, and keyboard switches do not remap shortcuts.

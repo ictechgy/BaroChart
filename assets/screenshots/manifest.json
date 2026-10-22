@@ -1,0 +1,54 @@
+{
+  "schema": "barochart.execution-screenshots",
+  "version": 1,
+  "images": [
+    {
+      "file": "web-linked-ranges.png",
+      "sha256": "e5303fb92e24a28eefeb1443ab8c5e69ca82632968913c7f5fe4ed3fdd43ebb3",
+      "bytes": 93424,
+      "width": 1280,
+      "height": 1000,
+      "example": "examples/web/linked-ranges.html",
+      "sourceCommit": "e3284e54b638b8a373311ef3788fcff003f6477a",
+      "captureDateUTC": "2026-10-14",
+      "platform": "macOS browser",
+      "browser": "Google Chrome 155.0.8059.79",
+      "mode": "isolated headless, actual DOM and Canvas rendering",
+      "data": "synthetic",
+      "imageProcessing": "none; original PNG bytes",
+      "scope": "Historical verified browser example after BFCache restoration; not latest-source, native SDK, assistive-technology or performance validation"
+    },
+    {
+      "file": "web-drawing-groups.png",
+      "sha256": "5161c135cfd577c32dc39d4e709173925be307b069082be5621328f8a7b03599",
+      "bytes": 176838,
+      "width": 1280,
+      "height": 1000,
+      "example": "examples/web/drawing-groups.html",
+      "sourceCommit": "e3284e54b638b8a373311ef3788fcff003f6477a",
+      "captureDateUTC": "2026-10-14",
+      "platform": "macOS browser",
+      "browser": "Google Chrome 155.0.8059.79",
+      "mode": "isolated headless, actual DOM and Canvas rendering",
+      "data": "synthetic",
+      "imageProcessing": "none; original PNG bytes",
+      "scope": "Historical verified browser example after BFCache restoration; not latest-source, native SDK, assistive-technology or performance validation"
+    },
+    {
+      "file": "web-linked-cursors.png",
+      "sha256": "d677bda4142af91be01a63ea7e0b06f42ea1cfce11cf9c19c0f6682c6024cf53",
+      "bytes": 134504,
+      "width": 1280,
+      "height": 1000,
+      "example": "examples/web/linked-cursors.html",
+      "sourceCommit": "e3284e54b638b8a373311ef3788fcff003f6477a",
+      "captureDateUTC": "2026-10-14",
+      "platform": "macOS browser",
+      "browser": "Google Chrome 155.0.8059.79",
+      "mode": "isolated headless, actual DOM and Canvas rendering",
+      "data": "synthetic",
+      "imageProcessing": "none; original PNG bytes",
+      "scope": "Historical verified browser example after BFCache restoration; not latest-source, native SDK, assistive-technology or performance validation"
+    }
+  ]
+}

@@ -107,3 +107,14 @@ export function validateQuickjsIndicatorReentryResults(results){
  // Retain the independent host normal/OOM/interrupt cleanup gate in this mode.
  validateQuickjsCloudResults([{case:'workspace-quickjs',passed:true,checks:130,iterations:100,scenarios:[...QUICKJS_WORKSPACE_SCENARIOS]},...results.slice(1)]);return results;
 }
+
+export const QUICKJS_NATIVE_CONTROLS_SCENARIOS=Object.freeze([
+ 'off and explicit action validation','navigation and refresh compute zero','explicit read and refreshed text',
+ 'unchanged receipt preserves owner and version','changed volume replaces and notifies once',
+ 'whole batch validates before unchanged admission','signed zero remains distinct','append anchor and legacy publication',
+ 'gesture rejection preserves off state','cleanup preserves borrowed buffers'
+]);
+export function validateQuickjsNativeControlsResults(results){
+ const r=results?.[0];if(r?.case!=='native-controls-quickjs'||r.passed!==true||r.checks!==23||!Array.isArray(r.scenarios)||r.scenarios.length!==QUICKJS_NATIVE_CONTROLS_SCENARIOS.length||new Set(r.scenarios).size!==r.scenarios.length||QUICKJS_NATIVE_CONTROLS_SCENARIOS.some(s=>!r.scenarios.includes(s)))throw new TypeError('QuickJS native controls coverage');
+ validateQuickjsCloudResults([{case:'workspace-quickjs',passed:true,checks:130,iterations:100,scenarios:[...QUICKJS_WORKSPACE_SCENARIOS]},...results.slice(1)]);return results;
+}

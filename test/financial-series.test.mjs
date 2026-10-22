@@ -38,7 +38,7 @@ test('all drawing anchors and geometry roundtrip on log/percent/inverted axes wi
  for(const scale of ['log','percent'])for(const inverted of [false,true]){
   const model=new ChartModel({store:new BarStore(bars),panels:[{id:'price',scale,inverted,base:100,range:[50,200],padding:0}]}),api=new ChartAPI(model);
   model.addSeries({id:'price',type:'candles',panel:'price'});model.fit();
-  for(const type of DRAWING_TYPES){const points=Array.from({length:drawingPointCount(type)},(_,i)=>({time:bars[0].time+(bars[1].time-bars[0].time)*(i+1)/4,price:80+i*30}));api.addDrawing({id:type,type,points,...(type==='text'?{text:'휴장 구간 / 한글 🚀'}:{})});}
+  for(const type of DRAWING_TYPES){const points=['longposition','shortposition'].includes(type)?[{time:bars[0].time,price:100},{time:bars[0].time,price:type==='longposition'?90:110},{time:bars[0].time,price:type==='longposition'?120:80},{time:bars[1].time,price:100}]:Array.from({length:drawingPointCount(type)},(_,i)=>({time:bars[0].time+(bars[1].time-bars[0].time)*(i+1)/4,price:80+i*30}));api.addDrawing({id:type,type,points,...(type==='text'?{text:'휴장 구간 / 한글 🚀'}:{})});}
   const layout=createLayout(model,1000,500),saved=api.saveDrawings(),before=model.drawings.items.map(d=>drawingGeometry(d,layout));
   api.loadDrawings(saved);assert.equal(api.saveDrawings(),saved);assert.deepEqual(model.drawings.items.map(d=>drawingGeometry(d,layout)),before);
   for(const d of model.drawings.items)for(const point of d.points){const xy=layout.toScreen(point,'price'),back=layout.fromScreen(xy.x,xy.y,'price');assert.ok(Math.abs(back.time-point.time)<=.001);assert.ok(Math.abs(back.price-point.price)<1e-10);}

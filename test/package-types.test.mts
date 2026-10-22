@@ -28,6 +28,12 @@ import {prepareWorkspaceAsync,type AsyncWorkspaceOptions} from 'barochart/worker
 const workspaceBinding:WorkspaceDatasetBinding={key:'feed/symbol/1m',revision:'1',adjustmentVersion:'1',priceUnit:'USD',adjustment:'raw'};
 const workspaceOptions:AsyncWorkspaceOptions={datasetBinding:workspaceBinding};
 const workspaceDocument:string=saveWorkspace(api,workspaceBinding);
+import {saveBoundDrawings,loadBoundDrawings,type DrawingIdentity} from 'barochart/core';
+const drawingIdentity:DrawingIdentity={symbolId:'TEST',exchange:'VENUE',priceUnit:'USD',timeframe:'1m',adjustment:'raw',adjustmentVersion:'raw-v1'};
+const boundDrawingDocument:string=saveBoundDrawings(api,drawingIdentity);
+const boundDrawingResult:void=loadBoundDrawings(api,boundDrawingDocument,drawingIdentity);
+// @ts-expect-error explicit identity is required
+saveBoundDrawings(api);
 const workspacePrepared:Promise<ChartModel>=prepareWorkspaceAsync(model.store,workspaceDocument,workspaceOptions);
 
 import {TimeCursorGroup,type TimeCursorState} from 'barochart/canvas';
@@ -64,3 +70,61 @@ ranges.dispose();
 new TimeRangeGroup({mode:'view'});
 // @ts-expect-error unknown policy
 new TimeRangeGroup({mode:'automatic',missing:'clip'});
+
+import type {DrawingMagnetOptions as PackageMagnet} from 'barochart/core';
+const packageMagnet:PackageMagnet={mode:'off'};
+input.setDrawingMagnet(packageMagnet);api.setDrawingMagnet({mode:'strong'});
+
+import type {CrosshairSnapOptions as PackageCursor,CrosshairSnapshot as PackageCursorSnapshot} from 'barochart/core';
+const packageCursor:PackageCursor={mode:'close'};input.setCrosshairSnap(packageCursor);api.setCrosshairSnap({mode:'free'});
+const packageCursorSnapshot:PackageCursorSnapshot|null=api.crosshairSnapshot(800,600);packageCursorSnapshot?.seriesId?.toUpperCase();
+import type {PositionMetrics as PackagePositionMetrics} from 'barochart/core';
+const packagePositionId=api.addDrawing({type:'shortposition',points:[{time:1,price:100},{time:1,price:105},{time:1,price:90},{time:2,price:100}]});
+const packagePosition:PackagePositionMetrics=api.positionMetrics(packagePositionId);packagePosition.ratio.toFixed(3);
+input.setTool('longposition');
+
+api.setDrawingVisibility('t',false).changed.toFixed();api.setDrawingsVisibility(['t'] as const,true).invalidationFailed.valueOf();
+const hiddenDrawing:Drawing={...drawing,visible:false};void hiddenDrawing;
+// @ts-expect-error installed public visibility contract requires boolean
+api.setDrawingsVisibility(['t'],0);
+
+import type {DrawingDuplicateOptions,DrawingDuplicateReceipt} from 'barochart';
+const copyOptions:DrawingDuplicateOptions={deltaTimeMs:0,deltaPrice:0};
+const copyReceipt:DrawingDuplicateReceipt=api.duplicateDrawings(['t'] as const,copyOptions);
+copyReceipt.created[0].sourceId.toUpperCase();api.duplicateDrawing('t',copyOptions);
+// @ts-expect-error duplicate options cannot omit time delta
+api.duplicateDrawings(['t'],{deltaPrice:0});
+
+import {DrawingStylePresets} from 'barochart/core';
+import {attachDrawingPanel} from 'barochart/canvas';
+const portablePresets=new DrawingStylePresets();portablePresets.set('Portable',{width:2});
+portablePresets.list().map(entry=>entry.style.color);portablePresets.load(portablePresets.save(),{replace:true});
+void attachDrawingPanel;
+
+import {BarReplay as PackageBarReplay} from 'barochart/core';
+import type {BarReplayOptions,BarReplayState} from 'barochart';
+const replayOptions:BarReplayOptions={volume:true,indicators:[{id:'r',kind:'rsi',period:14}]};
+const packageReplay=new PackageBarReplay([],replayOptions),replayState:BarReplayState=packageReplay.snapshot();
+replayState.count.toFixed();packageReplay.frame(800,480).commands.forEach(c=>void c);packageReplay.dispose();
+// @ts-expect-error no arbitrary replay panel configuration
+new PackageBarReplay([],{panels:[]});
+
+import {renderCanvas as renderPackageReplayCanvas} from 'barochart/canvas';
+declare const packageReplayContext:CanvasRenderingContext2D;renderPackageReplayCanvas(packageReplayContext,packageReplay.frame(800,480));
+
+import {attachChartToolbar,type InteractionOptions,type ChartToolbarState} from 'barochart/canvas';
+import {attachChartToolbar as rootToolbar} from 'barochart';
+const webChart=new CanvasChart(document.createElement('div'),model,{interaction:{wheelZoom:false,hitTolerancePx:12}});
+const inputPolicy:Readonly<InteractionOptions>=webChart.setInteractionOptions({pointer:false});
+const tools=attachChartToolbar(document.createElement('div'),webChart,{tools:['select','trendline'],actions:['undo','redo'],orientation:'vertical',density:'compact'});
+const toolbarState:ChartToolbarState=tools.snapshot();toolbarState.tools.map(id=>id.toUpperCase());tools.setOptions({actions:[]});tools.refresh();tools.destroy();void [inputPolicy,rootToolbar];
+// @ts-expect-error interaction switches require booleans
+webChart.setInteractionOptions({wheelZoom:1});
+// @ts-expect-error unsupported shortcut remapping is not part of this contract
+webChart.setInteractionOptions({shortcuts:{undo:'u'}});
+// @ts-expect-error toolbar options use a bounded orientation
+attachChartToolbar(document.body,webChart,{orientation:'diagonal'});
+// @ts-expect-error snapshots cannot be mutated
+inputPolicy.pointer=true;
+// @ts-expect-error tool list snapshots cannot be pushed
+ toolbarState.tools.push('select');

@@ -112,10 +112,10 @@ function checkScene(model, {width = WIDTH, expectedPolicy = model.store.length >
   const info = bucketInfo(model, series, scene, values);
   const expectedCalls = [[info.from, info.to]];
   if (series.type !== 'histogram') for (const b of info.buckets)
-    if (b.finite && b.finite === b.end - b.a) expectedCalls.push([b.a, b.end]);
+    if (b.b-b.a>1 && b.finite && b.finite === b.end - b.a) expectedCalls.push([b.a, b.end]);
   assert.deepEqual(calls, expectedCalls, series.type === 'histogram'
     ? 'histogram must retain only its autoscale extrema query'
-    : 'line/area must retain every finite-bucket extrema query');
+    : 'line/area must retain only multi-row finite-bucket extrema queries');
   assert.deepEqual(scene.commands.filter(c => c.color === COLOR),
     expectedSeriesCommands(model, series, scene, values, info), 'scan-oracle coordinates must remain bit-exact');
   assert.equal(model.seriesData(series).index, index, 'render must reuse the warmed range index');
@@ -196,3 +196,11 @@ test('source histogram stays query-light across current update, correction, thre
     checkScene(model, {expectedPolicy: false});
   } finally { model.dispose(); }
 });
+
+for(const type of ['line','area'])for(const offset of [-3,0,3])for(const scale of ['linear','log','percent'])test(`${type} singleton buckets ${offset}/${scale} skip unused extrema queries`,()=>{
+ const model=fixture(29,type,'finite',offset,false);try{model.series[0].baseline=1;model.setAxis('values',{scale,...(scale==='percent'?{base:1}:{})});model.setSeriesValues('subject',Float64Array.from({length:29},(_,i)=>i<3||i===9||i===11?NaN:i%7+1));const {info}=checkScene(model);assert(info.buckets.every(b=>b.b-b.a===1));}finally{model.dispose();}
+});
+for(const type of ['line','area'])for(const binding of ['raw','indicator'])test(`${type} singleton ${binding} preserves source and warmup geometry`,()=>{const model=fixture(29,type,'finite');try{model.removeSeries('subject');if(binding==='indicator')model.indicators.add('study','sma',{period:5});model.addSeries({id:'subject',type,panel:'price',axisId:'values',color:COLOR,width:1.75,baseline:0,offset:0,...(binding==='indicator'?{indicator:'study'}:{source:'close'})});const {info}=checkScene(model);assert(info.buckets.every(b=>b.b-b.a===1));}finally{model.dispose();}});
+for(const type of ['line','area'])for(const width of [169,170,171])test(`${type} bucket width1/2 boundary at width${width} retains compressed extrema`,()=>{const model=fixture(29,type,'finite');try{const {info}=checkScene(model,{width});assert(info.buckets.some(b=>b.b-b.a===1));assert.equal(info.buckets.some(b=>b.b-b.a>1),width===169);}finally{model.dispose();}});
+
+test('generated native VM skips only single-row line/area queries',async()=>{const vm=await import('node:vm'),{buildNativeBundle}=await import('../scripts/native-core-bundle.mjs'),context=vm.createContext({});vm.runInContext(await buildNativeBundle(),context);const result=vm.runInContext(`(()=>{const out=[];for(const type of ['line','area']){const m=new Aster.ChartModel();m.store.setColumns(Aster.seededColumns(1000));m.addSeries({id:'x',type,panel:'price'});m.setVisibleRange(799.5,999.5);const s=m.series[0],index=m.seriesData(s).index,q=index.query;let single=0,multi=0;index.query=function(a,b){if(b-a===1)single++;else multi++;return q.call(this,a,b);};const scene=Aster.buildScene(m,1200,700);out.push([single,multi,scene.stats.storedBars,m.seriesData(s).index===index]);m.dispose();}return out;})()`,context);assert.deepEqual(JSON.parse(JSON.stringify(result)),[[0,1,1000,true],[0,1,1000,true]]);});

@@ -16,7 +16,7 @@ export class BarStore {
  compactData(options:DataCompactionOptions):DataCompactionReceipt;
  setData(bars:Bar[]):void;setColumns(columns:Columns,length?:number):void;at(index:number):Bar;append(bar:Bar):number;update(index:number,bar:Bar):void;upsert(bar:Bar):void;prepend(bars:Bar[]):void;
  /** Atomic ordered transaction, one notification; no eviction/sorting/deduplication. */
- applyEvents(events:readonly OrderedDataEvent[],options?:{maxBars?:number;maxStoreBytes?:number}):BatchReceipt;
+ applyEvents(events:readonly OrderedDataEvent[],options?:{maxBars?:number;maxStoreBytes?:number;skipUnchanged?:boolean}):BatchReceipt;
  subscribe(fn:(change:DataChange)=>void):()=>void;lowerBound(time:number):number;indexAtTime(time:number):number;timeAtIndex(index:number):number;aggregate(start:number,end:number,maxBuckets:number):Bucket[];
 }
 export interface IndicatorInstance<State=unknown> {step(bar:Readonly<Bar>,index:number):number[];snapshot():State;restore(state:State):void}
@@ -28,9 +28,13 @@ export class IndicatorEngine {
  add(id:string,name:string,params?:Record<string,number|string>):IndicatorResult;get(id:string):IndicatorResult;remove(id:string):void;dispose():void;
 }
 export interface IndicatorResult {outputs:Record<string,Float64Array>;plotOffsets:Record<string,number>;revision:number;computedFrom:number;computedUntil:number}
-export type DrawingType='trendline'|'horizontal'|'fibonacci'|'rectangle'|'ellipse'|'text'|'ray'|'extendedline'|'channel'|'fibextension'|'fibfan'|'fibtimezones'|'freehand'|'measurement';
+export type DrawingType='trendline'|'horizontal'|'fibonacci'|'rectangle'|'ellipse'|'text'|'ray'|'extendedline'|'channel'|'fibextension'|'fibfan'|'fibtimezones'|'freehand'|'measurement'|'longposition'|'shortposition';
 export const DRAWING_TYPES:readonly DrawingType[];
-export interface Drawing {id:string;type:DrawingType;panel:string;axisId?:string|null;seriesId?:string|null;points:Point[];style?:{color?:string;fill?:string;width?:number;font?:string};text?:string;locked?:boolean}
+/** Position points: [entry(start,entry), stop(start,stop), target(start,target), extent(end,entry)]. */
+export interface PositionMetrics {direction:'long'|'short';startTime:number;endTime:number;entry:number;stop:number;target:number;risk:number;reward:number;riskPercent:number|null;rewardPercent:number|null;ratio:number}
+export interface DrawingDuplicateOptions {deltaTimeMs:number;deltaPrice:number}
+export interface DrawingDuplicateReceipt {readonly changed:number;readonly created:readonly {readonly sourceId:string;readonly id:string}[];readonly invalidationFailed:boolean}
+export interface Drawing {id:string;type:DrawingType;panel:string;axisId?:string|null;seriesId?:string|null;points:Point[];style?:{color?:string;fill?:string;width?:number;font?:string};text?:string;locked?:boolean;visible?:boolean}
 export class DrawingStore {
  constructor(options?:{historyLimit?:number;maxDrawings?:number;maxPoints?:number;maxDocumentChars?:number;historyBytes?:number});readonly retainedHistoryBytes?:number;readonly items:Drawing[];selected:string|null;readonly undoStack:Drawing[][];readonly redoStack:Drawing[][];readonly transaction:Drawing[]|null;
  add(drawing:Omit<Drawing,'id'|'panel'> & {id?:string;panel?:string}):string;edit(id:string,patch:Partial<Omit<Drawing,'id'>>):void;remove(id:string|null):boolean;
@@ -41,7 +45,12 @@ export const DARK_THEME:Theme;export const LIGHT_THEME:Theme;
 export interface Panel {id:string;weight?:number;label?:string;scale?:'linear'|'log'|'percent';inverted?:boolean;padding?:number;range?:[number,number];base?:number;precision?:number;formatter?:(value:number)=>string;axisVisible?:boolean;axisSide?:'left'|'right'}
 /** Independent value domain. Formatter callbacks are synchronous-only; async preparation rejects them. */
 export interface Axis {id:string;panel:string;side?:'left'|'right';scale?:'linear'|'log'|'percent';inverted?:boolean;padding?:number;range?:[number,number];base?:number;precision?:number;tickFormat?:'fixed'|'scientific';prefix?:string;suffix?:string;label?:string;visible?:boolean;width?:number;formatter?:(value:number)=>string}
+/** Per-controller pointer aid. Defaults to off, radius 8 logical pixels (1..32). */
+export interface DrawingMagnetOptions {mode:'off'|'weak'|'strong';radiusPx?:number}
 export interface DrawingTarget {panel:string;axisId?:string|null;seriesId?:string|null}
+/** Local pointer snapping, separate from drawing magnet and time-cursor sync. */
+export interface CrosshairSnapOptions {mode:'free'|'close'|'ohlc';target?:DrawingTarget|null}
+export interface CrosshairSnapshot {mode:'free'|'close'|'ohlc';raw:{x:number;y:number};resolved:{x:number;y:number};panel:string;snapped:boolean;reason:'free'|'no-eligible'|'snapped';index:number|null;time:number|null;field:'open'|'high'|'low'|'close'|null;price:number|null;axisId:string|null;seriesId:string|null;storeVersion:number|null}
 export interface CrosshairSeriesValue {id:string;label:string;symbolId:string|null;axisId:string|null;panel:string;value:number|null;sourceTime:number|null;sourceIndex:number}
 export interface CrosshairAxisValue {id:string|null;panel:string;value:number;formatted:string}
 export interface CrosshairValues {index:number;time:number;primary:{symbolId:string|null;bar:Bar};series:CrosshairSeriesValue[];axes:CrosshairAxisValue[]}
@@ -65,12 +74,13 @@ export interface DisplayCommand {op:'lines'|'rects'|'path'|'box'|'ellipse'|'text
 export function buildScene(model:ChartModel,width:number,height:number,options?:{crosshair?:boolean;drawings?:boolean}):Scene;
 export function drawingHitTest(store:DrawingStore,layout:Layout,x:number,y:number,tolerance?:number):{id:string;handle:number;locked?:boolean}|null;
 export class InteractionController {
- constructor(model:ChartModel,size:()=>{width:number;height:number},invalidate?:()=>void);tool:'select'|DrawingType;text:string;drawingTarget:DrawingTarget|null;readonly pointers:Map<number,{x:number;y:number}>;readonly gesture:unknown;
- setTool(tool:'select'|DrawingType):void;setDrawingTarget(target:DrawingTarget|null):void;down(id:number,x:number,y:number,hitTolerance?:number):void;move(id:number,x:number,y:number):void;up(id:number):void;cancel():void;wheel(delta:number,x:number):void;key(key:string,options?:{ctrl?:boolean;shift?:boolean}):void;layout():Layout;
+ constructor(model:ChartModel,size:()=>{width:number;height:number},invalidate?:()=>void);tool:'select'|DrawingType;text:string;drawingTarget:DrawingTarget|null;readonly drawingMagnet:Readonly<Required<DrawingMagnetOptions>>;readonly crosshairSnap:Readonly<{mode:CrosshairSnapOptions['mode'];target:Readonly<DrawingTarget>|null}>;readonly pointers:Map<number,{x:number;y:number}>;readonly gesture:unknown;
+ setTool(tool:'select'|DrawingType):void;setDrawingTarget(target:DrawingTarget|null):void;setDrawingMagnet(options:DrawingMagnetOptions):void;setCrosshairSnap(options:CrosshairSnapOptions):void;down(id:number,x:number,y:number,hitTolerance?:number):void;move(id:number,x:number,y:number):void;up(id:number):void;cancel():void;wheel(delta:number,x:number):void;key(key:string,options?:{ctrl?:boolean;shift?:boolean}):void;layout():Layout;
 }
 export interface SymbolMetadata {id:string;exchange:string;timezone:string;currency:string;priceDecimals:number;tickSize:number;volumeUnit:string;adjustment:'raw'|'split'|'total-return';provider?:string;adjustmentVersion?:string}
 export function validateSymbol(symbol:SymbolMetadata):Readonly<SymbolMetadata>;
 export function formatPrice(value:number,symbol:SymbolMetadata):string;
+/** Decimal timestamp strings: <=128 characters, exponent |e|<=10000, exact integer ms; no rounding. Number inputs retain binary64 scaling. */
 export function normalizeOHLCV(rows:unknown[],options?:{timeUnit?:'ms'|'s';format?:'objects'|'tuples'}):Bar[];
 export function zonedParts(time:number,timezone:string):Record<string,string>;
 export function marketDate(time:number,timezone:string):string;
@@ -85,7 +95,7 @@ export class TickAggregator {
  constructor(options:{calendar:SessionCalendar;interval?:number|'day'|'week'|'month';kinds?:string[];latePolicy?:'reject'|'correct';maxBuckets?:number;maxTicksPerBucket?:number});push(tick:Tick):{status:string;bar?:Bar;sessionDate?:string;sessionKind?:string};reset():void;
 }
 export interface OrderedDataEvent {kind:'append'|'update'|'correction';bar:Bar}
-export interface BatchReceipt {readonly events:number;readonly appended:number;readonly from:number;readonly to:number;readonly version:number;readonly length:number;readonly capacity:number;readonly bytes:number}
+export interface BatchReceipt {/** Present only for explicit skipUnchanged:true; compares final OHLCV, not feed freshness. */ readonly unchanged?:boolean;readonly events:number;readonly appended:number;readonly from:number;readonly to:number;readonly version:number;readonly length:number;readonly capacity:number;readonly bytes:number}
 export type DataEvent={kind:'reset';bars:Bar[]}|{kind:'reset';columns:Columns;length?:number}|OrderedDataEvent|{kind:'prepend';bars:Bar[]}|{kind:'batch';events:readonly OrderedDataEvent[]};
 export function applyDataEvent(store:BarStore,event:DataEvent):void|BatchReceipt;
 export class IngestionError extends Error {readonly code:string;constructor(code:string,message:string,cause?:unknown)}
@@ -135,15 +145,18 @@ export interface IndicatorPoint {value:number|null;sourceIndex:number|null;sourc
 export interface DataCompactionOptions {keepLastBars:number;studyHistory:'restart';maxPeakStoreBytes?:number;pendingData?:'reject'|'preserve-retained'}
 export interface DataCompactionReceipt {removed:number;length:number;capacity:number;bytes:number;previousBytes:number;peakSourceBytes:number;firstRetainedTime:number;version:number;timeVersion:number;studyHistory:'restart';invalidationFailed:boolean}
 export class ChartAPI {
- constructor(model:ChartModel,options?:{controller?:InteractionController;invalidate?:()=>void});
+ constructor(model:ChartModel,options?:{controller?:InteractionController;invalidate?:(kind?:string)=>void});
  dispatch(operation:string,args?:unknown[]):unknown;inspect():ChartSnapshot;
  compactData(options:DataCompactionOptions):DataCompactionReceipt;
- setData(bars:Bar[]):void;setColumns(columns:ColumnInput,length?:number):void;applyDataEvent(event:DataEvent|{kind:'reset';columns:ColumnInput;length?:number}):void|BatchReceipt;applyDataEvents(events:readonly OrderedDataEvent[]):BatchReceipt;
+ setData(bars:Bar[]):void;setColumns(columns:ColumnInput,length?:number):void;applyDataEvent(event:DataEvent|{kind:'reset';columns:ColumnInput;length?:number}):void|BatchReceipt;applyDataEvents(events:readonly OrderedDataEvent[],options?:{skipUnchanged?:boolean}):BatchReceipt;
  configureDataIngestion(options:DataIngestionOptions):DataIngestionStats;enqueueDataEvents(packet:DataIngestionPacket):DataIngestionEnqueueReceipt;drainDataEvents(maxEvents?:number):DataIngestionDrainReceipt;pauseDataIngestion():DataIngestionStats;resumeDataIngestion():DataIngestionStats;cancelDataEvents():DataIngestionCancelReceipt;dataIngestionStats():DataIngestionStats;saveDataIngestion():string;loadDataIngestion(text:string):DataIngestionStats;
- addPanel(options:Panel):string;setPanel(id:string,patch:PanelPatch):void;addAxis(options:Axis):string;setAxis(id:string,patch:AxisPatch):void;removeAxis(id:string):void;crosshairValues(width:number,height:number):CrosshairValues|null;dataAt(query:DataSelection,options?:DataQueryOptions):DataSnapshot|null;addSeries(options:SeriesInput):string;setSeries(id:string,patch:SeriesPatch):void;setSeriesValues(id:string,values:Float64Array|(number|null)[]):void;removeSeries(id:string):void;
+ addPanel(options:Panel):string;setPanel(id:string,patch:PanelPatch):void;addAxis(options:Axis):string;setAxis(id:string,patch:AxisPatch):void;removeAxis(id:string):void;crosshairValues(width:number,height:number):CrosshairValues|null;crosshairSnapshot(width:number,height:number):CrosshairSnapshot|null;dataAt(query:DataSelection,options?:DataQueryOptions):DataSnapshot|null;addSeries(options:SeriesInput):string;setSeries(id:string,patch:SeriesPatch):void;setSeriesValues(id:string,values:Float64Array|(number|null)[]):void;removeSeries(id:string):void;
  addIndicator(id:string,name:string,params?:Record<string,number|string>):{outputs:string[];plotOffsets:Record<string,number>};setIndicatorParams(id:string,params:Record<string,number|string>):{outputs:string[];plotOffsets:Record<string,number>};removeIndicator(id:string):void;indicatorValues(id:string,output?:string):(number|null)[];registerIndicator(name:string,factory:IndicatorFactory):void;registerIndicatorSource(name:string,source:string):void;
  registerIndicatorModule(id:string,version:number):string[];indicatorValueAt(id:string,output:string|undefined,index:number,options?:IndicatorQueryOptions):IndicatorPoint;saveStudies():string;loadStudies(text:string):{indicators:number;series:number};
- addDrawing(options:Omit<Drawing,'id'|'panel'>&{id?:string;panel?:string}):string;editDrawing(id:string,patch:Partial<Omit<Drawing,'id'>>):void;translateDrawings(ids:readonly string[],options:{deltaTimeMs:number;deltaPrice:number}):{changed:number;invalidationFailed:boolean};setDrawingsStyle(ids:readonly string[],patch:{color?:string;fill?:string;width?:number;font?:string}):{changed:number;invalidationFailed:boolean};deleteDrawings(ids:readonly string[]):{changed:number;invalidationFailed:boolean};deleteDrawing(id?:string|null):boolean;selectDrawing(id:string|null):void;saveDrawings():string;loadDrawings(text:string):void;undo():void;redo():void;setTool(tool:'select'|DrawingType):void;setText(text:string):void;setDrawingTarget(target:DrawingTarget|null):void;
+ duplicateDrawing(id:string,options:DrawingDuplicateOptions):DrawingDuplicateReceipt;duplicateDrawings(ids:readonly string[],options:DrawingDuplicateOptions):DrawingDuplicateReceipt;
+ setDrawingVisibility(id:string,visible:boolean):{changed:number;invalidationFailed:boolean};setDrawingsVisibility(ids:readonly string[],visible:boolean):{changed:number;invalidationFailed:boolean};
+ positionMetrics(id:string):PositionMetrics;
+ addDrawing(options:Omit<Drawing,'id'|'panel'>&{id?:string;panel?:string}):string;editDrawing(id:string,patch:Partial<Omit<Drawing,'id'>>):void;translateDrawings(ids:readonly string[],options:{deltaTimeMs:number;deltaPrice:number}):{changed:number;invalidationFailed:boolean};setDrawingsStyle(ids:readonly string[],patch:{color?:string;fill?:string;width?:number;font?:string}):{changed:number;invalidationFailed:boolean};deleteDrawings(ids:readonly string[]):{changed:number;invalidationFailed:boolean};deleteDrawing(id?:string|null):boolean;selectDrawing(id:string|null):void;saveDrawings():string;loadDrawings(text:string):void;undo():void;redo():void;setTool(tool:'select'|DrawingType):void;setText(text:string):void;setDrawingTarget(target:DrawingTarget|null):void;setDrawingMagnet(options:DrawingMagnetOptions):void;setCrosshairSnap(options:CrosshairSnapOptions):void;
  setTheme(patch:Partial<Theme>):void;setSymbol(symbol:SymbolMetadata):void;setVisibleRange(from:number,to:number):void;fit():void;zoom(factor:number,anchor?:number):void;pan(delta:number):void;
 }
 
@@ -154,3 +167,38 @@ export class BlockRangeIndex {constructor(length:number,values:Float64Array,capa
 export interface WorkspaceDatasetBinding {key:string;revision:string;adjustmentVersion:string;priceUnit:string;adjustment:'raw'|'split'|'total-return'}
 /** Save portable chart metadata without source bars or executable callbacks. Active gestures reject. */
 export function saveWorkspace(chart:ChartAPI,datasetBinding:WorkspaceDatasetBinding):string;
+/** Exact, host-declared primary-price identity. Does not authenticate source bars. */
+export interface DrawingIdentity {symbolId:string;exchange:string;priceUnit:string;timeframe:string;adjustment:'raw'|'split'|'total-return';adjustmentVersion:string}
+/** Primary price panel only, with no axisId/seriesId bindings; legacy formats are unchanged. */
+export function saveBoundDrawings(chart:ChartAPI,identity:DrawingIdentity):string;
+export function loadBoundDrawings(chart:ChartAPI,text:string,expectedIdentity:DrawingIdentity):void;
+
+/** Nonempty at runtime. Missing keys inherit the target drawing's stored style. */
+export interface DrawingStylePatch {color?:string;fill?:string;width?:number;font?:string;}
+export interface DrawingStylePreset {readonly name:string;readonly style:Readonly<DrawingStylePatch>;}
+/** Host-owned registry: 64 presets, separate explicit JSON persistence, no chart ownership. */
+export class DrawingStylePresets {
+ get(name:string):DrawingStylePreset|undefined;list():readonly DrawingStylePreset[];
+ set(name:string,style:DrawingStylePatch,options?:{replace?:boolean}):Readonly<{changed:number}>;
+ capture(api:ChartAPI,id:string,name:string,options?:{replace?:boolean}):Readonly<{changed:number}>;
+ remove(name:string):Readonly<{changed:number}>;
+ apply(api:ChartAPI,ids:readonly string[],name:string):Readonly<{changed:number;invalidationFailed:boolean}>;
+ save():string;load(text:string,options?:{replace?:boolean}):Readonly<{changed:number}>;
+}
+
+export interface BarReplayOptions {initialCount?:number;visibleBars?:number;priceScale?:'linear'|'log';inverted?:boolean;volume?:boolean;theme?:Partial<Theme>;indicators?:readonly {id:string;kind:'sma'|'ema'|'rsi';period:number;color?:string}[];}
+export interface BarReplayState {readonly count:number;readonly total:number;readonly initialCount:number;readonly lastTime:number|null;readonly paused:boolean;readonly ended:boolean;readonly generation:number;}
+export interface BarReplayBookmark {readonly id:string;readonly label:string;readonly count:number;}
+export interface BarReplayReceipt {readonly changed:boolean;readonly state:BarReplayState;}
+export interface BarReplayFrame {width:number;height:number;background:string;commands:Scene['commands'];stats:Scene['stats'];axes:{id:string;min:number;max:number;scale:string;inverted:boolean}[];}
+/** Manual-only private prefix model. Cold rebuild on changed count; no live API/model getter. */
+export class BarReplay {
+ constructor(bars:readonly Bar[],options?:BarReplayOptions);
+ static restoreSession(bars:readonly Bar[],text:string,options:{datasetBinding:WorkspaceDatasetBinding}):BarReplay;
+ bookmarks():readonly BarReplayBookmark[];addBookmark(input:{id:string;label:string}):BarReplayBookmark;
+ renameBookmark(id:string,label:string):BarReplayBookmark;removeBookmark(id:string):boolean;seekBookmark(id:string):BarReplayReceipt;saveSession(datasetBinding:WorkspaceDatasetBinding):string;
+ snapshot():BarReplayState;start():BarReplayReceipt;pause():BarReplayReceipt;step(count?:number):BarReplayReceipt;
+ seek(revealedCount:number):BarReplayReceipt;reset():BarReplayReceipt;
+ barAt(index:number):Readonly<Bar>;indicatorValues(id:string):Float64Array;
+ frame(width:number,height:number):BarReplayFrame;dispose():void;
+}
