@@ -1,25 +1,26 @@
 # BaroChart (바로차트)
 
-Financial charts built around your own data: a DOM-free Float64 core, Canvas and WebGL2 rendering, an optional React adapter, and Apple/Android native integrations.
+**Your data. Your chart. Your interface.**
 
-[한국어](README.ko.md) · [API reference](docs/API.md) · [Validation status](docs/PUBLIC-VALIDATION.md)
+A financial chart library with a DOM-free Float64 core, Canvas/WebGL2 rendering, optional React integration, and Apple/Android native integration paths. Build analysis screens without handing data ownership to a chart service.
 
-**Version 0.2.13 is a development preview.** Source is available under Apache-2.0; the npm package has not been published. Selected browser flows have been checked in Mac Chrome 155; assistive technology, other browsers and recent native host changes still need platform validation. See the [current validation limits](docs/PUBLIC-VALIDATION.md) before adopting this version.
+[한국어](README.ko.md) · [Quick start](#quick-start) · [Web & mobile gallery](#web--mobile-web) · [API](docs/API.md)
 
-## What you can build
+> **Development preview · 0.2.13 · Apache-2.0.** Not published to npm. Mobile previews below are not device screenshots. [Support and validation limits](#support-and-validation).
 
-- Candlestick, OHLC, line, area and histogram charts with multiple panels, independent price axes, pan/zoom and streaming updates.
-- Studies using **35 built-in indicators**, including SMA, EMA, RSI, MACD, Bollinger Bands, ATR, Ichimoku and session-aware VWAP. Numerical seeds, warm-up and undefined values have [documented contracts](docs/INDICATORS.md).
-- Annotations using **16 drawing tools**, including [long/short risk-reward annotations](docs/POSITION-DRAWINGS.md), with time/price anchors, selection, editing, locking and undo/redo.
-- Data-driven views with historical corrections, ordered ingestion batches, screen-independent queries and explicit session-based OHLCV resampling.
-- Portable chart configuration, drawings and study settings, with explicit dataset ownership and validation.
-- [Manual prefix-only bar replay](docs/BAR-REPLAY.md) from host-supplied snapshots, with isolated forward-study staging and detached frame queries.
+## What is included?
 
-The core and web renderers have no npm runtime dependencies. React is an optional peer used only by the `/react` entry point. Market data feeds, exchange calendars and trading execution belong to the host application.
+- **Charts and studies:** candles, OHLC, line, area, histogram, multiple panels/price axes, and **35 built-in indicators** including EMA, RSI, MACD, Bollinger Bands, Ichimoku and session-aware VWAP.
+- **Drawing and review:** **16 drawing tools**, long/short risk–reward annotations, multi-selection, locking, undo/redo, and manual bar replay with session/bookmark metadata.
+- **Your UI:** dark/light themes, colors/fonts, configurable toolbars, explicit desktop/mobile input presets, optional corner overlay slots and a range navigator.
+- **Saved charts:** versioned workspaces for chart configuration, indicators, drawings and viewport; a separate codec for input/toolbar preferences. Storage and restore ownership stay with your app.
+- **Data-driven integration:** streaming replacements/appends, historical corrections, ingestion queues, OHLCV resampling, linked time cursors/ranges and external trade-ID markers.
 
-## Try the demo
+Core/web renderers have **no npm runtime dependencies**. React is optional. The library does **not** supply market feeds, broker execution, accounts, journal backends or cloud synchronization. Trade markers display host-owned data; they do not place orders.
 
-Use **Node.js 22 or later**. The current cloud validation used Node.js 24.19.0. The basic demo and core tests need no dependency installation.
+## Quick start
+
+Use **Node.js 22+**. No dependency install is required for the plain web demo.
 
 ```sh
 git clone https://github.com/ictechgy/BaroChart.git
@@ -27,58 +28,39 @@ cd BaroChart
 npm run demo
 ```
 
-Open [http://127.0.0.1:5173/examples/web/](http://127.0.0.1:5173/examples/web/). The demo uses deterministic **synthetic data**, including stock-like and small-price fixtures. It lets you explore renderers, indicators, drawings, themes and live-update simulation.
+Open [the main demo](http://127.0.0.1:5173/examples/web/index.html), [minimal first chart](http://127.0.0.1:5173/examples/web/quickstart.html), or [UI customization](http://127.0.0.1:5173/examples/web/customization.html). These are local URLs and work only while your demo server is running. All demo data is **synthetic**, not a live market feed.
 
-Drawing file loads use [demo-local asynchronous ownership checks](docs/DRAWING-FILE-IMPORT.md) so an obsolete read does not overwrite a newer import or changed drawing context.
-Optional [web UI / UX customization](docs/WEB-CUSTOMIZATION.md) adds configurable HTML tools, live input preferences and a separate appearance/layout demo. Shortcut remapping, arbitrary panel docking, preference persistence and native UI parity are not included.
+## Web & mobile web
 
-The demo also [resumes interrupted first-load preparation on persisted page restoration](docs/DEMO-PAGE-LIFECYCLE.md), without replaying a deliberate Cancel or later chart operations.
+### Web: actual historical browser capture
 
-Other examples on the same server:
+Linked one-minute/five-minute views with an explicit stored-time range. This original PNG was captured on **2026-10-14**, macOS Chrome 155.0.8059.79, source **`e3284e54`**. It is not a screenshot of every newer v88 feature.
 
-- [Manual bar replay](http://127.0.0.1:5173/examples/web/bar-replay.html): explicit step/seek, isolated prefix data and studies; no autoplay.
-- [Independent price axes](http://127.0.0.1:5173/examples/web/axes.html)
-- [Explicit-baseline relative comparison](http://127.0.0.1:5173/examples/web/comparison.html): example-local signed percent change, exact alignment and raw-value provenance.
-- [Financial coordinates and time alignment](http://127.0.0.1:5173/examples/web/financial.html)
-- [Session studies and custom modules](http://127.0.0.1:5173/examples/web/analysis.html)
-- [Linked time cursors](http://127.0.0.1:5173/examples/web/linked-cursors.html)
-- [Linked time ranges](http://127.0.0.1:5173/examples/web/linked-ranges.html): opt-in stored-time view synchronization; [API contract](docs/TIME-RANGE.md).
-- [Drawing group selection and batch edits](http://127.0.0.1:5173/examples/web/drawing-groups.html)
-- [Manual ingestion queue](http://127.0.0.1:5173/examples/web/ingestion-queue.html): synthetic enqueue/drain, budget rejection and explicit recovery; [guide](docs/INGESTION-DEMO.md).
+![Actual historical web screenshot: linked time-range charts](assets/screenshots/web-linked-ranges.png)
 
-Run tests separately:
+<details>
+<summary>More actual web screens: drawing groups and linked cursors</summary>
 
-```sh
-npm test
-# Runs: node --test --test-concurrency=1 test/*.test.mjs
-```
+![Actual historical web screenshot: drawing group selection after Undo](assets/screenshots/web-drawing-groups.png)
 
-## Executed example screens
+![Actual historical web screenshot: linked cursors and value readouts](assets/screenshots/web-linked-cursors.png)
 
-These are actual browser captures with synthetic data, taken on macOS Chrome 155.0.8059.79 on 2026-10-14 at source revision `e3284e54`. They are historical execution examples; later source changes are not implicitly verified by these images.
+</details>
 
-![Running linked time-range charts in Chrome](assets/screenshots/web-linked-ranges.png)
+### Mobile web: source-derived UI previews
 
-![Running drawing-group example after Undo](assets/screenshots/web-drawing-groups.png)
+Dark/light previews at a **390 CSS-pixel layout width**. The chart is rasterized by the production scene/Canvas draw code with synthetic OHLCV; surrounding controls are an illustration based on the current mobile preset and customization CSS. **Not browser screenshots, native screens, or proof of touch-device behavior.**
 
-[Open the platform gallery and run instructions](docs/EXAMPLE-SCREENSHOTS.md) for linked cursors, React, macOS, iOS and Android. Verified native/React screenshots have not been retained; their status and required environments are listed explicitly. The browser images do not represent native SDK execution.
+<p>
+<img src="assets/previews/mobile-web-dark-preview.png" width="390" alt="Dark mobile web UI preview, not a browser screenshot">
+<img src="assets/previews/mobile-web-light-preview.png" width="390" alt="Light mobile web UI preview, not a browser screenshot">
+</p>
 
+Try the same controls in [customization.html](http://127.0.0.1:5173/examples/web/customization.html): choose the mobile preset and narrow the viewport. The preset is explicit, not device detection; the demo moves the toolbar above the chart at ≤600px. [Gallery, provenance and reproduction](docs/EXAMPLE-SCREENSHOTS.md).
 
 ## Your first chart
 
-In the checkout, save this as `examples/web/quickstart.html`:
-
-```html
-<!doctype html>
-<html lang="en">
-  <meta charset="utf-8">
-  <title>BaroChart quick start</title>
-  <div id="chart" style="height: 420px"></div>
-  <script type="module" src="./quickstart.mjs"></script>
-</html>
-```
-
-Save the following as `examples/web/quickstart.mjs`, then open `/examples/web/quickstart.html` on the demo server:
+The runnable [quickstart.html](examples/web/quickstart.html) provides a container with a real height. Its [module](examples/web/quickstart.mjs) is the complete code below; timestamps are UTC Unix **milliseconds**.
 
 ```js
 import { BarStore, ChartModel, createChart } from '../../src/index.mjs';
@@ -89,7 +71,6 @@ const store = new BarStore([
   { time: 1700000120000, open: 103, high: 105, low: 102, close: 104, volume: 700 },
   { time: 1700000180000, open: 104, high: 106, low: 103, close: 105, volume: 800 },
 ]);
-
 const model = new ChartModel({ store });
 model.addSeries({ id: 'price', type: 'candles', panel: 'price' });
 model.indicators.add('ema3', 'ema', { period: 3 });
@@ -97,54 +78,51 @@ model.addSeries({
   id: 'ema3', type: 'line', panel: 'price',
   indicator: 'ema3', color: '#f0b755',
 });
-
+model.fit();
 const chart = createChart(document.getElementById('chart'), model, {
   renderer: 'canvas',
 });
 
-// Replace the current bar. A later timestamp appends a new bar.
+// Same timestamp replaces the last bar; a later timestamp appends.
 store.upsert({
   time: 1700000180000, open: 104, high: 107,
   low: 103, close: 106, volume: 900,
 });
-chart.setTool('trendline');
+
+// Preserve the chart across back/forward-cache navigation; dispose on exit.
+window.addEventListener('pagehide', event => {
+  if (!event.persisted) chart.destroy({ disposeModel: true });
+});
+window.addEventListener('pageshow', event => {
+  if (event.persisted && !chart.disposed) chart.resize();
+});
 ```
 
-Give the container a real height. On unmount, call `chart.destroy({ disposeModel: true })` if the chart owns its model. Shared models need a separate owner responsible for final disposal. Stop application-owned timers and data subscriptions as well.
+For component unmount, call `chart.destroy({ disposeModel: true })` only when the chart owns the model. Shared models need a separate final owner; stop your own timers/subscriptions too. Canvas is the default; `renderer: 'webgl2'` opts into WebGL2 with Canvas fallback. Neither renderer guarantees device-independent performance or identical text pixels.
 
-Canvas is the default. Set `renderer: 'webgl2'` to opt into WebGL2; initialization/render failures and context loss can fall back to Canvas. Performance depends on the scene and device, and text shaping and line joins are not pixel-identical across renderers.
+## Install in your application
 
-## Use it in an application
-
-There is **no published npm release yet**. Build a local tarball from this checkout:
+There is **no published npm release yet**. Make a local source tarball instead of installing an unrelated registry package:
 
 ```sh
 mkdir -p /tmp/barochart-pack
 npm pack --ignore-scripts --pack-destination /tmp/barochart-pack
 
-# In your application:
+# Run in your application's directory:
 npm install /tmp/barochart-pack/barochart-0.2.13.tgz
 ```
 
-After installing that tarball, replace the source import above with:
+Then replace the source import with:
 
 ```js
 import { BarStore, ChartModel, createChart } from 'barochart';
 ```
 
-Available entry points:
-
-- `barochart/core`: DOM-free data, indicators, models, drawings and calculation APIs
-- `barochart/canvas` and `barochart/webgl`: browser renderers
-- `barochart/worker`: worker-backed preparation and calculation APIs
-- `barochart/worker-entry`: entry point for a separately bundled worker
-- `barochart/react`: optional React web adapter
-
-TypeScript declarations are included. Use `/core` for Node projects without DOM types. Examples, tests and benchmarks live in the repository; they are not included in the npm tarball.
+TypeScript declarations are included. Entry points: `barochart/core` (DOM-free), `/canvas`, `/webgl`, `/worker`, `/worker-entry`, and optional `/react`. Examples, tests, benchmarks and gallery assets stay in this repository, outside the npm payload.
 
 ### React
 
-The adapter currently retains the export name `AsterChart`:
+The compatibility export is still named `AsterChart`:
 
 ```jsx
 import { AsterChart } from 'barochart/react';
@@ -154,48 +132,56 @@ export function PriceChart({ bars }) {
 }
 ```
 
-React 18.3.1 or 19 is an optional peer; the application supplies ReactDOM. See the [React integration contract](docs/REACT.md) for streaming updates, `dataRevision`, model ownership, cleanup and SSR limits. The [TypeScript example](examples/react-web/README.md) has its own pinned development dependencies and requires registry access for the initial `npm ci`.
+Your app supplies React 18.3.1/19 and ReactDOM. [React ownership/streaming/SSR contract](docs/REACT.md) · [Runnable TypeScript consumer](examples/react-web/README.md).
 
-### Native
+## Customize the experience
 
-Apple integration uses JavaScriptCore and CoreGraphics with SwiftPM. Android uses QuickJS, JNI and Android Canvas with an Android library/AAR build path. These renderer paths do not embed a WebView.
+On a fresh mount, choose a preset and opt into a toolbar:
 
-See the [Swift SDK](docs/SWIFT-SDK.md), [Android SDK](docs/ANDROID-SDK.md) and [native integration guide](docs/NATIVE.md). Recent Swift and Android host additions have **not** been compiled and run against their actual SDKs/devices in the current validation environment. Earlier platform results do not verify those later changes. React Native and Flutter adapters are not provided.
+```js
+import { CanvasChart, attachChartToolbar, createChartUIPreset } from 'barochart';
 
-### Compatibility names
+const ui = createChartUIPreset('mobile');
+const chart = new CanvasChart(chartElement, readyModel, {
+  interaction: ui.interaction,
+});
+const toolbar = attachChartToolbar(emptyToolbarElement, chart, ui.toolbar);
+```
 
-BaroChart was previously named Aster. The npm package is now named `barochart`, while these existing identifiers are deliberately retained:
+- Mobile: 24px hit tolerance, wheel zoom off, comfortable horizontal controls. Comfortable buttons have a **44px minimum height**, not a guarantee about every target's width.
+- Change theme, font, toolbar content/order/density, panel height ratios and price-axis side. Add [overlay slots](docs/CHART-OVERLAYS.md), [navigator](docs/CHART-NAVIGATOR.md) or [trade markers](docs/TRADE-MARKERS.md) only when needed.
+- The demo explicitly saves/loads **input and toolbar preferences** via localStorage. No automatic persistence; those buttons do not save chart colors, panels, placement, drawings or data. Compose [UI state](docs/WEB-UI-STATE.md) with [workspaces](docs/WORKSPACES.md) for host-owned saved charts.
+- Keyboard options are enable switches, **not shortcut remapping**. Arbitrary panel docking and native UI parity are not included. [Full customization contract](docs/WEB-CUSTOMIZATION.md).
 
-- React: `AsterChart`, `AsterChartHandle`
-- Swift: `AsterNative`, `AsterEngine`, `AsterChartView`
-- Android: `dev.aster.charts` and its existing class/JNI names
-- Serialized document schemas and browser events: `aster.*` and `aster:*`
+## Examples and guides
 
-Use those API names as documented. Do not rename saved schema identifiers to match the product branding.
+| Explore | Local example | Contract |
+| --- | --- | --- |
+| Manual replay and bookmarks | [Bar replay](http://127.0.0.1:5173/examples/web/bar-replay.html) | [Prefix-only replay](docs/BAR-REPLAY.md), no autoplay |
+| Relative performance | [Comparison](http://127.0.0.1:5173/examples/web/comparison.html) | [Explicit baseline/alignment](docs/RELATIVE-COMPARISON.md) |
+| Linked views | [Time ranges](http://127.0.0.1:5173/examples/web/linked-ranges.html) · [cursors](http://127.0.0.1:5173/examples/web/linked-cursors.html) | [Time ranges](docs/TIME-RANGE.md) · [shared model ownership](docs/SHARED-MODEL-REFRESH.md) |
+| Drawing workflows | [Drawing groups](http://127.0.0.1:5173/examples/web/drawing-groups.html) | [Style presets](docs/DRAWING-STYLE-PRESETS.md) · [risk/reward](docs/POSITION-DRAWINGS.md) |
+| Batched live updates | [Ingestion queue](http://127.0.0.1:5173/examples/web/ingestion-queue.html) | [Host-owned data ingestion](docs/INGESTION.md) |
+| Data and analysis | [Analysis](http://127.0.0.1:5173/examples/web/analysis.html) | [Indicators](docs/INDICATORS.md) · [ingestion](docs/INGESTION.md) · [resampling](docs/RESAMPLING.md) |
 
-## Important contracts
+[API/lifecycle](docs/API.md) · [Data rules](docs/DATA.md) · [Independent axes](docs/INDEPENDENT-AXES.md) · [Architecture](docs/ARCHITECTURE.md) · [Contributing](CONTRIBUTING.md)
 
-- **Time and numbers:** OHLCV input uses finite numbers and strictly increasing UTC Unix timestamps in integer **milliseconds**. Storage is Float64, not arbitrary-precision decimal arithmetic. The default time axis spaces trading bars evenly and compresses missing periods. See [data ownership and input rules](docs/DATA.md).
-- **Array ownership:** OHLCV object/column inputs are copied. Store columns and returned indicator views are read-only by contract. External `series.values` are borrowed, not copied; reapply them through the supported setter to invalidate caches after changes.
-- **Indicator history:** Studies run on source bars. Seeds, warm-up `NaN` gaps, session boundaries and zero-denominator policies matter when comparing results. See [indicator math](docs/INDICATORS.md) and [session studies](docs/SESSION-STUDIES.md).
-- **Async costs:** Worker APIs support cancellation, stale-source checks and logical memory budgets. Snapshotting, validation and allocations still cost time; offloading can improve responsiveness while increasing total wall time and memory. Budgets are not process RSS limits or guaranteed maximum UI blocking times.
-- **Retention is explicit:** `api.compactData({ keepLastBars, studyHistory: 'restart' })` is synchronous maintenance. It restarts every study on the retained suffix, so results may differ from the tail of a full-history calculation. It requires the documented ownership/ingestion conditions and does not automatically evict data. Read the [compaction contract](docs/DATA-COMPACTION.md) first.
-- **Persistence needs source data:** Workspaces save portable configuration, not OHLCV or a complete application session. The host must provide the intended dataset and matching binding when restoring. See [workspace ownership and limits](docs/WORKSPACES.md).
+## Support and validation
 
-## Documentation
+| Integration | What exists | Important boundary |
+| --- | --- | --- |
+| Plain web | Canvas/WebGL2 and HTML controls | Selected historical Chrome flows checked; newer UI/device behavior needs browser QA |
+| React web | Optional `AsterChart` adapter | Latest modeled-hook tests do not establish React runtime/SSR behavior |
+| Mobile web | Explicit input preset and responsive example CSS | Preview images are illustrations; touch, scrolling and assistive technology remain unverified |
+| Apple native | JavaScriptCore/CoreGraphics, SwiftPM | [Swift SDK](docs/SWIFT-SDK.md); recent host changes need actual SDK/device validation |
+| Android native | QuickJS/JNI/Canvas, library/AAR path | [Android SDK](docs/ANDROID-SDK.md); recent host changes need actual SDK/device validation |
 
-- [Shared-model refresh recipe](docs/SHARED-MODEL-REFRESH.md): one input authority, shared history and explicit sibling redraw.
-- [Style-only drawing presets](docs/DRAWING-STYLE-PRESETS.md): bounded host-owned registry and optional panel.
-- [API, drawing tools and lifecycle](docs/API.md) · [independent price axes](docs/INDEPENDENT-AXES.md)
-- [Data queries](docs/DATA-EXPLORER.md) · [ordered ingestion](docs/INGESTION.md)
-- [Indicator parameter edits](docs/INDICATOR-PARAMETERS.md) · [async parameter edits](docs/ASYNC-INDICATOR-PARAMS.md) · [custom modules](docs/INDICATOR-MODULES.md)
-- [OHLCV resampling](docs/RESAMPLING.md) · [async resampling](docs/ASYNC-RESAMPLING.md)
-- [Architecture](docs/ARCHITECTURE.md) · [render layers](docs/RENDER-LAYERS.md)
-- [Current validation status](docs/PUBLIC-VALIDATION.md) · [contributing](CONTRIBUTING.md)
+Native paths are not WebViews. React Native/Flutter adapters are not supplied. Legacy API/schema names (`AsterChart`, `AsterNative`, `AsterEngine`, `dev.aster.charts`, `aster.*`) remain for compatibility; do not rename serialized schemas.
 
-Some detailed contract documents retain historical version notes and Aster-era names. The public validation summary distinguishes those older results from the current preview.
+Node contract tests, strict TypeScript and offline packed-consumer checks are automated checks, not browser/device certification. Float64 is not arbitrary-precision decimal arithmetic; workspaces need matching host-provided data; workers still incur snapshot/allocation costs. [Full validation history and limits](docs/PUBLIC-VALIDATION.md) · [state/ownership roadmap](docs/MARKET-ROADMAP.md).
 
-## Validation and limitations
+<details>
+<summary>Earlier validation records, including the retained failure</summary>
 
 At source `381fb00fc41c49aadfb72f45fb0c0a66f500d62c` (2026-10-18), **4,870/4,870 Node tests**, 513 ESM syntax checks, strict TypeScript 5.9.3 and an offline packed-consumer check passed. These are cloud Node/modeled-host results; no new browser/native SDK run is implied. See the [dated validation entries](docs/PUBLIC-VALIDATION.md) for scope and retained earlier failures.
 
@@ -203,18 +189,18 @@ The pre-branding Linux/Node baseline passed **2,551 of 2,552 tests**. One dry-ru
 
 Mac Chrome 155 checks cover the drawing panel, linked cursors, keyboard exploration and one Canvas/WebGL round trip. Screen readers, other browsers and long-running rendering remain unverified. Standalone QuickJS tests and Java tests using stubbed Android types do not substitute for native SDK builds or device runs. There is no verified claim of universal performance, commercial-product parity or physical-device FPS.
 
-To run the available local checks:
+</details>
 
 ```sh
 npm test
 npm run check
-# With a separately installed TypeScript 5.9+ compiler:
-TSC_PATH=/absolute/path/to/typescript/lib/tsc.js npm run check:types
-TSC_PATH=/absolute/path/to/typescript/lib/tsc.js npm run check:package
+# With an installed TypeScript 5.9+ compiler:
+TSC_PATH=/path/to/typescript/lib/tsc.js npm run check:types
+TSC_PATH=/path/to/typescript/lib/tsc.js npm run check:package
 ```
 
-Browser and native test scripts require their documented browsers, SDKs and host permissions. For measured results, outstanding gaps and how to interpret timings, use [PUBLIC-VALIDATION.md](docs/PUBLIC-VALIDATION.md).
+These local commands do not publish anything. Browser/native scripts require their documented browsers, SDKs and permissions.
 
 ## License
 
-BaroChart is licensed under [Apache License 2.0](LICENSE). See [NOTICE](NOTICE) and [third-party licensing notes](docs/LICENSING.md) for attribution and separately licensed components. The npm package remains `private: true` until a registry release is explicitly prepared.
+[Apache License 2.0](LICENSE) · [NOTICE](NOTICE) · [Third-party components](docs/LICENSING.md). The package remains `private: true`; this README does not announce a registry release.

@@ -1,25 +1,26 @@
 # BaroChart (바로차트)
 
-직접 공급하는 데이터로 만드는 금융 차트 라이브러리입니다. DOM에 의존하지 않는 Float64 코어, Canvas/WebGL2 렌더러, 선택형 React 어댑터와 Apple/Android 네이티브 통합 경로를 제공합니다.
+**내 데이터로 만드는, 내 앱에 맞는 차트.**
 
-[English](README.md) · [API](docs/API.md) · [검증 범위](docs/PUBLIC-VALIDATION.md)
+DOM 없는 Float64 코어, Canvas/WebGL2 렌더러, 선택형 React 어댑터와 Apple/Android 네이티브 통합 경로를 제공하는 금융 차트 라이브러리입니다. 데이터와 저장, 화면 구성의 주도권은 호스트 앱에 있습니다.
 
-**0.2.13 개발 프리뷰입니다.** 소스 라이선스는 Apache-2.0이며, npm에는 아직 게시하지 않았습니다. Mac Chrome 155에서 일부 브라우저 동작을 확인했습니다. 보조기술·다른 브라우저·최근 네이티브 호스트 변경은 실제 플랫폼 검증이 남아 있습니다. 도입 전에 [현재 검증 범위와 한계](docs/PUBLIC-VALIDATION.md)를 확인하세요.
+[English](README.md) · [빠른 시작](#빠른-시작) · [웹·모바일 웹 화면](#웹모바일-웹-화면) · [API](docs/API.md)
 
-## 주요 기능
+> **개발 프리뷰 · 0.2.13 · Apache-2.0.** npm 미출시입니다. 아래 모바일 이미지는 실제 기기 캡처가 아닙니다. [지원·검증 범위](#지원과-검증-범위)를 확인하세요.
 
-- 캔들, OHLC, 선, 영역, 히스토그램 시리즈와 다중 패널, 독립 가격축, 이동·확대·실시간 갱신
-- SMA, EMA, RSI, MACD, Bollinger Bands, ATR, Ichimoku, 세션 기반 VWAP 등을 포함한 **35종 기본 지표**
-- 시간·가격 앵커를 사용하는 **16종 그리기 도구**([롱/숏 위험·보상](docs/POSITION-DRAWINGS.md) 포함), 선택·편집·잠금·undo/redo
-- 과거 봉 수정, 순서가 있는 수집 배치, 화면과 독립적인 데이터 조회, 세션 기준 OHLCV 리샘플링
-- [수동 봉 리플레이](docs/BAR-REPLAY.md): 호스트 데이터 snapshot의 공개된 prefix만 표시하며, 자동 재생 없이 step/seek합니다.
-- 데이터 소유권과 검증 규칙을 명시한 차트 구성·도형·지표 설정 저장
+## 무엇을 만들 수 있나요?
 
-코어와 웹 렌더러에는 외부 npm 런타임 의존성이 없습니다. React는 `/react`를 사용할 때만 필요한 선택형 peer입니다. 시세 공급자 연결, 거래소 캘린더와 주문 실행은 호스트 앱이 담당합니다.
+- **차트·지표:** 캔들, OHLC, 선, 영역, 히스토그램, 여러 패널·가격축과 **35종 내장 지표**. EMA, RSI, MACD, 볼린저 밴드, 일목균형표, 세션 VWAP 등을 포함합니다.
+- **그리기·복기:** **16종 그리기 도구**, 롱/숏 위험·보상 표시, 다중 선택·잠금·undo/redo, 수동 봉 리플레이와 세션·북마크 메타데이터.
+- **맞춤 UI:** 다크/라이트, 색상·폰트, 도구 모음 구성, 명시적 데스크톱/모바일 입력 프리셋, 선택형 모서리 overlay slots와 navigator.
+- **저장된 차트:** 차트 구성·지표·드로잉·뷰포트를 저장하는 버전 있는 workspace와 별도의 입력·도구 모음 설정 codec. 저장소와 복원 책임은 앱이 가집니다.
+- **데이터 통합:** 실시간 봉 교체·추가, 과거 데이터 수정, 수집 큐, OHLCV 리샘플링, 차트 간 시간 커서·범위 연결과 외부 tradeID 마커.
 
-## 데모 실행
+코어·웹 렌더러에는 **npm 런타임 의존성이 없습니다.** React는 선택형입니다. 시세 공급, 주문 실행, 계정, 매매 일지 서버와 클라우드 동기화는 제공하지 않습니다. tradeID 마커는 호스트 데이터를 표시할 뿐 주문을 넣지 않습니다.
 
-**Node.js 22 이상**이 필요합니다. 현재 클라우드 검증 환경은 Node.js 24.19.0입니다. 기본 웹 데모와 코어 테스트에는 패키지 설치가 필요하지 않습니다.
+## 빠른 시작
+
+**Node.js 22 이상**을 사용하세요. 기본 웹 데모에는 의존성 설치가 필요하지 않습니다.
 
 ```sh
 git clone https://github.com/ictechgy/BaroChart.git
@@ -27,43 +28,81 @@ cd BaroChart
 npm run demo
 ```
 
-[http://127.0.0.1:5173/examples/web/](http://127.0.0.1:5173/examples/web/)을 여세요. 데모는 고정 seed의 **합성 데이터**를 사용하며 렌더러, 지표, 도형, 테마와 스트림 시뮬레이션을 바꿔 볼 수 있습니다.
+[기본 데모](http://127.0.0.1:5173/examples/web/index.html), [최소 첫 차트](http://127.0.0.1:5173/examples/web/quickstart.html), [UI 커스터마이징](http://127.0.0.1:5173/examples/web/customization.html)을 여세요. 이 주소들은 데모 서버가 실행 중인 내 컴퓨터에서만 동작합니다. 데이터는 모두 **합성 데이터**이며 실시간 시세 연결이 아닙니다.
 
-같은 서버의 다른 예제:
+## 웹·모바일 웹 화면
 
-- [수동 봉 리플레이](http://127.0.0.1:5173/examples/web/bar-replay.html): 명시적 step/seek, 공개된 prefix 데이터와 지표.
-- [명시적 기준 상대 변화](http://127.0.0.1:5173/examples/web/comparison.html): 예제 내부의 signed percent change, 정확한 시각 정렬과 원시 값 출처.
-- [독립 가격축](http://127.0.0.1:5173/examples/web/axes.html)
-- [금융 좌표·시간 정렬](http://127.0.0.1:5173/examples/web/financial.html)
-- [세션 분석·사용자 모듈](http://127.0.0.1:5173/examples/web/analysis.html)
-- [차트 간 시간 커서 연결](http://127.0.0.1:5173/examples/web/linked-cursors.html)
-- [시간 범위 연결 예제](http://127.0.0.1:5173/examples/web/linked-ranges.html): 저장된 봉 시간으로 뷰 범위를 동기화합니다. [API 계약](docs/TIME-RANGE.md).
-- [도형 그룹 선택과 일괄 편집](http://127.0.0.1:5173/examples/web/drawing-groups.html)
-- [수동 데이터 수집 큐](http://127.0.0.1:5173/examples/web/ingestion-queue.html): 합성 데이터의 수락·drain·예산 거절·명시적 복구; [사용법](docs/INGESTION-DEMO.md).
+### 웹: 과거 실제 브라우저 캡처
 
-테스트는 별도로 실행합니다.
+1분·5분 차트의 저장된 시각 범위를 연결한 예제입니다. **2026-10-14**, macOS Chrome 155.0.8059.79, 소스 **`e3284e54`**에서 촬영한 원본 PNG입니다. 이후 추가된 v88 기능 전체의 최신 실행 화면은 아닙니다.
 
-```sh
-npm test
-# node --test --test-concurrency=1 test/*.test.mjs
+![과거 실제 웹 캡처: 시간 범위가 연결된 차트](assets/screenshots/web-linked-ranges.png)
+
+<details>
+<summary>실제 웹 화면 더 보기: 도형 그룹과 연결 커서</summary>
+
+![과거 실제 웹 캡처: Undo 후 도형 그룹 선택](assets/screenshots/web-drawing-groups.png)
+
+![과거 실제 웹 캡처: 연결 커서와 값 읽기](assets/screenshots/web-linked-cursors.png)
+
+</details>
+
+### 모바일 웹: 소스 기반 UI 미리보기
+
+**390 CSS px 폭**을 기준으로 만든 다크/라이트 미리보기입니다. 차트는 실제 scene/Canvas 그리기 코드와 합성 OHLCV로 그렸고, 주변 도구 모음은 현재 모바일 프리셋·커스터마이징 CSS에 근거한 설명용 구성입니다. **브라우저 스크린샷이나 네이티브 화면, 터치 기기 검증 결과가 아닙니다.**
+
+<p>
+<img src="assets/previews/mobile-web-dark-preview.png" width="390" alt="다크 모바일 웹 UI 미리보기. 실제 브라우저 캡처 아님">
+<img src="assets/previews/mobile-web-light-preview.png" width="390" alt="라이트 모바일 웹 UI 미리보기. 실제 브라우저 캡처 아님">
+</p>
+
+[커스터마이징 예제](http://127.0.0.1:5173/examples/web/customization.html)에서 모바일 프리셋을 선택하고 화면 폭을 줄여 볼 수 있습니다. 기기 자동 감지는 하지 않으며, 예제 CSS는 600px 이하에서 도구 모음을 차트 위에 배치합니다. [전체 갤러리·출처·재생성 방법](docs/EXAMPLE-SCREENSHOTS.md).
+
+## 첫 차트 만들기
+
+[quickstart.html](examples/web/quickstart.html)에 높이가 있는 컨테이너가 준비되어 있습니다. 아래는 실제 [예제 모듈](examples/web/quickstart.mjs)의 전체 코드입니다. 시각은 UTC Unix **밀리초**입니다.
+
+```js
+import { BarStore, ChartModel, createChart } from '../../src/index.mjs';
+
+const store = new BarStore([
+  { time: 1700000000000, open: 100, high: 103, low: 99, close: 102, volume: 500 },
+  { time: 1700000060000, open: 102, high: 104, low: 101, close: 103, volume: 650 },
+  { time: 1700000120000, open: 103, high: 105, low: 102, close: 104, volume: 700 },
+  { time: 1700000180000, open: 104, high: 106, low: 103, close: 105, volume: 800 },
+]);
+const model = new ChartModel({ store });
+model.addSeries({ id: 'price', type: 'candles', panel: 'price' });
+model.indicators.add('ema3', 'ema', { period: 3 });
+model.addSeries({
+  id: 'ema3', type: 'line', panel: 'price',
+  indicator: 'ema3', color: '#f0b755',
+});
+model.fit();
+const chart = createChart(document.getElementById('chart'), model, {
+  renderer: 'canvas',
+});
+
+// Same timestamp replaces the last bar; a later timestamp appends.
+store.upsert({
+  time: 1700000180000, open: 104, high: 107,
+  low: 103, close: 106, volume: 900,
+});
+
+// Preserve the chart across back/forward-cache navigation; dispose on exit.
+window.addEventListener('pagehide', event => {
+  if (!event.persisted) chart.destroy({ disposeModel: true });
+});
+window.addEventListener('pageshow', event => {
+  if (event.persisted && !chart.disposed) chart.resize();
+});
 ```
 
-직접 차트를 만드는 실행 예제는 [영문 README의 첫 차트 예제](README.md#your-first-chart)에 있습니다. 저장소 상대 경로로 import하므로 npm 게시를 기다릴 필요가 없습니다. 차트를 넣는 요소에는 실제 높이를 지정하세요.
+컴포넌트를 해제할 때 모델까지 소유하고 있다면 `chart.destroy({ disposeModel: true })`를 호출하세요. 공유 모델은 마지막 소유자가 별도로 정리하고, 앱의 timer·구독도 중단해야 합니다. 기본은 Canvas이며 `renderer: 'webgl2'`는 Canvas 폴백이 있는 선택 경로입니다. 기기와 장면에 무관한 성능이나 동일한 문자 픽셀을 보장하지 않습니다.
 
-## 실제 실행 예시 화면
+## 앱에 설치하기
 
-2026-10-14 macOS의 Chrome 155.0.8059.79에서 합성 데이터로 실행한 실제 브라우저 캡처입니다. 기준 소스는 `e3284e54`이며, 이후 소스 변경까지 이 화면으로 검증한 것은 아닙니다.
-
-![Chrome에서 실행한 시간 범위 연결 차트](assets/screenshots/web-linked-ranges.png)
-
-![Undo 후 실제 도형 그룹 예제 화면](assets/screenshots/web-drawing-groups.png)
-
-[플랫폼별 화면과 실행 방법](docs/EXAMPLE-SCREENSHOTS.md)에서 커서 연결 예제와 React·macOS·iOS·Android 실행 경로를 확인할 수 있습니다. 검증된 네이티브·React 전용 스크린샷은 보존되어 있지 않아 해당 상태와 필요한 실행 환경을 명시했습니다. 브라우저 화면을 네이티브 SDK 실행 화면으로 표시하지 않습니다.
-
-
-## 앱에서 사용하기
-
-npm 배포 전에는 이 저장소로 만든 로컬 tarball을 설치하세요.
+**아직 npm에 게시하지 않았습니다.** 이름이 같은 다른 registry 패키지를 설치하지 말고, 이 소스로 로컬 tarball을 만드세요.
 
 ```sh
 mkdir -p /tmp/barochart-pack
@@ -73,23 +112,17 @@ npm pack --ignore-scripts --pack-destination /tmp/barochart-pack
 npm install /tmp/barochart-pack/barochart-0.2.13.tgz
 ```
 
-로컬 패키지를 설치하면 다음과 같이 import합니다.
+설치 후에는 소스 상대 경로 대신 다음 import를 사용합니다.
 
 ```js
 import { BarStore, ChartModel, createChart } from 'barochart';
 ```
 
-- `barochart/core`: DOM 없는 데이터·지표·모델·그리기·계산 API
-- `barochart/canvas`, `barochart/webgl`: 웹 렌더러
-- `barochart/worker`: Worker 기반 준비·계산 API
-- `barochart/worker-entry`: 별도로 번들링할 Worker 진입점
-- `barochart/react`: 선택형 React 웹 어댑터
-
-TypeScript 선언을 포함합니다. DOM 타입이 없는 Node 앱에는 `/core`를 사용하세요. 예제·테스트·벤치마크는 저장소에 있고 npm tarball에는 포함되지 않습니다.
+TypeScript 선언을 포함합니다. 진입점은 `barochart/core`(DOM 없음), `/canvas`, `/webgl`, `/worker`, `/worker-entry`, 선택형 `/react`입니다. 예제·테스트·벤치마크·갤러리 이미지는 저장소에만 있고 npm 배포 내용에는 포함하지 않습니다.
 
 ### React
 
-React 컴포넌트 이름은 호환성을 위해 `AsterChart`를 유지합니다.
+호환성 export 이름은 `AsterChart`를 유지합니다.
 
 ```jsx
 import { AsterChart } from 'barochart/react';
@@ -99,68 +132,73 @@ export function PriceChart({ bars }) {
 }
 ```
 
-React 18.3.1 또는 19를 선택형 peer로 사용하고 ReactDOM은 앱이 설치합니다. [React 통합 계약](docs/REACT.md)에서 스트림, `dataRevision`, 모델 소유권, 정리와 SSR 제한을 확인하세요. [TypeScript 예제](examples/react-web/README.md)는 첫 `npm ci`에 npm registry 연결이 필요합니다.
+앱이 React 18.3.1/19와 ReactDOM을 제공합니다. [React 소유권·스트림·SSR 계약](docs/REACT.md) · [실행 가능한 TypeScript 예제](examples/react-web/README.md).
 
-### 네이티브와 이름 호환성
+## UI·UX 커스터마이징
 
-Apple은 JavaScriptCore/CoreGraphics와 SwiftPM, Android는 QuickJS/JNI/Canvas와 library/AAR 빌드 경로를 사용합니다. 이 렌더러 경로는 WebView를 사용하지 않습니다. [Swift SDK](docs/SWIFT-SDK.md), [Android SDK](docs/ANDROID-SDK.md), [네이티브 통합](docs/NATIVE.md)을 참고하세요.
+새 차트를 만들 때 프리셋을 선택하고 도구 모음을 명시적으로 붙입니다.
 
-최근 Swift·Android 호스트 변경은 현재 검증 환경에서 **실제 SDK 빌드·기기 실행을 완료하지 않았습니다.** 과거 플랫폼 실행 결과로 이후 변경까지 검증되었다고 볼 수 없습니다. React Native와 Flutter 어댑터는 제공하지 않습니다.
+```js
+import { CanvasChart, attachChartToolbar, createChartUIPreset } from 'barochart';
 
-이전 이름인 Aster의 다음 식별자는 의도적으로 유지합니다.
+const ui = createChartUIPreset('mobile');
+const chart = new CanvasChart(chartElement, readyModel, {
+  interaction: ui.interaction,
+});
+const toolbar = attachChartToolbar(emptyToolbarElement, chart, ui.toolbar);
+```
 
-- React: `AsterChart`, `AsterChartHandle`
-- Swift: `AsterNative`, `AsterEngine`, `AsterChartView`
-- Android: `dev.aster.charts`와 기존 클래스·JNI 이름
-- 저장 문서 스키마·브라우저 이벤트: `aster.*`, `aster:*`
+- 모바일 프리셋: 선택 허용 거리 24px, 휠 줌 꺼짐, 편안한 가로 도구 모음. 버튼의 **최소 높이는 44px**이며 모든 대상의 최소 폭까지 보장하는 것은 아닙니다.
+- 테마·폰트·도구 구성/순서/간격, 패널 높이 비율과 가격축 방향을 설정합니다. [Overlay slots](docs/CHART-OVERLAYS.md), [navigator](docs/CHART-NAVIGATOR.md), [trade 마커](docs/TRADE-MARKERS.md)는 선택해서 붙입니다.
+- 예제는 localStorage로 **입력·도구 모음만 명시적으로 저장·불러오기**합니다. 자동 저장은 없으며 색상·패널·배치·드로잉·데이터는 이 버튼에 포함하지 않습니다. 앱의 저장 기능은 [UI 상태](docs/WEB-UI-STATE.md)와 [workspace](docs/WORKSPACES.md)를 조합하세요.
+- 키보드 옵션은 켜기/끄기이며 **단축키 재매핑이 아닙니다.** 자유로운 패널 도킹과 네이티브 UI 동등 지원도 포함하지 않습니다. [전체 계약](docs/WEB-CUSTOMIZATION.md).
 
-제품 이름은 BaroChart, npm 패키지 이름은 `barochart`입니다. 저장된 문서의 스키마 식별자를 제품 이름에 맞춰 바꾸지 마세요.
+## 예제와 문서
 
-## 사용 전에 알아둘 계약
+| 살펴볼 기능 | 로컬 예제 | 계약 |
+| --- | --- | --- |
+| 수동 리플레이·북마크 | [봉 리플레이](http://127.0.0.1:5173/examples/web/bar-replay.html) | [공개된 prefix만 사용](docs/BAR-REPLAY.md), 자동 재생 없음 |
+| 상대 성과 비교 | [비교 차트](http://127.0.0.1:5173/examples/web/comparison.html) | [명시적 기준·시간 정렬](docs/RELATIVE-COMPARISON.md) |
+| 뷰 연결 | [시간 범위](http://127.0.0.1:5173/examples/web/linked-ranges.html) · [커서](http://127.0.0.1:5173/examples/web/linked-cursors.html) | [시간 범위](docs/TIME-RANGE.md) · [공유 모델 소유권](docs/SHARED-MODEL-REFRESH.md) |
+| 드로잉 작업 | [도형 그룹](http://127.0.0.1:5173/examples/web/drawing-groups.html) | [스타일 프리셋](docs/DRAWING-STYLE-PRESETS.md) · [위험/보상](docs/POSITION-DRAWINGS.md) |
+| 실시간 묶음 갱신 | [수집 큐](http://127.0.0.1:5173/examples/web/ingestion-queue.html) | [호스트 소유 데이터 수집](docs/INGESTION.md) |
+| 데이터·분석 | [분석 화면](http://127.0.0.1:5173/examples/web/analysis.html) | [지표](docs/INDICATORS.md) · [수집](docs/INGESTION.md) · [리샘플링](docs/RESAMPLING.md) |
 
-- **시간·숫자:** 유한한 OHLCV와 엄격한 오름차순의 UTC Unix **정수 밀리초**를 받습니다. Float64는 임의 정밀도 십진수 연산이 아닙니다. 기본 시간축은 봉을 같은 간격에 배치해 비거래 구간을 압축합니다. [데이터 계약](docs/DATA.md)
-- **배열 소유권:** OHLCV 입력은 복사합니다. 저장소 컬럼과 지표 출력 view는 읽기 전용입니다. 외부 `series.values`는 참조를 유지하므로 변경 후 지원하는 setter로 다시 적용해야 캐시가 갱신됩니다.
-- **지표 이력:** 원본 봉으로 계산하며 seed, warm-up의 `NaN`, 세션 경계와 0분모 처리에 따라 다른 구현과 결과가 달라질 수 있습니다. [수치 규약](docs/INDICATORS.md) · [세션 분석](docs/SESSION-STUDIES.md)
-- **비동기 비용:** Worker API는 취소·stale 검사·논리 메모리 예산을 사용합니다. 복사·검증·할당 비용은 남으며 응답성을 개선해도 전체 완료시간과 메모리 비용은 늘 수 있습니다. 예산은 프로세스 RSS나 최대 UI 차단시간 보장이 아닙니다.
-- **명시적 이력 축소:** `api.compactData({ keepLastBars, studyHistory: 'restart' })`는 동기식 유지보수입니다. 모든 지표를 남은 구간에서 다시 시작하므로 전체 이력 계산의 끝부분과 값이 달라질 수 있습니다. 자동 삭제가 아니며 소유권·수집 상태 조건을 먼저 충족해야 합니다. [이력 축소 계약](docs/DATA-COMPACTION.md)
-- **저장·복원:** workspace는 이동 가능한 설정을 저장하며 OHLCV나 앱 전체 세션을 포함하지 않습니다. 복원할 데이터와 일치하는 binding은 호스트가 제공합니다. [Workspace 계약](docs/WORKSPACES.md)
-- **정리:** 소유한 모델까지 해제할 때 `chart.destroy({ disposeModel: true })`를 호출합니다. 모델을 공유한다면 마지막 소유자가 별도로 정리하고, 앱이 만든 timer와 구독도 해제하세요.
+[API·수명 관리](docs/API.md) · [데이터 규칙](docs/DATA.md) · [독립 가격축](docs/INDEPENDENT-AXES.md) · [구조](docs/ARCHITECTURE.md) · [기여](CONTRIBUTING.md)
 
-Canvas가 기본 렌더러입니다. `renderer: 'webgl2'`로 GPU 경로를 선택할 수 있으며 초기화·렌더 오류나 컨텍스트 손실 시 Canvas로 폴백할 수 있습니다. 장면·기기에 따라 비용이 다르고 문자 조합·선 접합의 픽셀 결과도 완전히 같지 않습니다.
+## 지원과 검증 범위
 
-## 문서
+| 통합 경로 | 제공 내용 | 주요 제한 |
+| --- | --- | --- |
+| 일반 웹 | Canvas/WebGL2와 HTML 컨트롤 | 과거 Chrome의 일부 흐름 확인. 최신 UI·기기 동작은 브라우저 QA 필요 |
+| React 웹 | 선택형 `AsterChart` 어댑터 | 최신 모의 hooks 테스트가 실제 React/SSR 실행을 대신하지 않음 |
+| 모바일 웹 | 명시적 입력 프리셋·반응형 예제 CSS | 이미지는 설명용 미리보기. 터치·스크롤·보조 기술 미검증 |
+| Apple 네이티브 | JavaScriptCore/CoreGraphics·SwiftPM | [Swift SDK](docs/SWIFT-SDK.md). 최근 호스트 변경은 실제 SDK·기기 검증 필요 |
+| Android 네이티브 | QuickJS/JNI/Canvas·library/AAR 경로 | [Android SDK](docs/ANDROID-SDK.md). 최근 호스트 변경은 실제 SDK·기기 검증 필요 |
 
-- [API·그리기·수명](docs/API.md) · [독립 가격축](docs/INDEPENDENT-AXES.md)
-- [데이터 조회](docs/DATA-EXPLORER.md) · [순서가 있는 수집](docs/INGESTION.md)
-- [지표 설정 변경](docs/INDICATOR-PARAMETERS.md) · [비동기 설정 변경](docs/ASYNC-INDICATOR-PARAMS.md) · [사용자 모듈](docs/INDICATOR-MODULES.md)
-- [OHLCV 리샘플링](docs/RESAMPLING.md) · [비동기 리샘플링](docs/ASYNC-RESAMPLING.md)
-- [아키텍처](docs/ARCHITECTURE.md) · [렌더 레이어](docs/RENDER-LAYERS.md)
-- [공유 모델 새로 그리기](docs/SHARED-MODEL-REFRESH.md): 하나의 입력 주체, 공유 이력과 명시적인 sibling redraw.
-- [스타일 전용 도형 프리셋](docs/DRAWING-STYLE-PRESETS.md): 호스트 소유 레지스트리와 선택형 패널.
-- [현재 검증 범위](docs/PUBLIC-VALIDATION.md) · [기여 가이드](CONTRIBUTING.md)
+네이티브 경로는 WebView가 아닙니다. React Native/Flutter 어댑터는 없습니다. `AsterChart`, `AsterNative`, `AsterEngine`, `dev.aster.charts`, `aster.*` 식별자는 호환성을 위해 유지하며 저장 스키마 이름을 바꾸면 안 됩니다.
 
-일부 상세 문서에는 이전 버전 실행 기록과 Aster 이름이 남아 있습니다. 현재 검증 요약에서 과거 결과와 이번 프리뷰의 검증 범위를 구분합니다.
+Node 계약 테스트, strict TypeScript, 오프라인 패키지 소비자 검사는 자동 검사이며 브라우저·기기 인증은 아닙니다. Float64는 임의 정밀도 십진수가 아니며 workspace 복원에는 맞는 호스트 데이터가 필요하고 Worker에도 복사·할당 비용이 있습니다. [전체 검증 이력·한계](docs/PUBLIC-VALIDATION.md) · [상태·소유권 로드맵](docs/MARKET-ROADMAP.md).
 
-## 검증 범위와 한계
+<details>
+<summary>이전 검증 기록과 보존한 실패</summary>
 
-2026-10-18 소스 `381fb00fc41c49aadfb72f45fb0c0a66f500d62c`에서 **Node 4,870/4,870**, ESM 구문 513개, strict TypeScript 5.9.3 및 offline packed-consumer 검사를 통과했습니다. cloud Node/모델링된 호스트 결과이며 새 브라우저·네이티브 SDK 실행을 뜻하지 않습니다. [날짜별 검증 기록](docs/PUBLIC-VALIDATION.md)에서 범위와 이전 실패를 구분합니다.
+2026-10-18 소스 `381fb00fc41c49aadfb72f45fb0c0a66f500d62c`에서 **4,870/4,870** Node 테스트, 513 ESM 구문 검사, strict TypeScript 5.9.3과 오프라인 패키지 검사가 통과했습니다. 브라우저·네이티브 실행 결과를 의미하지 않습니다.
 
-공개 이름 변경 전 Linux/Node 전체 테스트는 **2,552개 중 2,551개 통과**했습니다. 한 dry-run CLI가 15초 watchdog 제한에 걸렸고, 같은 파일을 수정 없이 단독 재실행했을 때는 **131/131 통과**했습니다. 전체 실행에서 발생한 실패 원인은 해결되지 않았으므로 전체 통과로 표기하지 않습니다.
+그보다 이른 Linux/Node 기준은 **2,551/2,552** 테스트가 통과했습니다. 한 dry-run CLI가 15초 watchdog에 걸렸고, 변경하지 않은 해당 파일만 다시 실행했을 때 **131/131** 통과했습니다. 당시 전체 실행 실패를 삭제하거나 전체 성공으로 바꾸지 않습니다.
 
-Mac Chrome 155에서 도형 패널·연결 커서·키보드 탐색과 Canvas/WebGL 1회 왕복을 확인했습니다. 화면 낭독기·다른 브라우저·장시간 렌더링은 아직 검증하지 않았습니다. 독립 QuickJS 실행과 Android 타입 stub을 사용한 Java 검사는 실제 SDK·JNI·기기 검증을 대신하지 않습니다. 모든 환경의 성능 우위, 상용 제품과의 동등성, 실기기 FPS를 입증한 상태가 아닙니다.
+</details>
 
 ```sh
 npm test
 npm run check
-# 별도로 설치한 TypeScript 5.9 이상 사용:
-TSC_PATH=/absolute/path/to/typescript/lib/tsc.js npm run check:types
-TSC_PATH=/absolute/path/to/typescript/lib/tsc.js npm run check:package
+# 설치된 TypeScript 5.9+ 컴파일러가 있을 때:
+TSC_PATH=/path/to/typescript/lib/tsc.js npm run check:types
+TSC_PATH=/path/to/typescript/lib/tsc.js npm run check:package
 ```
 
-브라우저·네이티브 검사는 각 문서의 브라우저, SDK와 호스트 권한이 필요합니다. 자세한 실행 범위와 비용 해석은 [PUBLIC-VALIDATION.md](docs/PUBLIC-VALIDATION.md)에 있습니다.
+이 로컬 명령은 게시하지 않습니다. 브라우저·네이티브 검사는 각각 문서에 명시된 환경과 권한이 필요합니다.
 
 ## 라이선스
 
-BaroChart는 [Apache License 2.0](LICENSE)으로 제공합니다. 귀속과 별도 라이선스 구성 요소는 [NOTICE](NOTICE)와 [라이선스·출처](docs/LICENSING.md)를 확인하세요. npm registry 배포 준비 전까지 패키지의 `private: true`를 유지합니다.
-
-웹 UI / UX: [선택형 도구 모음과 입력 설정](docs/WEB-CUSTOMIZATION.md), [커스터마이징 데모](examples/web/customization.html). 색상·글자·도구 순서/위치·간격·입력 켜기/끄기·패널 비중/축 위치를 조절합니다. 단축키 재지정, 패널 도킹, UI 설정 영구 저장과 네이티브 UI 동등 지원은 포함하지 않습니다.
+[Apache License 2.0](LICENSE) · [NOTICE](NOTICE) · [제3자 구성요소](docs/LICENSING.md). 패키지는 `private: true`이며 registry 출시를 선언하는 문서가 아닙니다.

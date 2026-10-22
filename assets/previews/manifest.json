@@ -1,0 +1,117 @@
+{
+  "schema": "barochart.documentation-previews",
+  "version": 1,
+  "sourceCommit": "01e4e1a83a560552c0e0274eaa685befced67412",
+  "generatedDateUTC": "2026-10-22",
+  "renderer": "Production buildScene + renderCanvas in Node, using @napi-rs/canvas 0.1.100",
+  "browserScreenshot": false,
+  "nativeSDKExecution": false,
+  "data": "seededColumns(512), synthetic; visible range 443.5..511.5",
+  "chrome": "Schematic application chrome based on customization CSS and mobile preset. Settings omitted and labels shortened; not computed browser CSS.",
+  "limitations": "No browser/device, touch, focus, screen-reader or performance validation. Fonts and raster output can vary by backend/environment.",
+  "fonts": {
+    "chrome": "DejaVu Sans",
+    "chart": "DejaVu Sans Mono"
+  },
+  "size": {
+    "width": 390,
+    "height": 896,
+    "dpr": 2,
+    "chartWidth": 366,
+    "chartHeight": 460
+  },
+  "mobilePreset": {
+    "interaction": {
+      "pointer": true,
+      "wheelZoom": false,
+      "keyboardShortcuts": true,
+      "hitTolerancePx": 24
+    },
+    "toolbar": {
+      "label": "Chart tools",
+      "tools": [
+        "select",
+        "trendline",
+        "horizontal",
+        "rectangle"
+      ],
+      "actions": [
+        "fit",
+        "undo",
+        "redo"
+      ],
+      "orientation": "horizontal",
+      "density": "comfortable"
+    }
+  },
+  "sources": [
+    {
+      "path": "src/core/model.mjs",
+      "sha256": "eb5d182ac4c62ecc4b863adf23406112fefdfbf78378f1a5321e8d11bd2ee8fa"
+    },
+    {
+      "path": "src/core/scene.mjs",
+      "sha256": "f27b48dbbd05f2176505807973047e6813be4cd151953e738f76dff9771587b2"
+    },
+    {
+      "path": "src/renderers/canvas.mjs",
+      "sha256": "46179fa5cf0fe982e67eee29566cee6d8ef03c25296eeb1aa59052797cb7f8a5"
+    },
+    {
+      "path": "src/renderers/chart-ui.mjs",
+      "sha256": "adddee5d53a237aba8bc82388572ba9056832c07ff2676b5b86715a70242206a"
+    },
+    {
+      "path": "src/renderers/chart-toolbar.mjs",
+      "sha256": "c096d92b7f4bd2329d8b2578205da38fa039fab3b396012f061a59a0923b17f0"
+    },
+    {
+      "path": "examples/web/customization.css",
+      "sha256": "bf03bdb3882b5e31c12cd6ead08e6fb70781d0e5d3ac21a983d5cea3c10871f5"
+    },
+    {
+      "path": "examples/web/customization.mjs",
+      "sha256": "e88ab3ff702e6b70119b4fc685d10d8608d506794408f8f236f1db0f552439b9"
+    },
+    {
+      "path": "scripts/readme-previews.mjs",
+      "sha256": "4a8ec24137a27b8bafdc29e3891cc04a476f3e8fb206e2661e7806e384596e48"
+    }
+  ],
+  "images": [
+    {
+      "file": "mobile-web-dark-preview.png",
+      "theme": "dark",
+      "width": 780,
+      "height": 1792,
+      "logicalWidth": 390,
+      "logicalHeight": 896,
+      "bytes": 139338,
+      "sha256": "bf66d0f31e4b56d08b9678a010661abbea06372e80150da76922f80a9700c8a6",
+      "sceneSha256": "fe7e0108d3332028e2db4a0e5839f974816009fa62873dbae7065b6caa2cf817",
+      "stats": {
+        "storedBars": 512,
+        "visibleSourceBars": 69,
+        "renderedCandleBuckets": 69,
+        "commandCount": 21
+      }
+    },
+    {
+      "file": "mobile-web-light-preview.png",
+      "theme": "light",
+      "width": 780,
+      "height": 1792,
+      "logicalWidth": 390,
+      "logicalHeight": 896,
+      "bytes": 140179,
+      "sha256": "06d0c4c891d4a9c46de35d9ab4765a71d0124bc65914a642279c841a81b8add0",
+      "sceneSha256": "85b6eea480cfe81e0a020607edfbda21659e13241e42fd95314dee7b1ab2c507",
+      "stats": {
+        "storedBars": 512,
+        "visibleSourceBars": 69,
+        "renderedCandleBuckets": 69,
+        "commandCount": 21
+      }
+    }
+  ]
+}
