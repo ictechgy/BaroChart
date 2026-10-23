@@ -177,6 +177,7 @@ toolbar.setOptions({labels: {select: '이동', fit: '전체 보기'}});
 - 모바일 프리셋: 선택 허용 거리 24px, 휠 줌 꺼짐, 편안한 가로 도구 모음. 호스트가 스타일을 바꾸기 전 편안한 도구 모음 버튼의 **최소 너비와 높이는 44px**입니다.
 - 테마·폰트·도구 구성/순서/간격, 패널 높이 비율과 가격축 방향을 설정합니다. [Overlay slots](docs/CHART-OVERLAYS.md), [navigator](docs/CHART-NAVIGATOR.md), [trade 마커](docs/TRADE-MARKERS.md)는 선택해서 붙입니다.
 - 커스터마이징 스튜디오는 localStorage로 **외관 프로필을 명시적으로 저장·불러오기**하고 JSON을 가져오거나 내보냅니다. 자동 저장은 없으며 색상·패널 배치·입력·도구 문구·표시 옵션을 저장하고 드로잉과 데이터는 현재 차트에 유지합니다. 앱의 저장 기능은 [UI 상태](docs/WEB-UI-STATE.md)와 [workspace](docs/WORKSPACES.md)를 조합하세요.
+- 스튜디오에서 버튼 문구를 편집하고, 드로잉 이력과 별도로 설정 변경을 최대 30단계 되돌리거나 다시 실행하며 JS/TS 차트 모듈을 복사할 수 있습니다. `npm run test:customization:browser`로 Chrome 검증을 실행합니다.
 - 키보드 옵션은 켜기/끄기이며 **단축키 재매핑이 아닙니다.** 자유로운 패널 도킹과 네이티브 UI 동등 지원도 포함하지 않습니다. [전체 계약](docs/WEB-CUSTOMIZATION.md).
 
 ## 예제와 문서

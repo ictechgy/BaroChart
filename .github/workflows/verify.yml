@@ -1,0 +1,63 @@
+name: Verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        # Official release: https://github.com/actions/checkout/releases/tag/v7.0.1
+        # ubuntu-latest supplies the runner required by the v7 Node 24 action runtime.
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        # Official release: https://github.com/actions/setup-node/releases/tag/v7.1.0
+        with:
+          node-version: 22
+
+      - name: Install verification TypeScript in runner temp
+        shell: bash
+        run: |
+          set -euo pipefail
+          typescript_dir="${RUNNER_TEMP}/barochart-typescript-5.9.3"
+          npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund \
+            --prefix "${typescript_dir}" typescript@5.9.3
+          echo "TSC_PATH=${typescript_dir}/node_modules/typescript/lib/tsc.js" >> "${GITHUB_ENV}"
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Check JavaScript modules
+        run: npm run check
+
+      - name: Check TypeScript declarations
+        run: npm run check:types
+
+      - name: Verify offline npm package
+        run: npm run check:package
+
+      - name: Run customization studio in Chrome CDP
+        shell: bash
+        run: |
+          set -euo pipefail
+          # ubuntu-latest provides Google Chrome; fail explicitly if the image changes
+          # so a missing browser is visible as environment drift rather than a skipped check.
+          chrome_bin="$(command -v google-chrome || true)"
+          if [[ -z "${chrome_bin}" ]]; then
+            echo 'google-chrome is required for the customization browser check' >&2
+            exit 1
+          fi
+          CHROME_BIN="${chrome_bin}" npm run test:customization:browser

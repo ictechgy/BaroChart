@@ -177,6 +177,7 @@ toolbar.setOptions({labels: {select: 'Pan', fit: 'Fit view'}});
 - Mobile: 24px hit tolerance, wheel zoom off, comfortable horizontal controls. Comfortable toolbar buttons have a **44px minimum width and height** before host restyling.
 - Change theme, font, toolbar content/order/density, panel height ratios and price-axis side. Add [overlay slots](docs/CHART-OVERLAYS.md), [navigator](docs/CHART-NAVIGATOR.md) or [trade markers](docs/TRADE-MARKERS.md) only when needed.
 - The customization studio explicitly saves/loads **appearance profiles** via localStorage and imports/exports JSON. No automatic persistence; profiles include colors, panel layout, placement, input, toolbar captions and optional displays, while drawings and data stay in the chart. Compose [UI state](docs/WEB-UI-STATE.md) with [workspaces](docs/WORKSPACES.md) for host-owned saved charts.
+- Edit button captions, undo/redo up to 30 settings changes independently of drawing history, and copy a JavaScript/TypeScript chart module from the studio. Run `npm run test:customization:browser` for the maintained Chrome checks.
 - Keyboard options are enable switches, **not shortcut remapping**. Arbitrary panel docking and native UI parity are not included. [Full customization contract](docs/WEB-CUSTOMIZATION.md).
 
 ## Examples and guides

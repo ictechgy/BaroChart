@@ -1,10 +1,14 @@
 import {ChartModel,CanvasChart,attachChartToolbar,DARK_THEME,LIGHT_THEME,DRAWING_TYPES,seededColumns,saveChartUI,readChartUI,createChartUIPreset,attachChartOverlays,attachChartNavigator,attachTradeMarkers} from '../../src/index.mjs';
 import {saveCustomizationProfile,readCustomizationProfile} from './customization-profile.mjs';
+import {generateCustomizationCode} from './customization-code.mjs';
 
 const $=id=>document.getElementById(id),root=$('customization-demo');
 const NEW_STORAGE_KEY='barochart.customization.profile.v1',LEGACY_STORAGE_KEY='barochart.customization.web-ui.v1',MAX_FILE_CHARS=64*1024;
 const koreanLabels=Object.freeze({select:'선택 / 이동',trendline:'추세선',horizontal:'수평선',fibonacci:'피보나치 되돌림',rectangle:'사각형',ellipse:'타원',text:'텍스트',ray:'광선',extendedline:'연장선',channel:'채널',fibextension:'피보나치 확장',fibfan:'피보나치 팬',fibtimezones:'피보나치 시간대',freehand:'자유 그리기',longposition:'롱 포지션',shortposition:'숏 포지션',measurement:'측정',fit:'전체 보기',zoomIn:'확대',zoomOut:'축소',undo:'실행 취소',redo:'다시 실행'});
+const englishLabels=Object.freeze({select:'Select / pan',trendline:'Trend line',horizontal:'Horizontal line',fibonacci:'Fibonacci retracement',rectangle:'Rectangle',ellipse:'Ellipse',text:'Text',ray:'Ray',extendedline:'Extended line',channel:'Channel',fibextension:'Fibonacci extension',fibfan:'Fibonacci fan',fibtimezones:'Fibonacci time zones',freehand:'Freehand',longposition:'Long position',shortposition:'Short position',measurement:'Measurement',fit:'Fit all',zoomIn:'Zoom in',zoomOut:'Zoom out',undo:'Undo',redo:'Redo'});
 const colorLabels={background:'배경',grid:'격자',text:'축 글자',up:'상승',down:'하락',crosshair:'십자선'};
+const toolSets=Object.freeze({basic:Object.freeze(['select','trendline','horizontal','rectangle']),analysis:Object.freeze(['select','trendline','fibonacci','longposition','shortposition','measurement']),all:Object.freeze(['select',...DRAWING_TYPES])});
+const SETTINGS_HISTORY_LIMIT=31;
 const model=new ChartModel({panels:[{id:'price',weight:3.5,axisSide:'right'},{id:'volume',weight:1,precision:0,axisSide:'right'}]});
 model.store.setColumns(seededColumns(512));
 model.addSeries({id:'price',type:'candles',panel:'price'});
@@ -13,23 +17,27 @@ const chart=new CanvasChart($('customization-chart'),model),toolbar=attachChartT
 const statusNode=$('customization-status'),stateNode=$('profile-state');
 const stateText={ready:'준비됨',dirty:'변경됨',saved:'저장됨',error:'오류'};
 const PROFILE_TEXT_CHARS=16384;
-let draftRevision=0,fileGeneration=0,statusGeneration=0,savedBaselineText=null,defaultProfileText='';
+let draftRevision=0,fileGeneration=0,statusGeneration=0,savedBaselineText=null,defaultProfileText='',settingsHistory=[],settingsCursor=-1,settingsApplying=false,codeGeneration=0,acceptedPlacement=['left','top','right'].includes(root.dataset.placement)?root.dataset.placement:'left';
 
 function status(text,state='ready'){
  statusGeneration++;
  statusNode.textContent=String(text);statusNode.setAttribute('data-state',state);stateNode.textContent=stateText[state]??state;stateNode.setAttribute('data-state',state);
 }
 function errorMessage(error){return String(error?.message??error??'알 수 없는 오류').replace(/\s+/g,' ').slice(0,220);}
-function syncActualControls(){if(chart.disposed)return;syncAppearance();syncToolbar();syncInput();syncLayout();syncExtrasControls();}
+function syncActualControls(){if(chart.disposed)return;syncAppearance();syncToolbar();syncCaptionEditor();syncInput();syncLayout();syncExtrasControls();syncSettingsHistoryControls();}
 function report(error){status('오류: '+errorMessage(error),'error');try{syncActualControls();}catch{}}
 function invalidatePending(){fileGeneration++;draftRevision++;}
 function currentDraftState(){try{const current=profileText();if(savedBaselineText!==null)return current===savedBaselineText?'saved':'dirty';return defaultProfileText&&current===defaultProfileText?'ready':'dirty';}catch{return 'dirty';}}
 function announceDraft(message){status(message,currentDraftState());}
+function syncSettingsHistoryControls(){const undo=$('undo-settings'),redo=$('redo-settings');if(!undo||!redo)return;undo.disabled=settingsApplying||settingsCursor<=0;redo.disabled=settingsApplying||settingsCursor<0||settingsCursor>=settingsHistory.length-1;}
+function reconcileSettingsHistory(actual){if(typeof actual!=='string')return false;if(settingsCursor<0){settingsHistory=[actual];settingsCursor=0;}else if(settingsHistory[settingsCursor]===actual)return false;else{settingsHistory=settingsHistory.slice(0,settingsCursor+1);settingsHistory.push(actual);if(settingsHistory.length>SETTINGS_HISTORY_LIMIT)settingsHistory.splice(0,settingsHistory.length-SETTINGS_HISTORY_LIMIT);settingsCursor=settingsHistory.length-1;}syncSettingsHistoryControls();return true;}
+function commitSettingsHistory(before,after){if(before===after)return false;if(settingsCursor<0){settingsHistory=[before];settingsCursor=0;}else{if(settingsHistory[settingsCursor]!==before)reconcileSettingsHistory(before);settingsHistory=settingsHistory.slice(0,settingsCursor+1);}settingsHistory.push(after);if(settingsHistory.length>SETTINGS_HISTORY_LIMIT)settingsHistory.splice(0,settingsHistory.length-SETTINGS_HISTORY_LIMIT);settingsCursor=settingsHistory.length-1;syncSettingsHistoryControls();return true;}
+function initializeSettingsHistory(){const initial=profileText();settingsHistory=[initial];settingsCursor=0;syncSettingsHistoryControls();}
 function live(){if(chart.disposed)throw new Error('Chart disposed');return true;}
 function activeGesture(){return !!chart.controller?.gesture||!!chart.controller?.pointers?.size||!!model.drawings?.transaction;}
 function guard(){live();if(activeGesture())throw new Error('진행 중인 입력을 완료하거나 취소한 뒤 다시 시도하세요.');}
 function changed(fn,message='설정을 적용했습니다.'){
- try{let before=null;try{before=profileText();}catch{}const result=fn();syncSummaries();const after=profileText();if(before===null||after!==before){fileGeneration++;draftRevision++;}status(message,currentDraftState());return result;}catch(error){report(error);return undefined;}
+ let before=null;try{try{before=profileText();}catch{}const result=fn();syncSummaries();const after=profileText();if(before!==null&&after!==before){fileGeneration++;draftRevision++;commitSettingsHistory(before,after);}status(message,currentDraftState());return result;}catch(error){try{syncActualControls();const after=profileText();if(before!==null&&after!==before){fileGeneration++;draftRevision++;reconcileSettingsHistory(after);}}catch{}report(error);return undefined;}
 }
 
 const colors=new Map();
@@ -69,21 +77,36 @@ function renderChoices(){
  if(focused&&host.contains(focused)&&(document.activeElement===null||document.activeElement===document.body))focused.focus();
 }
 function syncToolbar(){
- const options=toolbar.options,placement=$('placement').value;
+ const options=toolbar.options,placement=acceptedPlacement;
  $('density').value=options.density;root.dataset.density=options.density;$('placement').value=placement;root.dataset.placement=placement;
  selected=new Set(options.tools);ordered=[...options.tools,...ordered.filter(id=>!selected.has(id))];renderChoices();
- $('tool-set').value='custom';
+ const matching=Object.entries(toolSets).find(([,ids])=>ids.length===options.tools.length&&ids.every((id,index)=>options.tools[index]===id));
+ $('tool-set').value=matching?.[0]??'custom';
  $('toolbar-summary').textContent=(placement==='top'?'위쪽':placement==='right'?'오른쪽':'왼쪽')+' · '+(options.density==='compact'?'촘촘하게':'편안하게');
 }
+function captionText(id){return toolbar.options.labels[id]??englishLabels[id]??id;}
+function syncCaptionEditor(){const control=$('caption-control'),value=$('caption-value');if(!control||!value)return;const id=control.value||'select';control.value=id;if(document.activeElement!==value)value.value=captionText(id);}
+function captionLabelsWithout(id){const labels={...toolbar.options.labels};delete labels[id];return labels;}
+function applyCaption(){
+ const id=$('caption-control').value,value=$('caption-value').value;
+ if(!id)throw new Error('도구 버튼을 선택하세요.');
+ if(!value)throw new Error('문구를 비우려면 영문 기본값으로 초기화 버튼을 사용하세요.');
+ if(value.length>128)throw new RangeError('도구 문구는 128자 이하여야 합니다.');
+ const labels={...toolbar.options.labels,[id]:value};toolbar.setOptions({labels});syncCaptionEditor();
+}
+function resetCaption(){const id=$('caption-control').value;if(!id)throw new Error('도구 버튼을 선택하세요.');toolbar.setOptions({labels:captionLabelsWithout(id)});syncCaptionEditor();}
+$('caption-control').onchange=()=>syncCaptionEditor();
+$('caption-apply').onclick=()=>changed(applyCaption,'도구 문구를 적용했습니다.');
+$('caption-reset').onclick=()=>changed(resetCaption,'도구 문구를 영문 기본값으로 초기화했습니다.');
 function placementOrientation(value){return value==='top'?'horizontal':'vertical';}
-$('placement').onchange=()=>changed(()=>{guard();const placement=$('placement').value;toolbar.setOptions({orientation:placementOrientation(placement)});root.dataset.placement=placement;chart.resize();syncToolbar();},'도구 모음 위치를 적용했습니다.');
+$('placement').onchange=()=>changed(()=>{guard();const placement=$('placement').value;if(!['left','top','right'].includes(placement))throw new TypeError('도구 모음 위치가 올바르지 않습니다.');toolbar.setOptions({orientation:placementOrientation(placement)});acceptedPlacement=placement;root.dataset.placement=placement;chart.resize();syncToolbar();},'도구 모음 위치를 적용했습니다.');
 $('density').onchange=()=>changed(()=>{guard();toolbar.setOptions({density:$('density').value});root.dataset.density=$('density').value;syncToolbar();},'도구 모음 간격을 적용했습니다.');
-$('tool-set').onchange=()=>changed(()=>{guard();const value=$('tool-set').value,ids=value==='all'?['select',...DRAWING_TYPES]:value==='analysis'?['select','trendline','fibonacci','longposition','shortposition','measurement']:['select','trendline','horizontal','rectangle'];toolbar.setOptions({tools:ids});selected=new Set(ids);ordered=[...ids,...ordered.filter(id=>!selected.has(id))];renderChoices();},'도구 구성을 적용했습니다.');
+$('tool-set').onchange=()=>changed(()=>{guard();const value=$('tool-set').value,ids=toolSets[value];if(!ids)return;toolbar.setOptions({tools:ids});selected=new Set(ids);ordered=[...ids,...ordered.filter(id=>!selected.has(id))];renderChoices();},'도구 구성을 적용했습니다.');
 
 for(const key of ['pointer','wheelZoom','keyboardShortcuts'])$(key).onchange=()=>changed(()=>{live();chart.setInteractionOptions({[key]:$(key).checked});syncInput();},'입력 설정을 적용했습니다.');
 $('hitTolerancePx').onchange=()=>changed(()=>{const node=$('hitTolerancePx'),value=Number(node.value);if(!Number.isFinite(value)||value<1||value>32)throw new RangeError('선택 허용 거리: 1..32');chart.setInteractionOptions({hitTolerancePx:value});syncInput();},'선택 허용 거리를 적용했습니다.');
 function syncInput(){const options=chart.interactionOptions;for(const key of ['pointer','wheelZoom','keyboardShortcuts'])$(key).checked=options[key];$('hitTolerancePx').value=String(options.hitTolerancePx);$('input-summary').textContent=[options.pointer&&'포인터',options.wheelZoom&&'휠',options.keyboardShortcuts&&'단축키'].filter(Boolean).join(' · ')||'입력 꺼짐';}
-$('device-preset').onchange=()=>{const value=$('device-preset').value;try{if(!value)return;changed(()=>{guard();const preset=createChartUIPreset(value);chart.setInteractionOptions(preset.interaction);if(preset.toolbar){toolbar.setOptions(preset.toolbar);const placement=preset.toolbar.orientation==='horizontal'?'top':'left';$('placement').value=placement;root.dataset.placement=placement;}syncAll();},value==='mobile'?'모바일 입력 프리셋을 적용했습니다.':'데스크톱 입력 프리셋을 적용했습니다.');}catch(error){report(error);}finally{$('device-preset').value='';}};
+ $('device-preset').onchange=()=>{const value=$('device-preset').value;try{if(!value)return;changed(()=>{guard();const preset=createChartUIPreset(value);chart.setInteractionOptions(preset.interaction);if(preset.toolbar){const current=toolbar.options,toolbarPatch={...preset.toolbar,label:current.label,labels:{...current.labels}};toolbar.setOptions(toolbarPatch);if(Array.isArray(preset.toolbar.tools)){selected=new Set(preset.toolbar.tools);ordered=[...preset.toolbar.tools,...ordered.filter(id=>!selected.has(id))];renderChoices();}acceptedPlacement=preset.toolbar.orientation==='horizontal'?'top':'left';root.dataset.placement=acceptedPlacement;}syncAll();},value==='mobile'?'모바일 입력 프리셋을 적용했습니다.':'데스크톱 입력 프리셋을 적용했습니다.');}catch(error){report(error);}finally{$('device-preset').value='';}};
 
 for(const id of ['price','volume'])$(id+'-weight').onchange=()=>changed(()=>{const node=$(id+'-weight'),weight=Number(node.value);if(!Number.isFinite(weight)||weight<.5||weight>8)throw new RangeError('패널 비중: 0.5..8');chart.api.setPanel(id,{weight});syncLayout();},'패널 비중을 적용했습니다.');
 $('axis-side').onchange=()=>changed(()=>{guard();chart.api.setPanel('price',{axisSide:$('axis-side').value});syncLayout();},'가격 축 위치를 적용했습니다.');
@@ -107,15 +130,17 @@ for(const[id,key,label]of[['show-navigator','navigator','navigator 표시를'],[
 
 function profileConfig(){
  const price=model.panels.find(panel=>panel.id==='price'),volume=model.panels.find(panel=>panel.id==='volume');
- return {theme:{...model.theme},layout:{priceWeight:price.weight,volumeWeight:volume.weight,axisSide:price.axisSide??'right',placement:$('placement').value},ui:{interaction:{...chart.interactionOptions},toolbar:toolbar.options},extras:{navigator:$('show-navigator').checked,overlays:$('show-overlays').checked,tradeMarkers:$('show-trade-markers').checked}};
+ return {theme:{...model.theme},layout:{priceWeight:price.weight,volumeWeight:volume.weight,axisSide:price.axisSide??'right',placement:acceptedPlacement},ui:{interaction:{...chart.interactionOptions},toolbar:toolbar.options},extras:{navigator:!!demoNavigator,overlays:!!demoOverlays,tradeMarkers:!!demoTradeMarkers}};
 }
 function profileText(){return saveCustomizationProfile(profileConfig());}
 function applyProfile(profile,{state=null,message='저장한 프로필을 적용했습니다.',mark=true,invalidate=true,announce=true}={}){
  guard();if(!profile?.ui?.toolbar)throw new TypeError('프로필 도구 모음 설정이 필요합니다.');
  if(invalidate)invalidatePending();
  const theme={...profile.theme},layout={...profile.layout},interaction={...profile.ui.interaction},toolbarOptions={...profile.ui.toolbar};toolbarOptions.orientation=placementOrientation(layout.placement);
- chart.api.setTheme(theme);chart.setInteractionOptions(interaction);chart.api.setPanel('price',{weight:layout.priceWeight,axisSide:layout.axisSide});chart.api.setPanel('volume',{weight:layout.volumeWeight});$('placement').value=layout.placement;root.dataset.placement=layout.placement;toolbar.setOptions(toolbarOptions);root.dataset.density=toolbarOptions.density;setExtras(profile.extras);syncAll();if(mark)draftRevision++;if(announce)status(message,state??currentDraftState());
+ chart.api.setTheme(theme);chart.setInteractionOptions(interaction);chart.api.setPanel('price',{weight:layout.priceWeight,axisSide:layout.axisSide});chart.api.setPanel('volume',{weight:layout.volumeWeight});toolbar.setOptions(toolbarOptions);acceptedPlacement=layout.placement;root.dataset.placement=acceptedPlacement;root.dataset.density=toolbarOptions.density;setExtras(profile.extras);syncAll();if(mark)draftRevision++;if(announce)status(message,state??currentDraftState());
 }
+function applySettingsProfile(profile,{message='설정을 적용했습니다.',...options}={}){const before=profileText(),expected=saveCustomizationProfile(profile);try{applyProfile(profile,{...options,announce:false});const after=profileText();if(after!==expected){reconcileSettingsHistory(after);status('적용 중 상태가 변경되어 현재 상태를 유지했습니다.',currentDraftState());return false;}if(after!==before)commitSettingsHistory(before,after);status(message,currentDraftState());return true;}catch(error){try{syncActualControls();const actual=profileText();if(actual!==before)reconcileSettingsHistory(actual);}catch{}throw error;}}
+function applySettingsMutation(fn,message='설정을 적용했습니다.'){const before=profileText();try{fn();const after=profileText();if(after!==before)commitSettingsHistory(before,after);status(message,currentDraftState());return true;}catch(error){try{syncActualControls();const actual=profileText();if(actual!==before)reconcileSettingsHistory(actual);}catch{}throw error;}}
 function syncSummaries(){syncActualControls();}
 function syncAll(){syncActualControls();}
 
@@ -125,10 +150,10 @@ $('save-ui').onclick=()=>{
  catch(error){report(error);}
 };
 function applyLegacy(ui,{invalidate=true}={}){
- guard();if(invalidate)invalidatePending();if(ui.toolbar===null)throw new Error('이전 UI 저장에는 도구 모음 설정이 없습니다.');chart.setInteractionOptions(ui.interaction);toolbar.setOptions(ui.toolbar);const placement=ui.toolbar.orientation==='horizontal'?'top':$('placement').value==='right'?'right':'left';$('placement').value=placement;root.dataset.placement=placement;root.dataset.density=ui.toolbar.density;syncAll();announceDraft('이전 UI 저장을 적용했습니다. 외관·레이아웃·표시 옵션은 포함되지 않았습니다.');
+ guard();if(invalidate)invalidatePending();if(ui.toolbar===null)throw new Error('이전 UI 저장에는 도구 모음 설정이 없습니다.');chart.setInteractionOptions(ui.interaction);toolbar.setOptions(ui.toolbar);acceptedPlacement=ui.toolbar.orientation==='horizontal'?'top':acceptedPlacement==='right'?'right':'left';root.dataset.placement=acceptedPlacement;root.dataset.density=ui.toolbar.density;syncAll();
 }
 $('load-ui').onclick=()=>{
- try{guard();invalidatePending();const store=storage(),text=store.getItem(NEW_STORAGE_KEY);if(text!==null){const profile=readCustomizationProfile(text),canonical=saveCustomizationProfile(profile);applyProfile(profile,{message:'저장한 전체 프로필을 적용했습니다.',mark:false,invalidate:false,announce:false});savedBaselineText=canonical;$('profile-json').value=text;status('저장한 전체 프로필을 적용했습니다.',currentDraftState());return;}const legacy=store.getItem(LEGACY_STORAGE_KEY);if(legacy===null)throw new Error('저장된 프로필이 없습니다.');const ui=readChartUI(legacy);applyLegacy(ui,{invalidate:false});}
+ try{guard();invalidatePending();const store=storage(),text=store.getItem(NEW_STORAGE_KEY);if(text!==null){const profile=readCustomizationProfile(text),canonical=saveCustomizationProfile(profile);if(!applySettingsProfile(profile,{message:'저장한 전체 프로필을 적용했습니다.',mark:false,invalidate:false}))return;savedBaselineText=canonical;$('profile-json').value=text;status('저장한 전체 프로필을 적용했습니다.',currentDraftState());return;}const legacy=store.getItem(LEGACY_STORAGE_KEY);if(legacy===null)throw new Error('저장된 프로필이 없습니다.');const ui=readChartUI(legacy);applySettingsMutation(()=>applyLegacy(ui,{invalidate:false}),'이전 UI 저장을 적용했습니다. 외관·레이아웃·표시 옵션은 포함되지 않았습니다.');}
  catch(error){report(error);}
 };
 
@@ -138,7 +163,7 @@ function importText(text,{generation=null,startedDraft=null,message='가져온 �
  if(text.length>PROFILE_TEXT_CHARS)throw new RangeError('파일은 64KiB 이하, 프로필 본문은 16,384자 이하이어야 합니다.');
  const profile=readCustomizationProfile(text);
  if(generation!==null&&(generation!==fileGeneration||startedDraft!==draftRevision))return false;
- applyProfile(profile,{message,mark:true,invalidate});$('profile-json').value=text;return true;
+ if(!applySettingsProfile(profile,{message,mark:true,invalidate}))return false;$('profile-json').value=text;return true;
 }
 $('export-profile').onclick=()=>{try{guard();const text=profileText();$('profile-json').value=text;announceDraft('현재 프로필 JSON을 채웠습니다.');}catch(error){report(error);}};
 $('import-profile').onclick=()=>{try{guard();invalidatePending();importText($('profile-json').value,{invalidate:false});}catch(error){report(error);}};
@@ -146,9 +171,28 @@ $('profile-json').oninput=()=>{fileGeneration++;statusGeneration++;};
 $('copy-profile').onclick=async()=>{const generation=statusGeneration;try{const text=$('profile-json').value;if(!text)throw new Error('먼저 JSON을 채우거나 붙여 넣으세요.');const clipboard=globalThis.navigator?.clipboard;if(!clipboard?.writeText)throw new Error('클립보드 API를 사용할 수 없습니다.');await clipboard.writeText(text);if(chart.disposed||statusGeneration!==generation)return;announceDraft('프로필 JSON을 클립보드에 복사했습니다.');}catch(error){if(!chart.disposed&&statusGeneration===generation)report(error);}};
 $('download-profile').onclick=()=>{try{const text=$('profile-json').value;if(!text)throw new Error('먼저 JSON을 채우거나 붙여 넣으세요.');if(typeof Blob==='undefined'||!globalThis.URL?.createObjectURL)throw new Error('파일 저장 API를 사용할 수 없습니다.');const url=URL.createObjectURL(new Blob([text],{type:'application/json'})),link=document.createElement('a');link.href=url;link.download='barochart-customization-profile.json';link.click();URL.revokeObjectURL(url);announceDraft('프로필 JSON 파일을 만들었습니다.');}catch(error){report(error);}};
 $('profile-file').onchange=event=>{const input=event.target,file=input?.files?.[0];if(!file)return;const generation=++fileGeneration,startedDraft=draftRevision;input.value='';(async()=>{try{if(file.size>MAX_FILE_CHARS)throw new RangeError('가져오기 파일은 64KiB 이하이어야 합니다.');const text=await file.text();if(generation!==fileGeneration||startedDraft!==draftRevision||chart.disposed)return;importText(text,{generation,startedDraft,message:'파일에서 프로필을 적용했습니다.'});}catch(error){if(generation===fileGeneration&&!chart.disposed)report(error);}finally{if(generation===fileGeneration)input.value='';}})();};
-$('reset-profile').onclick=()=>{try{guard();invalidatePending();const defaults=readCustomizationProfile(defaultProfileText);applyProfile(defaults,{message:'현재 초안을 기본값으로 초기화했습니다.',mark:true,invalidate:false});}catch(error){report(error);}};
+$('reset-profile').onclick=()=>{try{guard();invalidatePending();const defaults=readCustomizationProfile(defaultProfileText);applySettingsProfile(defaults,{message:'현재 초안을 기본값으로 초기화했습니다.',mark:true,invalidate:false});}catch(error){report(error);}};
 
-renderChoices();syncAll();defaultProfileText=saveCustomizationProfile(profileConfig());status('설정을 바꿔 차트를 맞춤 구성하세요.','ready');
+function moveSettingsHistory(delta,message){
+ if(settingsApplying)return;
+ try{
+  guard();const target=settingsHistory[settingsCursor+delta];if(target===undefined)return;
+  settingsApplying=true;syncSettingsHistoryControls();
+  const profile=readCustomizationProfile(target);applyProfile(profile,{mark:false,invalidate:true,announce:false});
+  const actual=profileText();if(actual!==target)throw new Error('설정 이력을 적용한 뒤 실제 상태가 일치하지 않습니다.');
+  settingsCursor+=delta;status(message,currentDraftState());
+ }catch(error){try{syncActualControls();const actual=profileText();if(settingsCursor<0||settingsHistory[settingsCursor]!==actual)reconcileSettingsHistory(actual);}catch{}report(error);}finally{settingsApplying=false;syncSettingsHistoryControls();}
+}
+$('undo-settings').onclick=()=>moveSettingsHistory(-1,'설정을 실행 취소했습니다.');
+$('redo-settings').onclick=()=>moveSettingsHistory(1,'설정을 다시 적용했습니다.');
+
+function generateCode(){
+ guard();const language=$('code-language').value||'javascript',text=generateCustomizationCode(profileConfig(),{language});if(typeof text!=='string'||!text)throw new Error('코드 생성 결과가 비어 있습니다.');$('generated-code').value=text;codeGeneration++;announceDraft(language==='typescript'?'TypeScript 코드를 생성했습니다.':'JavaScript 코드를 생성했습니다.');
+}
+$('export-code').onclick=()=>{try{generateCode();}catch(error){report(error);}};
+$('copy-code').onclick=async()=>{const generation=codeGeneration,statusAt=statusGeneration;try{const text=$('generated-code').value;if(!text)throw new Error('먼저 코드를 생성하세요.');const clipboard=globalThis.navigator?.clipboard;if(!clipboard?.writeText)throw new Error('클립보드 API를 사용할 수 없습니다.');await clipboard.writeText(text);if(chart.disposed||generation!==codeGeneration||statusAt!==statusGeneration)return;announceDraft('생성된 코드를 클립보드에 복사했습니다.');}catch(error){if(!chart.disposed&&generation===codeGeneration&&statusAt===statusGeneration)report(error);}};
+
+renderChoices();syncAll();defaultProfileText=saveCustomizationProfile(profileConfig());initializeSettingsHistory();status('설정을 바꿔 차트를 맞춤 구성하세요.','ready');
 window.customizationStudio={chart,model,toolbar,ready:true,actions:{save:()=>$('save-ui').click(),load:()=>$('load-ui').click(),reset:()=>$('reset-profile').click(),export:()=>$('export-profile').click(),import:text=>{ $('profile-json').value=text;$('import-profile').click(); }}};
 window.addEventListener('pagehide',event=>{if(!event.persisted)chart.destroy({disposeModel:true});});
 window.addEventListener('pageshow',event=>{if(event.persisted&&!chart.disposed){chart.resize();syncAll();}});

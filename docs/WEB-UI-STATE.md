@@ -110,6 +110,13 @@ existing model, data, drawings and viewport. Appearance reset changes only the
 theme; draft reset restores the studio defaults without deleting a saved record.
 A host wanting full chart content uses the workspace composition above.
 
+Settings Undo/Redo keeps at most 30 prior transitions in memory and never stores
+drawing history. Successful profile loads, imports and resets can be undone;
+Save and read-only export/copy actions leave that history unchanged. Undo/Redo
+does not overwrite the persisted profile or its saved baseline. Caption edits
+are ordinary profile changes and survive device-preset selection. The studio's
+JS/TS code export is a separate application module, not another persistence schema.
+
 The demo rejects Load while a gesture, pointer or drawing transaction is active. It applies a validated profile to its live chart using existing setters. This
 is an explicit user action, not a transactional chart replacement: tool filtering
 and pointer disabling can cancel an owned gesture, callbacks may reenter, and a
