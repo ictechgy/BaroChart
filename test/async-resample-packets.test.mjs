@@ -1,13 +1,32 @@
 import test from 'node:test';import assert from 'node:assert/strict';
+import {execFile as spawn} from 'node:child_process';
+import {promisify} from 'node:util';
 import {SessionCalendar,BarStore} from '../src/core/index.mjs';
 import {resampleOHLCVAsync} from '../src/web/resample-async.mjs';
 import {calculationJobStats} from '../src/web/calculation-job.mjs';
 import {computeResampleRequest} from '../src/web/resample-worker.mjs';
 const fields=['time','open','high','low','close','volume'],t=Date.parse('2026-01-01T09:00Z');
+const execFile=promisify(spawn);
 function input(n=10){return {kind:'immutable-columns',length:n,columns:Object.fromEntries(fields.map(k=>[k,Float64Array.from({length:n},(_,i)=>k==='time'?t+i*60000:k==='volume'?1:10+i)]))};}
 function options(workerFactory,patch={}){return {sourceIntervalMs:60000,targetIntervalMs:300000,calendar:new SessionCalendar('UTC',()=>[{open:'09:00',close:'10:00'}]),kinds:['regular'],asOf:t+600000,partialTarget:'include-unconfirmed',workerFactory,...patch};}
-function mock(mutate=()=>{},control={}){return ()=>{control.created=(control.created??0)+1;return {onmessage:null,onerror:null,postMessage(request,transfer){const copy=structuredClone(request,{transfer});control.transferred=Object.values(request.columns).every(a=>a.byteLength===0);if(control.postError)throw Error('post failed');if(control.hang)return;setTimeout(()=>{const packet=computeResampleRequest(copy);mutate(packet);this.onmessage?.({data:packet});if(control.duplicate)this.onmessage?.({data:null});},0);},terminate(){control.terminated=(control.terminated??0)+1;if(control.terminateError)throw Error('terminate failed');}};};}
+function mock(mutate=()=>{},control={}){return ()=>{control.created=(control.created??0)+1;return {onmessage:null,onerror:null,postMessage(request,transfer){const copy=structuredClone(request,{transfer});control.transferred=Object.values(request.columns).every(a=>a.byteLength===0);if(control.postError)throw Error('post failed');if(control.hang)return;setTimeout(()=>{const packet=computeResampleRequest(copy);mutate(packet);this.onmessage?.({data:packet});if(control.duplicate)this.onmessage?.({data:null});},0);},terminate(){control.terminated=(control.terminated??0)+1;}};};}
 function baseline(){assert.deepEqual(calculationJobStats(),{activeJobs:0,reservedBytes:0});}
+async function isolatedTerminateFailure(){
+ const resampleURL=new URL('../src/web/resample-async.mjs',import.meta.url).href,workerURL=new URL('../src/web/resample-worker.mjs',import.meta.url).href,coreURL=new URL('../src/core/index.mjs',import.meta.url).href,jobURL=new URL('../src/web/calculation-job.mjs',import.meta.url).href;
+ const script=`
+  import {resampleOHLCVAsync} from ${JSON.stringify(resampleURL)};
+  import {computeResampleRequest} from ${JSON.stringify(workerURL)};
+  import {SessionCalendar} from ${JSON.stringify(coreURL)};
+  import {calculationJobStats} from ${JSON.stringify(jobURL)};
+  const time=Date.parse('2026-01-01T09:00Z'),fields=['time','open','high','low','close','volume'],columns=Object.fromEntries(fields.map(field=>[field,Float64Array.from([field==='time'?time:1])]));let worker;
+  const factory=()=>worker={onmessage:null,onerror:null,postMessage(request){queueMicrotask(()=>worker.onmessage?.({data:computeResampleRequest(request)}));},terminate(){return Promise.reject(Error('terminate failed'));}};
+  const options={sourceIntervalMs:60000,targetIntervalMs:300000,calendar:new SessionCalendar('UTC',()=>[{open:'09:00',close:'10:00'}]),kinds:['regular'],asOf:time+600000,partialTarget:'include-unconfirmed',workerFactory:factory};let error;
+  try{await resampleOHLCVAsync({kind:'immutable-columns',length:1,columns},options);}catch(failure){error={name:failure.name,message:failure.message};}
+  console.log(JSON.stringify({error,stats:calculationJobStats()}));
+ `;
+ const {stdout}=await execFile(process.execPath,['--input-type=module','-e',script],{cwd:process.cwd(),timeout:5000,maxBuffer:1024*1024});
+ return JSON.parse(stdout.trim().split('\n').at(-1));
+}
 test('private source copies transfer, caller buffers remain attached, duplicate replies settle once',async()=>{const source=input(),control={duplicate:true};const r=await resampleOHLCVAsync(source,options(mock(()=>{},control)));assert.equal(r.length,2);assert.equal(control.transferred,true);assert.equal(control.terminated,1);assert.equal(source.columns.time.byteLength,80);baseline();});
 const mutations={
  'wrong id':p=>p.jobId++, 'wrong kind':p=>p.kind='params', 'wrong protocol':p=>p.version=2,'wrong schema':p=>p.schema='other',
@@ -27,7 +46,8 @@ const mutations={
 for(const [label,mutate] of Object.entries(mutations))test('hostile result rejects '+label,async()=>{const control={};await assert.rejects(resampleOHLCVAsync(input(),options(mock(mutate,control))));assert.equal(control.terminated,1);baseline();});
 test('packet getters are rejected without invocation',async()=>{let reads=0;await assert.rejects(resampleOHLCVAsync(input(),options(mock(p=>Object.defineProperty(p.result,'columns',{enumerable:true,get(){reads++;throw Error('getter');}})))));assert.equal(reads,0);baseline();});
 test('undercovered target cannot be promoted to confirmed',async()=>{const source=input(3);await assert.rejects(resampleOHLCVAsync(source,options(mock(p=>{p.result.complete[0]=1;p.result.confirmed[0]=1;p.result.availableAt[0]=p.result.endTime[0];}))));baseline();});
-test('worker startup, postMessage and terminate errors release reservations',async()=>{await assert.rejects(resampleOHLCVAsync(input(),options(()=>{throw Error('startup');})));baseline();for(const key of ['postError','terminateError']){const control={[key]:true};await assert.rejects(resampleOHLCVAsync(input(),options(mock(()=>{},control))));assert.equal(control.terminated,1);baseline();}});
+test('worker startup and postMessage errors release reservations',async()=>{await assert.rejects(resampleOHLCVAsync(input(),options(()=>{throw Error('startup');})));baseline();const control={postError:true};await assert.rejects(resampleOHLCVAsync(input(),options(mock(()=>{},control))));assert.equal(control.terminated,1);baseline();});
+test('terminate rejection keeps its reservation quarantined',async()=>{const result=await isolatedTerminateFailure();assert.equal(result.error?.message,'terminate failed');assert.equal(result.stats.activeJobs,1);assert.ok(result.stats.reservedBytes>0);});
 test('per-job admission rejects before inspecting column elements or starting provider',async()=>{let reads=0;const source={kind:'immutable-columns',length:4194304,columns:new Proxy({},{get(){reads++;throw Error('column');}})};await assert.rejects(resampleOHLCVAsync(source,options(()=>{throw Error('worker');})),/budget/);assert.equal(reads,0);baseline();});
 test('at most two jobs are admitted and cancellation restores aggregate budget',async()=>{const a=new AbortController(),b=new AbortController(),control={hang:true};const first=resampleOHLCVAsync(input(),options(mock(()=>{},control),{signal:a.signal}));const second=resampleOHLCVAsync(input(),options(mock(()=>{},control),{signal:b.signal}));await assert.rejects(resampleOHLCVAsync(input(),options(mock())),/budget/);assert.equal(calculationJobStats().activeJobs,2);a.abort();b.abort();await Promise.all([assert.rejects(first,{name:'AbortError'}),assert.rejects(second,{name:'AbortError'})]);baseline();});
 test('ordinary store mutations during progress remain unpublished',async()=>{const source=input(),store=new BarStore();store.setColumns(source.columns,source.length);let changed=false;await assert.rejects(resampleOHLCVAsync({kind:'store',store},options(mock(),{onProgress(p){if(p.phase==='compute'&&!changed){changed=true;const old=store.at(0);store.update(0,{...old,volume:2});}}})),{name:'StaleSourceError'});assert.equal(store.at(0).volume,2);baseline();store.dispose?.();});

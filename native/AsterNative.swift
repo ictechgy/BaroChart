@@ -1513,7 +1513,7 @@ public final class AsterEngine {
         // The async handle is published before its deferred JavaScript begin.
         // Guard this owner-only gap too; the core lease covers direct JS calls
         // after begin. Existing data mutations keep their stale-result policy.
-        if (activeAsync.map{!$0.isCommitted} ?? false) || activeWorkspace != nil || pendingWorkspaceRegistration.map{AsterWorkspaceRegistry.contains($0)} == true || activeParams != nil || pendingParamsRegistration.map{AsterParamsRegistry.contains($0)} == true {
+        if (activeAsync.map{!$0.isCommitted} ?? false) || activeWorkspace != nil || pendingWorkspaceRegistration.map({AsterWorkspaceRegistry.contains($0)}) == true || activeParams != nil || pendingParamsRegistration.map({AsterParamsRegistry.contains($0)}) == true {
             if ["compactData", "configureDataIngestion", "enqueueDataEvents", "drainDataEvents", "pauseDataIngestion", "resumeDataIngestion", "cancelDataEvents", "loadDataIngestion"].contains(operation) {throw AsterIngestionError(code:"BUSY",message:"Native asynchronous job is active")}
         }
         let result:JSValue

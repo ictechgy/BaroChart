@@ -91,11 +91,18 @@ or accessor/Proxy rewrites of SDK internals are unsupported. A continuously
 updating feed may need a host-controlled stable revision window.
 
 Preabort rejects before document/binding access or Worker construction. A monotonic
-0..120000ms timeout (default30000) covers snapshot, calculation, validation and
-cleanup. Worker termination and listener removal occur before the final callback-free
-source check and return publication. Late packets are ignored. Unpublished candidates
-are disposed on every failure, cancellation or timeout. A cancellation after successful
-publication cannot revoke the model; the caller must dispose it if unwanted.
+0..120000ms timeout (default30000) covers snapshot, calculation and validation.
+Worker termination and listener removal are awaited before the final callback-free
+source check and return publication when cleanup is acknowledged promptly. If abort
+or timeout races a still-pending termination, the caller settles after a bounded
+50 ms cleanup grace window, while the job slot and logical byte reservation remain in a
+cleanup quarantine until that termination settles; a late acknowledgement only
+releases capacity and cannot publish a model. For an aborted, timed-out, or
+otherwise failed pre-commit job, a rejected termination is unconfirmed and keeps
+the reservation quarantined. Late packets are ignored. Unpublished
+candidates are disposed on every failure, cancellation or timeout. A cancellation
+after successful publication cannot revoke the model; the caller must dispose it
+if unwanted.
 
 Progress has snapshot/compute/validate phases. Validate progress sums all entries
 and is monotonic within that phase. Progress callback exceptions are isolated;

@@ -37,9 +37,16 @@ precedes one synchronous entry replacement and dependent range-cache reset.
 No user callback or await occurs inside the commit. Notification follows commit;
 a later abort must not turn an already committed operation into rejection.
 
-The job runner uses an internal synchronous publication hook executed
-after awaited cleanup and final guards but before reservation release. Validation
-and failure remain pre-commit. The hook is internal, not a caller callback API.
+The job runner uses an internal synchronous publication hook executed after
+cleanup acknowledgement and final guards but before reservation release.
+Validation and failure remain pre-commit. If abort or timeout arrives while a
+Worker termination is still pending, the caller receives that failure after a
+bounded 50 ms cleanup grace window; the job's slot and byte reservation stay in a
+cleanup quarantine until termination settles. A later cleanup acknowledgement
+releases that reservation and cannot publish a result. For an aborted, timed-out,
+or otherwise failed pre-commit job, a rejected termination is unconfirmed and
+keeps that reservation quarantined rather than claiming that the Worker is gone.
+The hook is internal, not a caller callback API.
 
 ## Notification errors
 
