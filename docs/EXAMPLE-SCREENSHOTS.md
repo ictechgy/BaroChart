@@ -1,5 +1,30 @@
 # Web screenshots and mobile web previews
 
+## Current browser showcase
+
+The current gallery contains actual browser captures of the included [`showcase.html`](../examples/web/showcase.html) custom host example. It renders the production Canvas chart with synthetic data; the surrounding controls belong to that example. Desktop framing is 1040 × 650 CSS pixels and mobile is 390 × 780, both captured at 2×. These are web screenshots, not native iOS or Android screens.
+
+Claude proposed **Instrument Panel**, a dark, chart-first composition, and **Specimen Plate**, a light technical-figure treatment. The implemented direction is Instrument Panel, with matching dark/light geometry, compact controls and a restrained palette. Displayed prices and OHLCV values come from the deterministic series.
+
+![Current dark desktop browser showcase](../assets/showcase/desktop-dark.png)
+
+<p>
+<img src="../assets/showcase/mobile-dark.png" width="390" alt="Dark mobile browser capture of the BaroChart showcase">
+<img src="../assets/showcase/mobile-light.png" width="390" alt="Light mobile browser capture of the BaroChart showcase">
+</p>
+
+Run `npm run demo` and open the [showcase](http://127.0.0.1:5173/examples/web/showcase.html). Its interval and theme controls work; 1/5/15-minute candles are host-aggregated from the same synthetic source. The [manifest](../assets/showcase/manifest.json) records source hashes, capture environment, dimensions and image hashes.
+
+With `agent-browser` and a local Chromium browser already installed, regenerate all four screenshots with:
+
+```sh
+node scripts/capture-showcase.mjs
+```
+
+The script starts a temporary loopback server and an isolated browser session, waits for fonts and chart rendering, checks the two themes use identical data, and saves original element-screenshot PNG bytes. It checks for overflow and external resource requests. `CHROME_BIN` can select a local browser; an optional output-directory argument keeps trial captures separate. No dependencies are installed and no image editing is applied. Font/browser differences can change pixels across machines.
+
+## Historical captures and source-derived previews
+
 The three web screenshots below are original PNG captures from **Google Chrome 155.0.8059.79 on macOS**, using an isolated headless browser with actual DOM and Canvas rendering on **2026-10-14 UTC**. The data is synthetic. The source revision was [`e3284e54b638b8a373311ef3788fcff003f6477a`](https://github.com/ictechgy/BaroChart/commit/e3284e54b638b8a373311ef3788fcff003f6477a). The PNG bytes have not been edited or regenerated.
 
 The captured run checked restored pages after back/forward navigation. These historical images show that revision, not an execution of the latest source. Text inside an image may retain the validation notice that existed when it was captured. The run does not establish native SDK/device support, screen-reader accessibility, display latency, FPS or competitive performance. See [current validation scope](PUBLIC-VALIDATION.md).
@@ -63,6 +88,6 @@ The backend is not a library runtime dependency and is not needed to run the dem
 | iOS native | Open the [consumer Xcode project](../examples/swift-consumer/iOS/AsterSDKConsumer.xcodeproj/project.pbxproj), use its shared scheme with an installed simulator; [Swift SDK guide](SWIFT-SDK.md) | No verified iOS screenshot retained. Recent host changes and physical-device execution remain unverified. Requires the user's own Xcode/runtime setup. |
 | Android native | [Android SDK / Kotlin consumer instructions](ANDROID-SDK.md), including explicit installed SDK/NDK and selected emulator/device | No verified Android screenshot retained. Recent host changes have not been built/run against the actual Android SDK/JNI/device here. |
 
-Apple uses JavaScriptCore/CoreGraphics; Android uses QuickJS/JNI/Android Canvas. These are native renderer paths, not WebViews. A web screenshot is not evidence of those paths. No new browser, SDK installation, simulator run or device execution was performed to create this gallery.
+Apple uses JavaScriptCore/CoreGraphics; Android uses QuickJS/JNI/Android Canvas. These are native renderer paths, not WebViews. A web screenshot is not evidence of those paths. The current showcase uses an installed Chromium browser; no native SDK installation, simulator run or physical-device execution is required for these captures.
 
 [Image manifest](../assets/screenshots/manifest.json) records source revision, capture environment, dimensions and SHA-256 for each image. Images are repository documentation assets and are excluded from the npm package; raw QA logs and private machine metadata are not included.
