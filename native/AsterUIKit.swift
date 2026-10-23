@@ -85,7 +85,7 @@ public final class AsterChartView: UIView {
             })
         }
         notifications.append(center.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification,object: nil,queue: .main) {[weak self] _ in
-            guard let self = self else {return};AsterNativeCacheBudget.shared.setLimit(0);self.frameRenderer?.release();self.frameRenderer = nil;if !self.suspended {self.setNeedsDisplay()}
+            guard let self = self else {return};AsterNativeCacheBudget.shared.purge();if !self.suspended {self.setNeedsDisplay()}
         })
         synchronizeFont();setNeedsDisplay()
     }
@@ -130,7 +130,7 @@ public final class AsterChartView: UIView {
         if releaseBase {baseFont = nil}
         guard let base = base,let owned = owned,base != owned else {return}
         do {if try engine.call("nativeThemeFont").toString() == owned {
-            cancelInteraction(clearCrosshair: false)
+            if !disposing {cancelInteraction(clearCrosshair: false)}
             applyingFont = true;defer {applyingFont = false};try engine.setTheme(["font": base])
         }} catch {lastError = String(describing: error)}
     }

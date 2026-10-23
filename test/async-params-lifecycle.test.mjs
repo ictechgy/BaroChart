@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Worker} from 'node:worker_threads';
 import {setTimeout as delay} from 'node:timers/promises';
+import {execFile as spawn} from 'node:child_process';
+import {promisify} from 'node:util';
 import {dedicatedCalculationWorkers} from './helpers/dedicated-calculation-workers.mjs';
 import {assertMatchingResult, observeOperation, watchdog, withCalculationDeadline} from './helpers/calculation-deadline-fixture.mjs';
 
@@ -9,6 +11,7 @@ const ROOT = new URL('../',import.meta.url);
 const {BarStore, ChartModel, ChartAPI, seededColumns} = await import(new URL('src/core/index.mjs', ROOT));
 const {setIndicatorParamsAsync} = await import(new URL('src/web/indicator-params-async.mjs', ROOT));
 const {calculationJobStats} = await import(new URL('src/web/calculation-job.mjs', ROOT));
+const {computeIndicatorParamsRequest} = await import(new URL('src/web/indicator-params-worker.mjs', ROOT));
 const HOST = new URL('test/helpers/async-resample-worker-host.mjs', ROOT);
 const BASELINE = {activeJobs: 0, reservedBytes: 0};
 const SAMPLE = 'aster.volume-direction@1/pressure';
@@ -16,7 +19,28 @@ const isAbort = error => /abort/i.test(`${error?.name} ${error?.code}`);
 const isTimeout = error => /timeout|timed.?out|deadline/i.test(`${error?.name} ${error?.code} ${error?.message}`);
 const isStale = error => /stale|source.changed/i.test(`${error?.name} ${error?.code} ${error?.message}`);
 const invocation = (...args) => Promise.resolve().then(() => setIndicatorParamsAsync(...args));
+const execFile = promisify(spawn);
 function deferred() { let resolve; const promise = new Promise(r => {resolve = r;}); return {promise, resolve}; }
+
+async function isolatedParamsTerminateFailure() {
+  const coreURL = new URL('src/core/index.mjs', ROOT).href;
+  const paramsURL = new URL('src/web/indicator-params-async.mjs', ROOT).href;
+  const workerURL = new URL('src/web/indicator-params-worker.mjs', ROOT).href;
+  const jobURL = new URL('src/web/calculation-job.mjs', ROOT).href;
+  const script = `
+    import {BarStore,ChartModel,ChartAPI,seededColumns} from ${JSON.stringify(coreURL)};
+    import {setIndicatorParamsAsync} from ${JSON.stringify(paramsURL)};
+    import {computeIndicatorParamsRequest} from ${JSON.stringify(workerURL)};
+    import {calculationJobStats} from ${JSON.stringify(jobURL)};
+    const store=new BarStore();store.setColumns(seededColumns(32,73));const model=new ChartModel({store});model.indicators.add('target','ema',{period:5});model.addSeries({id:'target',type:'line',panel:'price',indicator:'target'});const api=new ChartAPI(model);let worker;
+    const factory=()=>worker={onmessage:null,onerror:null,postMessage(request,transfer){const copy=structuredClone(request,{transfer});queueMicrotask(()=>worker.onmessage?.({data:computeIndicatorParamsRequest(copy)}));},terminate(){return Promise.reject(new Error('params termination failed'));}};
+    let error;
+    try{await setIndicatorParamsAsync(api,'target',{period:8},{workerFactory:factory});}catch(failure){error={name:failure.name,message:failure.message};}
+    const result={error,period:model.indicators.entries.get('target').params.period,stats:calculationJobStats()};model.dispose();console.log(JSON.stringify(result));
+  `;
+  const {stdout}=await execFile(process.execPath,['--input-type=module','-e',script],{cwd:process.cwd(),timeout:5000,maxBuffer:1024*1024});
+  return JSON.parse(stdout.trim().split('\n').at(-1));
+}
 
 function workers(t, hooks = {}) {
   const instances = [];
@@ -427,11 +451,11 @@ test('metadata accessor failure stays before publication and notifies nobody', a
   assert.ok(reads <= 1); assert.equal(w.instances.length, 0); assertHeldOutputs(before); await w.clean();
 });
 
-for (const mode of ['abort', 'stale', 'timeout', 'throw']) {
+for (const mode of ['abort', 'stale', 'timeout']) {
   test(`${mode} during awaited Worker termination prevents a validated result from committing`, async t => {
     const timeoutMs = mode === 'timeout' ? 600 : 5000;
     await withCalculationDeadline(timeoutMs, async clock => {
-      const f = fixture(t), controller = new AbortController(), before = hold(f.model), cleanupError = new Error('Worker cleanup failed'); let reached = false, validated = false, request, packet;
+      const f = fixture(t), controller = new AbortController(), before = hold(f.model); let reached = false, validated = false, request, packet;
       const hooks = {
         beforeSend(data) {request = data;}, beforeReceive(data) {packet = data;},
         async terminated() {
@@ -443,7 +467,6 @@ for (const mode of ['abort', 'stale', 'timeout', 'throw']) {
           if (mode === 'abort') controller.abort();
           if (mode === 'stale') {const old = f.store.at(0); f.store.update(0, {...old, volume: old.volume + 1});}
           if (mode === 'timeout') clock.expire();
-          if (mode === 'throw') throw cleanupError;
         },
       };
       const w = dedicatedCalculationWorkers(t, hooks);
@@ -454,8 +477,7 @@ for (const mode of ['abort', 'stale', 'timeout', 'throw']) {
       }));
       try {
         const result = await watchdog(operation.outcome, `${mode} after validated result`);
-        if (mode === 'throw') assert.equal(result.error, cleanupError);
-        else assert.equal(result.error?.name, {abort: 'AbortError', stale: 'StaleSourceError', timeout: 'TimeoutError'}[mode]);
+        assert.equal(result.error?.name, {abort: 'AbortError', stale: 'StaleSourceError', timeout: 'TimeoutError'}[mode]);
         assertMatchingResult(packet, request, 'aster.params-result');
         assert.equal(validated, true); assert.equal(reached, true); assertUnpublished(f, before); await w.clean();
       } finally {
@@ -465,6 +487,40 @@ for (const mode of ['abort', 'stale', 'timeout', 'throw']) {
     });
   });
 }
+
+test('confirmed Worker termination can report listener cleanup failure without quarantining capacity', async t => {
+  const f = fixture(t), before = hold(f.model), cleanupError = new Error('Worker cleanup failed');
+  const workerFactory = () => {
+    let messageHandler, detached = false;
+    const worker = {
+      onerror: null,
+      postMessage(request, transfer) {
+        const copy = structuredClone(request, {transfer});
+        queueMicrotask(() => messageHandler?.({data: computeIndicatorParamsRequest(copy)}));
+      },
+      terminate() {},
+    };
+    Object.defineProperty(worker, 'onmessage', {
+      configurable: true,
+      get() {return messageHandler;},
+      set(value) {
+        if (value === null && !detached) {detached = true; throw cleanupError;}
+        messageHandler = value;
+      },
+    });
+    return worker;
+  };
+  await assert.rejects(setIndicatorParamsAsync(f.api, 'target', {period: 8}, {workerFactory}), error => error === cleanupError);
+  assertUnpublished(f, before); assert.deepEqual(calculationJobStats(), BASELINE);
+});
+
+test('parameter Worker termination rejection quarantines the unpublished operation', async () => {
+  const result = await isolatedParamsTerminateFailure();
+  assert.equal(result.error?.message, 'params termination failed');
+  assert.equal(result.period, 5);
+  assert.equal(result.stats.activeJobs, 1);
+  assert.ok(result.stats.reservedBytes > 0);
+});
 
 test('listener-detach reentry is checked before final commit', async t => {
   const f = fixture(t), before = hold(f.model), controller = new AbortController(), w = workers(t); let detached = false;

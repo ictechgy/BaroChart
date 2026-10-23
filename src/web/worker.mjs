@@ -2,6 +2,10 @@ import {modelRequest,configurationKey,hydrateModel,installRecomputed,requestOpti
 import {UnsupportedIndicatorError} from '../core/indicator-modules.mjs';
 import {acquireDataIngestionLease,dataIngestionBatchLimits} from '../core/ingestion.mjs';
 const aborted=()=>new DOMException('Calculation cancelled','AbortError');
+const own=(value,key)=>Object.prototype.hasOwnProperty.call(value,key);
+const record=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
+const malformedWorkerReply=()=>new TypeError('Malformed Calculation Worker response');
+function validProgress(value){return record(value)&&own(value,'done')&&Number.isFinite(value.done)&&value.done>=0&&own(value,'total')&&Number.isFinite(value.total)&&value.total>=0&&value.done<=value.total&&(!own(value,'phase')||typeof value.phase==='string'&&value.phase.length>0);}
 async function operationDeadline(options,work){
  const timeoutMs=options.timeoutMs===undefined?30000:options.timeoutMs;
  if(typeof timeoutMs!=='number'||!Number.isFinite(timeoutMs)||timeoutMs<=0||timeoutMs>120000)throw new RangeError('Calculation timeout must be positive and at most 120000ms');
@@ -39,7 +43,7 @@ export function runChartWorker(request,{signal,onProgress=()=>{},timeoutMs=30000
    if(settled)return;settled=true;clearTimeout(timeout);
    // Cleanup failure must neither skip termination nor hide the operation error.
    try{if(listenerAttempted)signal.removeEventListener('abort',cancel);}catch(cleanup){error??=cleanup;}
-   try{worker?.terminate();}catch(cleanup){error??=cleanup;}
+   try{const termination=worker?.terminate?.();if(termination&&typeof termination.then==='function')Promise.resolve(termination).catch(()=>{});}catch(cleanup){error??=cleanup;}
    error?reject(error):resolve(packet);
   };
   const cancel=()=>finish(aborted());
@@ -51,7 +55,18 @@ export function runChartWorker(request,{signal,onProgress=()=>{},timeoutMs=30000
    if(signal){listenerAttempted=true;signal.addEventListener('abort',cancel,{once:true});if(signal.aborted)cancel();}
    if(settled)return;
    worker.onerror=e=>finish(new Error(e.message||'Worker failed'));
-   worker.onmessage=({data})=>{if(settled)return;if(data.progress){try{onProgress(data.progress);}catch{}return;}if(data.error){const error=data.errorName==='UnsupportedIndicatorError'&&data.errorCode==='UNSUPPORTED_INDICATOR_MODULE'?new UnsupportedIndicatorError(''):new Error(data.error);if(error instanceof UnsupportedIndicatorError)error.message=String(data.error).slice(0,256);finish(error);}else if(data.packet)finish(null,data.packet);};
+   worker.onmessage=event=>{if(settled)return;try{
+    const data=event&&typeof event==='object'?event.data:undefined;if(!record(data))throw malformedWorkerReply();
+    const keys=['progress','error','packet'].filter(key=>own(data,key));if(keys.length!==1)throw malformedWorkerReply();
+    const [key]=keys;
+    if(key==='progress'){if(!validProgress(data.progress))throw malformedWorkerReply();try{onProgress(data.progress);}catch{}return;}
+    if(key==='error'){
+     if(typeof data.error!=='string'||data.error.length===0||data.error.length>256)throw malformedWorkerReply();
+     if(own(data,'errorName')&&typeof data.errorName!=='string'||own(data,'errorCode')&&typeof data.errorCode!=='string')throw malformedWorkerReply();
+     const error=data.errorName==='UnsupportedIndicatorError'&&data.errorCode==='UNSUPPORTED_INDICATOR_MODULE'?new UnsupportedIndicatorError(''):new Error(data.error);if(error instanceof UnsupportedIndicatorError)error.message=data.error.slice(0,256);finish(error);return;
+    }
+    if(!record(data.packet))throw malformedWorkerReply();finish(null,data.packet);
+   }catch(error){finish(error);}};
    worker.postMessage(request);
   }catch(error){finish(error);}
  });

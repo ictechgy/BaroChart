@@ -35,3 +35,7 @@ Apple/Android의 whole-model async handover는 owner UI thread에서 상태를 c
 공유 pool의 policy generation은 budget 변경·memory pressure 때 바뀌고, ownership generation은 admission/release/prune 때 따로 바뀝니다. 다른 View가 bitmap을 가져가거나 반납한 사실만으로 이웃 View의 500ms retry cooldown을 무효화하지 않습니다. retry timer를 만들지 않으며 다음 실제 draw에서 retry를 판단합니다. budget/pressure 변경은 정책을 반영할 다음 draw를 허용합니다. detach/close는 owned bitmap 및 frame token을 해제합니다.
 
 계수는 CPU Bitmap allocationByteCount와 관측한 draw/rebuild/eviction 경계입니다. RenderThread/GPU copies, 전체 RSS/PSS, 물리 기기의 배터리·열·presentation FPS를 뜻하지 않습니다. 이번 실제 호스트 결과 (not included in this source distribution)와 각 플랫폼 raw JSON으로 적용 범위를 확인하세요.
+
+## Apple frame cache 정책
+
+Apple의 memory warning은 공유 frame cache surface를 purge하고 설정된 최대 예산은 유지합니다. purge 때 정책 generation을 바꾸며 각 renderer는 다음 실제 draw에서 한 번 admission을 건너뛰어 경고 직후의 일괄 재할당을 피합니다. 이후 draw에서는 기존 예산 안에서 다시 admission할 수 있습니다. 예산을 영구적으로 끄는 동작은 명시적인 `setLimit(0)` 호출에만 해당합니다.
