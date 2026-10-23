@@ -6,7 +6,16 @@ A financial chart library with a DOM-free Float64 core, Canvas/WebGL2 rendering,
 
 [한국어](README.ko.md) · [Quick start](#quick-start) · [Web & mobile gallery](#web--mobile-web) · [API](docs/API.md)
 
-> **Development preview · 0.2.13 · Apache-2.0.** Not published to npm. Mobile previews below are not device screenshots. [Support and validation limits](#support-and-validation).
+> **Development preview · 0.2.13 · Apache-2.0.** Not published to npm. [Support and validation limits](#support-and-validation).
+
+<p align="center">
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="assets/showcase/desktop-dark.png">
+<img src="assets/showcase/desktop-light.png" alt="BaroChart browser showcase with a production Canvas chart">
+</picture>
+</p>
+
+A custom web interface built with BaroChart: synthetic candles, EMA overlays, volume and RSI, captured in a real browser. [Run the example](http://127.0.0.1:5173/examples/web/showcase.html) after `npm run demo` · [Capture details](docs/EXAMPLE-SCREENSHOTS.md#current-browser-showcase).
 
 ## What is included?
 
@@ -31,6 +40,20 @@ npm run demo
 Open [the main demo](http://127.0.0.1:5173/examples/web/index.html), [minimal first chart](http://127.0.0.1:5173/examples/web/quickstart.html), or [UI customization](http://127.0.0.1:5173/examples/web/customization.html). These are local URLs and work only while your demo server is running. All demo data is **synthetic**, not a live market feed.
 
 ## Web & mobile web
+
+### Current browser showcase
+
+The same sample series in two appearances, at a 390px mobile web layout. The desktop image above follows your GitHub theme.
+
+<p>
+<img src="assets/showcase/mobile-dark.png" width="390" alt="Dark mobile browser capture of the BaroChart showcase">
+<img src="assets/showcase/mobile-light.png" width="390" alt="Light mobile browser capture of the BaroChart showcase">
+</p>
+
+Dark / light · actual browser captures of the custom host example. [Source and image hashes](assets/showcase/manifest.json).
+
+<details>
+<summary>Earlier captures and source-derived previews</summary>
 
 ### Web: actual historical browser capture
 
@@ -57,6 +80,8 @@ Dark/light previews at a **390 CSS-pixel layout width**. The chart is rasterized
 </p>
 
 Try the same controls in [customization.html](http://127.0.0.1:5173/examples/web/customization.html): choose the mobile preset and narrow the viewport. The preset is explicit, not device detection; the demo moves the toolbar above the chart at ≤600px. [Gallery, provenance and reproduction](docs/EXAMPLE-SCREENSHOTS.md).
+
+</details>
 
 ## Your first chart
 

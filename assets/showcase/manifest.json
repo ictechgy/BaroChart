@@ -1,0 +1,197 @@
+{
+  "schema": "barochart.showcase-captures",
+  "version": 1,
+  "captureDateUTC": "2026-10-23",
+  "sourceCommit": "4aee49665133fd7e2c6114b675101718898317fa",
+  "sources": [
+    {
+      "path": "examples/web/showcase.html",
+      "sha256": "b4400411aeb241c3c70920801e8306aa422ca94704400576f3cbaf9f1ab9aada"
+    },
+    {
+      "path": "examples/web/showcase.css",
+      "sha256": "82520d26b2234c4ef304b1274412fae17d4a6a0252353ae8f09ec213b002d04a"
+    },
+    {
+      "path": "examples/web/showcase.mjs",
+      "sha256": "f62a361f8ad91d3e87d9b0fe77ce184c4d780a519f644f56cd1684223844c122"
+    },
+    {
+      "path": "examples/web/showcase-data.mjs",
+      "sha256": "dd4d7f0b8b46215cb0d2021663a3ded5cfbb3db6d20a743fd2b34b8a080a1b64"
+    },
+    {
+      "path": "src/core/model.mjs",
+      "sha256": "eb5d182ac4c62ecc4b863adf23406112fefdfbf78378f1a5321e8d11bd2ee8fa"
+    },
+    {
+      "path": "src/core/scene.mjs",
+      "sha256": "f27b48dbbd05f2176505807973047e6813be4cd151953e738f76dff9771587b2"
+    },
+    {
+      "path": "src/core/labels.mjs",
+      "sha256": "a5f47cd2a29aead2ee553a2acf2f6c3125205b353c29ad956f304391bad93ffa"
+    },
+    {
+      "path": "src/renderers/canvas.mjs",
+      "sha256": "46179fa5cf0fe982e67eee29566cee6d8ef03c25296eeb1aa59052797cb7f8a5"
+    },
+    {
+      "path": "scripts/capture-showcase.mjs",
+      "sha256": "7332f7f6baf61ff6f3645157b5dd4a525b65000c9d606062f91ee5620cd803a8"
+    }
+  ],
+  "example": "examples/web/showcase.html",
+  "renderer": "Actual browser DOM and production CanvasChart",
+  "browserScreenshot": true,
+  "nativeSDKExecution": false,
+  "imageProcessing": "none; original element screenshot PNG bytes",
+  "design": {
+    "provider": "Claude",
+    "model": "claude-opus-5",
+    "selectedConcept": "Instrument Panel",
+    "alternateConcept": "Specimen Plate"
+  },
+  "data": "Deterministic synthetic OHLCV; 1800 one-minute bars, host-aggregated into 1/5/15-minute intervals",
+  "capture": {
+    "tool": "agent-browser",
+    "selector": "#showcase",
+    "externalRequests": 0,
+    "readiness": "document.fonts.ready and two requestAnimationFrame ticks after draw"
+  },
+  "scope": "Custom example host UI, not the default SDK UI. Browser captures do not establish physical-device, native SDK, accessibility or performance validation.",
+  "images": [
+    {
+      "file": "desktop-dark.png",
+      "layout": "desktop",
+      "theme": "dark",
+      "width": 2080,
+      "height": 1300,
+      "logicalWidth": 1040,
+      "logicalHeight": 650,
+      "dpr": 2,
+      "bytes": 115992,
+      "sha256": "937121189bf3c7973bca3ffb4dcbacad1042635b7179c01654e7354fbc297e6f",
+      "browser": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36",
+      "stats": {
+        "bars": 360,
+        "intervalMinutes": 5,
+        "lastPrice": 131.5673175807299,
+        "readout": {
+          "close": 131.5673175807299,
+          "ema12": 130.97495528994344,
+          "ema26": 130.11982168279607,
+          "high": 132.3692321766051,
+          "low": 130.7527025978437,
+          "open": 131.01029452792204,
+          "time": 1767731100000,
+          "volume": 16579
+        },
+        "readoutIndex": 359,
+        "sampleChange": 31.567317580729934,
+        "sampleChangePercent": 31.567317580729934,
+        "sourceBars": 1800,
+        "visibleBars": 120
+      }
+    },
+    {
+      "file": "desktop-light.png",
+      "layout": "desktop",
+      "theme": "light",
+      "width": 2080,
+      "height": 1300,
+      "logicalWidth": 1040,
+      "logicalHeight": 650,
+      "dpr": 2,
+      "bytes": 115994,
+      "sha256": "5aae2d665d82138641e7f8ec8c0ecfc1d9d9f2b4a0297f392d26af60699738cd",
+      "browser": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36",
+      "stats": {
+        "bars": 360,
+        "intervalMinutes": 5,
+        "lastPrice": 131.5673175807299,
+        "readout": {
+          "close": 131.5673175807299,
+          "ema12": 130.97495528994344,
+          "ema26": 130.11982168279607,
+          "high": 132.3692321766051,
+          "low": 130.7527025978437,
+          "open": 131.01029452792204,
+          "time": 1767731100000,
+          "volume": 16579
+        },
+        "readoutIndex": 359,
+        "sampleChange": 31.567317580729934,
+        "sampleChangePercent": 31.567317580729934,
+        "sourceBars": 1800,
+        "visibleBars": 120
+      }
+    },
+    {
+      "file": "mobile-dark.png",
+      "layout": "mobile",
+      "theme": "dark",
+      "width": 780,
+      "height": 1560,
+      "logicalWidth": 390,
+      "logicalHeight": 780,
+      "dpr": 2,
+      "bytes": 85731,
+      "sha256": "ddfd678d2b54451cafdb739f21d8998bbd46c98dbb385c14c6539569708a6ec8",
+      "browser": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36",
+      "stats": {
+        "bars": 360,
+        "intervalMinutes": 5,
+        "lastPrice": 131.5673175807299,
+        "readout": {
+          "close": 131.5673175807299,
+          "ema12": 130.97495528994344,
+          "ema26": 130.11982168279607,
+          "high": 132.3692321766051,
+          "low": 130.7527025978437,
+          "open": 131.01029452792204,
+          "time": 1767731100000,
+          "volume": 16579
+        },
+        "readoutIndex": 359,
+        "sampleChange": 31.567317580729934,
+        "sampleChangePercent": 31.567317580729934,
+        "sourceBars": 1800,
+        "visibleBars": 56
+      }
+    },
+    {
+      "file": "mobile-light.png",
+      "layout": "mobile",
+      "theme": "light",
+      "width": 780,
+      "height": 1560,
+      "logicalWidth": 390,
+      "logicalHeight": 780,
+      "dpr": 2,
+      "bytes": 85581,
+      "sha256": "ce2d92905f7595f139de40b6b4e22ed9ef0d14291ee8719956d0f4f6a229a3ca",
+      "browser": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36",
+      "stats": {
+        "bars": 360,
+        "intervalMinutes": 5,
+        "lastPrice": 131.5673175807299,
+        "readout": {
+          "close": 131.5673175807299,
+          "ema12": 130.97495528994344,
+          "ema26": 130.11982168279607,
+          "high": 132.3692321766051,
+          "low": 130.7527025978437,
+          "open": 131.01029452792204,
+          "time": 1767731100000,
+          "volume": 16579
+        },
+        "readoutIndex": 359,
+        "sampleChange": 31.567317580729934,
+        "sampleChangePercent": 31.567317580729934,
+        "sourceBars": 1800,
+        "visibleBars": 56
+      }
+    }
+  ]
+}

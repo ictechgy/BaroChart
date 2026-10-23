@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BaroChart · SYNTH-A</title>
+  <link rel="stylesheet" href="./showcase.css">
+</head>
+<body data-theme="dark">
+  <div id="showcase" aria-label="BaroChart synthetic chart showcase">
+    <header class="rail">
+      <a class="brand" href="./index.html" aria-label="BaroChart examples">
+        <svg class="brand-mark" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 14.5h13M3 12V7m4 5V3m4 9V8m3 4V5"/></svg>
+        <span>BaroChart</span>
+      </a>
+      <div class="identity"><span class="identity-divider" aria-hidden="true"></span><span class="symbol">SYNTH-A</span><span class="identity-detail">OHLCV</span></div>
+      <div class="rail-controls">
+        <div class="timeframes" role="group" aria-label="Bar interval">
+          <button type="button" data-interval="1" aria-pressed="false">1m</button>
+          <button type="button" data-interval="5" aria-pressed="true">5m</button>
+          <button type="button" data-interval="15" aria-pressed="false">15m</button>
+        </div>
+        <button type="button" id="theme-toggle" class="theme-toggle" aria-label="Switch to light theme" aria-pressed="false">
+          <span aria-hidden="true">◐</span><span id="theme-toggle-text" class="theme-toggle-text">Light</span>
+        </button>
+      </div>
+      <div class="quote" aria-live="polite">
+        <span id="last-price" class="last-price">—</span>
+        <span id="sample-change" class="sample-change">—</span>
+      </div>
+      <span class="data-chip">Synthetic data</span>
+    </header>
+
+    <section class="mobile-summary" aria-label="Current sample price">
+      <div><span class="summary-label">SYNTH-A · CLOSE</span><span id="mobile-price" class="mobile-price">—</span></div>
+      <div class="mobile-change-wrap"><span class="mobile-change-label">Sample change</span><span id="mobile-change" class="mobile-change">—</span></div>
+    </section>
+
+    <main class="chart-frame" aria-label="SYNTH-A chart">
+      <div id="chart" class="chart-surface"></div>
+      <div class="chart-readout" aria-live="polite">
+        <div id="ohlcv-readout" class="ohlcv-readout">O — &nbsp; H — &nbsp; L — &nbsp; C — &nbsp; V —</div>
+        <div class="legend-lines"><span><i class="swatch fast"></i>EMA 12</span><span><i class="swatch slow"></i>EMA 26</span></div>
+      </div>
+    </main>
+
+    <p id="showcase-error" class="showcase-error" role="status" hidden>Chart unavailable.</p>
+    <p class="caption">Deterministic sample series · <span id="bar-count">120</span> visible bars</p>
+  </div>
+
+  <p id="showcase-description">Example host UI · synthetic data · production Canvas renderer</p>
+  <script type="module" src="./showcase.mjs"></script>
+</body>
+</html>

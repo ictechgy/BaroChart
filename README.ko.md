@@ -6,7 +6,16 @@ DOM 없는 Float64 코어, Canvas/WebGL2 렌더러, 선택형 React 어댑터와
 
 [English](README.md) · [빠른 시작](#빠른-시작) · [웹·모바일 웹 화면](#웹모바일-웹-화면) · [API](docs/API.md)
 
-> **개발 프리뷰 · 0.2.13 · Apache-2.0.** npm 미출시입니다. 아래 모바일 이미지는 실제 기기 캡처가 아닙니다. [지원·검증 범위](#지원과-검증-범위)를 확인하세요.
+> **개발 프리뷰 · 0.2.13 · Apache-2.0.** npm 미출시입니다. [지원·검증 범위](#지원과-검증-범위)를 확인하세요.
+
+<p align="center">
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="assets/showcase/desktop-dark.png">
+<img src="assets/showcase/desktop-light.png" alt="프로덕션 Canvas 차트가 포함된 BaroChart 브라우저 쇼케이스">
+</picture>
+</p>
+
+BaroChart로 구성한 웹 화면입니다. 합성 캔들·EMA·거래량·RSI를 실제 브라우저에서 캡처했습니다. `npm run demo` 실행 후 [예제 열기](http://127.0.0.1:5173/examples/web/showcase.html) · [캡처 정보](docs/EXAMPLE-SCREENSHOTS.md#current-browser-showcase).
 
 ## 무엇을 만들 수 있나요?
 
@@ -31,6 +40,20 @@ npm run demo
 [기본 데모](http://127.0.0.1:5173/examples/web/index.html), [최소 첫 차트](http://127.0.0.1:5173/examples/web/quickstart.html), [UI 커스터마이징](http://127.0.0.1:5173/examples/web/customization.html)을 여세요. 이 주소들은 데모 서버가 실행 중인 내 컴퓨터에서만 동작합니다. 데이터는 모두 **합성 데이터**이며 실시간 시세 연결이 아닙니다.
 
 ## 웹·모바일 웹 화면
+
+### 현재 브라우저 쇼케이스
+
+같은 데이터를 다크·라이트 테마로 보여 주는 390px 모바일 웹 화면입니다. 위 데스크톱 이미지는 GitHub 테마에 맞춰 전환됩니다.
+
+<p>
+<img src="assets/showcase/mobile-dark.png" width="390" alt="BaroChart 다크 모바일 브라우저 캡처">
+<img src="assets/showcase/mobile-light.png" width="390" alt="BaroChart 라이트 모바일 브라우저 캡처">
+</p>
+
+다크 / 라이트 · 직접 구성한 웹 예제의 실제 브라우저 캡처. [소스·이미지 해시](assets/showcase/manifest.json).
+
+<details>
+<summary>이전 캡처와 소스 기반 미리보기</summary>
 
 ### 웹: 과거 실제 브라우저 캡처
 
@@ -57,6 +80,8 @@ npm run demo
 </p>
 
 [커스터마이징 예제](http://127.0.0.1:5173/examples/web/customization.html)에서 모바일 프리셋을 선택하고 화면 폭을 줄여 볼 수 있습니다. 기기 자동 감지는 하지 않으며, 예제 CSS는 600px 이하에서 도구 모음을 차트 위에 배치합니다. [전체 갤러리·출처·재생성 방법](docs/EXAMPLE-SCREENSHOTS.md).
+
+</details>
 
 ## 첫 차트 만들기
 
