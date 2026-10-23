@@ -41,7 +41,11 @@
             <p class="rail-kicker">DRAFT PROFILE</p>
             <p class="rail-title">스튜디오 설정</p>
           </div>
-          <button id="save-ui" type="button" class="primary-action">저장</button>
+          <div class="rail-action-group">
+            <button id="undo-settings" type="button" class="quiet-action" disabled aria-label="설정 실행 취소" title="설정 실행 취소 · 드로잉은 유지">↶</button>
+            <button id="redo-settings" type="button" class="quiet-action" disabled aria-label="설정 다시 실행" title="설정 다시 실행 · 드로잉은 유지">↷</button>
+            <button id="save-ui" type="button" class="primary-action">저장</button>
+          </div>
         </div>
         <p id="customization-status" class="status-message" role="status" aria-live="polite">설정을 바꿔 차트를 맞춤 구성하세요.</p>
         <p class="profile-scope">프로필은 외관·도구·입력·레이아웃과 표시 옵션만 저장하며 차트 데이터와 드로잉은 포함하지 않습니다.</p>
@@ -80,6 +84,46 @@
                 <select id="tool-set"><option value="basic">기본</option><option value="analysis">분석</option><option value="all">모든 도구</option><option value="custom" disabled>사용자 구성</option></select>
               </label>
               <div id="tool-choices" class="tool-choices" aria-label="도구 표시와 순서"></div>
+            </div>
+          </details>
+
+          <details id="caption-section">
+            <summary><span>도구 문구</span><small>버튼별 표시 이름</small></summary>
+            <div class="section-body caption-editor">
+              <label>도구 버튼
+                <select id="caption-control">
+                  <option value="select">선택 / 이동</option>
+                  <option value="trendline">추세선</option>
+                  <option value="horizontal">수평선</option>
+                  <option value="fibonacci">피보나치 되돌림</option>
+                  <option value="rectangle">사각형</option>
+                  <option value="ellipse">타원</option>
+                  <option value="text">텍스트</option>
+                  <option value="ray">광선</option>
+                  <option value="extendedline">연장선</option>
+                  <option value="channel">채널</option>
+                  <option value="fibextension">피보나치 확장</option>
+                  <option value="fibfan">피보나치 팬</option>
+                  <option value="fibtimezones">피보나치 시간대</option>
+                  <option value="freehand">자유 그리기</option>
+                  <option value="longposition">롱 포지션</option>
+                  <option value="shortposition">숏 포지션</option>
+                  <option value="measurement">측정</option>
+                  <option value="fit">전체 보기</option>
+                  <option value="zoomIn">확대</option>
+                  <option value="zoomOut">축소</option>
+                  <option value="undo">실행 취소</option>
+                  <option value="redo">다시 실행</option>
+                </select>
+              </label>
+              <label class="caption-value-row">표시 문구
+                <input id="caption-value" type="text" maxlength="128" autocomplete="off">
+              </label>
+              <div class="profile-button-row">
+                <button id="caption-apply" type="button" class="primary-action">문구 적용</button>
+                <button id="caption-reset" type="button" class="quiet-action">영문 기본값으로 초기화</button>
+              </div>
+              <p class="section-note">문구는 128자 이내로 입력하세요. 초기화하면 영문 기본값을 사용합니다.</p>
             </div>
           </details>
 
@@ -139,6 +183,24 @@
                 <label class="file-action">파일 선택<input id="profile-file" type="file" accept="application/json,.json"></label>
               </div>
               <p class="section-note">이 브라우저에 저장한 설정만 불러옵니다. 다른 기기로 옮기려면 JSON 파일을 사용하세요.</p>
+            </div>
+          </details>
+
+          <details id="code-section">
+            <summary><span>코드 내보내기</span><small>JavaScript · TypeScript</small></summary>
+            <div class="section-body code-tools">
+              <label>언어
+                <select id="code-language">
+                  <option value="javascript">JavaScript</option>
+                  <option value="typescript">TypeScript</option>
+                </select>
+              </label>
+              <div class="profile-button-row">
+                <button id="export-code" type="button" class="primary-action">코드 생성</button>
+                <button id="copy-code" type="button">복사</button>
+              </div>
+              <textarea id="generated-code" rows="12" readonly spellcheck="false" aria-label="생성된 차트 설정 코드" placeholder="코드 생성을 누르면 여기에 표시됩니다."></textarea>
+              <p class="section-note">외부 데이터는 별도로 준비해야 합니다. 생성된 코드는 현재 차트와 독립적인 차트를 만듭니다.</p>
             </div>
           </details>
         </div>

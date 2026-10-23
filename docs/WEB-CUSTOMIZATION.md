@@ -10,8 +10,23 @@ Open [`examples/web/customization.html`](../examples/web/customization.html) thr
 - Pointer/drag/pinch, wheel zoom and ordinary keyboard-shortcut enable switches, plus hit tolerance.
 - Existing panel height ratios and primary price-axis left/right placement.
 - Explicit appearance-profile Save/Load, JSON import/export, and appearance/current-draft resets. The saved profile includes theme, layout, input, toolbar labels/order and optional navigator/overlay/marker visibility.
+- A 30-step settings Undo/Redo history, a per-button caption editor, and JavaScript/TypeScript module export. Tool and device presets preserve edited captions; matching tool lists display their actual preset name.
 
 There is **no shortcut remapping, arbitrary panel docking/reordering/hiding, automatic persistence, trading control or native UI parity**. These demo settings reset on reload unless the user explicitly loads a saved appearance profile. Drawing files do not contain them. See [versioned UI state](WEB-UI-STATE.md) for the pure UI codec and the example-owned appearance-profile boundary. Existing workspace serialization still covers its existing chart configuration, not these new toolbar/input/chrome preferences.
+
+## Editing and exporting a configuration
+
+The two arrow buttons beside Save undo and redo **settings**, independently of the chart's drawing history. Up to 30 changes are retained in memory. Theme, layout, captions, input and optional displays can be restored, including successful profile loads/imports/resets. A new edit clears redo; saving, copying, generating code and no-op changes do not add history. Restoring a saved configuration reports Saved again. Active chart gestures must finish before history or profiles can be applied. Partial failures retain an honest actual state that can be undone; this is not a rollback guarantee across host callbacks. No global undo keyboard shortcut is intercepted.
+
+The caption editor applies one selected tool/action name explicitly, using the same 128-UTF-16-unit validation as the SDK. Resetting a caption explicitly restores its English fallback. Labels remain literal text in the chart, saved profile and generated source.
+
+Code Export produces a JavaScript or TypeScript module with `mountCustomizedChart(host, bars, markers = [])`. Save it in an application that resolves the `barochart` package, supply an `HTMLElement` and your own `Bar[]`, then call the returned `destroy()` when removing the chart. The generated module creates its own model, candle/volume series, DOM and optional helpers. Theme, panel weights, primary-axis side, toolbar placement/captions and input options match the profile. Optional trade markers use caller-provided records; overlay slots start empty for host content. No demo data, drawings, viewport or user storage is embedded, and the studio never executes the generated source. Code generation does not change the current chart or its settings history.
+
+## Automated browser verification
+
+`npm run test:customization:browser` opens this route in an isolated local Chrome session using the repository's CDP harness. It checks settings history, profile storage/failure paths, caption focus, code generation, chart-content preservation and four responsive sizes. `CHROME_BIN` can select an installed Chrome executable; `CUSTOMIZATION_BROWSER_ARTIFACT` optionally records a JSON result. The runner owns and closes its temporary server and browser.
+
+The GitHub Actions verification workflow runs Node tests, syntax checks, TypeScript declarations and generated-code checks, offline npm packaging, and the customization browser suite on pull requests and pushes to `main`. The compiler is pinned and installed in runner temporary storage; it is not a production dependency. Responsive and CDP mouse checks do not replace physical iOS/Android touch or screen-reader validation.
 
 ## Host-facing toolbar
 

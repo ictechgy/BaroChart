@@ -9,7 +9,7 @@ body { margin: 0; min-width: 320px; background: #0a0f18; color: #e6edf5; }
 button, input, select, textarea { font: inherit; }
 button, select, input, textarea { border: 1px solid var(--barochart-ui-border); border-radius: 6px; }
 button, select, input { min-height: 44px; }
-button, select, textarea, input[type="number"] { color: var(--barochart-ui-text); background: var(--barochart-ui-raised); }
+button, select, textarea, input[type="number"], input[type="text"] { color: var(--barochart-ui-text); background: var(--barochart-ui-raised); }
 button { padding: 8px 12px; cursor: pointer; }
 button:disabled { opacity: .5; cursor: default; }
 button:hover:not(:disabled) { border-color: var(--barochart-ui-accent); }
@@ -88,8 +88,10 @@ h1 { margin: 0; font-size: clamp(24px, 3vw, 34px); letter-spacing: -.03em; }
 #customization-navigator { margin-top: 10px; }
 #customization-navigator:empty { display: none; }
 
-.settings-rail { min-width: 0; border: 1px solid var(--barochart-ui-border); border-radius: 8px; background: var(--barochart-ui-surface); }
+.settings-rail { min-width: 0; scroll-padding-top: 76px; border: 1px solid var(--barochart-ui-border); border-radius: 8px; background: var(--barochart-ui-surface); }
 .rail-actions { position: sticky; top: 0; z-index: 2; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px; border-bottom: 1px solid var(--barochart-ui-border-soft); background: var(--barochart-ui-surface); }
+.rail-action-group { display: flex; align-items: center; gap: 6px; }
+.rail-action-group button { min-width: 44px; padding-inline: 8px; }
 .rail-kicker { margin: 0; font-size: 10px; }
 .rail-title { margin: 2px 0 0; font-size: 15px; font-weight: 700; }
 .primary-action { color: #071a16; border-color: var(--barochart-ui-accent); background: var(--barochart-ui-accent); font-weight: 700; }
@@ -123,6 +125,10 @@ label > select, label > input[type="number"], label > .inline-control { max-widt
 .tool-choice label { justify-content: flex-start; min-width: 0; }
 .tool-choice button { min-width: 32px; min-height: 32px; padding: 2px; }
 .profile-tools textarea { width: 100%; min-height: 150px; padding: 9px; resize: vertical; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; line-height: 1.45; }
+.caption-editor input[type="text"], .code-tools select { width: 100%; max-width: 150px; padding: 7px 9px; }
+.caption-editor .caption-value-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.caption-editor .caption-value-row input { max-width: none; }
+.code-tools textarea { width: 100%; min-height: 190px; padding: 9px; resize: vertical; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; line-height: 1.45; }
 .profile-button-row { display: flex; flex-wrap: wrap; gap: 6px; }
 .profile-button-row > button { flex: 1 1 auto; min-width: 0; }
 .file-action { position: relative; display: inline-flex; flex: 1 1 auto; justify-content: center; align-items: center; min-height: 44px; padding: 7px 10px; border: 1px solid var(--barochart-ui-border); border-radius: 6px; color: var(--barochart-ui-text); background: var(--barochart-ui-raised); cursor: pointer; }

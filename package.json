@@ -43,6 +43,7 @@
     "bench:native": "./artifacts/aster-native --bench",
     "check": "node scripts/check.mjs",
     "test:browser": "node test/browser.mjs",
+    "test:customization:browser": "node test/customization-browser.mjs",
     "test:shared-model:browser": "node test/shared-model-browser.mjs",
     "test:lifecycle": "node test/lifecycle.mjs",
     "bench:browser": "node benchmarks/browser.mjs",
