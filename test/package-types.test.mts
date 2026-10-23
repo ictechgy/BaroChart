@@ -7,6 +7,9 @@ const model=new ChartModel({store:new BarStore()});
 const axis:Axis={id:'usd',panel:'price',side:'right',scale:'linear',prefix:'$',precision:2};model.addAxis(axis);
 const patch:AxisPatch={range:[1,10],base:null};const input=new InteractionController(model,()=>({width:800,height:600})),api=new ChartAPI(model,{controller:input});api.setAxis('usd',patch);
 const target:DrawingTarget={panel:'price',axisId:'usd'};api.setDrawingTarget(target);const hover:CrosshairValues|null=api.crosshairValues(800,600);hover?.axes[0].formatted.toLowerCase();
+const packageOrder:boolean=api.setPanelOrder(['price']);const packagePlacement:{changed:number}=api.setIndicatorPlacement('e',{panel:'price',axisId:'usd'});void [packageOrder,packagePlacement];
+// @ts-expect-error indicator placement axis identifiers are strings or null
+api.setIndicatorPlacement('e',{panel:'price',axisId:7});
 const domain:AxisLayout|undefined=createLayout(model,800,600).axis('price','usd');domain?.inverse(1);domain?.base.toFixed();api.setDrawingTarget(null);
 const drawing:Drawing={id:'t',type:'trendline',panel:'price',points:[{time:1,price:1},{time:2,price:2}]};
 const aligned:Float64Array=alignSeriesByTime([1,2],[{time:2,value:100}]);

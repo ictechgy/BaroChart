@@ -4,6 +4,7 @@ button:disabled{opacity:.45;cursor:default}button,select{-webkit-tap-highlight-c
 @media(max-width:600px){.chart-row{flex-direction:column}.tools{width:100%;height:64px;flex-direction:row;overflow-x:auto;overflow-y:hidden;padding:6px}.tools button{min-width:44px;width:44px;height:48px}button,select,input{min-height:44px}.footer{padding:12px}.footer button{min-width:44px}main{padding-bottom:max(20px,env(safe-area-inset-bottom))}}
 
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}#explorer-readout{padding:8px 0;overflow-wrap:anywhere;font-size:12px;color:inherit}#exploration-help{font-size:12px}
+#indicator-layout-section{margin-top:18px;border:1px solid #263248;border-radius:8px;padding:12px 14px;background:#0c1320}#indicator-layout-section summary{cursor:pointer;font-size:12px;color:#afbed2}.indicator-layout-grid{display:flex;flex-wrap:wrap;align-items:center;gap:9px;margin-top:12px;font-size:11px;color:#91a4bd}.indicator-layout-grid label{display:flex;align-items:center;gap:7px}.indicator-layout-grid select{max-width:190px}.indicator-layout-grid button{padding:7px 9px}#indicator-layout-section p{font-size:11px;color:#8295af;min-height:18px;margin:10px 0 0;overflow-wrap:anywhere}
 
 /* Demo chrome follows the chart preset. Canvas Theme stays a portable record. */
 :root[data-chart-theme=light]{color-scheme:light;color:#203047;background:#f8fafc}
@@ -14,3 +15,5 @@ button:disabled{opacity:.45;cursor:default}button,select{-webkit-tap-highlight-c
 [data-chart-theme=light] .brand,[data-chart-theme=light] .live{color:#176b55}
 [data-chart-theme=light] .brand span,[data-chart-theme=light] .badge,[data-chart-theme=light] .eyebrow,[data-chart-theme=light] h1 em,[data-chart-theme=light] .headline p,[data-chart-theme=light] .market label,[data-chart-theme=light] .symbol span,[data-chart-theme=light] .controls,[data-chart-theme=light] .tools span,[data-chart-theme=light] .footer,[data-chart-theme=light] .settings,[data-chart-theme=light] #status,[data-chart-theme=light] .notes b,[data-chart-theme=light] .notes p,[data-chart-theme=light] #keyboard-help,[data-chart-theme=light] #selection,[data-chart-theme=light] #data-summary{color:#405570}
 [data-chart-theme=light] a{color:#285bb9}
+[data-chart-theme=light] #indicator-layout-section{background:#f8fafc;border-color:#bccbdb}[data-chart-theme=light] #indicator-layout-section summary,[data-chart-theme=light] #indicator-layout-section p{color:#405570}
+@media(max-width:600px){.indicator-layout-grid{align-items:stretch}.indicator-layout-grid label{width:100%;justify-content:space-between}.indicator-layout-grid select{max-width:none;flex:1}.indicator-layout-grid button{flex:1;min-width:44px}}

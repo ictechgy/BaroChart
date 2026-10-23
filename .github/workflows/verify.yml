@@ -61,3 +61,14 @@ jobs:
             exit 1
           fi
           CHROME_BIN="${chrome_bin}" npm run test:customization:browser
+
+      - name: Run indicator layout regression in Chrome CDP
+        shell: bash
+        run: |
+          set -euo pipefail
+          chrome_bin="$(command -v google-chrome || true)"
+          if [[ -z "${chrome_bin}" ]]; then
+            echo 'google-chrome is required for the indicator layout browser check' >&2
+            exit 1
+          fi
+          CHROME_BIN="${chrome_bin}" npm run test:indicator-layout:browser

@@ -7,6 +7,7 @@ import * as lib from '../src/index.mjs';
 import {modelRequest} from '../src/web/worker-state.mjs';
 import {drawingImportMessage} from '../examples/web/import-errors.mjs';
 import {createDrawingFileImport} from '../examples/web/drawing-file-import.mjs';
+import {collectIndicatorGroups,indicatorGroup,copyPanelProjection,copyAxisProjection,uniqueLayoutId} from '../examples/web/indicator-layout.mjs';
 import {fixture,event,key} from './helpers/customization-dom.mjs';
 const root=new URL('../',import.meta.url);
 const src=readFileSync(new URL('examples/web/demo.mjs',root),'utf8'),html=readFileSync(new URL('examples/web/index.html',root),'utf8');
@@ -20,7 +21,7 @@ function demo(t){
  const requests=[],timers=new Map();let timerSerial=0;
  const prepareChartModel=(request,options)=>new Promise((resolve,reject)=>{requests.push({request,options,resolve,reject});options.signal.addEventListener('abort',()=>reject(new DOMException('Cancelled','AbortError')),{once:true});});
  const createChart=(host,model,opts)=>{const chart=new lib.CanvasChart(host,model,{...opts,observeResize:false,layerCaching:false,dpr:()=>1,rendererFactory:()=>({kind:'canvas',render(){},dispose(){}})});env.charts.push(chart);env.models.push(model);return chart;};
- const args={...lib,createChart,modelRequest,drawingImportMessage,createDrawingFileImport,prepareChartModel,matchMedia:()=>({matches:false}),setInterval:(fn,delay)=>{const id=++timerSerial;timers.set(id,{fn,delay});return id;},clearInterval:id=>timers.delete(id)};
+ const args={...lib,collectIndicatorGroups,indicatorGroup,copyPanelProjection,copyAxisProjection,uniqueLayoutId,createChart,modelRequest,drawingImportMessage,createDrawingFileImport,prepareChartModel,matchMedia:()=>({matches:false}),setInterval:(fn,delay)=>{const id=++timerSerial;timers.set(id,{fn,delay});return id;},clearInterval:id=>timers.delete(id)};
  const body=src.replace(/^import[^\n]+\n/gm,'').replaceAll('import.meta.url',JSON.stringify(new URL('examples/web/demo.mjs',root).href)).replace('await load();','const initialLoad=load(); return {initialLoad,load,addIndicator,install,get model(){return model;},get chart(){return chart;},get preparing(){return preparing;}};');
  const state=Function(...Object.keys(args),body)(...Object.values(args));
 

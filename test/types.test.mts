@@ -6,6 +6,9 @@ const engine = new IndicatorEngine(store);
 const axis:Axis={id:'foreign',panel:'price',side:'left',scale:'percent',base:100,precision:5,prefix:'$',suffix:' USD',tickFormat:'scientific'};
 model.addAxis(axis);const axisPatch:AxisPatch={range:null,precision:4};
 const controller=new InteractionController(model,()=>({width:1200,height:700}));const api=new ChartAPI(model,{controller});api.setAxis('foreign',axisPatch);
+const panelOrderChanged:boolean=api.setPanelOrder(['price']);const placementChanged:{changed:number}=api.setIndicatorPlacement('ema',{panel:'price',axisId:null});void [panelOrderChanged,placementChanged];
+// @ts-expect-error indicator placement axis identifiers are strings or null
+api.setIndicatorPlacement('ema',{panel:'price',axisId:7});
 model.addSeries({id:'f',type:'line',panel:'price',axisId:'foreign',symbolId:'FOREIGN',label:'Aligned foreign',values:new Float64Array(store.length)});
 api.setSeries('f',{axisId:null,label:'Primary scale'});const target:DrawingTarget={panel:'price',seriesId:'f',axisId:null};api.setDrawingTarget(target);controller.setDrawingTarget(null);
 const crosshair:CrosshairValues|null=api.crosshairValues(1200,700);crosshair?.series.forEach(s=>{s.label.toUpperCase();s.value?.toFixed();s.sourceTime?.toFixed();s.axisId?.toUpperCase();});crosshair?.axes.forEach(a=>a.formatted.toUpperCase());
