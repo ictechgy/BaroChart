@@ -55,14 +55,19 @@ export interface TimeRangeState {
  status:'empty'|'insufficient'|'unmatched'|'clipped'|'applied';stale:boolean;
 }
 
+export type ChartToolbarToolId='select'|DrawingType;
+export type ChartToolbarActionId='fit'|'zoomIn'|'zoomOut'|'undo'|'redo';
+export type ChartToolbarControlId=ChartToolbarToolId|ChartToolbarActionId;
+export type ChartToolbarLabels=Readonly<Partial<Record<ChartToolbarControlId,string>>>;
 export interface ChartToolbarOptions {
- label?:string;tools?:readonly ('select'|DrawingType)[];
- actions?:readonly ('fit'|'zoomIn'|'zoomOut'|'undo'|'redo')[];
+ label?:string;tools?:readonly ChartToolbarToolId[];
+ actions?:readonly ChartToolbarActionId[];
  orientation?:'horizontal'|'vertical';density?:'comfortable'|'compact';
+ labels?:ChartToolbarLabels;
 }
 export interface ChartToolbarState {
- readonly label:string;readonly tools:readonly ('select'|DrawingType)[];
- readonly actions:readonly ('fit'|'zoomIn'|'zoomOut'|'undo'|'redo')[];
+ readonly label:string;readonly tools:readonly ChartToolbarToolId[];
+ readonly actions:readonly ChartToolbarActionId[];readonly labels:ChartToolbarLabels;
  readonly orientation:'horizontal'|'vertical';readonly density:'comfortable'|'compact';
  readonly activeTool:'select'|DrawingType;readonly canUndo:boolean;readonly canRedo:boolean;
 }

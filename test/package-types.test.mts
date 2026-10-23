@@ -112,12 +112,15 @@ new PackageBarReplay([],{panels:[]});
 import {renderCanvas as renderPackageReplayCanvas} from 'barochart/canvas';
 declare const packageReplayContext:CanvasRenderingContext2D;renderPackageReplayCanvas(packageReplayContext,packageReplay.frame(800,480));
 
-import {attachChartToolbar,type InteractionOptions,type ChartToolbarState} from 'barochart/canvas';
+import {attachChartToolbar,type InteractionOptions,type ChartToolbarOptions,type ChartToolbarState} from 'barochart/canvas';
+import type {ChartToolbarControlId as RootToolbarControlId,ChartToolbarLabels as RootToolbarLabels} from 'barochart';
 import {attachChartToolbar as rootToolbar} from 'barochart';
 const webChart=new CanvasChart(document.createElement('div'),model,{interaction:{wheelZoom:false,hitTolerancePx:12}});
 const inputPolicy:Readonly<InteractionOptions>=webChart.setInteractionOptions({pointer:false});
-const tools=attachChartToolbar(document.createElement('div'),webChart,{tools:['select','trendline'],actions:['undo','redo'],orientation:'vertical',density:'compact'});
-const toolbarState:ChartToolbarState=tools.snapshot();toolbarState.tools.map(id=>id.toUpperCase());tools.setOptions({actions:[]});tools.refresh();tools.destroy();void [inputPolicy,rootToolbar];
+const labels:ChartToolbarOptions['labels']={select:'Pan',undo:'Back'};
+const rootControl:RootToolbarControlId='select';const rootLabels:RootToolbarLabels={select:'Pan'};
+const tools=attachChartToolbar(document.createElement('div'),webChart,{tools:['select','trendline'],actions:['undo','redo'],orientation:'vertical',density:'compact',labels});
+const toolbarState:ChartToolbarState=tools.snapshot();toolbarState.tools.map(id=>id.toUpperCase());toolbarState.labels.select?.toUpperCase();tools.setOptions({actions:[],labels:{}});tools.refresh();tools.destroy();void [inputPolicy,rootToolbar,labels,rootControl,rootLabels];
 // @ts-expect-error interaction switches require booleans
 webChart.setInteractionOptions({wheelZoom:1});
 // @ts-expect-error unsupported shortcut remapping is not part of this contract

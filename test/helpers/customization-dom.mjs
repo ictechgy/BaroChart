@@ -19,7 +19,7 @@ export function fixture(t){
   contains(node){return node===this||this.children.some(x=>x.contains(node));}
   replaceWith(node){const parent=this.parentNode;this.remove();parent?.append(node);}
   cloneNode(){const node=new Element(this.tagName);node.attributes=new Map(this.attributes);node.style={...this.style};node.tabIndex=this.tabIndex;return node;}
-  setAttribute(key,value){this.attributes.set(key,String(value));this.onAttribute?.(key,value);}getAttribute(key){return this.attributes.get(key)??null;}
+  setAttribute(key,value){this.attributes.set(key,String(value));if(key.startsWith('data-'))this.dataset[key.slice(5).replace(/-([a-z])/g,(_,letter)=>letter.toUpperCase())]=String(value);this.onAttribute?.(key,value);}getAttribute(key){return this.attributes.get(key)??null;}
   addEventListener(type,fn){if(!this.events.has(type))this.events.set(type,new Set());this.events.get(type).add(fn);}removeEventListener(type,fn){this.events.get(type)?.delete(fn);}
   dispatchEvent(event){if(!event.target)Object.defineProperty(event,'target',{configurable:true,value:this});for(const fn of [...this.events.get(event.type)??[]])if(this.events.get(event.type)?.has(fn))fn(event);this['on'+event.type]?.(event);if(event.bubbles&&!event.cancelBubble)this.parentNode?.dispatchEvent(event);return !event.defaultPrevented;}
   focus(){if(this.disabled)return;document.activeElement=this;this.onFocus?.();}
