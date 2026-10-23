@@ -80,6 +80,23 @@ async function isolatedResampleTerminationFailure() {
  return JSON.parse(stdout.trim().split('\n').at(-1));
 }
 
+async function isolatedLateTerminationRejection() {
+ const calculationURL = new URL('../src/web/calculation-job.mjs', import.meta.url).href;
+ const entryURL = ENTRY.href;
+ const script = `
+  import {runCalculationJob,runDedicatedCalculationWorker,calculationJobStats} from ${JSON.stringify(calculationURL)};
+  const entry=new URL(${JSON.stringify(entryURL)}),termination={};termination.promise=new Promise((resolve,reject)=>{termination.reject=reject;});
+  let worker;let unhandled=0;process.on('unhandledRejection',()=>{unhandled++;});
+  const controller=new AbortController();
+  const operation=runCalculationJob({signal:controller.signal,timeoutMs:1000},async context=>{context.reserve(64);return runDedicatedCalculationWorker({},entry,{workerFactory:()=>worker={onmessage:null,onerror:null,postMessage(){},terminate(){return termination.promise;}}},context);});
+  setTimeout(()=>controller.abort(),5);let error;try{await operation;}catch(failure){error={name:failure.name,message:failure.message};}
+  const before=calculationJobStats();termination.reject(new Error('late termination failure'));await new Promise(resolve=>setTimeout(resolve,0));
+  console.log(JSON.stringify({error,before,after:calculationJobStats(),unhandled}));
+ `;
+ const {stdout}=await execFile(process.execPath,['--input-type=module','-e',script],{cwd:process.cwd(),timeout:5000,maxBuffer:1024*1024});
+ return JSON.parse(stdout.trim().split('\n').at(-1));
+}
+
 test('timeout and abort settle while Worker cleanup stays quarantined, then recover capacity', async () => {
  const baseline = calculationJobStats(), first = hangingWorkers(), second = hangingWorkers();
  const timeout = runCalculationJob({timeoutMs:20}, async context => {
@@ -131,4 +148,33 @@ test('public resample API retains reservation after Worker termination rejection
  assert.equal(result.error?.message,'resample termination failed');
  assert.equal(result.stats.activeJobs,1);
  assert.ok(result.stats.reservedBytes>0);
+});
+
+test('late termination rejection keeps the cancelled reservation without unhandled rejection', async () => {
+ const result=await isolatedLateTerminationRejection();
+ assert.equal(result.error?.name,'AbortError');
+ assert.deepEqual(result.before,{activeJobs:1,reservedBytes:64});
+ assert.deepEqual(result.after,result.before);
+ assert.equal(result.unhandled,0);
+});
+
+test('stopped jobs ignore late packets and drain every cleanup after termination acknowledgement', async () => {
+ const baseline=calculationJobStats(),termination=deferred();let worker,lateMessage,published=0,remainingCleanup=false,checkError;
+ const operation=runCalculationJob({timeoutMs:20},async context=>{
+  context.reserve(64);context.publish(()=>{published++;return 'published';});
+  context.cleanup(()=>{remainingCleanup=true;});
+  context.cleanup(async()=>{await termination.promise;try{context.check();}catch(error){checkError=error;}});
+  return runDedicatedCalculationWorker({},ENTRY,{workerFactory:()=>worker={onmessage:null,onerror:null,postMessage(){lateMessage=worker.onmessage;},terminate(){return termination.promise;}}},context);
+ });
+ await assert.rejects(operation,{name:'TimeoutError'});
+ assert.equal(typeof lateMessage,'function');
+ assert.equal(remainingCleanup,false);
+ lateMessage({data:{packet:{ok:true}}});
+ assert.equal(published,0);
+ termination.resolve();
+ for(let i=0;i<20&&JSON.stringify(calculationJobStats())!==JSON.stringify(baseline);i++)await pause(0);
+ assert.equal(remainingCleanup,true);
+ assert.equal(checkError?.name,'TimeoutError');
+ assert.deepEqual(calculationJobStats(),baseline);
+ assert.equal(published,0);
 });
