@@ -72,14 +72,14 @@ npm run demo
 
 ### 모바일 웹: 소스 기반 UI 미리보기
 
-**390 CSS px 폭**을 기준으로 만든 다크/라이트 미리보기입니다. 차트는 실제 scene/Canvas 그리기 코드와 합성 OHLCV로 그렸고, 주변 도구 모음은 현재 모바일 프리셋·커스터마이징 CSS에 근거한 설명용 구성입니다. **브라우저 스크린샷이나 네이티브 화면, 터치 기기 검증 결과가 아닙니다.**
+**390 CSS px 폭**을 기준으로 만든 다크/라이트 미리보기입니다. 차트는 실제 scene/Canvas 그리기 코드와 합성 OHLCV로 그렸고, 주변 도구 모음은 보관된 소스 버전의 모바일 프리셋·커스터마이징 CSS에 근거한 설명용 구성입니다. **브라우저 스크린샷이나 네이티브 화면, 터치 기기 검증 결과가 아닙니다.**
 
 <p>
 <img src="assets/previews/mobile-web-dark-preview.png" width="390" alt="다크 모바일 웹 UI 미리보기. 실제 브라우저 캡처 아님">
 <img src="assets/previews/mobile-web-light-preview.png" width="390" alt="라이트 모바일 웹 UI 미리보기. 실제 브라우저 캡처 아님">
 </p>
 
-[커스터마이징 예제](http://127.0.0.1:5173/examples/web/customization.html)에서 모바일 프리셋을 선택하고 화면 폭을 줄여 볼 수 있습니다. 기기 자동 감지는 하지 않으며, 예제 CSS는 600px 이하에서 도구 모음을 차트 위에 배치합니다. [전체 갤러리·출처·재생성 방법](docs/EXAMPLE-SCREENSHOTS.md).
+[커스터마이징 예제](http://127.0.0.1:5173/examples/web/customization.html)에서 모바일 프리셋을 선택하고 화면 폭을 줄여 볼 수 있습니다. 기기 자동 감지는 하지 않으며, 예제 CSS는 920px 이하에서 도구 모음을 차트 위에 배치합니다. [전체 갤러리·출처·재생성 방법](docs/EXAMPLE-SCREENSHOTS.md).
 
 </details>
 
@@ -171,11 +171,12 @@ const chart = new CanvasChart(chartElement, readyModel, {
   interaction: ui.interaction,
 });
 const toolbar = attachChartToolbar(emptyToolbarElement, chart, ui.toolbar);
+toolbar.setOptions({labels: {select: '이동', fit: '전체 보기'}});
 ```
 
-- 모바일 프리셋: 선택 허용 거리 24px, 휠 줌 꺼짐, 편안한 가로 도구 모음. 버튼의 **최소 높이는 44px**이며 모든 대상의 최소 폭까지 보장하는 것은 아닙니다.
+- 모바일 프리셋: 선택 허용 거리 24px, 휠 줌 꺼짐, 편안한 가로 도구 모음. 호스트가 스타일을 바꾸기 전 편안한 도구 모음 버튼의 **최소 너비와 높이는 44px**입니다.
 - 테마·폰트·도구 구성/순서/간격, 패널 높이 비율과 가격축 방향을 설정합니다. [Overlay slots](docs/CHART-OVERLAYS.md), [navigator](docs/CHART-NAVIGATOR.md), [trade 마커](docs/TRADE-MARKERS.md)는 선택해서 붙입니다.
-- 예제는 localStorage로 **입력·도구 모음만 명시적으로 저장·불러오기**합니다. 자동 저장은 없으며 색상·패널·배치·드로잉·데이터는 이 버튼에 포함하지 않습니다. 앱의 저장 기능은 [UI 상태](docs/WEB-UI-STATE.md)와 [workspace](docs/WORKSPACES.md)를 조합하세요.
+- 커스터마이징 스튜디오는 localStorage로 **외관 프로필을 명시적으로 저장·불러오기**하고 JSON을 가져오거나 내보냅니다. 자동 저장은 없으며 색상·패널 배치·입력·도구 문구·표시 옵션을 저장하고 드로잉과 데이터는 현재 차트에 유지합니다. 앱의 저장 기능은 [UI 상태](docs/WEB-UI-STATE.md)와 [workspace](docs/WORKSPACES.md)를 조합하세요.
 - 키보드 옵션은 켜기/끄기이며 **단축키 재매핑이 아닙니다.** 자유로운 패널 도킹과 네이티브 UI 동등 지원도 포함하지 않습니다. [전체 계약](docs/WEB-CUSTOMIZATION.md).
 
 ## 예제와 문서

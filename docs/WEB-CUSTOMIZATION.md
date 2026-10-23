@@ -2,15 +2,16 @@
 
 The core theme, panel, axis, series and drawing APIs remain the source of chart state. This layer adds **optional HTML controls and web input preferences**, not a new settings engine. Nothing is mounted unless the host calls `attachChartToolbar`. Existing renderer defaults remain pointer/wheel/keyboard enabled with an 8-logical-pixel hit tolerance.
 
-Open [`examples/web/customization.html`](../examples/web/customization.html) through the local demo server. The main demo links it and retains its original controls/layout. The separate demo provides:
+Open [`examples/web/customization.html`](../examples/web/customization.html) through the local demo server. The main demo links it and retains its original controls/layout. The separate studio keeps the chart beside a grouped settings rail on desktop and above the settings on narrow screens. It provides:
 
-- Dark/light presets, six chart colors and 10/12/14/16/20/24 px font choices.
+- Dark/light presets, six chart colors and a 10–24 px font-size control.
 - Tool visibility and ordering, preset tool lists, toolbar top/left/right placement and comfortable/compact density. Narrow screens place the toolbar above the chart.
 - Explicit desktop/mobile input and toolbar presets (no device detection).
 - Pointer/drag/pinch, wheel zoom and ordinary keyboard-shortcut enable switches, plus hit tolerance.
 - Existing panel height ratios and primary price-axis left/right placement.
+- Explicit appearance-profile Save/Load, JSON import/export, and appearance/current-draft resets. The saved profile includes theme, layout, input, toolbar labels/order and optional navigator/overlay/marker visibility.
 
-There is **no shortcut remapping, arbitrary panel docking/reordering/hiding, automatic persistence, trading control or native UI parity**. These demo settings reset on reload unless the user explicitly loads saved input/toolbar preferences. Drawing files do not contain them. See [versioned UI state](WEB-UI-STATE.md) for the new pure codec and host storage boundary. Existing workspace serialization still covers its existing chart configuration, not these new toolbar/input/chrome preferences.
+There is **no shortcut remapping, arbitrary panel docking/reordering/hiding, automatic persistence, trading control or native UI parity**. These demo settings reset on reload unless the user explicitly loads a saved appearance profile. Drawing files do not contain them. See [versioned UI state](WEB-UI-STATE.md) for the pure UI codec and the example-owned appearance-profile boundary. Existing workspace serialization still covers its existing chart configuration, not these new toolbar/input/chrome preferences.
 
 ## Host-facing toolbar
 
@@ -24,6 +25,7 @@ const toolbar = attachChartToolbar(emptyControlsElement, chart, {
   actions: ['fit', 'zoomIn', 'zoomOut', 'undo', 'redo'],
   orientation: 'horizontal',
   density: 'comfortable',
+  labels: {select: 'Pan', undo: 'Undo last change'},
 });
 
 toolbar.setOptions({tools: ['select', 'horizontal'], density: 'compact'});
@@ -32,11 +34,11 @@ toolbar.refresh(); // also refreshes automatically on this chart's aster:state
 // toolbar.destroy(); // idempotent; also called by chart.destroy()
 ```
 
-The container must be empty and unowned. At most one toolbar attaches to a live chart. The host owns its location and dimensions; the helper does not move surrounding panels. Tool IDs are `select` plus existing `DrawingType` IDs. Action IDs are exactly `fit`, `zoomIn`, `zoomOut`, `undo`, `redo`. Ordered lists reject unsupported or duplicate IDs; tools must include `select`, while actions may be empty. Unknown keys, accessors, invalid labels/orientation/density and invalid list values are rejected before changing options. Labels are 1–128 nonblank characters. `setOptions` merges a patch; lists replace the prior list. Snapshot records and lists are frozen.
+The container must be empty and unowned. At most one toolbar attaches to a live chart. The host owns its location and dimensions; the helper does not move surrounding panels. Tool IDs are `select` plus existing `DrawingType` IDs. Action IDs are exactly `fit`, `zoomIn`, `zoomOut`, `undo`, `redo`. Ordered lists reject unsupported or duplicate IDs; tools must include `select`, while actions may be empty. Unknown keys, accessors, invalid labels/orientation/density and invalid list values are rejected before changing options. Caption maps also reject hidden and symbol fields. `labels` is an optional replacement map keyed by those tool and action IDs; each value is a detached, nonblank Unicode text string of at most 128 UTF-16 code units. Captions are assigned through `textContent`, so characters such as `<` and `>` remain literal text and no HTML is parsed. An empty map restores the English captions. `setOptions` merges a patch; lists and `labels` replace their prior values. Snapshot records and lists are frozen.
 
 Attaching a filtered toolbar or removing the current tool explicitly selects `select`, using the existing API and its cancellation behavior. This is an intentional tool command, not silent filtering of the chart's capabilities. Another programmatic tool command can still select a tool outside the displayed list; then no displayed tool is pressed until the host changes tool/options. Programmatic commands remain available when controls or canvas inputs are absent/disabled.
 
-Native buttons use visible English names, titles, `aria-pressed` on tools, and actual disabled Undo/Redo state. Tab visits enabled buttons; this is a labeled group, not a roving-tabindex ARIA toolbar. Focus is retained when surviving controls reorder; removing or disabling the focused toolbar control moves focus to the group. The helper tracks its original chart/model ownership and ignores retired buttons. Raw store edits without chart invalidation require `refresh()`.
+Native buttons use visible captions, matching titles and accessible names, `aria-pressed` on tools, and actual disabled Undo/Redo state. Tab visits enabled buttons; this is a labeled group, not a roving-tabindex ARIA toolbar. Focus is retained when surviving controls reorder or labels change; removing or disabling the focused toolbar control moves focus to the group. The helper tracks its original chart/model ownership and ignores retired buttons. Raw store edits without chart invalidation require `refresh()`.
 
 The helper does not parse HTML, add a stylesheet, or modify global CSS. It uses scoped classes and inherited CSS variables with explicit dark defaults:
 
@@ -51,7 +53,7 @@ The helper does not parse HTML, add a stylesheet, or modify global CSS. It uses 
 | `--barochart-ui-gap` | Control spacing, `6px` |
 | `--barochart-ui-padding` | Group padding, `6px` |
 
-Native focus styling remains intact. The demo additionally uses a scoped `--barochart-ui-focus` outline. Comfortable buttons have 44 px minimum height, compact buttons 32 px. Hosts are responsible for contrast, focus visibility, touch targets and accessible localized controls when restyling. CSS variables style HTML only; they are **not** accepted as portable canvas Theme colors. Use `chart.api.setTheme({background,grid,text,up,down,crosshair,font})` for chart appearance and existing series APIs for per-series colors.
+Native focus styling remains intact. The demo additionally uses a scoped `--barochart-ui-focus` outline. Comfortable buttons have 44 px minimum width and height, compact buttons 32 px in both dimensions. Hosts are responsible for contrast, focus visibility and accessible localized controls when restyling. CSS variables style HTML only; they are **not** accepted as portable canvas Theme colors. Use `chart.api.setTheme({background,grid,text,up,down,crosshair,font})` for chart appearance and existing series APIs for per-series colors.
 
 ## Independent web input preferences
 
@@ -84,13 +86,13 @@ The main Theme button previously dereferenced an absent model while initial asyn
 
 ## Verification boundary
 
-Maintained Node tests exercise actual web/helper/demo source with modeled DOM, queued RAF, synchronous callback reentrancy, state/history ownership, pointer-capture retirement, toolbar focus reconciliation, invalid options, theme startup, panel bindings, contrast pairs and exports/types. React coverage uses the actual adapter with a modeled hooks scheduler, **not** the React runtime or StrictMode/hydration. Pixel/computed-style layout, actual touch scrolling, real browser keyboard/focus, assistive technology, native/JNI and Mac execution remain unrun for this change. This is not accessibility certification, a performance result, or cross-platform parity evidence.
+Maintained Node tests exercise actual web/helper/demo source with modeled DOM, queued RAF, synchronous callback reentrancy, state/history ownership, pointer-capture retirement, toolbar focus reconciliation, invalid options, theme startup, panel bindings, contrast pairs and exports/types. React coverage uses the actual adapter with a modeled hooks scheduler, **not** the React runtime or StrictMode/hydration. Browser checks for the customization studio are recorded separately from these modeled tests; actual touch hardware, assistive technology and native/JNI execution are outside this web change. This is not accessibility certification, a performance result, or cross-platform parity evidence.
 
 ## Explicit mobile preset
 
-`createChartUIPreset('mobile')` (canvas/root) returns a detached, deeply frozen UI configuration: pointer and ordinary keyboard shortcuts remain enabled, wheel zoom is disabled, hit tolerance is 24 logical CSS pixels, and the horizontal comfortable toolbar retains the basic four tools plus Fit/Undo/Redo. Comfortable buttons retain their existing 44px minimum height; this is not a claim that every styled target has a 44px minimum width. `createChartUIPreset('desktop')` returns the existing 8px/enabled input defaults and full default toolbar actions. Neither function mounts anything, changes defaults, reads a user agent, remaps shortcuts, or affects native hosts.
+`createChartUIPreset('mobile')` (canvas/root) returns a detached, deeply frozen UI configuration: pointer and ordinary keyboard shortcuts remain enabled, wheel zoom is disabled, hit tolerance is 24 logical CSS pixels, and the horizontal comfortable toolbar retains the basic four tools plus Fit/Undo/Redo. Comfortable toolbar buttons have a 44px minimum width and height before host restyling. `createChartUIPreset('desktop')` returns the existing 8px/enabled input defaults and full default toolbar actions. Neither function mounts anything, changes defaults, reads a user agent, remaps shortcuts, or affects native hosts.
 
-Pass the returned interaction record to a fresh CanvasChart and toolbar record to attachChartToolbar, or explicitly apply through the existing setters. The demo device selector is an action, not automatic responsive state; it resets to its prompt after applying. It rejects changes while an input gesture is active. Save the resolved values with saveChartUI, not just a preset name. A mobile preset does not override `interactive:false` or disable the independent keyboard explorer. Actual mobile scrolling, touch targets and screen readers remain unverified.
+Pass the returned interaction record to a fresh CanvasChart and toolbar record to attachChartToolbar, or explicitly apply through the existing setters. The demo device selector is an action, not automatic responsive state; it resets to its prompt after applying. It rejects changes while an input gesture is active. Save the resolved values with saveChartUI, not just a preset name. A mobile preset does not override `interactive:false` or disable the independent keyboard explorer. Physical touch scrolling and screen readers require separate validation.
 
 ## Optional overlay slots
 

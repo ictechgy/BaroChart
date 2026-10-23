@@ -64,11 +64,13 @@ These dark/light illustrations use a 390 × 896 logical-pixel layout, saved as 7
 
 The surrounding controls are drawn illustrations based on [customization CSS](../examples/web/customization.css) and `createChartUIPreset('mobile')`, not computed browser layout. The desktop settings panel is omitted and toolbar labels are shortened. Undo/Redo are shown disabled because there is no drawing history. The mobile preset opts into 24px hit tolerance, wheel zoom off and a comfortable horizontal toolbar; it does not detect devices automatically. These images do not establish browser layout, touch scrolling, keyboard focus, assistive-technology behavior, performance or native SDK support.
 
-Try the real example with `npm run demo`, open [UI customization](http://127.0.0.1:5173/examples/web/customization.html), choose the mobile preset, and narrow the viewport. The example CSS places the toolbar above the chart at widths ≤600px. The full settings controls remain part of that example. See [UI customization and its limits](WEB-CUSTOMIZATION.md).
+Try the real example with `npm run demo`, open [UI customization](http://127.0.0.1:5173/examples/web/customization.html), choose the mobile preset, and narrow the viewport. The current studio places the toolbar above the chart at widths ≤920px, with a scrolling settings pane below it. The full settings controls remain part of that example. See [UI customization and its limits](WEB-CUSTOMIZATION.md).
 
 ### Preview regeneration and integrity
 
 [Preview manifest](../assets/previews/manifest.json) is separate from the historical [screenshot manifest](../assets/screenshots/manifest.json). It records source-file hashes, scene hashes, image hashes, dimensions, the actual preset and limitations. No original screenshot has been changed.
+
+These preview source hashes describe the pinned historical revision, not the current customization studio. Tests preserve the archived manifest and PNG bytes and compare the chart scene with current rendering. If the historical Git commit is available, they also verify its source bytes; shallow checkouts and source archives report when that extra comparison is unavailable. Reproduce the historical illustrations from their pinned revision; a new capture needs its own current provenance.
 
 The optional documentation generator [readme-previews.mjs](../scripts/readme-previews.mjs) uses `@napi-rs/canvas` 0.1.100 as its Node raster backend, with DejaVu Sans/DejaVu Sans Mono fonts. With that development-only backend available to Node, run:
 

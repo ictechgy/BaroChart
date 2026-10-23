@@ -19,8 +19,32 @@ test('web UI codec owns complete frozen options and excludes transient state',t=
  assert.throws(()=>saveChartUI({toolbar:toolbar.snapshot()}));assert.equal(saveChartUI(ui),text);
  const held=toolbar.options;toolbar.setOptions({density:'comfortable'});assert.equal(held.density,'compact');toolbar.destroy();assert.throws(()=>toolbar.options);
 });
+test('toolbar labels use exact legacy v1 text until an override requires v2',()=>{
+ const legacy=saveChartUI({toolbar:{}});
+ assert.equal(legacy,'{"schema":"barochart.web-ui","version":1,"interaction":{"pointer":true,"wheelZoom":true,"keyboardShortcuts":true,"hitTolerancePx":8},"toolbar":{"label":"Chart tools","tools":["select","trendline","horizontal","rectangle"],"actions":["fit","zoomIn","zoomOut","undo","redo"],"orientation":"horizontal","density":"comfortable"}}');
+ assert.equal(JSON.parse(legacy).version,1);assert(!legacy.includes('labels'));
+ const reset=saveChartUI({toolbar:{labels:{}}});assert.equal(reset,legacy);
+ const text=saveChartUI({toolbar:{labels:{select:'Pan',undo:'Back'}}}),doc=JSON.parse(text);
+ assert.equal(doc.version,2);assert.deepEqual(doc.toolbar.labels,{select:'Pan',undo:'Back'});assert.deepEqual(readChartUI(text).toolbar.labels,{select:'Pan',undo:'Back'});assert.equal(saveChartUI(readChartUI(text)),text);
+ const literal=saveChartUI({toolbar:{labels:{select:'<b>Literal</b>'}}});assert.equal(readChartUI(literal).toolbar.labels.select,'<b>Literal</b>');
+});
+test('reading v2 then clearing labels re-saves canonical v1 and preserves toolbar defaults',()=>{
+ const decoded=readChartUI(saveChartUI({toolbar:{labels:{select:'Pan',undo:'Back'}}})),cleared={...decoded,toolbar:{...decoded.toolbar,labels:{}}},text=saveChartUI(cleared),doc=JSON.parse(text),roundTrip=readChartUI(text);
+ assert.equal(doc.version,1);assert(!Object.hasOwn(doc.toolbar,'labels'));assert.deepEqual(roundTrip.toolbar.labels,{});assert.equal(roundTrip.toolbar.label,'Chart tools');assert.deepEqual(roundTrip.toolbar.tools,['select','trendline','horizontal','rectangle']);assert.deepEqual(roundTrip.toolbar.actions,['fit','zoomIn','zoomOut','undo','redo']);assert.equal(saveChartUI(roundTrip),text);
+});
+test('UI reader enforces exact versioned toolbar fields',()=>{
+ const v1=JSON.parse(saveChartUI({toolbar:{}}));v1.toolbar.labels={select:'Pan'};assert.throws(()=>readChartUI(JSON.stringify(v1)));
+ const v2=JSON.parse(saveChartUI({toolbar:{labels:{select:'Pan'}}}));delete v2.toolbar.labels;assert.throws(()=>readChartUI(JSON.stringify(v2)));
+ v2.toolbar.labels={};assert.throws(()=>readChartUI(JSON.stringify(v2)));
+ v2.toolbar.labels={select:'Pan'};v2.toolbar.extra=true;assert.throws(()=>readChartUI(JSON.stringify(v2)));
+});
 test('saved configuration detaches caller lists',()=>{const tools=['select','text'],input={toolbar:{tools}};const text=saveChartUI(input);tools[1]='ray';assert.deepEqual(readChartUI(text).toolbar.tools,['select','text']);});
-for(const [name,value] of Object.entries({unknown:{extra:true},null:null,array:[],interactionNull:{interaction:null},switch:{interaction:{pointer:1}},radius:{interaction:{hitTolerancePx:33}},tool:{toolbar:{tools:['select','bad']}},transient:{toolbar:{activeTool:'select'}},sparse:{toolbar:{tools:new Array(2)}},infinite:{interaction:{hitTolerancePx:Infinity}},unicode:{toolbar:{label:'\ud800'}},function:{toolbar:{label:()=>{}}}}))test('UI writer rejects '+name,()=>assert.throws(()=>saveChartUI(value)));
+for(const [name,value] of Object.entries({unknown:{extra:true},null:null,array:[],interactionNull:{interaction:null},switch:{interaction:{pointer:1}},radius:{interaction:{hitTolerancePx:33}},tool:{toolbar:{tools:['select','bad']}},transient:{toolbar:{activeTool:'select'}},sparse:{toolbar:{tools:new Array(2)}},infinite:{interaction:{hitTolerancePx:Infinity}},unicode:{toolbar:{label:'\ud800'}},function:{toolbar:{label:()=>{}}},blankLabel:{toolbar:{labels:{select:'  '}}},unknownLabel:{toolbar:{labels:{unknown:'Bad'}}}}))test('UI writer rejects '+name,()=>assert.throws(()=>saveChartUI(value)));
+test('UI writer rejects label accessors and inherited or symbol fields without invoking getters',()=>{
+ let calls=0;const labels=Object.defineProperty({},'select',{enumerable:true,get(){calls++;return'Bad';}});assert.throws(()=>saveChartUI({toolbar:{labels}}));
+ const inherited=Object.create({select:'Bad'});assert.throws(()=>saveChartUI({toolbar:{labels:inherited}}));
+ const symbols={[Symbol('label')]: 'Bad'};assert.throws(()=>saveChartUI({toolbar:{labels:symbols}}));assert.equal(calls,0);
+});
 test('UI writer never evaluates accessors or toJSON',()=>{
  let calls=0;for(const value of [{get interaction(){calls++;return{};}},{toolbar:{get label(){calls++;return'Bad';}}},{toJSON(){calls++;return{};}},Object.defineProperty({},'toolbar',{value:{},enumerable:false})])assert.throws(()=>saveChartUI(value));
  assert.equal(calls,0);

@@ -2,8 +2,11 @@
 
 `saveChartUI(options)` and `readChartUI(text)` are exported from `barochart/canvas`
 and the root package. They serialize **web input and optional toolbar preferences**
-as `barochart.web-ui` version 1. They do not read a live chart, install settings,
+as `barochart.web-ui` version 1, or version 2 when a toolbar label override is
+present. They do not read a live chart, install settings,
 mount controls, access storage, send data, or change a workspace/native protocol.
+Chart appearance profiles, theme choices, CSS variables and host placement remain
+host-owned records; this codec does not absorb them.
 
 ```js
 import {saveChartUI, readChartUI, saveWorkspace, prepareWorkspaceAsync,
@@ -25,10 +28,21 @@ const nextToolbar = preferences.toolbar === null ? null
 Omitted interaction preferences use existing defaults: pointer/wheel/ordinary
 keyboard shortcuts enabled, hit tolerance 8 logical pixels. Omitted/null toolbar
 means no toolbar. A supplied toolbar record uses existing option defaults. The
-saved document includes all normalized values, so a later named preset does not
-reinterpret them. Read results, nested records and lists are detached and frozen.
+saved document includes normalized stable values; an empty `labels` map is omitted
+in version 1 for compatibility, so a later named preset does not reinterpret them.
+Toolbar `labels` maps existing tool/action IDs to bounded
+nonblank Unicode captions; they are reflected into button text, titles and
+accessible names through text-only DOM properties. Read results, nested records
+and lists are detached and frozen.
 `toolbar.options` is an immutable current configuration; held earlier values stay
 unchanged, and reading it after destruction rejects.
+
+Documents without label overrides retain the exact version 1 field layout and
+serialization. Version 1 toolbar records exclude `labels`. A nonempty `labels`
+map is serialized with version 2 and is required in that version; the reader
+rejects missing, empty or extra per-version fields instead of reinterpreting a
+document under another version. A `labels: {}` override resets captions and
+still serializes as version 1.
 
 Input must be portable plain own-data records. Unknown fields/versions, missing
 document fields, accessors, hidden/symbol/reserved keys, sparse or extended arrays,
@@ -74,15 +88,29 @@ remain available, and `interactive:false` remains the constructor master switch.
 
 ## Explicit demo storage and limits
 
-The customization demo has explicit **input/toolbar Save and Load** buttons using
-one host-chosen localStorage key. There is no automatic save or restore. It reports
-missing/invalid/blocked/quota-failed storage honestly. These buttons do not save
-chart colors, panel layout, left/right placement, studies, drawings or data.
-Toolbar orientation is mapped to the demo's existing top/side layout on apply;
-this is not generic docking. A host wanting full chart content uses the workspace
-composition above.
+The customization studio has explicit **appearance-profile Save and Load** buttons
+using `barochart.customization.profile.v1` in localStorage. There is no automatic
+save or restore. It reports missing, invalid, blocked and quota-failed storage.
+Only when that key is absent does Load try the previous
+`barochart.customization.web-ui.v1` key; an invalid new record never silently falls
+back to an older record.
 
-The demo rejects Load while a gesture, pointer or drawing transaction is active. It applies valid preferences to its live chart using existing setters. This
+The example-owned `customization-profile.mjs` codec stores a versioned envelope
+containing six theme colors and font, price/volume panel weights, price-axis side,
+toolbar placement, a `saveChartUI` string, and navigator/overlay/trade-marker
+visibility. Its text is limited to 16,384 UTF-16 code units. It validates exact
+fields and values before applying anything to the live chart. A toolbar is
+required; top placement requires horizontal orientation, and either side requires
+vertical orientation. It is an example module, not a new package export.
+
+JSON can be pasted, copied, downloaded or imported from a file. File imports reject
+files larger than 64 KiB before reading, then enforce the smaller codec limit.
+Pending reads cannot replace newer settings. Save/Load and import preserve the
+existing model, data, drawings and viewport. Appearance reset changes only the
+theme; draft reset restores the studio defaults without deleting a saved record.
+A host wanting full chart content uses the workspace composition above.
+
+The demo rejects Load while a gesture, pointer or drawing transaction is active. It applies a validated profile to its live chart using existing setters. This
 is an explicit user action, not a transactional chart replacement: tool filtering
 and pointer disabling can cancel an owned gesture, callbacks may reenter, and a
 reported application error does not prove rollback. Use fresh mounting for a
@@ -91,5 +119,6 @@ host-controlled replacement boundary.
 Transient tool/selection, undo/redo, gestures, focus, explorer/cursor state, DOM,
 CSS variables, arbitrary docking, callbacks and renderer resources are excluded.
 No shortcut remapping, backend storage or native UI parity is introduced. Tests
-cover the pure codec and modeled DOM/storage; real browser storage, layout,
-touch/focus and assistive technology remain unverified here.
+cover the pure codecs and modeled DOM/storage, including invalid input, storage
+errors and stale file reads. Real touch hardware and assistive technology require
+separate validation.

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile,access} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
+import {spawnSync} from 'node:child_process';
 import {resolve,dirname} from 'node:path';
 import {previewScene,PREVIEW_SIZE,PREVIEW_SOURCE} from '../scripts/readme-previews.mjs';
 import {createChartUIPreset} from '../src/renderers/canvas.mjs';
@@ -17,16 +18,28 @@ test('mobile preview manifest separates illustrations from actual browser/native
   assert.equal(manifest.browserScreenshot,false);assert.equal(manifest.nativeSDKExecution,false);
   assert.match(manifest.chrome,/Schematic/);assert.match(manifest.limitations,/No browser\/device/);
   assert.deepEqual(manifest.size,PREVIEW_SIZE);
-  assert.deepEqual(manifest.mobilePreset,createChartUIPreset('mobile'));
+  const current=createChartUIPreset('mobile'),{labels,...toolbar}=current.toolbar;
+  assert.deepEqual(labels,{}); // Empty caption overrides do not change the archived controls.
+  assert.deepEqual(manifest.mobilePreset,{...current,toolbar});
   assert.deepEqual(manifest.images.map(image=>image.theme),['dark','light']);
 });
 
-test('mobile preview source, scene and image hashes match without loading a raster backend',async()=>{
-  const manifest=JSON.parse(await read('assets/previews/manifest.json'));
+test('archived mobile preview provenance and images stay intact; current chart scene still matches',async t=>{
+  const manifestText=await read('assets/previews/manifest.json'),manifest=JSON.parse(manifestText);
+  // This archive describes PREVIEW_SOURCE, not the evolving working tree.
+  assert.equal(hash(manifestText),'5590981483a6cd26b075494b9446caaadc796482fa441709be7480b2769572ed');
+  const sourceAvailable=spawnSync('git',['cat-file','-e',`${PREVIEW_SOURCE}^{commit}`],{cwd:root,stdio:'ignore'}).status===0;
+  if(!sourceAvailable)t.diagnostic('Archived source commit unavailable in this checkout; provenance digest, PNG bytes and current scene verified, historical source bytes not reverified.');
   assert.equal(manifest.sources.length,8);
   for(const source of manifest.sources){
     assert(!source.path.startsWith('/')&&!source.path.includes('..'));
-    assert.equal(hash(await readFile(resolve(root,source.path))),source.sha256,source.path);
+    assert.match(source.sha256,/^[0-9a-f]{64}$/);
+    await access(resolve(root,source.path));
+    if(sourceAvailable){
+      const archived=spawnSync('git',['show',`${PREVIEW_SOURCE}:${source.path}`],{cwd:root,maxBuffer:4*1024*1024});
+      assert.equal(archived.status,0,source.path);
+      assert.equal(hash(archived.stdout),source.sha256,source.path);
+    }
   }
   for(const image of manifest.images){
     const bytes=await readFile(resolve(root,'assets/previews',image.file));

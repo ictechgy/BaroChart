@@ -34,19 +34,26 @@ export function attachChartToolbar(container,chart,initial={}){
   for(let i=0;i<ids.length;i++){
    const id=ids[i];let row=rows.get(id);
    if(!row){
-    const button=doc.createElement('button');button.type='button';button.textContent=labels[id];button.title=labels[id];button.setAttribute('data-chart-control',id);
+    const button=doc.createElement('button');button.type='button';button.setAttribute('data-chart-control',id);
     const click=()=>{if(!valid()||busy||rows.get(id)!==row||!config.tools.includes(id)&&!config.actions.includes(id)||button.disabled)return;busy=true;try{
      if(tools.includes(id))api.setTool(id);else if(id==='zoomIn'||id==='zoomOut')api.zoom(id==='zoomIn'?.8:1.25);else api[id]();
      if(valid())status.textContent='';
     }catch(error){if(valid())status.textContent=String(error?.message??'Chart action failed').slice(0,256);}finally{busy=false;if(valid())refresh();}};
-    row={button,click};rows.set(id,row);button.addEventListener('click',click);
+    row={button,click,caption:undefined};rows.set(id,row);button.addEventListener('click',click);
+   }
+   const caption=config.labels[id]??labels[id];
+   if(row.caption!==caption){
+    if(!effect(()=>row.button.textContent=caption))return null;
+    if(!effect(()=>row.button.title=caption))return null;
+    if(!effect(()=>row.button.setAttribute('aria-label',caption)))return null;
+    row.caption=caption;
    }
    const selected=tools.includes(id)&&id===state.activeTool,disabled=id==='undo'?!state.canUndo:id==='redo'?!state.canRedo:false;
    if(disabled&&doc.activeElement===row.button&&!effect(()=>root.focus()))return null;
    if(!effect(()=>row.button.disabled=disabled))return null;
    if(tools.includes(id)&&!effect(()=>row.button.setAttribute('aria-pressed',String(selected))))return null;
    const background=selected?'var(--barochart-ui-selected-background,#18352f)':'var(--barochart-ui-surface,#111d2e)',foreground=selected?'var(--barochart-ui-selected-text,#7ce8ca)':'var(--barochart-ui-text,#dfe8f4)';
-   if(!effect(()=>row.button.style.cssText='font:inherit;border:1px solid var(--barochart-ui-border,#2b3950);border-radius:6px;padding:6px 10px;min-height:'+(config.density==='compact'?32:44)+'px;background:'+background+';color:'+foreground+';cursor:'+(disabled?'default':'pointer')+';opacity:'+(disabled?'.5':'1')+';'))return null;
+   if(!effect(()=>row.button.style.cssText='font:inherit;border:1px solid var(--barochart-ui-border,#2b3950);border-radius:6px;padding:6px 10px;min-width:'+(config.density==='compact'?32:44)+'px;min-height:'+(config.density==='compact'?32:44)+'px;background:'+background+';color:'+foreground+';cursor:'+(disabled?'default':'pointer')+';opacity:'+(disabled?'.5':'1')+';'))return null;
    if(root.children[i]!==row.button){
     const focused=doc.activeElement===row.button;
     if(!effect(()=>root.insertBefore(row.button,root.children[i]??null)))return null;
@@ -56,7 +63,9 @@ export function attachChartToolbar(container,chart,initial={}){
   if(!effect(()=>root.append(status)))return null;return state;
  }
  function setOptions(patch){
-  if(!valid())throw new Error('Toolbar disposed or owner changed');const next=options(patch,config);config=next;++epoch;
+  if(!valid())throw new Error('Toolbar disposed or owner changed');const prior=config,version=epoch,next=options(patch,config);
+  if(!valid()||config!==prior||epoch!==version)return valid()?snapshot():null;
+  config=next;++epoch;
   busy=true;try{if(!config.tools.includes(controller.tool))api.setTool('select');}finally{busy=false;if(valid())refresh();}
   return valid()?snapshot():null;
  }
