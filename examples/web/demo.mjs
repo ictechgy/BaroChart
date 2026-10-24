@@ -3,9 +3,9 @@ import {createDrawingFileImport} from './drawing-file-import.mjs';
 import {createChart,DARK_THEME,LIGHT_THEME,builtinIndicators,DEMO_SYMBOLS,formatPrice,zonedParts,demoCalendar} from '../../src/index.mjs';
 import {prepareChartModel} from '../../src/web/worker.mjs';
 import {modelRequest} from '../../src/web/worker-state.mjs';
-import {collectIndicatorGroups,indicatorGroup,copyPanelProjection,copyAxisProjection,uniqueLayoutId} from './indicator-layout.mjs';
+import {collectIndicatorGroups,indicatorGroup,copyPanelProjection,copyAxisProjection,uniqueLayoutId,captureLayoutDomains,pinSyntheticRange,clearSyntheticRange,rebindSyntheticRangePins,pruneSyntheticRangePins} from './indicator-layout.mjs';
 const $=id=>document.getElementById(id);let chart,model,timer,extras=[],serial=0,job=0,controller,loadedMarket,loadedCount,streamIntent=false,light=false,preparing=false;
-const generatedPanelIds=new Set(),generatedAxisIds=new Set();let layoutAxisExplicit=false,layoutDraft=null,layoutMutationOwner=null;
+const generatedPanelIds=new Set(),generatedAxisIds=new Set(),syntheticPanelRanges=new Map(),syntheticAxisRanges=new Map();let layoutAxisExplicit=false,layoutDraft=null,layoutMutationOwner=null;
 const journals=new Map();
 let pageActive=true,pageClosed=false,resumeInitial=false;
 const dataExplorer=()=>({readout:$('explorer-readout'),live:$('explorer-live'),controls:[$('explore'),$('explore-read')]});
@@ -91,24 +91,24 @@ function palette(){
  }
 }
 function layoutPanels(){if(!model)return;const total=model.panels.reduce((a,p)=>a+p.weight,0),min=Math.min(...model.panels.map(p=>p.weight)),height=Math.max(515,Math.ceil(72*total/min+38));$('chart-row').style.height=(height+(matchMedia('(max-width:600px)').matches?64:0))+'px';chart?.resize();}
-function install(next,market,count,newExtras=extras){drawingFileImport.cancel();const same=market===loadedMarket,oldModel=model,oldChart=chart;layoutAxisExplicit=false;layoutDraft=null;if(!same){generatedPanelIds.clear();generatedAxisIds.clear();generatedPanelIds.add('rsi');}if(oldModel)journals.set(loadedMarket,oldModel.drawings);if(journals.has(market))next.drawings=journals.get(market);
+function install(next,market,count,newExtras=extras){drawingFileImport.cancel();const same=market===loadedMarket,oldModel=model,oldChart=chart;layoutAxisExplicit=false;layoutDraft=null;if(!same){generatedPanelIds.clear();generatedAxisIds.clear();syntheticPanelRanges.clear();syntheticAxisRanges.clear();generatedPanelIds.add('rsi');}if(oldModel)journals.set(loadedMarket,oldModel.drawings);if(journals.has(market))next.drawings=journals.get(market);
  const symbol=DEMO_SYMBOLS[market];next.symbol=symbol;next.priceFormatter=v=>formatPrice(v,symbol);next.timeFormatter=t=>{const p=zonedParts(t,symbol.timezone);return p.month+'/'+p.day+' '+p.hour+':'+p.minute;};
  if(same&&oldModel){const span=oldModel.view.to-oldModel.view.from;next.setVisibleRange(oldModel.follow?next.store.length-span-.5:oldModel.view.from,oldModel.follow?next.store.length-.5:oldModel.view.to);}
  const host=document.createElement('div');host.style='width:100%;height:100%';let created;
  try{created=createChart(host,next,{renderer:$('renderer').value,dataExplorer:dataExplorer(),onError:error=>status(friendly(error)),onFallback:reason=>status('GPU를 사용할 수 없어 Canvas로 전환했습니다. '+reason.slice(0,80))});}catch(error){next.dispose();throw error;}
- oldChart?.destroy({disposeModel:true});$('chart').replaceChildren(host);model=next;chart=created;extras=newExtras;loadedMarket=market;loadedCount=count;streamCalendar=demoCalendar(market);palette();chart.setTool(document.querySelector('[data-tool][aria-pressed="true"]').dataset.tool);chart.api.setCrosshairSnap({mode:$('crosshair-snap').value});chart.api.setDrawingMagnet({mode:$('magnet').value});chart.controller.text=$('annotation').value;chart.canvas.setAttribute('aria-describedby','keyboard-help exploration-help selection data-summary');host.addEventListener('aster:exploration',()=>{$('explore').setAttribute('aria-pressed',String(chart.dataExploration.active));});host.addEventListener('aster:render',sync);host.addEventListener('aster:state',sync);window.aster={model,chart};setText('symbol',symbol.id);setText('meta',symbol.currency+' · '+symbol.timezone+' · '+symbol.volumeUnit);layoutPanels();chart.invalidate();sync();
+ oldChart?.destroy({disposeModel:true});$('chart').replaceChildren(host);model=next;chart=created;rebindSyntheticRangePinsToModel(model);extras=newExtras;loadedMarket=market;loadedCount=count;streamCalendar=demoCalendar(market);palette();chart.setTool(document.querySelector('[data-tool][aria-pressed="true"]').dataset.tool);chart.api.setCrosshairSnap({mode:$('crosshair-snap').value});chart.api.setDrawingMagnet({mode:$('magnet').value});chart.controller.text=$('annotation').value;chart.canvas.setAttribute('aria-describedby','keyboard-help exploration-help selection data-summary');host.addEventListener('aster:exploration',()=>{$('explore').setAttribute('aria-pressed',String(chart.dataExploration.active));});host.addEventListener('aster:render',sync);host.addEventListener('aster:state',sync);window.aster={model,chart};setText('symbol',symbol.id);setText('meta',symbol.currency+' · '+symbol.timezone+' · '+symbol.volumeUnit);layoutPanels();chart.invalidate();sync();
 }
-async function load(){if(!pageActive||pageClosed)return;const token=++job;controller?.abort();controller=new AbortController();stopStream();busy(true);const market=$('market').value,count=Number($('count').value),same=market===loadedMarket;const options=stripUncommittedLayoutResources(same&&model?modelRequest(model):defaults(market));
+async function load(){if(!pageActive||pageClosed)return;cleanupSyntheticRangePins();const token=++job;controller?.abort();controller=new AbortController();stopStream();busy(true);const market=$('market').value,count=Number($('count').value),same=market===loadedMarket;const options=stripUncommittedLayoutResources(same&&model?modelRequest(model):defaults(market));
  try{const next=await prepareChartModel({market,count,options},{workerURL:new URL('./model-worker.mjs',import.meta.url),signal:controller.signal,onProgress:p=>{if(token===job&&pageActive&&!pageClosed)progress(p);}});if(token!==job){next.dispose();return;}install(next,market,count,same?extras:[]);if(!same)$('scale').value='linear';status('계산 완료 · 원본/지표는 worker에서 준비합니다. 키보드 안내와 데이터 요약을 확인하세요.');}
  catch(error){if(token===job){layoutDraft=null;layoutAxisExplicit=false;status(friendly(error));if(loadedMarket){$('market').value=loadedMarket;$('count').value=String(loadedCount);}}}finally{if(token===job){busy(false);if(streamIntent&&!document.hidden)startStream();}}
 }
-async function addIndicator(){if(!model||!pageActive||pageClosed)return;const token=++job;controller?.abort();controller=new AbortController();stopStream();busy(true);const version=model.store.version,options=stripUncommittedLayoutResources(modelRequest(model)),name=$('indicator').value,id='extra-'+(++serial),overlay=['sma','vwma','ema','wma','bollinger','donchian','vwap','dema','tema','hma','keltner','supertrend','ichimoku','pivots','parabolicSAR'].includes(name),panel=overlay?'price':id;
+async function addIndicator(){if(!model||!pageActive||pageClosed)return;cleanupSyntheticRangePins();const token=++job;controller?.abort();controller=new AbortController();stopStream();busy(true);const version=model.store.version,options=stripUncommittedLayoutResources(modelRequest(model)),name=$('indicator').value,id='extra-'+(++serial),overlay=['sma','vwma','ema','wma','bollinger','donchian','vwap','dema','tema','hma','keltner','supertrend','ichimoku','pivots','parabolicSAR'].includes(name),panel=overlay?'price':id;
  try{const def=builtinIndicators.get(name)({});options.indicators.push({id,name,params:{}});if(!overlay)options.panels.push({id,label:name.toUpperCase(),weight:1});for(const output of def.outputs.filter(x=>x!=='direction'))options.series.push({id:id+'-'+output,type:output==='histogram'?'histogram':'line',panel,indicator:id,output,color:'#aa91f7'});
  const next=await prepareChartModel({columns:Object.fromEntries(Object.entries(model.store.columns).map(([k,a])=>[k,a.subarray(0,model.store.length)])),length:model.store.length,options},{signal:controller.signal,onProgress:p=>{if(token===job&&pageActive&&!pageClosed)progress(p);}});if(token!==job||version!==model.store.version){next.dispose();throw new Error('Data changed; prepared result discarded');}if(!overlay)generatedPanelIds.add(panel);install(next,loadedMarket,loadedCount,[...extras,{id,panel}]);status('지표를 추가했습니다.');}
  catch(error){if(token===job){layoutDraft=null;layoutAxisExplicit=false;status(friendly(error));}}finally{if(token===job){busy(false);if(streamIntent&&!document.hidden)startStream();}}
 }
 function selectedLayoutGroup(){return model&&indicatorGroup(model,$('layout-indicator')?.value)||collectIndicatorGroups(model)[0]||null;}
-function layoutMutationReady(){if(!model||model.disposed||!chart||chart.disposed||preparing||!pageActive||pageClosed)return false;if(chart.controller?.gesture||chart.controller?.pointers?.size){layoutStatus('진행 중인 입력이 끝난 뒤 지표 배치를 변경하세요.');return false;}return true;}
+function layoutMutationReady(){if(!model||model.disposed||!chart||chart.disposed||preparing||!pageActive||pageClosed)return false;if(chart.controller?.gesture||chart.controller?.pointers?.size||model.drawings?.transaction){layoutStatus('진행 중인 입력이 끝난 뒤 지표 배치를 변경하세요.');return false;}return true;}
 function captureLayoutOwner(){return {model,chart,job};}
 function layoutOwnerLive(owner){return !!owner&&model===owner.model&&chart===owner.chart&&job===owner.job&&pageActive&&!pageClosed&&!preparing&&!owner.model?.disposed&&!owner.chart?.disposed;}
 function assertLayoutOwner(owner){if(!layoutOwnerLive(owner)){const error=new Error('지표 배치 소유자가 변경되어 적용을 중단했습니다.');error.name='StaleSourceError';throw error;}}
@@ -134,25 +134,37 @@ function drawingHasReference(kind,id){
  const frames=[drawings.items,drawings.transaction,...(drawings.undoStack??[]),...(drawings.redoStack??[])];
  return frames.some(frame=>Array.isArray(frame)&&frame.some(drawing=>drawing?.[kind]===id));
 }
-function cleanupGeneratedLayout(owner=null){
+function cleanupSyntheticRangePins(){if(!model)return false;return pruneSyntheticRangePins(model,syntheticPanelRanges,syntheticAxisRanges);}
+function rebindSyntheticRangePinsToModel(next){return rebindSyntheticRangePins(next,syntheticPanelRanges,syntheticAxisRanges);}
+function capturePreMutationDomains(){return captureLayoutDomains(model,chart?.lastScene);}
+function pinRetainedRange(owner,kind,id,domains){
+ const range=domains?.[kind==='panel'?'panels':'axes']?.get(id);if(!range)return false;
+ return pinSyntheticRange({model:owner?.model??model,api:owner?.chart?.api??chart?.api,pins:kind==='panel'?syntheticPanelRanges:syntheticAxisRanges,kind,id,range,assertOwner:()=>{if(owner)assertLayoutOwner(owner);}});
+}
+function clearReusedRange(owner,kind,id){
+ return clearSyntheticRange({model:owner?.model??model,api:owner?.chart?.api??chart?.api,pins:kind==='panel'?syntheticPanelRanges:syntheticAxisRanges,kind,id,assertOwner:()=>{if(owner)assertLayoutOwner(owner);}});
+}
+function cleanupGeneratedLayout(owner=null,domains=null){
  const retained={panels:[],axes:[],historyPanels:[],historyAxes:[],failedPanels:[],failedAxes:[]};if(!layoutMutationReady()||owner&&!layoutOwnerLive(owner))return retained;
  for(const id of [...generatedAxisIds]){
   if(owner&&!layoutOwnerLive(owner))return retained;
-  if(!model.axes.some(axis=>axis.id===id)){generatedAxisIds.delete(id);continue;}
-  if(model.series.some(series=>(series.axisId??null)===id))continue;
-  try{chart.api.removeAxis(id);generatedAxisIds.delete(id);}catch{if(drawingHasReference('axisId',id))retained.historyAxes.push(id);else retained.failedAxes.push(id);if(owner&&!layoutOwnerLive(owner))return retained;}
+  if(!model.axes.some(axis=>axis.id===id)){generatedAxisIds.delete(id);syntheticAxisRanges.delete(id);continue;}
+  if(model.series.some(series=>(series.axisId??null)===id)){clearReusedRange(owner,'axis',id);continue;}
+  try{chart.api.removeAxis(id);generatedAxisIds.delete(id);syntheticAxisRanges.delete(id);}catch{if(drawingHasReference('axisId',id)){retained.historyAxes.push(id);pinRetainedRange(owner,'axis',id,domains);}else retained.failedAxes.push(id);if(owner&&!layoutOwnerLive(owner))return retained;}
  }
  for(const id of [...generatedPanelIds]){
   if(owner&&!layoutOwnerLive(owner))return retained;
-  if(!model.panels.some(panel=>panel.id===id)){generatedPanelIds.delete(id);continue;}
-  if(model.series.some(series=>series.panel===id)||model.axes.some(axis=>axis.panel===id))continue;
-  try{chart.api.removePanel(id);generatedPanelIds.delete(id);}catch{if(drawingHasReference('panel',id))retained.historyPanels.push(id);else retained.failedPanels.push(id);if(owner&&!layoutOwnerLive(owner))return retained;}
+  if(!model.panels.some(panel=>panel.id===id)){generatedPanelIds.delete(id);syntheticPanelRanges.delete(id);continue;}
+  const hasPrimarySeries=model.series.some(series=>series.panel===id&&(series.axisId??null)===null),hasAnySeries=model.series.some(series=>series.panel===id),retainedAxis=model.axes.some(axis=>axis.panel===id),hasDrawing=drawingHasReference('panel',id);
+  if(hasPrimarySeries)clearReusedRange(owner,'panel',id);
+  if(hasAnySeries||retainedAxis){if(hasDrawing&&!hasPrimarySeries){retained.historyPanels.push(id);pinRetainedRange(owner,'panel',id,domains);}continue;}
+  try{chart.api.removePanel(id);generatedPanelIds.delete(id);syntheticPanelRanges.delete(id);}catch{if(hasDrawing){retained.historyPanels.push(id);pinRetainedRange(owner,'panel',id,domains);}else retained.failedPanels.push(id);if(owner&&!layoutOwnerLive(owner))return retained;}
  }
  return retained;
 }
 function applyIndicatorPlacement(){
  if(!layoutMutationReady())return;
- const owner=captureLayoutOwner(),group=selectedLayoutGroup(),target=$('layout-panel')?.value;
+ const owner=captureLayoutOwner(),group=selectedLayoutGroup(),target=$('layout-panel')?.value,priorDomains=capturePreMutationDomains();
  if(!group||!model.panels.some(panel=>panel.id===target)){layoutStatus('표시된 지표와 대상 패널을 먼저 선택하세요.');return;}
  let choice=$('layout-axis')?.value??'primary';
  if(target!==group.panelId&&!layoutAxisExplicit&&choice==='primary')choice='independent';
@@ -166,7 +178,7 @@ function applyIndicatorPlacement(){
    axisId=choice.slice(5);if(!model.axes.some(axis=>axis.id===axisId&&axis.panel===target))throw new Error('선택한 축을 찾을 수 없습니다.');
   }
   assertLayoutOwner(owner);owner.chart.api.setIndicatorPlacement(group.id,{panel:target,axisId});assertLayoutOwner(owner);
-  layoutDraft=null;layoutAxisExplicit=false;const retained=cleanupGeneratedLayout(owner);assertLayoutOwner(owner);layoutPanels();assertLayoutOwner(owner);owner.chart.invalidate();assertLayoutOwner(owner);endLayoutMutation(owner);sync();
+  layoutDraft=null;layoutAxisExplicit=false;const retained=cleanupGeneratedLayout(owner,priorDomains);assertLayoutOwner(owner);layoutPanels();assertLayoutOwner(owner);owner.chart.invalidate();assertLayoutOwner(owner);endLayoutMutation(owner);sync();
   const mixed=group.mixedPanelOrigins||group.mixedAxisOrigins;
   const historyNote=retained.historyPanels.length||retained.historyAxes.length?' · 도형 기록이 있어 이전 패널/축은 유지했습니다.':retained.failedPanels.length||retained.failedAxes.length?' · 일부 호스트 생성 패널/축을 아직 정리하지 못했습니다.':'';
   layoutStatus((mixed&&createdAxis?'여러 원본 축을 합쳐 선형 자동 범위의 독립 축으로 배치했습니다.':`${(group.name??group.id).toUpperCase()} 지표의 모든 출력선을 ${target} 패널에 배치했습니다.`)+historyNote);
@@ -180,23 +192,23 @@ function applyIndicatorPlacement(){
 }
 function separateIndicatorPanel(){
  if(!layoutMutationReady())return;
- const owner=captureLayoutOwner(),group=selectedLayoutGroup();if(!group)return;
+ const owner=captureLayoutOwner(),group=selectedLayoutGroup(),priorDomains=capturePreMutationDomains();if(!group)return;
  const id=uniqueLayoutId(group.id+'-panel',new Set((model.panels??[]).map(panel=>panel.id))),projection=copyPanelProjection(model,group),panel={id,label:(group.name??group.id).toUpperCase(),...projection};
  let added=false;
- try{beginLayoutMutation(owner);generatedPanelIds.add(id);owner.chart.api.addPanel(panel);added=true;assertLayoutOwner(owner);owner.chart.api.setIndicatorPlacement(group.id,{panel:id,axisId:null});assertLayoutOwner(owner);layoutDraft=null;layoutAxisExplicit=false;const retained=cleanupGeneratedLayout(owner);assertLayoutOwner(owner);layoutPanels();assertLayoutOwner(owner);owner.chart.invalidate();assertLayoutOwner(owner);endLayoutMutation(owner);sync();const historyNote=retained.historyPanels.length||retained.historyAxes.length?' 이전 패널/축은 도형 기록 때문에 유지했습니다.':retained.failedPanels.length||retained.failedAxes.length?' 일부 호스트 생성 패널/축을 아직 정리하지 못했습니다.':'';layoutStatus(`${(group.name??group.id).toUpperCase()} 지표를 새 패널로 분리했습니다.${historyNote}`);status('지표를 새 패널로 분리했습니다.');}
+ try{beginLayoutMutation(owner);generatedPanelIds.add(id);owner.chart.api.addPanel(panel);added=true;assertLayoutOwner(owner);owner.chart.api.setIndicatorPlacement(group.id,{panel:id,axisId:null});assertLayoutOwner(owner);layoutDraft=null;layoutAxisExplicit=false;const retained=cleanupGeneratedLayout(owner,priorDomains);assertLayoutOwner(owner);layoutPanels();assertLayoutOwner(owner);owner.chart.invalidate();assertLayoutOwner(owner);endLayoutMutation(owner);sync();const historyNote=retained.historyPanels.length||retained.historyAxes.length?' 이전 패널/축은 도형 기록 때문에 유지했습니다.':retained.failedPanels.length||retained.failedAxes.length?' 일부 호스트 생성 패널/축을 아직 정리하지 못했습니다.':'';layoutStatus(`${(group.name??group.id).toUpperCase()} 지표를 새 패널로 분리했습니다.${historyNote}`);status('지표를 새 패널로 분리했습니다.');}
  catch(error){if(added)rollbackCreatedResource(owner,'panel',id);if(!owner.model.panels.some(panel=>panel.id===id))generatedPanelIds.delete(id);endLayoutMutation(owner);layoutDraft=null;layoutAxisExplicit=false;sync();layoutStatus(friendly(error));status(friendly(error));}
 }
 function reorderPanel(direction){
  if(!layoutMutationReady())return;
- const owner=captureLayoutOwner(),selected=$('reorder-panel')?.value,order=model.panels.map(panel=>panel.id),index=order.indexOf(selected),target=index+direction;
+ const owner=captureLayoutOwner(),selected=$('reorder-panel')?.value,order=model.panels.map(panel=>panel.id),index=order.indexOf(selected),target=index+direction,focused=document.activeElement;
  if(index<0||target<0||target>=order.length)return;
  [order[index],order[target]]=[order[target],order[index]];
- try{beginLayoutMutation(owner);const changed=owner.chart.api.setPanelOrder(order);assertLayoutOwner(owner);if(changed===false){endLayoutMutation(owner);layoutStatus('패널 순서를 변경하지 못했습니다.');return;}layoutPanels();assertLayoutOwner(owner);owner.chart.invalidate();assertLayoutOwner(owner);endLayoutMutation(owner);sync();layoutStatus('패널 순서를 적용했습니다.');status('패널 순서를 적용했습니다.');}catch(error){endLayoutMutation(owner);sync();layoutStatus(friendly(error));status(friendly(error));}
+ try{beginLayoutMutation(owner);const changed=owner.chart.api.setPanelOrder(order);assertLayoutOwner(owner);if(changed===false){endLayoutMutation(owner);layoutStatus('패널 순서를 변경하지 못했습니다.');return;}layoutPanels();assertLayoutOwner(owner);owner.chart.invalidate();assertLayoutOwner(owner);endLayoutMutation(owner);sync();const active=document.activeElement;if((focused===$('panel-up')||focused===$('panel-down'))&&focused.disabled&&(active===focused||active===document.body||active==null))$('reorder-panel').focus({preventScroll:true});layoutStatus('패널 순서를 적용했습니다.');status('패널 순서를 적용했습니다.');}catch(error){endLayoutMutation(owner);sync();layoutStatus(friendly(error));status(friendly(error));}
 }
 function clearExtraIndicators(){
  if(!layoutMutationReady())return;
- const owner=captureLayoutOwner(),ids=[...new Set(extras.map(extra=>extra.id).filter(id=>model.indicators?.entries?.has?.(id)))];let removed=0;
- try{beginLayoutMutation(owner);for(const id of ids){if(model.series.some(series=>series.indicator===id)){owner.chart.api.removeIndicator(id);assertLayoutOwner(owner);removed++;}}extras=[];layoutDraft=null;layoutAxisExplicit=false;const retained=cleanupGeneratedLayout(owner);assertLayoutOwner(owner);layoutPanels();assertLayoutOwner(owner);owner.chart.invalidate();assertLayoutOwner(owner);endLayoutMutation(owner);sync();status(removed?(retained.historyPanels.length||retained.historyAxes.length?'추가 지표를 지웠고 도형 기록이 있는 패널/축은 유지했습니다.':retained.failedPanels.length||retained.failedAxes.length?'추가 지표를 지웠지만 일부 호스트 생성 패널/축을 아직 정리하지 못했습니다.':'추가 지표와 비어 있는 호스트 생성 패널을 지웠습니다.'):'지울 추가 지표가 없습니다.');}
+ const owner=captureLayoutOwner(),priorDomains=capturePreMutationDomains(),ids=[...new Set(extras.map(extra=>extra.id).filter(id=>model.indicators?.entries?.has?.(id)))];let removed=0;
+ try{beginLayoutMutation(owner);for(const id of ids){if(model.series.some(series=>series.indicator===id)){owner.chart.api.removeIndicator(id);assertLayoutOwner(owner);removed++;}}extras=[];layoutDraft=null;layoutAxisExplicit=false;const retained=cleanupGeneratedLayout(owner,priorDomains);assertLayoutOwner(owner);layoutPanels();assertLayoutOwner(owner);owner.chart.invalidate();assertLayoutOwner(owner);endLayoutMutation(owner);sync();status(removed?(retained.historyPanels.length||retained.historyAxes.length?'추가 지표를 지웠고 도형 기록이 있는 패널/축은 유지했습니다.':retained.failedPanels.length||retained.failedAxes.length?'추가 지표를 지웠지만 일부 호스트 생성 패널/축을 아직 정리하지 못했습니다.':'추가 지표와 비어 있는 호스트 생성 패널을 지웠습니다.'):'지울 추가 지표가 없습니다.');}
  catch(error){endLayoutMutation(owner);layoutDraft=null;layoutAxisExplicit=false;sync();status(friendly(error));}
 }
 for(const name of builtinIndicators.keys()){const option=document.createElement('option');option.value=name;option.textContent=name.toUpperCase();$('indicator').append(option);}

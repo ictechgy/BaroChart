@@ -6,6 +6,62 @@ const PANEL_PROJECTION_KEYS=['scale','inverted','padding','range','base','precis
 const AXIS_PROJECTION_KEYS=['side','scale','inverted','padding','range','base','precision','tickFormat','visible'];
 
 const cloneRange=value=>Array.isArray(value)&&value.length===2?[value[0],value[1]]:undefined;
+const validRange=value=>{const range=cloneRange(value);return range&&range.every(Number.isFinite)&&range[0]<range[1]?range:undefined;};
+const sameRange=(a,b)=>Array.isArray(a)&&Array.isArray(b)&&a.length===2&&b.length===2&&Object.is(a[0],b[0])&&Object.is(a[1],b[1]);
+const resourceFor=(model,kind,id)=>kind==='panel'?model?.panels?.find(panel=>panel.id===id):model?.axes?.find(axis=>axis.id===id);
+const rangeAPI=(api,kind,id,range)=>kind==='panel'?api.setPanel(id,{range}):api.setAxis(id,{range});
+
+function sceneAxis(scene,panelId,axisId=null){return scene?.layout?.axis?.(panelId,axisId)??null;}
+
+export function captureLayoutDomains(model,scene){
+ const result={panels:new Map(),axes:new Map()};
+ for(const panel of model?.panels??[]){const axis=sceneAxis(scene,panel.id,null),range=validRange(axis&&[axis.min,axis.max]);if(range)result.panels.set(panel.id,range);}
+ for(const axis of model?.axes??[]){const projection=sceneAxis(scene,axis.panel,axis.id),range=validRange(projection&&[projection.min,projection.max]);if(range)result.axes.set(axis.id,range);}
+ return result;
+}
+
+export function pinSyntheticRange({model,api,pins,kind,id,range,assertOwner=()=>{}}){
+ if(!(pins instanceof Map)||!['panel','axis'].includes(kind))throw new TypeError('Synthetic range pin store');
+ const resource=resourceFor(model,kind,id),next=validRange(range);
+ if(!resource||!next){pins.delete(id);return false;}
+ const existing=pins.get(id);
+ if(Array.isArray(resource.range)){
+  if(existing?.model===model&&existing.rangeRef===resource.range&&sameRange(existing.range,resource.range))return false;
+  pins.delete(id);return false;
+ }
+ // The API publishes this exact range before notifying the host. A reentrant
+ // worker reload must see its ownership while taking the model snapshot.
+ const entry={model,range:next,rangeRef:next};pins.set(id,entry);
+ try{rangeAPI(api,kind,id,next);assertOwner();return true;}
+ catch(error){if(pins.get(id)===entry&&resourceFor(model,kind,id)?.range!==next)pins.delete(id);throw error;}
+}
+
+export function clearSyntheticRange({model,api,pins,kind,id,assertOwner=()=>{}}){
+ if(!(pins instanceof Map)||!['panel','axis'].includes(kind))throw new TypeError('Synthetic range pin store');
+ const entry=pins.get(id),resource=resourceFor(model,kind,id);
+ if(!entry)return false;
+ if(!resource||entry.model!==model||resource.range!==entry.rangeRef||!sameRange(entry.range,resource.range)){pins.delete(id);return false;}
+ rangeAPI(api,kind,id,null);assertOwner();pins.delete(id);return true;
+}
+
+export function rebindSyntheticRangePins(model,panelPins=new Map(),axisPins=new Map()){
+ let changed=false;
+ for(const [kind,pins] of [['panel',panelPins],['axis',axisPins]])for(const [id,entry] of [...pins]){
+  const resource=resourceFor(model,kind,id);
+  if(!resource||!Array.isArray(resource.range)||!sameRange(entry.range,resource.range)){pins.delete(id);changed=true;continue;}
+  entry.model=model;entry.rangeRef=resource.range;
+ }
+ return changed;
+}
+
+export function pruneSyntheticRangePins(model,panelPins=new Map(),axisPins=new Map()){
+ let changed=false;
+ for(const [kind,pins] of [['panel',panelPins],['axis',axisPins]])for(const [id,entry] of [...pins]){
+  const resource=resourceFor(model,kind,id);
+  if(entry.model!==model||!resource||resource.range!==entry.rangeRef||!sameRange(entry.range,resource.range)){pins.delete(id);changed=true;}
+ }
+ return changed;
+}
 
 export function collectIndicatorGroups(model){
  const groups=new Map();

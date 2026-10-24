@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {ChartModel,ChartAPI,builtinIndicators,buildScene} from '../src/core/index.mjs';
 import {modelRequest} from '../src/web/worker-state.mjs';
+import * as layoutHelpers from '../examples/web/indicator-layout.mjs';
 const source=await readFile(new URL('../examples/web/demo.mjs',import.meta.url),'utf8');
 const start=source.indexOf('async function addIndicator(){'),end=source.indexOf('\nfunction selectedLayoutGroup',start);
 assert.ok(start>=0&&end>start);
@@ -13,7 +14,7 @@ const priceNames=['sma','vwma','ema','wma','bollinger','donchian','vwap','dema',
 const separateNames=['rsi','atr','macd','aroon','stochastic','roc','williamsR','cci','obv','mfi','cmf','adx','trix','ppo','stochRSI','adl','chaikin','forceIndex','volumeOscillator','vortex'];
 async function optionsFor(name,scale='linear'){
  const model=new ChartModel({panels:[{id:'price',scale,precision:5,weight:3}]});const api=new ChartAPI(model);api.addSeries({id:'price',type:'candles',panel:'price'});let prepared,installed;
- const context={model,job:0,controller:null,serial:0,pageActive:true,pageClosed:false,AbortController,stopStream(){},busy(){},modelRequest,stripUncommittedLayoutResources:options=>options,$:()=>({value:name}),builtinIndicators,progress(){},loadedMarket:'us',loadedCount:0,extras:[],generatedPanelIds:new Set(),streamIntent:false,document:{hidden:true},startStream(){},status(){},friendly(error){throw error;},prepareChartModel:async request=>{prepared=request;return{sentinel:true};},install:next=>{installed=next;}};
+ const syntheticPanelRanges=new Map(),syntheticAxisRanges=new Map(),context={model,job:0,controller:null,serial:0,pageActive:true,pageClosed:false,AbortController,stopStream(){},busy(){},modelRequest,stripUncommittedLayoutResources:options=>options,$:()=>({value:name}),builtinIndicators,progress(){},loadedMarket:'us',loadedCount:0,extras:[],generatedPanelIds:new Set(),generatedAxisIds:new Set(),syntheticPanelRanges,syntheticAxisRanges,cleanupSyntheticRangePins(){return layoutHelpers.pruneSyntheticRangePins(model,syntheticPanelRanges,syntheticAxisRanges);},streamIntent:false,document:{hidden:true},startStream(){},status(){},friendly(error){throw error;},prepareChartModel:async request=>{prepared=request;return{sentinel:true};},install:next=>{installed=next;}};
  try{await invoke(context);assert.equal(installed?.sentinel,true);return prepared.options;}finally{model.dispose();}
 }
 test('demo classification covers all 35 canonical builtin names exactly once',()=>{assert.equal(builtinIndicators.size,35);assert.equal(new Set([...priceNames,...separateNames]).size,35);assert.deepEqual([...builtinIndicators.keys()].sort(),[...priceNames,...separateNames].sort());});

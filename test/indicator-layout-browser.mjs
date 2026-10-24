@@ -225,11 +225,76 @@ async function runLayoutChecks(browser,origin){
   await browser.evaluate(`(()=>{if(window.aster?.chart?.controller)window.aster.chart.controller.gesture=null;})()`);
  }
 
+ const beforeTransaction=await browser.evaluate(`(()=>{const m=window.aster.model;m.drawings.begin();return {panels:m.panels.length,axes:m.axes.length};})()`);
+ let transactionResult;
+ try{await click(browser,'apply-indicator-placement');transactionResult=await browser.evaluate(`({message:document.getElementById('indicator-layout-status').textContent,panels:window.aster.model.panels.length,axes:window.aster.model.axes.length})`);}
+ finally{await browser.evaluate('window.aster.model.drawings.cancel()');}
+ check(transactionResult.message.includes('진행 중인 입력이 끝난 뒤')&&transactionResult.panels===beforeTransaction.panels&&transactionResult.axes===beforeTransaction.axes,'an open drawing transaction is rejected by the friendly layout gate before creating resources');
+
  const historyPanel=await browser.evaluate(`(()=>{const {model:m,chart:c}=window.aster,panel=m.series.find(s=>s.indicator==='rsi').panel,bar=m.store.at(m.store.length-1);const id=c.api.addDrawing({type:'horizontal',panel,points:[{time:bar.time,price:50}]});c.api.deleteDrawing(id);return panel;})()`);
  await setSelect(browser,'layout-indicator',['rsi']);await setSelect(browser,'layout-panel',['price']);await setSelect(browser,'layout-axis',['independent']);await click(browser,'apply-indicator-placement');
  check(await browser.evaluate(`window.aster.model.panels.some(p=>p.id===${JSON.stringify(historyPanel)})&&window.aster.model.drawings.undoStack.some(frame=>frame.some(d=>d.panel===${JSON.stringify(historyPanel)}))`),'moving a study preserves its old panel referenced only by drawing history');
 
  return {checks:checks.length,initial,count:countInfo,before:summary(baseline),independent:summary(independent),afterSeparate:summary(afterSeparate),reordered:summary(reordered),macd:summary(macd),macdPlaced:summary(macdPlaced),cleared:summary(cleared)};
+}
+
+async function runRetainedRangeChecks(browser){
+ await setSelect(browser,'indicator',['atr']);await click(browser,'add-indicator');await waitReady(browser,'ATR add ready');
+ const study=await browser.evaluate(`(()=>{const {model:m,chart:c}=window.aster,id=[...m.indicators.entries].find(([,entry])=>entry.name==='atr')[0],panel=m.series.find(s=>s.indicator===id).panel;c.drawNow();const axis=c.lastScene.layout.axis(panel),price=axis.min+(axis.max-axis.min)*.37,drawing=c.api.addDrawing({type:'horizontal',panel,points:[{time:m.store.at(m.store.length-1).time,price}]});return{id,panel,price,drawing,domain:[axis.min,axis.max]};})()`);
+ const domain=async(panel,axisId,price)=>browser.evaluate(`(()=>{const {model:m,chart:c}=window.aster;c.drawNow();const axis=c.lastScene.layout.axis(${JSON.stringify(panel)},${JSON.stringify(axisId)}),config=${axisId===null?`m.panels.find(p=>p.id===${JSON.stringify(panel)})`:`m.axes.find(a=>a.id===${JSON.stringify(axisId)})`};return{domain:[axis.min,axis.max],range:config.range??null,y:axis.y(${price}),top:axis.top,bottom:axis.bottom};})()`);
+ const sameDomain=(actual,expected)=>actual.every((value,index)=>Math.abs(value-expected[index])<=Math.max(1,Math.abs(expected[index]))*1e-12);
+ const visible=value=>Number.isFinite(value.y)&&value.y>=value.top&&value.y<=value.bottom;
+ const reload=async()=>{const count=await browser.evaluate(`(()=>{const n=document.getElementById('count');return [...n.options].map(o=>o.value).filter(v=>v!==n.value).sort((a,b)=>Number(a)-Number(b))[0]})()`);await setSelect(browser,'count',[count]);await waitReady(browser,'retained domain reload');};
+ await setSelect(browser,'layout-indicator',[study.id]);await setSelect(browser,'layout-panel',['price']);await setSelect(browser,'layout-axis',['independent']);await click(browser,'apply-indicator-placement');
+ const retainedPanel=await domain(study.panel,null,study.price);
+ check(!!retainedPanel.range&&sameDomain(retainedPanel.domain,study.domain)&&visible(retainedPanel),'an empty generated panel retains its prior domain and visible unbound drawing');
+ await reload();
+ const reloadedPanel=await domain(study.panel,null,study.price);
+ check(sameDomain(reloadedPanel.domain,study.domain)&&visible(reloadedPanel),'an empty panel keeps its drawing domain through same-market worker reload');
+ await setSelect(browser,'layout-indicator',['bb']);await setSelect(browser,'layout-panel',[study.panel]);await setSelect(browser,'layout-axis',['independent']);await click(browser,'apply-indicator-placement');
+ const sharedPrimary=await domain(study.panel,null,study.price);
+ check(!!sharedPrimary.range&&sameDomain(sharedPrimary.domain,study.domain),'an independent study in the same panel does not release its empty primary-domain pin');
+ const overlay=await browser.evaluate(`(()=>{const {model:m,chart:c}=window.aster,axisId=m.series.find(s=>s.indicator===${JSON.stringify(study.id)}).axisId;c.drawNow();const axis=c.lastScene.layout.axis('price',axisId),price=axis.min+(axis.max-axis.min)*.37,drawing=c.api.addDrawing({type:'horizontal',panel:'price',axisId,points:[{time:m.store.at(m.store.length-1).time,price}]});return{axisId,price,drawing,domain:[axis.min,axis.max]};})()`);
+ await setSelect(browser,'layout-indicator',[study.id]);await setSelect(browser,'layout-panel',[study.panel]);await setSelect(browser,'layout-axis',['primary']);await click(browser,'apply-indicator-placement');
+ const returnedPanel=await domain(study.panel,null,study.price),retainedAxis=await domain('price',overlay.axisId,overlay.price);
+ check(returnedPanel.range===null,'returning a study after reload releases only the synthetic primary range');
+ check(!!retainedAxis.range&&sameDomain(retainedAxis.domain,overlay.domain)&&visible(retainedAxis),'an empty generated independent axis retains its drawing domain');
+ await reload();
+ const reloadedAxis=await domain('price',overlay.axisId,overlay.price);
+ check(sameDomain(reloadedAxis.domain,overlay.domain)&&visible(reloadedAxis),'an empty independent axis keeps its drawing domain through worker reload');
+ const primaryBeforeMove=await domain(study.panel,null,study.price);
+ await setSelect(browser,'layout-indicator',[study.id]);await setSelect(browser,'layout-panel',['price']);await setSelect(browser,'layout-axis',['axis:'+overlay.axisId]);await click(browser,'apply-indicator-placement');
+ const returnedAxis=await domain('price',overlay.axisId,overlay.price);
+ check(returnedAxis.range===null,'returning a study after reload releases the synthetic independent-axis range');
+ const primaryWithOverlay=await domain(study.panel,null,study.price);
+ check(!!primaryWithOverlay.range&&sameDomain(primaryWithOverlay.domain,primaryBeforeMove.domain),'the primary domain is pinned when only independent-axis series remain in the panel');
+ await click(browser,'clear-indicators');
+ const clearedAxis=await domain('price',overlay.axisId,overlay.price);
+ check(!!clearedAxis.range&&sameDomain(clearedAxis.domain,returnedAxis.domain),'clearing the last study preserves the retained drawing axis domain');
+ return {study,retainedPanel,reloadedPanel,returnedPanel,overlay,retainedAxis,reloadedAxis,returnedAxis,clearedAxis};
+}
+
+async function runThemeAndFocusChecks(browser){
+ await click(browser,'theme');
+ const palette=await browser.evaluate(`(()=>{const color=getComputedStyle(document.querySelector('.indicator-layout-grid')).color,background=getComputedStyle(document.getElementById('indicator-layout-section')).backgroundColor;const luminance=text=>text.match(/[\\d.]+/g).slice(0,3).map(Number).map(value=>value/255).map(value=>value<=.04045?value/12.92:((value+.055)/1.055)**2.4).reduce((sum,value,index)=>sum+value*[.2126,.7152,.0722][index],0);const light=Math.max(luminance(color),luminance(background)),dark=Math.min(luminance(color),luminance(background));return{color,background,contrast:(light+.05)/(dark+.05)}})()`);
+ const order=await browser.evaluate('window.aster.model.panels.map(panel=>panel.id)'),selected=order[order.length-1];
+ await setSelect(browser,'reorder-panel',[selected]);
+ await browser.evaluate(`document.getElementById('panel-up').focus()`);
+ for(let index=1;index<order.length;index++)await click(browser,'panel-up');
+ const top=await browser.evaluate(`({panel:window.aster.model.panels[0].id,focus:document.activeElement.id||document.activeElement.tagName})`);
+ await browser.evaluate(`document.getElementById('panel-down').focus()`);
+ for(let index=1;index<order.length;index++)await click(browser,'panel-down');
+ const bottom=await browser.evaluate(`({panel:window.aster.model.panels.at(-1).id,focus:document.activeElement.id||document.activeElement.tagName})`);
+ check(top.panel===selected&&bottom.panel===selected,'focused reorder controls move the selected panel to both boundaries');
+ check(palette.contrast>=4.5,`light indicator labels keep readable contrast: ${JSON.stringify({palette,top,bottom})}`);
+ check(['reorder-panel','panel-down'].includes(top.focus),'reaching the top preserves focus on an enabled layout control');
+ check(['reorder-panel','panel-up'].includes(bottom.focus),'reaching the bottom preserves focus on an enabled layout control');
+ for(let index=1;index<order.length-1;index++)await click(browser,'panel-up');
+ await browser.evaluate(`(()=>{document.getElementById('panel-up').focus();window.aster.chart.container.addEventListener('aster:state',()=>document.getElementById('layout-indicator').focus(),{once:true});})()`);
+ await click(browser,'panel-up');
+ check(await browser.evaluate(`document.activeElement.id==='layout-indicator'`),'boundary focus repair preserves a newer focus choice made by a state listener');
+ await click(browser,'theme');
+ return {palette,top,bottom};
 }
 
 async function runResponsiveChecks(browser,origin){
@@ -248,8 +313,8 @@ async function runResponsiveChecks(browser,origin){
 const port=await availablePort();let server;let browser;const startedAt=Date.now();let browserInfo={};
 try{
  server=await startServer(port);browser=await launchBrowser({width:1280,height:900,dpr:1});browserInfo=await browser.send('Browser.getVersion',{},null);
- const behavior=await runLayoutChecks(browser,server.origin);const responsive=await runResponsiveChecks(browser,server.origin);
- const result={status:'passed',checks:checks.length,behavior,responsive,environment:{node:process.version,chromeOverride:Boolean(process.env.CHROME_BIN),browserProduct:browserInfo.product??'unknown',route:routePath,durationMs:Date.now()-startedAt}};
+ const behavior=await runLayoutChecks(browser,server.origin);const retainedRanges=await runRetainedRangeChecks(browser);const accessibility=await runThemeAndFocusChecks(browser);const responsive=await runResponsiveChecks(browser,server.origin);
+ const result={status:'passed',checks:checks.length,behavior,retainedRanges,accessibility,responsive,environment:{node:process.version,chromeOverride:Boolean(process.env.CHROME_BIN),browserProduct:browserInfo.product??'unknown',route:routePath,durationMs:Date.now()-startedAt}};
  if(artifact){await mkdir(resolve(artifact,'..'),{recursive:true});await writeFile(artifact,JSON.stringify(result,null,2));}
  console.log(JSON.stringify(result));
 }catch(error){const result={status:'failed',checks:checks.length,error:String(error?.message??error),environment:{node:process.version,chromeOverride:Boolean(process.env.CHROME_BIN),browserProduct:browserInfo.product??'unknown',route:routePath,durationMs:Date.now()-startedAt}};if(artifact){await mkdir(resolve(artifact,'..'),{recursive:true});await writeFile(artifact,JSON.stringify(result,null,2));}throw error;
