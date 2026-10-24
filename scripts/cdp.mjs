@@ -43,7 +43,9 @@ export async function launchBrowser({dpr=1,width=1280,height=900,timeoutMs}={}){
   const profile=await mkdtemp(join(tmpdir(),'aster-chrome-'));
   const executable=process.env.CHROME_BIN??(process.platform==='darwin'?'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome':'chromium');
   let child,socket,transport,closing,cleaning;const ownedError=()=>{};
-  const cleanup=()=>cleaning??=(async()=>{transport?.dispose();try{socket?.close();}catch{}const result=await terminateOwnedBrowser(child);child?.off('error',ownedError);await rm(profile,{recursive:true,force:true});return {...result,profileRemoved:true};})();
+  // Cache helpers can finish a write just after the browser process exits.
+  // Retry transient directory-removal races while keeping cleanup bounded.
+  const cleanup=()=>cleaning??=(async()=>{transport?.dispose();try{socket?.close();}catch{}const result=await terminateOwnedBrowser(child);child?.off('error',ownedError);await rm(profile,{recursive:true,force:true,maxRetries:5,retryDelay:100});return {...result,profileRemoved:true};})();
   try{
     remaining(15000,'spawn');
     child=spawn(executable,['--headless=new','--no-first-run','--no-default-browser-check','--disable-background-networking','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:['ignore','ignore','pipe']});child.on('error',ownedError);
