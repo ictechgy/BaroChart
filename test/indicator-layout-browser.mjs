@@ -297,6 +297,54 @@ async function runThemeAndFocusChecks(browser){
  return {palette,top,bottom};
 }
 
+async function runLayoutHistoryChecks(browser,origin){
+ await click(browser,'forget-chart-layout');await browser.navigate(origin+routePath);await waitReady(browser,'fresh layout history');
+ await setSelect(browser,'count',['10000']);await waitReady(browser,'bounded history source');
+ check(await browser.evaluate(`document.getElementById('layout-undo').disabled&&document.getElementById('layout-redo').disabled`),'a new model starts with an empty layout journal');
+ await browser.evaluate(`(()=>{const {model:m,chart:c}=window.aster;window.__indicatorLayoutRefs={model:m,chart:c,canvas:c.canvas,store:m.store,columns:m.store.columns};c.api.addDrawing({id:'history-price',type:'horizontal',panel:'price',points:[{time:m.store.at(m.store.length-1).time,price:m.store.at(m.store.length-1).close}]});})()`);
+ const before=await snapshot(browser),bindings=value=>value.series.filter(series=>series.indicator).map(series=>[series.id,series.panel,series.axisId]);
+ await setSelect(browser,'layout-indicator',['rsi']);await setSelect(browser,'layout-panel',['price']);await setSelect(browser,'layout-axis',['independent']);await click(browser,'apply-indicator-placement');
+ const overlay=await snapshot(browser);check(await browser.evaluate(`!document.getElementById('layout-undo').disabled`),'moving a study records one reversible layout command');
+ await browser.evaluate(`document.getElementById('layout-undo').focus()`);await click(browser,'layout-undo');const undone=await snapshot(browser);
+ check(JSON.stringify(bindings(undone))===JSON.stringify(bindings(before))&&JSON.stringify(undone.panels.map(p=>p.id))===JSON.stringify(before.panels.map(p=>p.id)),'undo restores study bindings and the pruned source panel');
+ check(undone.identity.model&&undone.identity.chart&&undone.identity.store&&sameOutputBuffers(before,undone)&&undone.drawings===before.drawings&&undone.undo===before.undo&&undone.redo===before.redo&&JSON.stringify(undone.view)===JSON.stringify(before.view),'layout undo preserves buffers, source, drawing history and viewport');
+ check(await browser.evaluate(`document.activeElement.id==='layout-redo'`),'undo at the journal boundary keeps focus on an enabled history action');
+ await click(browser,'layout-redo');const redone=await snapshot(browser);
+ check(JSON.stringify(bindings(redone))===JSON.stringify(bindings(overlay))&&redone.axes.some(axis=>axis.id===overlay.series.find(series=>series.indicator==='rsi').axisId),'redo recreates the same independent-axis binding');
+ await click(browser,'separate-indicator-panel');const separated=await snapshot(browser),panel=separated.series.find(series=>series.indicator==='rsi').panel;
+ await setSelect(browser,'reorder-panel',[panel]);await click(browser,'panel-up');const ordered=await snapshot(browser);
+ await click(browser,'layout-undo');const orderUndone=await snapshot(browser);
+ check(JSON.stringify(orderUndone.panels.map(p=>p.id))===JSON.stringify(separated.panels.map(p=>p.id)),'panel order is independently undoable');
+ await click(browser,'layout-undo');const splitUndone=await snapshot(browser);
+ check(JSON.stringify(bindings(splitUndone))===JSON.stringify(bindings(overlay)),'a chained undo reverses panel separation');
+ await click(browser,'layout-redo');await click(browser,'layout-redo');const chainRedone=await snapshot(browser);
+ check(JSON.stringify(chainRedone.panels.map(p=>p.id))===JSON.stringify(ordered.panels.map(p=>p.id))&&sameOutputBuffers(before,chainRedone),'chained redo restores the layout without replacing indicator buffers');
+ await click(browser,'layout-undo');await setSelect(browser,'layout-indicator',['rsi']);await setSelect(browser,'layout-panel',[panel]);await setSelect(browser,'layout-axis',['primary']);await click(browser,'apply-indicator-placement');
+ check(await browser.evaluate(`!document.getElementById('layout-redo').disabled`),'a no-op placement preserves the redo branch');
+ await setSelect(browser,'editor-indicator',['rsi']);await browser.evaluate(`(()=>{const n=document.getElementById('editor-param-period');n.value='7';n.dispatchEvent(new Event('input',{bubbles:true}));})()`);await click(browser,'editor-apply-params');await waitReady(browser,'history parameter replacement');
+ await browser.evaluate(`(()=>{const n=document.getElementById('editor-color');n.value='#2357ab';n.dispatchEvent(new Event('input',{bubbles:true}));const width=document.getElementById('editor-width');width.value='2.75';width.dispatchEvent(new Event('input',{bubbles:true}));})()`);await click(browser,'editor-apply-style');const styled=await snapshot(browser);
+ await click(browser,'layout-redo');const afterSettings=await snapshot(browser);
+ check(await browser.evaluate(`window.aster.model.indicators.entries.get('rsi').params.period===7&&window.aster.model.series.filter(s=>s.indicator==='rsi').every(s=>s.width===2.75&&s.color.startsWith('#2357ab'))`),'layout redo preserves newer indicator parameters and styles');
+ check(sameOutputBuffers(styled,afterSettings),'layout redo preserves the latest calculated output buffers');
+ await click(browser,'layout-undo');
+ await browser.evaluate(`(()=>{const {model:m,chart:c}=window.aster;c.api.addDrawing({id:'late-panel-note',type:'horizontal',panel:${JSON.stringify(panel)},points:[{time:m.store.at(m.store.length-1).time,price:50}]});})()`);
+ const withNote=await snapshot(browser);await click(browser,'layout-undo');const retained=await snapshot(browser);
+ check(retained.series.find(series=>series.indicator==='rsi').panel==='price'&&retained.panels.some(item=>item.id===panel)&&retained.drawings===withNote.drawings&&retained.undo===withNote.undo,'undo retains a newly referenced panel and its drawing history');
+ check(await browser.evaluate(`!document.getElementById('layout-redo').disabled`),'retained drawing resources do not invalidate layout redo');
+ await click(browser,'undo');check(await browser.evaluate(`!window.aster.model.drawings.items.some(d=>d.id==='late-panel-note')&&!document.getElementById('layout-redo').disabled`),'drawing undo does not clear the layout redo branch');
+ await click(browser,'layout-redo');await click(browser,'redo');
+ check(await browser.evaluate(`window.aster.model.series.find(s=>s.indicator==='rsi').panel===${JSON.stringify(panel)}&&window.aster.model.drawings.items.some(d=>d.id==='late-panel-note')`),'layout redo and drawing redo remain independent');
+ await click(browser,'layout-undo');await setSelect(browser,'layout-indicator',['rsi']);await setSelect(browser,'layout-panel',['volume']);await setSelect(browser,'layout-axis',['independent']);await click(browser,'apply-indicator-placement');
+ check(await browser.evaluate(`document.getElementById('layout-redo').disabled&&window.aster.model.drawings.items.some(d=>d.id==='late-panel-note')`),'a new effective layout command branches without changing drawings');
+ const guarded=await snapshot(browser);await browser.evaluate(`window.aster.model.drawings.begin()`);try{await click(browser,'layout-undo');}finally{await browser.evaluate(`window.aster.model.drawings.cancel()`);}const blocked=await snapshot(browser);
+ check(JSON.stringify(bindings(blocked))===JSON.stringify(bindings(guarded))&&blocked.panels.length===guarded.panels.length,'an active drawing transaction blocks layout history without mutation');
+ await setSelect(browser,'count',['100000']);await waitReady(browser,'history source replacement');
+ check(await browser.evaluate(`document.getElementById('layout-undo').disabled&&document.getElementById('layout-redo').disabled`),'source/model replacement resets the layout journal');
+ await click(browser,'forget-chart-layout');await browser.navigate(origin+routePath);await waitReady(browser,'default chart after history checks');await setSelect(browser,'count',['10000']);await waitReady(browser,'bounded editor source');
+ await browser.evaluate(`(()=>{const checkbox=document.getElementById('remember-chart-layout');checkbox.checked=true;checkbox.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+ return {checks:checks.length,retainedPanel:panel};
+}
+
 async function runEditorPersistenceChecks(browser,origin){
  await setSelect(browser,'indicator',['macd']);await click(browser,'add-indicator');await waitReady(browser,'saved MACD ready');
  const savedExtra=await browser.evaluate(`(()=>{const m=window.aster.model,[id]=[...m.indicators.entries].find(([,entry])=>entry.name==='macd');return{id,panel:m.series.find(s=>s.indicator===id).panel}})()`);
@@ -357,7 +405,7 @@ async function runResponsiveChecks(browser,origin){
  for(const [width,height] of [[320,568],[390,844],[1280,900]]){
   await browser.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:width<=390?2:1,mobile:width<=390,screenWidth:width,screenHeight:height});
   await browser.navigate(origin+routePath);await waitReady(browser,`responsive ${width}x${height}`);
-  const result=await browser.evaluate(`(()=>{const root=document.documentElement,section=document.getElementById('indicator-layout-section'),status=document.getElementById('indicator-layout-status');const controls=['layout-indicator','layout-panel','layout-axis','apply-indicator-placement','separate-indicator-panel','reorder-panel','panel-up','panel-down'].map(id=>document.getElementById(id));return {width:innerWidth,height:innerHeight,scrollWidth:root.scrollWidth,section:!!section,controls:controls.map(n=>({id:n?.id,disabled:n?.disabled,text:n?.textContent?.trim()})),status:status?.getBoundingClientRect().height??0,readable:controls.every(n=>n&&n.getBoundingClientRect().width>24&&n.getBoundingClientRect().height>20)};})()`);
+  const result=await browser.evaluate(`(()=>{const root=document.documentElement,section=document.getElementById('indicator-layout-section'),status=document.getElementById('indicator-layout-status');const controls=['layout-indicator','layout-panel','layout-axis','apply-indicator-placement','separate-indicator-panel','reorder-panel','panel-up','panel-down','layout-undo','layout-redo'].map(id=>document.getElementById(id));return {width:innerWidth,height:innerHeight,scrollWidth:root.scrollWidth,section:!!section,controls:controls.map(n=>({id:n?.id,disabled:n?.disabled,text:n?.textContent?.trim()})),status:status?.getBoundingClientRect().height??0,readable:controls.every(n=>n&&n.getBoundingClientRect().width>24&&n.getBoundingClientRect().height>20)};})()`);
   check(result.scrollWidth<=width+1,`indicator layout ${width}x${height} has no horizontal overflow`);
   check(result.section&&result.readable,`indicator layout ${width}x${height} keeps readable controls`);
   const editor=await browser.evaluate(`(()=>{const controls=['save-chart-layout','load-chart-layout','editor-indicator','editor-param-period','editor-apply-params','editor-output','editor-color','editor-width','editor-apply-style','editor-remove'].map(id=>document.getElementById(id));return{readable:controls.every(n=>n&&!n.disabled&&n.getBoundingClientRect().width>24&&n.getBoundingClientRect().height>20),touchTargets:['remember-chart-layout','editor-visible'].every(id=>document.getElementById(id)?.closest('label')?.getBoundingClientRect().height>=44)}})()`);
@@ -371,8 +419,8 @@ async function runResponsiveChecks(browser,origin){
 const port=await availablePort();let server;let browser;const startedAt=Date.now();let browserInfo={};
 try{
  server=await startServer(port);browser=await launchBrowser({width:1280,height:900,dpr:1});browserInfo=await browser.send('Browser.getVersion',{},null);
- const behavior=await runLayoutChecks(browser,server.origin);const retainedRanges=await runRetainedRangeChecks(browser);const accessibility=await runThemeAndFocusChecks(browser);const editing=await runEditorPersistenceChecks(browser,server.origin);const responsive=await runResponsiveChecks(browser,server.origin);
- const result={status:'passed',checks:checks.length,behavior,retainedRanges,accessibility,editing,responsive,environment:{node:process.version,chromeOverride:Boolean(process.env.CHROME_BIN),browserProduct:browserInfo.product??'unknown',route:routePath,durationMs:Date.now()-startedAt}};
+ const behavior=await runLayoutChecks(browser,server.origin);const retainedRanges=await runRetainedRangeChecks(browser);const accessibility=await runThemeAndFocusChecks(browser);const history=await runLayoutHistoryChecks(browser,server.origin);const editing=await runEditorPersistenceChecks(browser,server.origin);const responsive=await runResponsiveChecks(browser,server.origin);
+ const result={status:'passed',checks:checks.length,behavior,retainedRanges,accessibility,history,editing,responsive,environment:{node:process.version,chromeOverride:Boolean(process.env.CHROME_BIN),browserProduct:browserInfo.product??'unknown',route:routePath,durationMs:Date.now()-startedAt}};
  if(artifact){await mkdir(resolve(artifact,'..'),{recursive:true});await writeFile(artifact,JSON.stringify(result,null,2));}
  console.log(JSON.stringify(result));
 }catch(error){const result={status:'failed',checks:checks.length,error:String(error?.message??error),environment:{node:process.version,chromeOverride:Boolean(process.env.CHROME_BIN),browserProduct:browserInfo.product??'unknown',route:routePath,durationMs:Date.now()-startedAt}};if(artifact){await mkdir(resolve(artifact,'..'),{recursive:true});await writeFile(artifact,JSON.stringify(result,null,2));}throw error;

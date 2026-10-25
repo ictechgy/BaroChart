@@ -1532,7 +1532,7 @@ function panelOwnerGuard(model,owner,snapshot){
 function indicatorOwnerGuard(model,owner,snapshot,checkBindings=true,allowTransaction=false){
   if(!chartOwnerCurrent(model,owner,snapshot.controller)||ownData(model,'store','Chart')!==snapshot.store||snapshot.store.version!==snapshot.version||ownData(model,'indicators','Chart')!==snapshot.engine||ownData(snapshot.engine,'entries','Indicator engine')!==snapshot.entries||Map.prototype.get.call(snapshot.entries,snapshot.id)!==snapshot.entry||ownData(model,'series','Chart')!==snapshot.series||snapshot.seriesRefs.length!==snapshot.series.length||snapshot.seriesRefs.some((series,index)=>snapshot.series[index]!==series)||ownData(model,'drawings','Chart')!==snapshot.drawings||!allowTransaction&&ownData(snapshot.drawings,'transaction','Drawing store')||ownData(model,'panels','Chart')!==snapshot.panels.panels||snapshot.panels.refs.length!==snapshot.panels.panels.length||snapshot.panels.refs.some((panel,index)=>snapshot.panels.panels[index]!==panel||ownData(panel,'id','Panel')!==snapshot.panels.ids[index])||ownData(model,'axes','Chart')!==snapshot.axes.axes||snapshot.axes.refs.length!==snapshot.axes.axes.length||snapshot.axes.records.some((axis,index)=>snapshot.axes.axes[index]!==axis.ref||ownData(axis.ref,'id','Axis')!==axis.id||ownData(axis.ref,'panel','Axis')!==axis.panel))throw staleError('Indicator placement owner changed');
   if(snapshot.controller&&snapshot.targetCaptured&&(!sameDataDescriptor(Object.getOwnPropertyDescriptor(snapshot.controller,'drawingTarget'),snapshot.targetSlot)||ownData(snapshot.controller,'drawingTarget','Interaction controller',true)!==snapshot.controllerTarget))throw staleError('Indicator placement owner changed');
-  if(checkBindings&&snapshot.bound.some(({ref,panel,axisId})=>ownData(ref,'panel','Series')!==panel||((ownData(ref,'axisId','Series',true)??null)!==(axisId??null))))throw staleError('Indicator placement owner changed');
+  if(checkBindings&&snapshot.bound.some(({ref,id,indicator,panel,axisId})=>ownData(ref,'id','Series')!==id||ownData(ref,'indicator','Series',true)!==indicator||ownData(ref,'panel','Series')!==panel||((ownData(ref,'axisId','Series',true)??null)!==(axisId??null))))throw staleError('Indicator placement owner changed');
   if(!chartOwnerCurrent(model,owner,snapshot.controller))throw staleError('Indicator placement owner changed');
 }
 function managedArraySnapshot(value,label,max,record){
@@ -1566,6 +1566,17 @@ function cloneSeriesPlacement(series,panel,axisId){
   const panelDescriptor=descriptors.panel,axisDescriptor=descriptors.axisId;descriptors.panel={value:panel,writable:true,enumerable:panelDescriptor?.enumerable??true,configurable:true};descriptors.axisId={value:axisId,writable:true,enumerable:axisDescriptor?.enumerable??true,configurable:true};
   return Object.create(Object.getPrototypeOf(series),descriptors);
 }
+function cloneDrawingTarget(target,panel,axisId){
+  const descriptors=Object.getOwnPropertyDescriptors(target);for(const descriptor of Object.values(descriptors))if(!Object.hasOwn(descriptor,'value'))throw new TypeError('Drawing target own data fields required');
+  const panelDescriptor=descriptors.panel,axisDescriptor=descriptors.axisId;descriptors.panel={value:panel,writable:true,enumerable:panelDescriptor?.enumerable??true,configurable:true};descriptors.axisId={value:axisId,writable:true,enumerable:axisDescriptor?.enumerable??true,configurable:true};return Object.create(Object.getPrototypeOf(target),descriptors);
+}
+function strictIndicatorBindingRecord(value){
+  if(!value||typeof value!=='object'||Array.isArray(value)||![Object.prototype,null].includes(Object.getPrototypeOf(value)))throw new TypeError('Indicator binding record required');
+  const keys=Reflect.ownKeys(value),allowed=['seriesId','panel','axisId'];if(keys.length!==allowed.length||keys.some(key=>typeof key!=='string'||!allowed.includes(key)))throw new TypeError('Indicator binding fields');
+  const read=key=>{const descriptor=Object.getOwnPropertyDescriptor(value,key);if(!descriptor?.enumerable||!Object.hasOwn(descriptor,'value'))throw new TypeError('Indicator binding own data fields required');return descriptor.value;};
+  const seriesId=read('seriesId'),panel=read('panel'),axisId=read('axisId');identifier(seriesId,'Indicator binding series');identifier(panel,'Indicator binding panel');if(axisId!==null)identifier(axisId,'Indicator binding axis');return {seriesId,panel,axisId};
+}
+function strictIndicatorBindings(value){return strictArrayValues(value,'Indicator bindings',RESOURCE_LIMITS.maxSeries).map(strictIndicatorBindingRecord);}
 
 function axisStripWidths(panels,axes,axisWidth){
   let left=0,right=0;
@@ -1624,28 +1635,43 @@ class ChartModel {
     seriesStateGuard(seriesState);axisStateGuard(axisState);drawingHistoryGuard(drawingState);panelOwnerGuard(this,owner,{...snapshot,controller});rejectOwnedInput(controller,this);
     this.panels=snapshot.refs.filter((_,entryIndex)=>entryIndex!==index);
   }
-  _setIndicatorPlacement(id,placement,options={}) {
-    const {owner=null,controller=null}=options;
+  _setIndicatorPlacement(id,placement,options={}) {return this._applyIndicatorBindings(id,{kind:'placement',value:placement},options);}
+  _restoreIndicatorBindings(id,bindings,options={}) {return this._applyIndicatorBindings(id,{kind:'records',value:bindings},options);}
+  _applyIndicatorBindings(id,request,options={}) {
+    const {owner=null,controller=null,updateControllerTarget=false}=options;
     const disposedDescriptor=Object.getOwnPropertyDescriptor(this,'disposed');if(disposedDescriptor&&!Object.hasOwn(disposedDescriptor,'value'))throw new TypeError('Chart disposed own data slot required');if(disposedDescriptor?.value)throw new Error('Chart disposed');identifier(id,'Indicator id');
     const engine=ownData(this,'indicators','Chart'),entries=ownData(engine,'entries','Indicator engine'),entry=Map.prototype.get.call(entries,id);if(!entry)throw new Error('Missing indicator');
     const store=ownData(this,'store','Chart'),series=ownData(this,'series','Chart'),drawings=ownData(this,'drawings','Chart'),panels=managedPanels(this),axes=managedAxes(this);
-    const seriesState=seriesStateSnapshot(series),seriesRefs=seriesState.refs,bound=seriesState.records.filter(record=>record.indicator===id).map(record=>({ref:record.ref,panel:record.panel,axisId:record.axisId,id:record.id}));
+    const seriesState=seriesStateSnapshot(series),seriesRefs=seriesState.refs,bound=seriesState.records.filter(record=>record.indicator===id).map(record=>({ref:record.ref,panel:record.panel,axisId:record.axisId,id:record.id,indicator:record.indicator}));
     if(!bound.length)throw new Error('Indicator has no bound series');
+    // Capture the target before reflecting over the requested placement. A
+    // host supplied field getter may reenter the chart, and the final owner
+    // guard must observe the target that was current at call entry.
     const targetSlot=controller?(Object.hasOwn(options,'controllerTargetSlot')?options.controllerTargetSlot:Object.getOwnPropertyDescriptor(controller,'drawingTarget')):undefined,targetCaptured=!!controller&&!!targetSlot,controllerTarget=controller?(Object.hasOwn(options,'controllerTarget')?options.controllerTarget:ownData(controller,'drawingTarget','Interaction controller',true)):undefined;
+    const targetSeriesId=targetCaptured&&controllerTarget?ownData(controllerTarget,'seriesId','Drawing target',true):undefined;
+    const targetTemplate=updateControllerTarget&&targetSeriesId!==undefined&&targetSeriesId!==null?cloneDrawingTarget(controllerTarget,ownData(controllerTarget,'panel','Drawing target'),ownData(controllerTarget,'axisId','Drawing target',true)??null):null;
     const snapshot={id,engine,entries,entry,store,version:store.version,series,seriesRefs,drawings,bound,controller,panels,axes,targetCaptured,controllerTarget,targetSlot};
-    const next=strictPlacementRecord(placement),panelIndex=panels.ids.indexOf(next.panel);if(panelIndex<0)throw new Error('Missing placement panel');
-    if(next.axisId!==null&&!axes.records.some(axis=>axis.id===next.axisId&&axis.panel===next.panel))throw new Error('Missing placement axis');
+    let targets;
+    if(request?.kind==='placement'){
+      const next=strictPlacementRecord(request.value);if(panels.ids.indexOf(next.panel)<0)throw new Error('Missing placement panel');if(next.axisId!==null&&!axes.records.some(axis=>axis.id===next.axisId&&axis.panel===next.panel))throw new Error('Missing placement axis');
+      targets=bound.map(record=>({id:record.id,panel:next.panel,axisId:next.axisId}));
+    } else if(request?.kind==='records'){
+      const requested=strictIndicatorBindings(request.value);if(requested.length!==bound.length)throw new TypeError('Indicator bindings must contain every bound series exactly once');
+      const byId=new Map(bound.map(record=>[record.id,record])),seen=new Set();for(const target of requested){if(seen.has(target.seriesId))throw new TypeError('Duplicate indicator binding series');if(!byId.has(target.seriesId))throw new Error('Foreign indicator binding series');seen.add(target.seriesId);if(panels.ids.indexOf(target.panel)<0)throw new Error('Missing placement panel');if(target.axisId!==null&&!axes.records.some(axis=>axis.id===target.axisId&&axis.panel===target.panel))throw new Error('Missing placement axis');}
+      if(seen.size!==bound.length)throw new TypeError('Indicator bindings must contain every bound series exactly once');const requestedById=new Map(requested.map(target=>[target.seriesId,target]));targets=bound.map(record=>{const target=requestedById.get(record.id);return {id:record.id,panel:target.panel,axisId:target.axisId};});
+    } else throw new TypeError('Indicator binding request required');
     rejectOwnedInput(controller,this);indicatorOwnerGuard(this,owner,snapshot);
-    const changed=bound.filter(({panel,axisId})=>panel!==next.panel||axisId!==next.axisId).length;
-    if(!changed){indicatorOwnerGuard(this,owner,snapshot,true,true);rejectOwnedInput(controller,this);if(ownData(drawings,'transaction','Drawing store'))throw new Error('Indicator placement during drawing transaction');return {changed:0,panel:next.panel,axisId:next.axisId,boundIds:bound.map(record=>record.id)};}
-    const targetSeriesId=targetCaptured&&controllerTarget?ownData(controllerTarget,'seriesId','Drawing target',true):undefined,targetNeedsUpdate=targetSeriesId!==undefined&&targetSeriesId!==null&&bound.some(record=>record.id===targetSeriesId);if(targetNeedsUpdate&&(!snapshot.targetSlot||snapshot.targetSlot.writable!==true))throw new TypeError('Interaction controller drawing target must be writable own data');
-    const nextSeries=seriesRefs.slice();for(const [index,record] of seriesState.records.entries())if(record.indicator===id&&(record.panel!==next.panel||record.axisId!==next.axisId))nextSeries[index]=cloneSeriesPlacement(record.ref,next.panel,next.axisId);
+    const changed=bound.filter((record,index)=>record.panel!==targets[index].panel||record.axisId!==targets[index].axisId).length;
+    if(!changed){indicatorOwnerGuard(this,owner,snapshot,true,true);rejectOwnedInput(controller,this);if(ownData(drawings,'transaction','Drawing store'))throw new Error('Indicator placement during drawing transaction');return {changed:0,panel:targets[0].panel,axisId:targets[0].axisId,boundIds:bound.map(record=>record.id)};}
+    const targetRecord=targetSeriesId!==undefined&&targetSeriesId!==null?targets.find(target=>target.id===targetSeriesId):undefined,targetNeedsUpdate=!!targetRecord;if(targetNeedsUpdate&&(!snapshot.targetSlot||snapshot.targetSlot.writable!==true))throw new TypeError('Interaction controller drawing target must be writable own data');
+    const targetsById=new Map(targets.map(target=>[target.id,target])),nextSeries=seriesRefs.slice();for(const [index,record] of seriesState.records.entries())if(record.indicator===id){const target=targetsById.get(record.id);if(record.panel!==target.panel||record.axisId!==target.axisId)nextSeries[index]=cloneSeriesPlacement(record.ref,target.panel,target.axisId);}
     if(ownData(drawings,'transaction','Drawing store'))throw new Error('Indicator placement during drawing transaction');
     indicatorOwnerGuard(this,owner,snapshot,true,true);rejectOwnedInput(controller,this);
     if(ownData(drawings,'transaction','Drawing store'))throw new Error('Indicator placement during drawing transaction');
     const seriesSlot=Object.getOwnPropertyDescriptor(this,'series');if(!seriesSlot||!Object.hasOwn(seriesSlot,'value')||seriesSlot.writable!==true)throw new TypeError('Chart series owner is not writable');
     this.series=nextSeries;
-    return {changed,panel:next.panel,axisId:next.axisId,boundIds:bound.map(record=>record.id)};
+    if(updateControllerTarget&&targetNeedsUpdate)controller.drawingTarget=cloneDrawingTarget(targetTemplate,targetRecord.panel,targetRecord.axisId);
+    return {changed,panel:targets[0].panel,axisId:targets[0].axisId,boundIds:bound.map(record=>record.id)};
   }
   validateAxis(a) {
     optionRecord(a,AXIS_KEYS,'Axis');identifier(a.id,'Axis id');identifier(a.panel,'Axis panel');

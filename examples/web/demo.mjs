@@ -5,6 +5,8 @@ import {prepareChartModel,setIndicatorParamsAsync} from '../../src/web/worker.mj
 import {createIndicatorEditor} from './indicator-editor.mjs';
 import {captureDemoLayout,stringifyDemoLayout,parseDemoLayout,presetOptions,validateRetainedDrawings,MAX_DEMO_LAYOUT_BYTES} from './demo-layout-preset.mjs';
 import {createLayoutMemory} from './layout-memory.mjs';
+import {captureLayoutFrame,createLayoutHistory} from './layout-history.mjs';
+import {applyLayoutFrame} from './apply-layout-frame.mjs';
 import {safeCheckpointStringify} from '../../src/core/checkpoint-validation.mjs';
 import {modelRequest} from '../../src/web/worker-state.mjs';
 import {collectIndicatorGroups,indicatorGroup,copyPanelProjection,copyAxisProjection,uniqueLayoutId,captureLayoutDomains,pinSyntheticRange,clearSyntheticRange,rebindSyntheticRangePins,pruneSyntheticRangePins} from './indicator-layout.mjs';
@@ -68,8 +70,12 @@ function syncIndicatorLayoutControls(){
  if($('apply-indicator-placement'))$('apply-indicator-placement').disabled=!ready||!group;
  if($('panel-up'))$('panel-up').disabled=!ready||index<=0;
  if($('panel-down'))$('panel-down').disabled=!ready||index<0||index>=panels.length-1;
+ const history=layoutHistory.status();$('layout-undo').disabled=!ready||!history.canUndo;$('layout-redo').disabled=!ready||!history.canRedo;
+ $('layout-undo').title=history.undoLabel?'되돌리기: '+history.undoLabel:'되돌릴 배치가 없습니다.';$('layout-redo').title=history.redoLabel?'다시 실행: '+history.redoLabel:'다시 실행할 배치가 없습니다.';
+ setText('layout-history-summary',`배치 기록 ${history.cursor} / ${history.depth} · 지표 배치와 패널 순서를 최대 30단계 되돌립니다.`);
 }
 function friendly(error,file=false){if(file)return drawingImportMessage(error);if(/positive|Log scale/.test(error.message))return '로그 축은 양수 범위만 표시할 수 있습니다. 선형 축 또는 양수 범위를 사용하세요.';if(error.name==='AbortError')return model&&!model.disposed?'계산을 취소했습니다. 이전 차트는 유지됩니다.':'첫 차트 계산을 취소했습니다. 시장이나 저장 봉 수를 선택해 다시 시작하세요.';return '변경을 적용하지 못했습니다: '+String(error.message).slice(0,180);}
+const layoutHistory=createLayoutHistory({getModel:()=>model,capture:captureHistoryFrame,apply:restoreHistoryFrame,maxEntries:30});
 const drawingFileImport=createDrawingFileImport({getChart:()=>preparing?null:chart,onStatus:status,onError:(error,{changed})=>status(changed?'도형은 반영됐지만 화면 갱신 중 오류가 발생했습니다. 다시 불러오기 전에 현재 상태를 확인하세요.':friendly(error,true))});
 const editorStatus=message=>setText('indicator-editor-status',message);
 const indicatorEditor=createIndicatorEditor({root:$('indicator-editor'),getChart:()=>chart,isBusy:()=>preparing||!pageActive||pageClosed,onApplyParams:applyIndicatorParams,onApplyStyle:applyIndicatorStyle,onRemove:removeSelectedIndicator,onStatus:editorStatus});
@@ -85,7 +91,7 @@ function sync(){if(!model||!chart||chart.disposed)return;$('explore').setAttribu
  if(typeof syncIndicatorLayoutControls==='function')syncIndicatorLayoutControls();
  indicatorEditor.sync();
 }
-function busy(value){preparing=value;if(value)drawingFileImport.cancel();$('cancel-compute').hidden=!value;$('workspace').setAttribute('aria-busy',String(value));for(const id of ['add-indicator','clear-indicators','series','scale','renderer','stream','load','layout-indicator','layout-panel','layout-axis','apply-indicator-placement','separate-indicator-panel','reorder-panel','panel-up','panel-down','save-chart-layout','load-chart-layout'])$(id).disabled=value||!model||!chart||chart.disposed;const ready=!!model&&!model.disposed&&!!chart&&!chart.disposed;for(const id of ['fit','recent','save','explore','explore-read'])$(id).disabled=!ready;for(const node of document.querySelectorAll('[data-tool]'))node.disabled=!ready;if(!value&&typeof syncIndicatorLayoutControls==='function')syncIndicatorLayoutControls();indicatorEditor.sync();}
+function busy(value){preparing=value;if(value)drawingFileImport.cancel();$('cancel-compute').hidden=!value;$('workspace').setAttribute('aria-busy',String(value));for(const id of ['add-indicator','clear-indicators','series','scale','renderer','stream','load','layout-indicator','layout-panel','layout-axis','apply-indicator-placement','separate-indicator-panel','reorder-panel','panel-up','panel-down','layout-undo','layout-redo','save-chart-layout','load-chart-layout'])$(id).disabled=value||!model||!chart||chart.disposed;const ready=!!model&&!model.disposed&&!!chart&&!chart.disposed;for(const id of ['fit','recent','save','explore','explore-read'])$(id).disabled=!ready;for(const node of document.querySelectorAll('[data-tool]'))node.disabled=!ready;if(!value&&typeof syncIndicatorLayoutControls==='function')syncIndicatorLayoutControls();indicatorEditor.sync();}
 function progress(p){status(p.phase==='data'?'원본 데이터 준비 '+Math.round(p.done/p.total*100)+'%…':p.phase==='indicators'?'지표 계산 '+p.done+'/'+p.total+'…':'화면 인덱스를 준비합니다…');}
 function defaults(market){const symbol=DEMO_SYMBOLS[market];return {panels:[{id:'price',label:'PRICE',weight:3.5},{id:'volume',label:'VOLUME',weight:.8,precision:0},{id:'rsi',label:'RSI',weight:1,range:[0,100],precision:0}],series:[{id:'price',type:$('series').value,panel:'price'},{id:'volume',type:'histogram',source:'volume',panel:'volume',color:'#2b6e78'},{id:'ema',type:'line',panel:'price',indicator:'ema',color:'#f0b755'},{id:'upper',type:'line',panel:'price',indicator:'bb',output:'upper',color:'#63779e',width:1},{id:'lower',type:'line',panel:'price',indicator:'bb',output:'lower',color:'#63779e',width:1},{id:'rsi',type:'line',panel:'rsi',indicator:'rsi',color:'#aa91f7'}],indicators:[{id:'ema',name:'ema',params:{}},{id:'bb',name:'bollinger',params:{}},{id:'rsi',name:'rsi',params:{}}],precision:symbol.priceDecimals,axisWidth:market==='crypto'?125:85,theme:light?LIGHT_THEME:DARK_THEME};}
 function palette(){
@@ -125,7 +131,7 @@ function install(next,market,count,newExtras=extras,{adoption=null,beforeCommit=
  }else if(!same){generatedPanelIds.clear();generatedAxisIds.clear();syntheticPanelRanges.clear();syntheticAxisRanges.clear();generatedPanelIds.add('rsi');}
  // Publish the mounted owner before tearing down the old chart. Any disposal
  // observer sees the new accepted chart, never a half-disposed old owner.
- model=next;chart=created;extras=newExtras;loadedMarket=market;loadedCount=count;streamCalendar=demoCalendar(market);rebindSyntheticRangePinsToModel(model);
+ model=next;chart=created;resetLayoutHistory(next);extras=newExtras;loadedMarket=market;loadedCount=count;streamCalendar=demoCalendar(market);rebindSyntheticRangePinsToModel(model);
  $('chart').replaceChildren(host);window.aster={model,chart};
  host.addEventListener('aster:exploration',()=>{$('explore').setAttribute('aria-pressed',String(chart.dataExploration.active));});host.addEventListener('aster:render',sync);host.addEventListener('aster:state',sync);
  if(adoption){document.documentElement.dataset.chartTheme=light?'light':'dark';$('theme').setAttribute('aria-pressed',String(light));}else palette();
@@ -158,7 +164,7 @@ async function addIndicator(){if(!model||!pageActive||pageClosed)return;cleanupS
  catch(error){if(token===job){layoutDraft=null;layoutAxisExplicit=false;status(friendly(error));}}finally{if(token===job){busy(false);if(streamIntent&&!document.hidden)startStream();}}
 }
 function selectedLayoutGroup(){return model&&indicatorGroup(model,$('layout-indicator')?.value)||collectIndicatorGroups(model)[0]||null;}
-function layoutMutationReady(){if(!model||model.disposed||!chart||chart.disposed||preparing||!pageActive||pageClosed)return false;if(chart.controller?.gesture||chart.controller?.pointers?.size||model.drawings?.transaction){layoutStatus('진행 중인 입력이 끝난 뒤 지표 배치를 변경하세요.');return false;}return true;}
+function layoutMutationReady({allowLayoutOwner=false}={}){if(layoutMutationOwner&&!allowLayoutOwner){layoutStatus('진행 중인 배치 변경이 끝난 뒤 다시 시도하세요.');return false;}if(!model||model.disposed||!chart||chart.disposed||preparing||!pageActive||pageClosed)return false;if(chart.controller?.gesture||chart.controller?.pointers?.size||model.drawings?.transaction){layoutStatus('진행 중인 입력이 끝난 뒤 지표 배치를 변경하세요.');return false;}return true;}
 function captureLayoutOwner(){return {model,chart,job};}
 function layoutOwnerLive(owner){return !!owner&&model===owner.model&&chart===owner.chart&&job===owner.job&&pageActive&&!pageClosed&&!preparing&&!owner.model?.disposed&&!owner.chart?.disposed;}
 function assertLayoutOwner(owner){if(!layoutOwnerLive(owner)){const error=new Error('지표 배치 소유자가 변경되어 적용을 중단했습니다.');error.name='StaleSourceError';throw error;}}
@@ -194,8 +200,8 @@ function pinRetainedRange(owner,kind,id,domains){
 function clearReusedRange(owner,kind,id){
  return clearSyntheticRange({model:owner?.model??model,api:owner?.chart?.api??chart?.api,pins:kind==='panel'?syntheticPanelRanges:syntheticAxisRanges,kind,id,assertOwner:()=>{if(owner)assertLayoutOwner(owner);}});
 }
-function cleanupGeneratedLayout(owner=null,domains=null){
- const retained={panels:[],axes:[],historyPanels:[],historyAxes:[],failedPanels:[],failedAxes:[]};if(!layoutMutationReady()||owner&&!layoutOwnerLive(owner))return retained;
+function cleanupGeneratedLayout(owner=null,domains=null,protectedResources=null){
+ const retained={panels:[],axes:[],historyPanels:[],historyAxes:[],failedPanels:[],failedAxes:[]};if(!layoutMutationReady({allowLayoutOwner:!!owner})||owner&&!layoutOwnerLive(owner))return retained;
  // Temporary drawing domains may belong to explicit imported resources too.
  // Releasing an owned pin does not grant permission to delete that resource.
  for(const id of [...syntheticAxisRanges.keys()])if(model.series.some(series=>series.axisId===id)){if(owner)assertLayoutOwner(owner);clearReusedRange(owner,'axis',id);}
@@ -204,6 +210,7 @@ function cleanupGeneratedLayout(owner=null,domains=null){
   if(owner&&!layoutOwnerLive(owner))return retained;
   if(!model.axes.some(axis=>axis.id===id)){generatedAxisIds.delete(id);syntheticAxisRanges.delete(id);continue;}
   if(model.series.some(series=>(series.axisId??null)===id))continue;
+  if(protectedResources?.axes?.has(id)){if(drawingHasReference('axisId',id))pinRetainedRange(owner,'axis',id,domains);continue;}
   try{chart.api.removeAxis(id);generatedAxisIds.delete(id);syntheticAxisRanges.delete(id);}catch{if(drawingHasReference('axisId',id)){retained.historyAxes.push(id);pinRetainedRange(owner,'axis',id,domains);}else retained.failedAxes.push(id);if(owner&&!layoutOwnerLive(owner))return retained;}
  }
  for(const id of [...generatedPanelIds]){
@@ -211,6 +218,7 @@ function cleanupGeneratedLayout(owner=null,domains=null){
   if(!model.panels.some(panel=>panel.id===id)){generatedPanelIds.delete(id);syntheticPanelRanges.delete(id);continue;}
   const hasPrimarySeries=model.series.some(series=>series.panel===id&&(series.axisId??null)===null),hasAnySeries=model.series.some(series=>series.panel===id),retainedAxis=model.axes.some(axis=>axis.panel===id),hasDrawing=drawingHasReference('panel',id);
   if(hasAnySeries||retainedAxis){if(hasDrawing&&!hasPrimarySeries){retained.historyPanels.push(id);pinRetainedRange(owner,'panel',id,domains);}continue;}
+  if(protectedResources?.panels?.has(id)){if(hasDrawing)pinRetainedRange(owner,'panel',id,domains);continue;}
   try{chart.api.removePanel(id);generatedPanelIds.delete(id);syntheticPanelRanges.delete(id);}catch{if(hasDrawing){retained.historyPanels.push(id);pinRetainedRange(owner,'panel',id,domains);}else retained.failedPanels.push(id);if(owner&&!layoutOwnerLive(owner))return retained;}
  }
  return retained;
@@ -221,9 +229,9 @@ function applyIndicatorPlacement(){
  if(!group||!model.panels.some(panel=>panel.id===target)){layoutStatus('표시된 지표와 대상 패널을 먼저 선택하세요.');return;}
  let choice=$('layout-axis')?.value??'primary';
  if(target!==group.panelId&&!layoutAxisExplicit&&choice==='primary')choice='independent';
- let axisId=null,createdAxis=null;
+ let axisId=null,createdAxis=null,historyToken;
  try{
-  beginLayoutMutation(owner);
+  historyToken=layoutHistory.begin('지표 배치');beginLayoutMutation(owner);
   if(choice==='independent'){
    const id=uniqueLayoutId(group.id+'-axis',new Set((model.axes??[]).map(axis=>axis.id))),projection=copyAxisProjection(model,group);
    createdAxis=id;generatedAxisIds.add(id);owner.chart.api.addAxis({id,panel:target,label:(group.name??group.id).toUpperCase(),...projection});assertLayoutOwner(owner);axisId=id;
@@ -231,7 +239,7 @@ function applyIndicatorPlacement(){
    axisId=choice.slice(5);if(!model.axes.some(axis=>axis.id===axisId&&axis.panel===target))throw new Error('선택한 축을 찾을 수 없습니다.');
   }
   assertLayoutOwner(owner);owner.chart.api.setIndicatorPlacement(group.id,{panel:target,axisId});assertLayoutOwner(owner);
-  layoutDraft=null;layoutAxisExplicit=false;const retained=cleanupGeneratedLayout(owner,priorDomains);assertLayoutOwner(owner);layoutPanels();assertLayoutOwner(owner);owner.chart.invalidate();assertLayoutOwner(owner);endLayoutMutation(owner);sync();
+  layoutDraft=null;layoutAxisExplicit=false;const retained=cleanupGeneratedLayout(owner,priorDomains);assertLayoutOwner(owner);layoutPanels();assertLayoutOwner(owner);owner.chart.invalidate();assertLayoutOwner(owner);endLayoutMutation(owner);layoutHistory.commit(historyToken);historyToken=null;sync();
   const mixed=group.mixedPanelOrigins||group.mixedAxisOrigins;
   const historyNote=retained.historyPanels.length||retained.historyAxes.length?' · 도형 기록이 있어 이전 패널/축은 유지했습니다.':retained.failedPanels.length||retained.failedAxes.length?' · 일부 호스트 생성 패널/축을 아직 정리하지 못했습니다.':'';
   recordLayoutChange();layoutStatus((mixed&&createdAxis?'여러 원본 축을 합쳐 선형 자동 범위의 독립 축으로 배치했습니다.':`${(group.name??group.id).toUpperCase()} 지표의 모든 출력선을 ${target} 패널에 배치했습니다.`)+historyNote);
@@ -239,7 +247,7 @@ function applyIndicatorPlacement(){
  }catch(error){
   if(createdAxis)rollbackCreatedResource(owner,'axis',createdAxis);
   if(createdAxis&&!owner.model.axes.some(axis=>axis.id===createdAxis))generatedAxisIds.delete(createdAxis);
-  endLayoutMutation(owner);
+  endLayoutMutation(owner);cancelLayoutRecord(historyToken,owner);
   layoutDraft=null;layoutAxisExplicit=false;sync();layoutStatus(friendly(error));status(friendly(error));
  }
 }
@@ -247,21 +255,27 @@ function separateIndicatorPanel(){
  if(!layoutMutationReady())return;
  const owner=captureLayoutOwner(),group=selectedLayoutGroup(),priorDomains=capturePreMutationDomains();if(!group)return;
  const id=uniqueLayoutId(group.id+'-panel',new Set((model.panels??[]).map(panel=>panel.id))),projection=copyPanelProjection(model,group),panel={id,label:(group.name??group.id).toUpperCase(),...projection};
- let added=false;
- try{beginLayoutMutation(owner);generatedPanelIds.add(id);owner.chart.api.addPanel(panel);added=true;assertLayoutOwner(owner);owner.chart.api.setIndicatorPlacement(group.id,{panel:id,axisId:null});assertLayoutOwner(owner);layoutDraft=null;layoutAxisExplicit=false;const retained=cleanupGeneratedLayout(owner,priorDomains);assertLayoutOwner(owner);layoutPanels();assertLayoutOwner(owner);owner.chart.invalidate();assertLayoutOwner(owner);endLayoutMutation(owner);sync();const historyNote=retained.historyPanels.length||retained.historyAxes.length?' 이전 패널/축은 도형 기록 때문에 유지했습니다.':retained.failedPanels.length||retained.failedAxes.length?' 일부 호스트 생성 패널/축을 아직 정리하지 못했습니다.':'';recordLayoutChange();layoutStatus(`${(group.name??group.id).toUpperCase()} 지표를 새 패널로 분리했습니다.${historyNote}`);status('지표를 새 패널로 분리했습니다.');}
- catch(error){if(added)rollbackCreatedResource(owner,'panel',id);if(!owner.model.panels.some(panel=>panel.id===id))generatedPanelIds.delete(id);endLayoutMutation(owner);layoutDraft=null;layoutAxisExplicit=false;sync();layoutStatus(friendly(error));status(friendly(error));}
+ let added=false,historyToken;
+ try{historyToken=layoutHistory.begin('새 패널로 분리');beginLayoutMutation(owner);generatedPanelIds.add(id);owner.chart.api.addPanel(panel);added=true;assertLayoutOwner(owner);owner.chart.api.setIndicatorPlacement(group.id,{panel:id,axisId:null});assertLayoutOwner(owner);layoutDraft=null;layoutAxisExplicit=false;const retained=cleanupGeneratedLayout(owner,priorDomains);assertLayoutOwner(owner);layoutPanels();assertLayoutOwner(owner);owner.chart.invalidate();assertLayoutOwner(owner);endLayoutMutation(owner);layoutHistory.commit(historyToken);historyToken=null;sync();const historyNote=retained.historyPanels.length||retained.historyAxes.length?' 이전 패널/축은 도형 기록 때문에 유지했습니다.':retained.failedPanels.length||retained.failedAxes.length?' 일부 호스트 생성 패널/축을 아직 정리하지 못했습니다.':'';recordLayoutChange();layoutStatus(`${(group.name??group.id).toUpperCase()} 지표를 새 패널로 분리했습니다.${historyNote}`);status('지표를 새 패널로 분리했습니다.');}
+ catch(error){if(added)rollbackCreatedResource(owner,'panel',id);if(!owner.model.panels.some(panel=>panel.id===id))generatedPanelIds.delete(id);endLayoutMutation(owner);cancelLayoutRecord(historyToken,owner);layoutDraft=null;layoutAxisExplicit=false;sync();layoutStatus(friendly(error));status(friendly(error));}
 }
 function reorderPanel(direction){
  if(!layoutMutationReady())return;
  const owner=captureLayoutOwner(),selected=$('reorder-panel')?.value,order=model.panels.map(panel=>panel.id),index=order.indexOf(selected),target=index+direction,focused=document.activeElement;
  if(index<0||target<0||target>=order.length)return;
- [order[index],order[target]]=[order[target],order[index]];
- try{beginLayoutMutation(owner);const changed=owner.chart.api.setPanelOrder(order);assertLayoutOwner(owner);if(changed===false){endLayoutMutation(owner);layoutStatus('패널 순서를 변경하지 못했습니다.');return;}layoutPanels();assertLayoutOwner(owner);owner.chart.invalidate();assertLayoutOwner(owner);endLayoutMutation(owner);sync();const active=document.activeElement;if((focused===$('panel-up')||focused===$('panel-down'))&&focused.disabled&&(active===focused||active===document.body||active==null))$('reorder-panel').focus({preventScroll:true});recordLayoutChange();layoutStatus('패널 순서를 적용했습니다.');status('패널 순서를 적용했습니다.');}catch(error){endLayoutMutation(owner);sync();layoutStatus(friendly(error));status(friendly(error));}
+ [order[index],order[target]]=[order[target],order[index]];let historyToken;
+ try{
+  historyToken=layoutHistory.begin('패널 순서');beginLayoutMutation(owner);const changed=owner.chart.api.setPanelOrder(order);assertLayoutOwner(owner);
+  if(changed===false){endLayoutMutation(owner);layoutHistory.commit(historyToken);historyToken=null;return;}
+  layoutPanels();assertLayoutOwner(owner);owner.chart.invalidate();assertLayoutOwner(owner);endLayoutMutation(owner);layoutHistory.commit(historyToken);historyToken=null;sync();
+  const active=document.activeElement;if((focused===$('panel-up')||focused===$('panel-down'))&&focused.disabled&&(active===focused||active===document.body||active==null))$('reorder-panel').focus({preventScroll:true});
+  recordLayoutChange();layoutStatus('패널 순서를 적용했습니다.');status('패널 순서를 적용했습니다.');
+ }catch(error){endLayoutMutation(owner);cancelLayoutRecord(historyToken,owner);sync();layoutStatus(friendly(error));status(friendly(error));}
 }
 function clearExtraIndicators(){
  if(!layoutMutationReady())return;
  const owner=captureLayoutOwner(),priorDomains=capturePreMutationDomains(),ids=[...new Set(extras.map(extra=>extra.id).filter(id=>model.indicators?.entries?.has?.(id)))];let removed=0;
- try{beginLayoutMutation(owner);for(const id of ids){if(model.series.some(series=>series.indicator===id)){owner.chart.api.removeIndicator(id);assertLayoutOwner(owner);removed++;}}extras=[];layoutDraft=null;layoutAxisExplicit=false;const retained=cleanupGeneratedLayout(owner,priorDomains);assertLayoutOwner(owner);layoutPanels();assertLayoutOwner(owner);owner.chart.invalidate();assertLayoutOwner(owner);endLayoutMutation(owner);sync();recordLayoutChange();status(removed?(retained.historyPanels.length||retained.historyAxes.length?'추가 지표를 지웠고 도형 기록이 있는 패널/축은 유지했습니다.':retained.failedPanels.length||retained.failedAxes.length?'추가 지표를 지웠지만 일부 호스트 생성 패널/축을 아직 정리하지 못했습니다.':'추가 지표와 비어 있는 호스트 생성 패널을 지웠습니다.'):'지울 추가 지표가 없습니다.');}
+ try{beginLayoutMutation(owner);for(const id of ids){if(model.series.some(series=>series.indicator===id)){owner.chart.api.removeIndicator(id);if(model===owner.model)resetLayoutHistory(model);assertLayoutOwner(owner);removed++;}}extras=[];layoutDraft=null;layoutAxisExplicit=false;const retained=cleanupGeneratedLayout(owner,priorDomains);assertLayoutOwner(owner);layoutPanels();assertLayoutOwner(owner);owner.chart.invalidate();assertLayoutOwner(owner);endLayoutMutation(owner);sync();recordLayoutChange();status(removed?(retained.historyPanels.length||retained.historyAxes.length?'추가 지표를 지웠고 도형 기록이 있는 패널/축은 유지했습니다.':retained.failedPanels.length||retained.failedAxes.length?'추가 지표를 지웠지만 일부 호스트 생성 패널/축을 아직 정리하지 못했습니다.':'추가 지표와 비어 있는 호스트 생성 패널을 지웠습니다.'):'지울 추가 지표가 없습니다.');}
  catch(error){endLayoutMutation(owner);layoutDraft=null;layoutAxisExplicit=false;sync();status(friendly(error));}
 }
 function requireEditorReady(){if(!layoutMutationReady())throw new Error('진행 중인 입력이나 계산이 끝난 뒤 지표 설정을 변경하세요.');}
@@ -276,8 +290,36 @@ async function applyIndicatorParams(id,params){
 function applyIndicatorStyle(id,patch){requireEditorReady();const owner=captureLayoutOwner();owner.chart.api.setSeries(id,patch);assertLayoutOwner(owner);sync();recordLayoutChange();editorStatus('출력 스타일을 적용했습니다.');}
 function removeSelectedIndicator(id){
  requireEditorReady();const owner=captureLayoutOwner(),priorDomains=capturePreMutationDomains();
- try{beginLayoutMutation(owner);owner.chart.api.removeIndicator(id);assertLayoutOwner(owner);extras=extras.filter(extra=>extra.id!==id);layoutDraft=null;layoutAxisExplicit=false;cleanupGeneratedLayout(owner,priorDomains);assertLayoutOwner(owner);layoutPanels();assertLayoutOwner(owner);endLayoutMutation(owner);sync();recordLayoutChange();editorStatus('지표와 모든 출력을 제거했습니다.');}
+ try{beginLayoutMutation(owner);owner.chart.api.removeIndicator(id);if(model===owner.model)resetLayoutHistory(model);assertLayoutOwner(owner);extras=extras.filter(extra=>extra.id!==id);layoutDraft=null;layoutAxisExplicit=false;cleanupGeneratedLayout(owner,priorDomains);assertLayoutOwner(owner);layoutPanels();assertLayoutOwner(owner);endLayoutMutation(owner);sync();recordLayoutChange();editorStatus('지표와 모든 출력을 제거했습니다.');}
  catch(error){endLayoutMutation(owner);sync();throw error;}
+}
+function captureHistoryFrame(source=model){
+ if(source!==model)throw new Error('배치 기록의 차트가 바뀌었습니다.');
+ for(const id of [...generatedPanelIds])if(!source.panels.some(panel=>panel.id===id)){generatedPanelIds.delete(id);syntheticPanelRanges.delete(id);}
+ for(const id of [...generatedAxisIds])if(!source.axes.some(axis=>axis.id===id)){generatedAxisIds.delete(id);syntheticAxisRanges.delete(id);}
+ return captureLayoutFrame(source,{generatedPanelIds,generatedAxisIds,syntheticPanelRanges,syntheticAxisRanges});
+}
+function resetLayoutHistory(source=model){if(source&&source===model&&!source.disposed)layoutHistory.reset(source);}
+function cancelLayoutRecord(token,owner){
+ if(!token||model!==owner.model||model.disposed)return;
+ try{layoutHistory.cancel(token);}catch{resetLayoutHistory(model);}
+}
+function restoreHistoryFrame(frame){
+ if(!layoutMutationReady())throw new Error('진행 중인 입력이나 계산이 끝난 뒤 배치를 되돌리세요.');
+ const owner=captureLayoutOwner(),domains=capturePreMutationDomains();beginLayoutMutation(owner);
+ try{return applyLayoutFrame({api:owner.chart.api,frame,generatedPanelIds,generatedAxisIds,assertOwner:()=>assertLayoutOwner(owner),cleanup:(previous,protectedResources)=>cleanupGeneratedLayout(owner,previous,protectedResources),domains}).changed;}
+ finally{endLayoutMutation(owner);}
+}
+function navigateLayoutHistory(direction){
+ if(!layoutMutationReady())return;const owner=captureLayoutOwner(),focused=document.activeElement;
+ try{
+  const changed=layoutHistory[direction]();assertLayoutOwner(owner);if(!changed){syncIndicatorLayoutControls();layoutStatus('사용할 수 있는 배치 기록이 없습니다.');return;}
+  layoutDraft=null;layoutAxisExplicit=false;layoutPanels();assertLayoutOwner(owner);owner.chart.invalidate();assertLayoutOwner(owner);sync();recordLayoutChange();
+  const active=document.activeElement;if((focused===$('layout-undo')||focused===$('layout-redo'))&&focused.disabled&&(active===focused||active===document.body||active==null)){
+   const opposite=$(direction==='undo'?'layout-redo':'layout-undo');(opposite.disabled?$('reorder-panel'):opposite).focus({preventScroll:true});
+  }
+  layoutStatus(direction==='undo'?'이전 지표 배치로 되돌렸습니다.':'지표 배치를 다시 실행했습니다.');
+ }catch(error){sync();layoutStatus(friendly(error));}
 }
 function currentLayoutPreset(){
  if(!model||model.disposed||!loadedMarket||layoutMutationOwner)return null;
@@ -342,7 +384,7 @@ async function importLayoutFile(file){
 for(const name of builtinIndicators.keys()){const option=document.createElement('option');option.value=name;option.textContent=name.toUpperCase();$('indicator').append(option);}
 $('market').onchange=load;$('count').onchange=load;$('cancel-compute').onclick=()=>controller?.abort();$('fit').onclick=()=>chart?.api.fit();$('recent').onclick=()=>chart?.api.setVisibleRange(model.store.length-200.5,model.store.length-.5);
 $('series').onchange=()=>{if(!model||!chart||chart.disposed||preparing)return;const s=model.series.find(s=>s.id==='price'),old=s.type;try{chart.api.setSeries('price',{type:$('series').value});palette();chart.drawNow();recordLayoutChange();}catch(error){chart.api.setSeries('price',{type:old});$('series').value=old;status(friendly(error));}chart.invalidate();};
-$('scale').onchange=()=>{if(!model||!chart||chart.disposed||preparing)return;const old=model.panels.find(p=>p.id==='price').scale;try{chart.api.setPanel('price',{scale:$('scale').value});chart.drawNow();recordLayoutChange();}catch(error){chart.api.setPanel('price',{scale:old});$('scale').value=old;status(friendly(error));}chart.invalidate();};
+$('scale').onchange=()=>{if(!model||!chart||chart.disposed||preparing)return;const old=model.panels.find(p=>p.id==='price').scale;try{chart.api.setPanel('price',{scale:$('scale').value});chart.drawNow();resetLayoutHistory(model);recordLayoutChange();}catch(error){chart.api.setPanel('price',{scale:old});$('scale').value=old;status(friendly(error));}chart.invalidate();};
 $('explore').onclick=()=>{if(!chart)return;try{chart.setDataExploration(!chart.dataExploration.active);$('explore').setAttribute('aria-pressed',String(chart.dataExploration.active));chart.canvas.focus({preventScroll:true});}catch(error){status(friendly(error));}};
 $('explore-read').onclick=()=>{if(!chart)return;try{chart.readExploration();}catch(error){status(friendly(error));}};
  $('renderer').onchange=()=>{if(!model||!chart||chart.disposed||preparing)return;drawingFileImport.cancel();layoutDraft=null;layoutAxisExplicit=false;const tool=chart.controller.tool;chart.destroy();chart=createChart(chart.container,model,{renderer:$('renderer').value,dataExplorer:dataExplorer(),onError:error=>status(friendly(error))});chart.setTool(tool);chart.api.setCrosshairSnap({mode:$('crosshair-snap').value});chart.api.setDrawingMagnet({mode:$('magnet').value});chart.controller.text=$('annotation').value;chart.canvas.setAttribute('aria-describedby','keyboard-help exploration-help selection data-summary');window.aster={model,chart};chart.invalidate();sync();};
@@ -358,7 +400,7 @@ $('layout-indicator').onchange=()=>{layoutAxisExplicit=false;const group=selecte
 $('layout-panel').onchange=()=>{const group=selectedLayoutGroup(),target=$('layout-panel').value;layoutAxisExplicit=false;const axis=group&&target===group.panelId&&!group.mixedAxisOrigins?(group.axisId===null?'primary':group.axisId===undefined?'independent':'axis:'+group.axisId):'independent';if(group)setLayoutDraft(group,target,axis,true);refreshLayoutAxisChoices(axis);};
 $('layout-axis').onchange=()=>{const group=selectedLayoutGroup();layoutAxisExplicit=true;if(group)setLayoutDraft(group,$('layout-panel').value,$('layout-axis').value,true);};
 $('apply-indicator-placement').onclick=applyIndicatorPlacement;$('separate-indicator-panel').onclick=separateIndicatorPanel;$('panel-up').onclick=()=>reorderPanel(-1);$('panel-down').onclick=()=>reorderPanel(1);
-$('reorder-panel').onchange=()=>syncIndicatorLayoutControls();
+$('reorder-panel').onchange=()=>syncIndicatorLayoutControls();$('layout-undo').onclick=()=>navigateLayoutHistory('undo');$('layout-redo').onclick=()=>navigateLayoutHistory('redo');
 $('save-chart-layout').onclick=downloadLayout;$('load-chart-layout').onclick=()=>{if(layoutMutationReady())$('chart-layout-file').click();};
 $('chart-layout-file').onchange=e=>{const file=e.target.files[0];e.target.value='';void importLayoutFile(file);};
 $('remember-chart-layout').onchange=()=>{const enabled=$('remember-chart-layout').checked,saved=layoutMemory.setEnabled(enabled);$('remember-chart-layout').checked=layoutMemory.enabled;if(saved){if(enabled){recordLayoutChange();layoutMemory.flush();}else presetStatus('배치를 자동으로 기억하지 않습니다.');}};

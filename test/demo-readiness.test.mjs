@@ -9,6 +9,8 @@ import {drawingImportMessage} from '../examples/web/import-errors.mjs';
 import {createDrawingFileImport} from '../examples/web/drawing-file-import.mjs';
 import * as layoutHelpers from '../examples/web/indicator-layout.mjs';
 import * as presetHelpers from '../examples/web/demo-layout-preset.mjs';
+import * as historyHelpers from '../examples/web/layout-history.mjs';
+import {applyLayoutFrame} from '../examples/web/apply-layout-frame.mjs';
 import {createLayoutMemory} from '../examples/web/layout-memory.mjs';
 import {createIndicatorEditor} from '../examples/web/indicator-editor.mjs';
 import {safeCheckpointStringify} from '../src/core/checkpoint-validation.mjs';
@@ -25,8 +27,8 @@ function demo(t){
  const requests=[],timers=new Map();let timerSerial=0;
  const prepareChartModel=(request,options)=>new Promise((resolve,reject)=>{requests.push({request,options,resolve,reject});options.signal.addEventListener('abort',()=>reject(new DOMException('Cancelled','AbortError')),{once:true});});
  const createChart=(host,model,opts)=>{const chart=new lib.CanvasChart(host,model,{...opts,observeResize:false,layerCaching:false,dpr:()=>1,rendererFactory:()=>({kind:'canvas',render(){},dispose(){}})});env.charts.push(chart);env.models.push(model);return chart;};
- const args={...lib,...layoutHelpers,...presetHelpers,createLayoutMemory,createIndicatorEditor,safeCheckpointStringify,createChart,modelRequest,drawingImportMessage,createDrawingFileImport,prepareChartModel,matchMedia:()=>({matches:false}),setInterval:(fn,delay)=>{const id=++timerSerial;timers.set(id,{fn,delay});return id;},clearInterval:id=>timers.delete(id)};
- const body=src.replace(/^import[^\n]+\n/gm,'').replaceAll('import.meta.url',JSON.stringify(new URL('examples/web/demo.mjs',root).href)).replace('await load();','const initialLoad=load(); return {initialLoad,load,addIndicator,install,importLayoutFile,get model(){return model;},get chart(){return chart;},get preparing(){return preparing;}};');
+ const args={...lib,...layoutHelpers,...presetHelpers,...historyHelpers,applyLayoutFrame,createLayoutMemory,createIndicatorEditor,safeCheckpointStringify,createChart,modelRequest,drawingImportMessage,createDrawingFileImport,prepareChartModel,matchMedia:()=>({matches:false}),setInterval:(fn,delay)=>{const id=++timerSerial;timers.set(id,{fn,delay});return id;},clearInterval:id=>timers.delete(id)};
+ const body=src.replace(/^import[^\n]+\n/gm,'').replaceAll('import.meta.url',JSON.stringify(new URL('examples/web/demo.mjs',root).href)).replace('await load();','const initialLoad=load(); return {initialLoad,load,addIndicator,install,importLayoutFile,get layoutHistoryStatus(){return layoutHistory.status();},get model(){return model;},get chart(){return chart;},get preparing(){return preparing;}};');
  const state=Function(...Object.keys(args),body)(...Object.values(args));
 
  const complete=async (index=requests.length-1)=>{const r=requests[index],m=new lib.ChartModel(r.request.options);m.store.setColumns(lib.seededColumns(64));const api=new lib.ChartAPI(m);for(const d of r.request.options.indicators??[])api.addIndicator(d.id,d.name,d.params);for(const s of r.request.options.series??[])m.addSeries(s);r.resolve(m);await Promise.resolve();await Promise.resolve();return m;};
@@ -109,4 +111,34 @@ test('an explicit retained panel resumes autoscale when a study reuses its tempo
  assert.notEqual(f.state.model,before);assert.deepEqual(f.state.model.panels.find(panel=>panel.id==='notes').range,[40,60]);
  f.$('layout-indicator').value='rsi';f.$('layout-indicator').onchange();f.$('layout-panel').value='notes';f.$('layout-panel').onchange();f.$('layout-axis').value='primary';f.$('layout-axis').onchange();f.$('apply-indicator-placement').onclick();
  assert.equal(f.state.model.series.find(series=>series.indicator==='rsi').panel,'notes');assert.equal(f.state.model.panels.find(panel=>panel.id==='notes').range,undefined);
+});
+
+function chooseRSIOverlay(f){
+ f.$('layout-indicator').value='rsi';f.$('layout-indicator').onchange();f.$('layout-panel').value='price';f.$('layout-panel').onchange();f.$('layout-axis').value='independent';f.$('layout-axis').onchange();
+}
+
+test('nested layout handlers during a placement notification cannot append another command',async t=>{
+ const f=demo(t);await f.complete();await f.state.initialLoad;chooseRSIOverlay(f);const api=f.state.chart.api,invalidate=api.invalidate;let nested=0;
+ f.$('reorder-panel').value='volume';api.invalidate=()=>{invalidate();if(!nested++){f.$('panel-up').onclick();}};
+ f.$('apply-indicator-placement').onclick();api.invalidate=invalidate;
+ assert.ok(nested>0);assert.deepEqual(f.state.model.panels.map(panel=>panel.id),['price','volume']);assert.equal(f.state.layoutHistoryStatus.depth,1);
+ f.$('layout-undo').onclick();assert.deepEqual(f.state.model.panels.map(panel=>panel.id),['price','volume','rsi']);assert.equal(f.state.model.series.find(series=>series.indicator==='rsi').panel,'rsi');assert.equal(f.state.layoutHistoryStatus.canRedo,true);
+});
+
+test('a replacement started during placement excludes staged resources and resets history after acceptance',async t=>{
+ const f=demo(t);await f.complete();await f.state.initialLoad;chooseRSIOverlay(f);const api=f.state.chart.api,invalidate=api.invalidate;let loading;
+ api.invalidate=()=>{invalidate();if(!loading){f.$('count').value='10000';loading=f.$('count').onchange();}};
+ f.$('apply-indicator-placement').onclick();api.invalidate=invalidate;
+ assert.equal(f.requests.length,2);assert.equal(f.requests[1].request.options.axes.some(axis=>axis.id==='rsi-axis'),false);
+ const replacement=await f.complete();await loading;assert.equal(f.state.model,replacement);assert.equal(replacement.axes.length,0);assert.equal(f.state.layoutHistoryStatus.depth,0);
+ chooseRSIOverlay(f);f.$('apply-indicator-placement').onclick();assert.equal(f.state.layoutHistoryStatus.depth,1);f.$('layout-undo').onclick();assert.equal(replacement.series.find(series=>series.indicator==='rsi').panel,'rsi');
+});
+
+test('an observer error after partial layout undo rebases history and permits the next command',async t=>{
+ const f=demo(t);await f.complete();await f.state.initialLoad;chooseRSIOverlay(f);f.$('apply-indicator-placement').onclick();const model=f.state.model,api=f.state.chart.api,invalidate=api.invalidate,columns=model.store.columns;
+ api.addDrawing({id:'kept',type:'horizontal',panel:'price',points:[{time:model.store.at(0).time,price:100}]});const drawings=api.saveDrawings();let notified=false;
+ api.invalidate=()=>{invalidate();if(!notified){notified=true;throw new Error('observer failed after publication');}};
+ f.$('layout-undo').onclick();api.invalidate=invalidate;
+ assert.equal(notified,true);assert.equal(model.store.columns,columns);assert.equal(api.saveDrawings(),drawings);assert.equal(f.state.layoutHistoryStatus.depth,0);assert.match(f.$('indicator-layout-status').textContent,/observer failed/);
+ f.$('reorder-panel').value='volume';f.$('panel-up').onclick();assert.equal(f.state.layoutHistoryStatus.depth,1);f.$('layout-undo').onclick();assert.equal(model.panels[0].id,'price');assert.equal(api.saveDrawings(),drawings);
 });
