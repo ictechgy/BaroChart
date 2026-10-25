@@ -9,6 +9,8 @@ const exact = api.dataAt({time: requestedTime, match: 'exact'});
 const previous = api.dataAt({time: requestedTime, match: 'at-or-before'});
 // Explicit historical source-index cutoff:
 const limited = api.dataAt({index: 120}, {asOfIndex: 120, includeHidden: true});
+// Interactive readout: use completed caches, never start a calculation.
+const cached = api.dataAt({index: 120}, {indicatorMode: 'cached'});
 ```
 
 ## Selection and time
@@ -29,18 +31,26 @@ A non-null result includes index, stored time, effective asOfIndex, storeVersion
 
 - `stored-source`: a stored OHLCV column, restricted by source index.
 - `host-aligned`: caller-provided aligned values. Cutoff restricts their source index only; the library cannot certify how, when or using which future information they were produced.
-- `canonical-builtin`: an unmodified definition created by a canonical builtin factory, with the canonical registry binding still installed. The 33 current builtin raw outputs use current/prior source rows. Plot offsets are applied separately.
+- `canonical-builtin`: an unmodified definition created by a canonical builtin factory, with the canonical registry binding still installed. The 35 current built-in definitions use current/prior source rows. Plot offsets are applied separately.
 - `unverified-study`: custom, linked or altered definitions. With a past cutoff these return `unsupported-causality` without invoking lazy calculation. A custom module's causal declaration alone is not certification. The latest cutoff permits its current trusted output.
 
 Definition provenance is private and follows the actual definition, not its registry name. Replacing the registry factory makes an existing builtin unsupported for historical queries; restoring the original factory restores eligibility only if the original definition's create function, output schema and offsets still match. Arbitrarily changing implementation state is unsupported.
 
-Statuses are `value`, `non-finite` (NaN/warmup/Infinity mapped to null with source position retained), `outside-source`, `after-cutoff`, and `unsupported-causality`. The last three return null value/sourceIndex/sourceTime. No missing observation silently carries an earlier value.
+Statuses are `value`, `non-finite` (NaN/warmup/Infinity mapped to null with source position retained), `pending`, `unsupported-cache`, `outside-source`, `after-cutoff`, and `unsupported-causality`. `pending` and `unsupported-cache` are specific to cached queries and retain sourceIndex/sourceTime with a null value. The last three return null value/sourceIndex/sourceTime. No missing observation silently carries an earlier value.
+
+## Cached interactive reads
+
+`indicatorMode` accepts `'calculate'` (the default) or `'cached'`. Cached queries read source and aligned external values normally, but return indicator values only from a completely finished, current cache of an unmodified canonical built-in. They never invoke indicator calculation, custom study callbacks, layout building or formatters. A dirty suffix makes the whole eligible indicator pending, including earlier indices: a suspended calculation may already have rewritten part of the same checkpoint block. A pending row must be displayed as unavailable until a normal render or explicit calculation completes; it must not reuse the previous number.
+
+The existing private built-in provenance check verifies the registry factory, definition, output-key order and plot offsets. Custom, linked and altered definitions return `unsupported-cache` at the latest cutoff, including when their output bytes are warm. Use the default calculating mode for those studies. Past-cutoff custom studies still return `unsupported-causality`; source cutoffs and out-of-range mappings take precedence. Reset, append, compaction and incomplete calculations make built-in caches pending. Direct output-element writes and unsupported internal storage mutation are not tracked.
+
+Cached responses allocate bounded scalar records, not new indicator buffers. They do not change source, viewport, crosshair, drawings, calculation metadata or invalidation state. Invalid options and malformed or shared cache storage reject rather than treating them as values. TypeScript consumers with exhaustive `DataSeriesValue.status` switches must handle the additive `pending` and `unsupported-cache` cases, even if their current calls use the default mode.
 
 ## Bounds, ownership and lazy execution
 
 Visible series are included by default; includeHidden opts in to hidden rows. The model limit is 256 series and overflow is rejected, never truncated. Metadata is bounded: 128-character IDs, 256-character labels, 64-character currency/volume units, 16-character series types, plus the existing 32-panel/64-axis/128-indicator contracts. Returned records and arrays are independent of the model; no column/output buffer is exposed.
 
-This is a semantic read, not a side-effect-free computation: it does not notify, change viewport/hover, drain ingestion, alter drawings or modify the store. It may allocate or update lazy indicator caches and run trusted custom code. The existing indicator engine can calculate the entire dirty suffix, even beyond the requested cutoff. Later overflow or custom computation errors propagate; historical lookup does not truncate engine evaluation or suppress errors. A bounded response therefore does not bound CPU or indicator cache memory. Prefer warmed queries for interactive readouts and measure cold/dirty workloads separately.
+The default calculating mode is a semantic read, not a side-effect-free computation: it does not notify, change viewport/hover, drain ingestion, alter drawings or modify the store. It may allocate or update lazy indicator caches and run trusted custom code. The existing indicator engine can calculate the entire dirty suffix, even beyond the requested cutoff. Later overflow or custom computation errors propagate; historical lookup does not truncate engine evaluation or suppress errors. A bounded response therefore does not bound CPU or indicator cache memory. Use cached mode for an interactive availability read and measure exact calculation separately.
 
 Supported source/model/series/definition changes during trusted callbacks are checked before returning; mixed results fail with StaleSourceError. When a source changes during a lazy computation, a failed read resets only its still-owned in-flight entry to dirty-from-zero so the next read recomputes the revised data. Replaced/disposed entries are untouched; UI-only staleness does not force recomputation. The common IndicatorEngine now also guards direct get/calculate, scene and crosshair consumers; see [INDICATOR-REENTRY.md](INDICATOR-REENTRY.md). A simultaneous prepared worker is not committed by this read, and supported later publication is visible on subsequent calls. Ordinary reads may warm the old engine's caches while it waits. Shared stores remain owned by their hosts. Getter inputs, inherited options, shared typed buffers and missing own output keys are rejected without treating them as values. Direct column writes, arbitrary Proxy replacements and unsupported internal object mutation are outside managed consistency guarantees.
 

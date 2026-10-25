@@ -106,7 +106,7 @@ test('opening actual picker cancels old read even when no new file is selected',
  const f=handlerFixture(t),a=deferred(),p=f.importer.read(a.file),before=state(f);f.$('load').onclick();assert.equal(f.$('file').clicks,1);a.resolve();assert.equal((await p).status,'superseded');unchanged(f,before);
 });
 test('actual busy handler cancels pending read and disables Load during preparation',async t=>{
- const f=handlerFixture(t),a=deferred(),p=f.importer.read(a.file);f.context.preparing=false;f.context.indicatorEditor={sync(){}};
+ const f=handlerFixture(t),a=deferred(),p=f.importer.read(a.file);f.context.preparing=false;f.context.indicatorEditor={sync(){}};f.context.indicatorPicker={sync(){},selectedName:'ema'};f.context.pageActive=true;f.context.pageClosed=false;
  const start=demo.indexOf('function busy(value)'),end=demo.indexOf('\nfunction progress',start);vm.runInNewContext(demo.slice(start,end),f.context);f.context.busy(true);
  assert.equal(f.context.preparing,true);assert.equal(f.$('load').disabled,true);a.resolve();assert.equal((await p).status,'superseded');f.context.busy(false);assert.equal(f.$('load').disabled,false);
 });

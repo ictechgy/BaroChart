@@ -91,6 +91,67 @@ function summary(snapshot){
  return {identity:snapshot.identity,storeLength:snapshot.storeLength,storeVersion:snapshot.storeVersion,outputBuffers:Object.fromEntries(Object.entries(snapshot.outputs).map(([id,outputs])=>[id,Object.fromEntries(Object.entries(outputs).map(([name,meta])=>[name,meta.buffer]))])),panels:snapshot.panels.map(panel=>panel.id),axes:snapshot.axes.map(axis=>({id:axis.id,panel:axis.panel})),series:snapshot.series.map(series=>({id:series.id,indicator:series.indicator,panel:series.panel,axisId:series.axisId,output:series.output})),drawings:snapshot.drawings,undo:snapshot.undo,redo:snapshot.redo,view:snapshot.view,scenePanels:snapshot.scenePanels};
 }
 
+async function probeReadoutHover(){
+ const {IndicatorEngine}=await import('/src/core/indicators.mjs'),{model,chart}=window.aster;
+ const needed=Math.max(0,32-model.indicators.entries.size);
+ for(let i=0;i<needed;i++){chart.api.addIndicator('readout-'+i,'ema',{period:20+i});chart.api.addSeries({id:'readout-'+i,label:'EMA '+(20+i),type:'line',panel:'price',indicator:'readout-'+i,color:'#aa91f7'});}
+ chart.drawNow();await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+ const root=document.getElementById('chart-readout'),nodes=[...root.querySelectorAll('[data-readout-series]')],source={columns:model.store.columns,version:model.store.version,view:JSON.stringify(model.view),drawings:model.drawings.items},outputs=[...model.indicators.entries.values()].map(entry=>entry.arrays);
+ const originalGet=IndicatorEngine.prototype.get,originalRead=chart.api.dataAt,queryMs=[];let getCalls=0,queries=0,baseRedraws=0,renders=0;
+ IndicatorEngine.prototype.get=function(){getCalls++;throw new Error('Hover readout attempted lazy calculation');};
+ chart.api.dataAt=function(query,options){const start=performance.now(),result=originalRead.call(this,query,options);if(options?.indicatorMode==='cached'){queries++;queryMs.push(performance.now()-start);}return result;};
+ try{
+  for(let i=0;i<300;i++){
+   const layout=chart.timeLayout?.layout,panel=layout?.panels[0],rect=chart.canvas.getBoundingClientRect(),index=model.store.length-180+i%160;
+   if(!panel)throw new Error('Prepared hover layout missing');
+   await new Promise((resolve,reject)=>{
+    const timer=setTimeout(()=>{chart.canvas.removeEventListener('aster:render',done);reject(new Error('Hover frame timed out'));},2000);
+    const done=()=>{clearTimeout(timer);renders++;if(chart.renderMetrics?.baseRedrawn)baseRedraws++;queueMicrotask(resolve);};
+    chart.canvas.addEventListener('aster:render',done,{once:true});
+    chart.canvas.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,pointerId:1,pointerType:'mouse',clientX:rect.left+layout.x(index),clientY:rect.top+(panel.top+panel.bottom)/2}));
+   });
+  }
+ }finally{IndicatorEngine.prototype.get=originalGet;chart.api.dataAt=originalRead;}
+ const sorted=queryMs.sort((a,b)=>a-b),percentile=fraction=>sorted[Math.floor((sorted.length-1)*fraction)];
+ return {storedBars:model.store.length,studies:model.indicators.entries.size,renders,queries,getCalls,baseRedraws,queryMs:{p50:percentile(.5),p95:percentile(.95),p99:percentile(.99)},stableRows:nodes.length===root.querySelectorAll('[data-readout-series]').length&&nodes.every(node=>node.parentNode&&root.contains(node)),preserved:model.store.columns===source.columns&&model.store.version===source.version&&JSON.stringify(model.view)===source.view&&model.drawings.items===source.drawings&&[...model.indicators.entries.values()].every((entry,i)=>entry.arrays===outputs[i]),error:chart.lastError?String(chart.lastError.message):null};
+}
+
+async function runAnalysisReadoutChecks(browser,origin){
+ await browser.navigate(origin+routePath);await waitReady(browser,'analysis readout initial model');
+ check(await browser.evaluate(`document.getElementById('indicator').options.length===35&&document.getElementById('chart-readout').getAttribute('aria-live')==='off'`),'indicator search covers all builtins and hover readout does not announce every update');
+ check(await browser.evaluate(`(()=>{const a=window.aster,root=document.getElementById('chart-readout'),value=root.querySelector('[data-readout-value="close"]');return root.textContent.includes('최신 봉')&&value.title==='원본 값 '+a.model.store.at(a.model.store.length-1).close&&root.querySelector('[data-readout-series="rsi"]')?.getAttribute('data-readout-status')==='value';})()`),'prepared models immediately expose exact latest OHLC and study values');
+ const search=async value=>{await browser.evaluate(`(()=>{const input=document.getElementById('indicator-search');input.value=${JSON.stringify(value)};input.dispatchEvent(new Event('input',{bubbles:true}));})()`);};
+ await search('bands bollinger');check(await browser.evaluate(`document.getElementById('indicator').value==='bollinger'&&document.getElementById('indicator').options.length===1`),'multiword indicator search matches reordered English tokens');
+ await search('볼린저');check(await browser.evaluate(`document.getElementById('indicator').value==='bollinger'`),'indicator search supports Korean names');
+ await search('not-a-study');check(await browser.evaluate(`document.getElementById('add-indicator').disabled&&document.getElementById('indicator').options.length===0&&document.getElementById('indicator-search-summary').textContent.includes('없습니다')`),'empty search clearly disables Add');
+ await browser.evaluate(`document.getElementById('indicator-search').focus()`);
+ for(const type of ['keyDown','keyUp'])await browser.send('Input.dispatchKeyEvent',{type,key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+ check(await browser.evaluate(`document.activeElement.id==='indicator-search'&&document.getElementById('indicator-search').value===''&&document.getElementById('indicator').options.length===35&&!document.getElementById('add-indicator').disabled`),'native Escape clears the query and preserves input focus');
+ await setSelect(browser,'indicator-category',['volume']);check(await browser.evaluate(`document.getElementById('indicator').options.length>0&&[...document.getElementById('indicator').options].every(option=>/거래량|자금|누적|차이킨/u.test(option.textContent))`),'category filtering keeps native indicator selection usable');
+ await setSelect(browser,'indicator-category',['']);await search('macd');await click(browser,'add-indicator');await waitReady(browser,'searched MACD preparation');
+ check(await browser.evaluate(`(()=>{const a=window.aster,id=[...a.model.indicators.entries].find(([,entry])=>entry.name==='macd')?.[0];return !!id&&a.model.series.filter(series=>series.indicator===id).every(series=>document.querySelector('[data-readout-series="'+series.id+'"]')?.getAttribute('data-readout-status')==='value');})()`),'a searched multioutput study appears in the live readout after worker preparation');
+ await browser.evaluate(`window.aster.chart.canvas.scrollIntoView({block:'center'})`);await browser.evaluate(`(${frame})()`);
+ const point=await browser.evaluate(`(()=>{const {model,chart}=window.aster,layout=chart.timeLayout.layout,panel=layout.panels[0],rect=chart.canvas.getBoundingClientRect(),index=model.store.length-80;return{x:rect.left+layout.x(index),y:rect.top+(panel.top+panel.bottom)/2,index};})()`);
+ await browser.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:point.x,y:point.y});await browser.evaluate(`(${frame})()`);
+ check(await browser.evaluate(`(()=>{const root=document.getElementById('chart-readout');return root.querySelector('[data-readout-label]').textContent==='십자선'&&root.querySelector('[data-readout-value="close"]').title==='원본 값 '+window.aster.model.store.at(${point.index}).close;})()`),'trusted browser pointer input selects the actual stored bar in the readout');
+ await click(browser,'explore');await browser.evaluate('window.aster.chart.canvas.focus()');
+ for(const type of ['keyDown','keyUp'])await browser.send('Input.dispatchKeyEvent',{type,key:'Home',code:'Home',windowsVirtualKeyCode:36});
+ check(await browser.evaluate(`(()=>{const root=document.getElementById('chart-readout');return root.querySelector('[data-readout-label]').textContent==='키보드 선택'&&root.querySelector('[data-readout-value="close"]').title==='원본 값 '+window.aster.model.store.at(0).close;})()`),'keyboard stored-time selection takes priority over the pointer');
+ for(const type of ['keyDown','keyUp'])await browser.send('Input.dispatchKeyEvent',{type,key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+ await browser.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:1,y:1});await browser.evaluate(`(${frame})()`);
+ check(await browser.evaluate(`document.querySelector('[data-readout-label]').textContent==='최신 봉'`),'pointer leave restores the latest-bar readout');
+ await setSelect(browser,'renderer',['webgl2']);
+ const contextLoss=await browser.evaluate(`(()=>{const chart=window.aster.chart,extension=chart.renderer?.gl?.getExtension('WEBGL_lose_context');window.__readoutPreviousCanvas=chart.canvas;if(!extension){chart.fallback('Readout regression without WebGL extension');return false;}extension.loseContext();return true;})()`);
+ await waitFor(browser,`window.aster.chart.rendererKind==='canvas'&&window.aster.chart.canvas!==window.__readoutPreviousCanvas`,{timeout:5000,label:'readout canvas fallback'});
+ const fallback=await browser.evaluate(`(()=>{const {model,chart}=window.aster,last=model.store.at(model.store.length-1);chart.api.applyDataEvent({kind:'update',bar:{...last,close:last.high}});return{replaced:window.__readoutPreviousCanvas!==chart.canvas,close:last.high};})()`);await browser.evaluate(`(${frame})()`);
+ check(fallback.replaced&&await browser.evaluate(`document.querySelector('[data-readout-value="close"]').title==='원본 값 '+${fallback.close}`),contextLoss?'readout stays current after actual WebGL context loss replaces the canvas':'readout stays current after explicit canvas fallback (WebGL extension unavailable)');
+ const hover=await browser.evaluate(`(${probeReadoutHover.toString()})()`,{timeout:30000,label:'300 cached readout hover frames'});
+ check(hover.renders===300&&hover.queries===300&&hover.getCalls===0&&hover.baseRedraws===0&&!hover.error,'300 hover frames reuse the prepared scene and perform zero lazy study calculations');
+ check(hover.stableRows&&hover.preserved,'continuous readouts preserve keyed rows, buffers, source, drawings and viewport');
+ await click(browser,'forget-chart-layout');
+ return {...hover,webglContextLossExecuted:contextLoss};
+}
+
 async function runLayoutChecks(browser,origin){
  await browser.navigate(origin+routePath);
  const initial=await waitFor(browser,`(()=>{const count=document.getElementById('count');return !!window.aster||count?.value==='100000';})()`,{timeout:60000,label:'initial asynchronous demo bootstrap'});
@@ -408,7 +469,7 @@ async function runResponsiveChecks(browser,origin){
   const result=await browser.evaluate(`(()=>{const root=document.documentElement,section=document.getElementById('indicator-layout-section'),status=document.getElementById('indicator-layout-status');const controls=['layout-indicator','layout-panel','layout-axis','apply-indicator-placement','separate-indicator-panel','reorder-panel','panel-up','panel-down','layout-undo','layout-redo'].map(id=>document.getElementById(id));return {width:innerWidth,height:innerHeight,scrollWidth:root.scrollWidth,section:!!section,controls:controls.map(n=>({id:n?.id,disabled:n?.disabled,text:n?.textContent?.trim()})),status:status?.getBoundingClientRect().height??0,readable:controls.every(n=>n&&n.getBoundingClientRect().width>24&&n.getBoundingClientRect().height>20)};})()`);
   check(result.scrollWidth<=width+1,`indicator layout ${width}x${height} has no horizontal overflow`);
   check(result.section&&result.readable,`indicator layout ${width}x${height} keeps readable controls`);
-  const editor=await browser.evaluate(`(()=>{const controls=['save-chart-layout','load-chart-layout','editor-indicator','editor-param-period','editor-apply-params','editor-output','editor-color','editor-width','editor-apply-style','editor-remove'].map(id=>document.getElementById(id));return{readable:controls.every(n=>n&&!n.disabled&&n.getBoundingClientRect().width>24&&n.getBoundingClientRect().height>20),touchTargets:['remember-chart-layout','editor-visible'].every(id=>document.getElementById(id)?.closest('label')?.getBoundingClientRect().height>=44)}})()`);
+  const editor=await browser.evaluate(`(()=>{const controls=['save-chart-layout','load-chart-layout','editor-indicator','editor-param-period','editor-apply-params','editor-output','editor-color','editor-width','editor-apply-style','editor-remove','indicator-search','indicator-category','indicator','add-indicator','clear-indicators'].map(id=>document.getElementById(id));return{readable:controls.every(n=>n&&!n.disabled&&n.getBoundingClientRect().width>24&&n.getBoundingClientRect().height>20),touchTargets:['remember-chart-layout','editor-visible'].every(id=>document.getElementById(id)?.closest('label')?.getBoundingClientRect().height>=44)}})()`);
   check(editor.readable,`indicator editor and preset actions remain readable at ${width}x${height}`);
   if(width<=390)check(editor.touchTargets,`checkbox labels provide touch targets at ${width}x${height}`);
   results.push(result);
@@ -419,8 +480,8 @@ async function runResponsiveChecks(browser,origin){
 const port=await availablePort();let server;let browser;const startedAt=Date.now();let browserInfo={};
 try{
  server=await startServer(port);browser=await launchBrowser({width:1280,height:900,dpr:1});browserInfo=await browser.send('Browser.getVersion',{},null);
- const behavior=await runLayoutChecks(browser,server.origin);const retainedRanges=await runRetainedRangeChecks(browser);const accessibility=await runThemeAndFocusChecks(browser);const history=await runLayoutHistoryChecks(browser,server.origin);const editing=await runEditorPersistenceChecks(browser,server.origin);const responsive=await runResponsiveChecks(browser,server.origin);
- const result={status:'passed',checks:checks.length,behavior,retainedRanges,accessibility,history,editing,responsive,environment:{node:process.version,chromeOverride:Boolean(process.env.CHROME_BIN),browserProduct:browserInfo.product??'unknown',route:routePath,durationMs:Date.now()-startedAt}};
+ const analysis=await runAnalysisReadoutChecks(browser,server.origin);const behavior=await runLayoutChecks(browser,server.origin);const retainedRanges=await runRetainedRangeChecks(browser);const accessibility=await runThemeAndFocusChecks(browser);const history=await runLayoutHistoryChecks(browser,server.origin);const editing=await runEditorPersistenceChecks(browser,server.origin);const responsive=await runResponsiveChecks(browser,server.origin);
+ const result={status:'passed',checks:checks.length,analysis,behavior,retainedRanges,accessibility,history,editing,responsive,environment:{node:process.version,chromeOverride:Boolean(process.env.CHROME_BIN),browserProduct:browserInfo.product??'unknown',route:routePath,durationMs:Date.now()-startedAt}};
  if(artifact){await mkdir(resolve(artifact,'..'),{recursive:true});await writeFile(artifact,JSON.stringify(result,null,2));}
  console.log(JSON.stringify(result));
 }catch(error){const result={status:'failed',checks:checks.length,error:String(error?.message??error),environment:{node:process.version,chromeOverride:Boolean(process.env.CHROME_BIN),browserProduct:browserInfo.product??'unknown',route:routePath,durationMs:Date.now()-startedAt}};if(artifact){await mkdir(resolve(artifact,'..'),{recursive:true});await writeFile(artifact,JSON.stringify(result,null,2));}throw error;

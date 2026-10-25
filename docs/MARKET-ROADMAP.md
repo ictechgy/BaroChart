@@ -53,3 +53,9 @@ General multi-chart/alert editing, free docking and shortcut remapping are not
 part of these initial slices. Per-feature documentation records completed APIs,
 regressions and the exact verification limits; this list is not a claim that all
 items already exist.
+
+## Interactive analysis and competitive acceptance
+
+Implemented: [searchable study discovery and a cached live value readout](INTERACTIVE-ANALYSIS.md) in the main demo. Pointer updates reuse a prepared layout and completed study caches; an unfinished cache is explicitly pending. The same contract is available through `dataAt(..., {indicatorMode: 'cached'})` for host-owned interfaces.
+
+Further improvement is tracked as concrete workflow/runtime gates: integrate the existing drawing manager, compose saved linked-chart analysis, verify real framework/native runtimes, and run matched accessible-product benchmarks. The [interactive analysis contract](INTERACTIVE-ANALYSIS.md#competitive-quality-gates) records scope and comparison requirements. The presence of these features is not evidence of overall TradingView/SciChart parity or superiority.
