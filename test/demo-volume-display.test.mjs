@@ -11,7 +11,7 @@ const sync=new Function('context','with(context){return ('+source.slice(start,en
 function fixture(t){
  const model=new ChartModel(),api=new ChartAPI(model),nodes=new Map(),$=id=>{if(!nodes.has(id))nodes.set(id,{setAttribute(){}});return nodes.get(id);};
  const chart={controller:{tool:'select'},canvas:{style:{}}};
- t.after(()=>model.dispose());return {model,api,$,run:()=>sync({model,chart,$,setText:(id,value)=>$(id).textContent=value,formatPrice})};
+ t.after(()=>model.dispose());return {model,api,$,run:()=>sync({model,chart,$,indicatorEditor:{sync(){}},setText:(id,value)=>$(id).textContent=value,formatPrice})};
 }
 for(const market of ['kr','us','crypto'])test(`actual ${market} summary keeps stored volume distinguishable from zero and round-trippable`,t=>{
  const f=fixture(t);f.api.setSymbol(DEMO_SYMBOLS[market]);

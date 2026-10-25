@@ -106,13 +106,13 @@ test('opening actual picker cancels old read even when no new file is selected',
  const f=handlerFixture(t),a=deferred(),p=f.importer.read(a.file),before=state(f);f.$('load').onclick();assert.equal(f.$('file').clicks,1);a.resolve();assert.equal((await p).status,'superseded');unchanged(f,before);
 });
 test('actual busy handler cancels pending read and disables Load during preparation',async t=>{
- const f=handlerFixture(t),a=deferred(),p=f.importer.read(a.file);f.context.preparing=false;
+ const f=handlerFixture(t),a=deferred(),p=f.importer.read(a.file);f.context.preparing=false;f.context.indicatorEditor={sync(){}};
  const start=demo.indexOf('function busy(value)'),end=demo.indexOf('\nfunction progress',start);vm.runInNewContext(demo.slice(start,end),f.context);f.context.busy(true);
  assert.equal(f.context.preparing,true);assert.equal(f.$('load').disabled,true);a.resolve();assert.equal((await p).status,'superseded');f.context.busy(false);assert.equal(f.$('load').disabled,false);
 });
 test('install, renderer recreation and persisted pagehide are wired to invalidate reads',()=>{
- assert.match(demo,/function install\([^]*?\{drawingFileImport\.cancel\(\);/);
+ assert.match(demo,/function install\([^]*?\{\s*drawingFileImport\.cancel\(\);/);
  assert.match(demo,/\$\('renderer'\)\.onchange=\(\)=>\{if\(!model\|\|!chart\|\|chart\.disposed\|\|preparing\)return;drawingFileImport\.cancel\(\);/);
- assert.match(demo,/addEventListener\('pagehide',e=>\{drawingFileImport\.cancel\(\);/);
+ assert.match(demo,/addEventListener\('pagehide',e=>\{\s*drawingFileImport\.cancel\(\);/);
  assert.match(demo,/getChart:\(\)=>preparing\?null:chart/);
 });

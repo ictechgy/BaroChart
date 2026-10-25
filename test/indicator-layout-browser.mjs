@@ -297,6 +297,61 @@ async function runThemeAndFocusChecks(browser){
  return {palette,top,bottom};
 }
 
+async function runEditorPersistenceChecks(browser,origin){
+ await setSelect(browser,'indicator',['macd']);await click(browser,'add-indicator');await waitReady(browser,'saved MACD ready');
+ const savedExtra=await browser.evaluate(`(()=>{const m=window.aster.model,[id]=[...m.indicators.entries].find(([,entry])=>entry.name==='macd');return{id,panel:m.series.find(s=>s.indicator===id).panel}})()`);
+ await setSelect(browser,'editor-indicator',['rsi']);
+ const before=await browser.evaluate(`(()=>{const {model:m,chart:c}=window.aster;window.__editorOwners={model:m,store:m.store,drawings:m.drawings,items:m.drawings.items,ema:m.indicators.entries.get('ema')};return{params:m.indicators.entries.get('rsi').params,source:m.store.at(m.store.length-1),length:m.store.length};})()`);
+ await browser.evaluate(`(()=>{const n=document.getElementById('editor-param-period');n.value='7';n.dispatchEvent(new Event('input',{bubbles:true}));window.aster.chart.invalidate();})()`);await browser.evaluate(`(${frame})()`);
+ check(await browser.evaluate(`document.getElementById('editor-param-period').value==='7'`),'indicator parameter draft survives chart rendering');
+ await browser.evaluate(`document.getElementById('editor-apply-params').focus()`);await click(browser,'editor-apply-params');await waitReady(browser,'parameter worker complete');
+ check(await browser.evaluate(`(()=>{const m=window.aster.model,r=window.__editorOwners;return m.indicators.entries.get('rsi').params.period===7&&m===r.model&&m.store===r.store&&m.drawings===r.drawings&&m.drawings.items===r.items&&m.indicators.entries.get('ema')===r.ema})()`),'background parameter editing preserves chart source, other indicators and drawings');
+ check(await browser.evaluate(`document.activeElement.id==='editor-apply-params'`),'parameter application returns focus to the enabled action after computation');
+ await browser.evaluate(`(()=>{const n=document.getElementById('editor-color');n.value='#cc3366';n.dispatchEvent(new Event('input',{bubbles:true}));const w=document.getElementById('editor-width');w.value='3';w.dispatchEvent(new Event('input',{bubbles:true}));const v=document.getElementById('editor-visible');v.checked=false;v.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+ await click(browser,'editor-apply-style');
+ check(await browser.evaluate(`window.aster.model.series.filter(s=>s.indicator==='rsi').every(s=>s.color.startsWith('#cc3366')&&s.width===3&&s.visible===false)`),'individual indicator output color, width and visibility are applied');
+ const saved=await browser.evaluate(`(async()=>{let blob;const original=URL.createObjectURL,click=HTMLAnchorElement.prototype.click;URL.createObjectURL=value=>{blob=value;return original(value)};HTMLAnchorElement.prototype.click=function(){};try{document.getElementById('save-chart-layout').click();return blob?await blob.text():null;}finally{URL.createObjectURL=original;HTMLAnchorElement.prototype.click=click}})()`);
+ check(typeof saved==='string'&&JSON.parse(saved).schema==='barochart.main-demo-layout','layout file download contains a versioned layout preset');
+ await browser.evaluate(`(()=>{const n=document.getElementById('editor-param-period');n.value='11';n.dispatchEvent(new Event('input',{bubbles:true}));document.getElementById('editor-apply-params').focus();window.aster.chart.container.addEventListener('aster:state',()=>document.getElementById('theme').focus(),{once:true});})()`);await click(browser,'editor-apply-params');await waitReady(browser,'second parameter worker complete');
+ check(await browser.evaluate(`document.activeElement.id==='theme'`),'parameter completion preserves a newer external focus choice');
+ const importFile=async(text,name='chart-layout.json')=>{await browser.evaluate(`(()=>{const input=document.getElementById('chart-layout-file'),data=new DataTransfer();data.items.add(new File([${JSON.stringify(text)}],${JSON.stringify(name)},{type:'application/json'}));input.files=data.files;input.dispatchEvent(new Event('change',{bubbles:true}));})()`);await waitReady(browser,'layout file preparation');};
+ await waitFor(browser,`(()=>{const text=localStorage.getItem('barochart.main-demo.layout.v1');return text&&JSON.parse(text).preset?.layout.indicators.find(i=>i.id==='rsi')?.params.period===11})()`,{timeout:5000,label:'committed layout saved before stream'});
+ const streamVersion=await browser.evaluate(`(()=>{window.__savedStorageSet=Storage.prototype.setItem;window.__streamLayoutWrites=0;Storage.prototype.setItem=function(key,value){if(key==='barochart.main-demo.layout.v1')window.__streamLayoutWrites++;return window.__savedStorageSet.call(this,key,value)};return window.aster.model.store.version})()`);
+ await click(browser,'stream');await waitFor(browser,`window.aster.model.store.version>${streamVersion}`,{timeout:5000,label:'source update before layout import'});await click(browser,'stream');
+ await browser.evaluate(`new Promise(resolve=>setTimeout(resolve,500))`);
+ const streamWrites=await browser.evaluate(`(()=>{Storage.prototype.setItem=window.__savedStorageSet;return window.__streamLayoutWrites})()`);
+ check(streamWrites===0,'stream updates and resulting renders do not write layout storage');
+ const sourceBeforeImport=await browser.evaluate(`(()=>{const m=window.aster.model;window.__presetDrawingStore=m.drawings;return{length:m.store.length,first:m.store.at(0),last:m.store.at(m.store.length-1),view:{...m.view},follow:m.follow,undo:m.drawings.undoStack.length};})()`);
+ await importFile(saved);
+ const restored=await browser.evaluate(`(()=>{const m=window.aster.model;return{params:m.indicators.entries.get('rsi').params,length:m.store.length,first:m.store.at(0),last:m.store.at(m.store.length-1),view:{...m.view},follow:m.follow,undo:m.drawings.undoStack.length,sameDrawings:m.drawings===window.__presetDrawingStore};})()`);
+ check(restored.params.period===7&&restored.sameDrawings&&restored.undo===sourceBeforeImport.undo,'layout file restore applies settings while retaining the actual drawing history');
+ check(restored.length===sourceBeforeImport.length&&JSON.stringify(restored.first)===JSON.stringify(sourceBeforeImport.first)&&JSON.stringify(restored.last)===JSON.stringify(sourceBeforeImport.last)&&JSON.stringify(restored.view)===JSON.stringify(sourceBeforeImport.view)&&restored.follow===sourceBeforeImport.follow,'layout import preserves the current source and viewport');
+ await browser.evaluate(`window.__validLayoutModel=window.aster.model`);await importFile('{"schema":"invalid"}');
+ check(await browser.evaluate(`window.aster.model===window.__validLayoutModel&&window.aster.model.indicators.entries.get('rsi').params.period===7`),'an invalid layout file leaves the accepted chart unchanged');
+ const explicit=JSON.parse(saved);explicit.layout.panels.push({id:'notes',label:'메모 패널',weight:1,range:[0,100]});explicit.layout.axes.push({id:'notes-axis',panel:'notes',side:'right',range:[-1,1]});await importFile(JSON.stringify(explicit));
+ const explicitExport=await browser.evaluate(`(async()=>{let blob;const original=URL.createObjectURL,click=HTMLAnchorElement.prototype.click;URL.createObjectURL=value=>{blob=value;return original(value)};HTMLAnchorElement.prototype.click=function(){};try{document.getElementById('save-chart-layout').click();return JSON.parse(await blob.text());}finally{URL.createObjectURL=original;HTMLAnchorElement.prototype.click=click}})()`);
+ check(explicitExport.layout.panels.some(p=>p.id==='notes')&&explicitExport.layout.axes.some(a=>a.id==='notes-axis'),'explicit empty preset panels and axes survive immediate export');
+ await setSelect(browser,'editor-indicator',['rsi']);
+ await browser.evaluate(`(()=>{const n=document.getElementById('editor-param-period');n.value='8';n.dispatchEvent(new Event('input',{bubbles:true}));})()`);await click(browser,'editor-apply-params');await waitReady(browser,'remembered parameter worker complete');
+ await waitFor(browser,`(()=>{const text=localStorage.getItem('barochart.main-demo.layout.v1');return text&&JSON.parse(text).preset?.layout.indicators.find(i=>i.id==='rsi')?.params.period===8})()`,{timeout:5000,label:'layout remembered'});
+ await browser.navigate(origin+routePath);await waitReady(browser,'remembered layout on refresh');
+ check(await browser.evaluate(`window.aster.model.indicators.entries.get('rsi').params.period===8&&window.aster.model.series.filter(s=>s.indicator==='rsi').every(s=>s.color.startsWith('#cc3366')&&s.width===3&&s.visible===false)`),'refresh restores remembered indicator parameters and styles');
+ check(await browser.evaluate(`window.aster.model.panels.some(p=>p.id==='notes')&&window.aster.model.axes.some(a=>a.id==='notes-axis')`),'refresh preserves explicit empty resources');
+ const existingIds=await browser.evaluate(`Array.from(window.aster.model.indicators.entries.keys())`);
+ await setSelect(browser,'indicator',['macd']);await click(browser,'add-indicator');await waitReady(browser,'additional restored-study model ready');
+ const addedIds=await browser.evaluate(`Array.from(window.aster.model.indicators.entries.keys())`);
+ check(addedIds.length===existingIds.length+1&&existingIds.every(id=>addedIds.includes(id)),'adding a study after restore does not collide with restored identifiers');
+ await click(browser,'clear-indicators');
+ check(await browser.evaluate(`!window.aster.model.panels.some(p=>p.id===${JSON.stringify(savedExtra.panel)})&&window.aster.model.panels.some(p=>p.id==='notes')&&window.aster.model.axes.some(a=>a.id==='notes-axis')`),'cleanup after restore removes generated empty resources and retains explicit ones');
+ await setSelect(browser,'editor-indicator',['rsi']);await click(browser,'editor-remove');
+ check(await browser.evaluate(`!window.aster.model.indicators.entries.has('rsi')&&window.aster.model.series.every(s=>s.indicator!=='rsi')&&window.aster.model.indicators.entries.has('ema')`),'individual removal deletes only the selected study and its outputs');
+ const storageFailure=await browser.evaluate(`(()=>{const original=Storage.prototype.setItem,before=localStorage.getItem('barochart.main-demo.layout.v1');Storage.prototype.setItem=function(){throw new DOMException('Denied','QuotaExceededError')};try{const checkbox=document.getElementById('remember-chart-layout');checkbox.checked=false;checkbox.dispatchEvent(new Event('change',{bubbles:true}));const toggle=checkbox.checked&&localStorage.getItem('barochart.main-demo.layout.v1')===before;document.getElementById('forget-chart-layout').click();return{toggle,clear:checkbox.checked&&localStorage.getItem('barochart.main-demo.layout.v1')===before}}finally{Storage.prototype.setItem=original}})()`);
+ check(storageFailure.toggle&&storageFailure.clear,'failed storage preferences preserve the saved record and restore the checked control');
+ await click(browser,'forget-chart-layout');await browser.navigate(origin+routePath);await waitReady(browser,'default chart after forgetting layout');
+ check(await browser.evaluate(`window.aster.model.indicators.entries.has('rsi')&&!document.getElementById('remember-chart-layout').checked`),'forgetting saved layout persists opt-out and restores the default chart on refresh');
+ return {sourceLength:before.length,restoredParameters:restored.params};
+}
+
 async function runResponsiveChecks(browser,origin){
  const results=[];
  for(const [width,height] of [[320,568],[390,844],[1280,900]]){
@@ -305,6 +360,9 @@ async function runResponsiveChecks(browser,origin){
   const result=await browser.evaluate(`(()=>{const root=document.documentElement,section=document.getElementById('indicator-layout-section'),status=document.getElementById('indicator-layout-status');const controls=['layout-indicator','layout-panel','layout-axis','apply-indicator-placement','separate-indicator-panel','reorder-panel','panel-up','panel-down'].map(id=>document.getElementById(id));return {width:innerWidth,height:innerHeight,scrollWidth:root.scrollWidth,section:!!section,controls:controls.map(n=>({id:n?.id,disabled:n?.disabled,text:n?.textContent?.trim()})),status:status?.getBoundingClientRect().height??0,readable:controls.every(n=>n&&n.getBoundingClientRect().width>24&&n.getBoundingClientRect().height>20)};})()`);
   check(result.scrollWidth<=width+1,`indicator layout ${width}x${height} has no horizontal overflow`);
   check(result.section&&result.readable,`indicator layout ${width}x${height} keeps readable controls`);
+  const editor=await browser.evaluate(`(()=>{const controls=['save-chart-layout','load-chart-layout','editor-indicator','editor-param-period','editor-apply-params','editor-output','editor-color','editor-width','editor-apply-style','editor-remove'].map(id=>document.getElementById(id));return{readable:controls.every(n=>n&&!n.disabled&&n.getBoundingClientRect().width>24&&n.getBoundingClientRect().height>20),touchTargets:['remember-chart-layout','editor-visible'].every(id=>document.getElementById(id)?.closest('label')?.getBoundingClientRect().height>=44)}})()`);
+  check(editor.readable,`indicator editor and preset actions remain readable at ${width}x${height}`);
+  if(width<=390)check(editor.touchTargets,`checkbox labels provide touch targets at ${width}x${height}`);
   results.push(result);
  }
  return results;
@@ -313,8 +371,8 @@ async function runResponsiveChecks(browser,origin){
 const port=await availablePort();let server;let browser;const startedAt=Date.now();let browserInfo={};
 try{
  server=await startServer(port);browser=await launchBrowser({width:1280,height:900,dpr:1});browserInfo=await browser.send('Browser.getVersion',{},null);
- const behavior=await runLayoutChecks(browser,server.origin);const retainedRanges=await runRetainedRangeChecks(browser);const accessibility=await runThemeAndFocusChecks(browser);const responsive=await runResponsiveChecks(browser,server.origin);
- const result={status:'passed',checks:checks.length,behavior,retainedRanges,accessibility,responsive,environment:{node:process.version,chromeOverride:Boolean(process.env.CHROME_BIN),browserProduct:browserInfo.product??'unknown',route:routePath,durationMs:Date.now()-startedAt}};
+ const behavior=await runLayoutChecks(browser,server.origin);const retainedRanges=await runRetainedRangeChecks(browser);const accessibility=await runThemeAndFocusChecks(browser);const editing=await runEditorPersistenceChecks(browser,server.origin);const responsive=await runResponsiveChecks(browser,server.origin);
+ const result={status:'passed',checks:checks.length,behavior,retainedRanges,accessibility,editing,responsive,environment:{node:process.version,chromeOverride:Boolean(process.env.CHROME_BIN),browserProduct:browserInfo.product??'unknown',route:routePath,durationMs:Date.now()-startedAt}};
  if(artifact){await mkdir(resolve(artifact,'..'),{recursive:true});await writeFile(artifact,JSON.stringify(result,null,2));}
  console.log(JSON.stringify(result));
 }catch(error){const result={status:'failed',checks:checks.length,error:String(error?.message??error),environment:{node:process.version,chromeOverride:Boolean(process.env.CHROME_BIN),browserProduct:browserInfo.product??'unknown',route:routePath,durationMs:Date.now()-startedAt}};if(artifact){await mkdir(resolve(artifact,'..'),{recursive:true});await writeFile(artifact,JSON.stringify(result,null,2));}throw error;
