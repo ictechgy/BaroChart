@@ -13,6 +13,8 @@ import * as historyHelpers from '../examples/web/layout-history.mjs';
 import {applyLayoutFrame} from '../examples/web/apply-layout-frame.mjs';
 import {createLayoutMemory} from '../examples/web/layout-memory.mjs';
 import {createIndicatorEditor} from '../examples/web/indicator-editor.mjs';
+import {createIndicatorPicker} from '../examples/web/indicator-picker.mjs';
+import {createLiveReadout} from '../examples/web/live-readout.mjs';
 import {safeCheckpointStringify} from '../src/core/checkpoint-validation.mjs';
 import {fixture,event,key} from './helpers/customization-dom.mjs';
 const root=new URL('../',import.meta.url);
@@ -27,7 +29,7 @@ function demo(t){
  const requests=[],timers=new Map();let timerSerial=0;
  const prepareChartModel=(request,options)=>new Promise((resolve,reject)=>{requests.push({request,options,resolve,reject});options.signal.addEventListener('abort',()=>reject(new DOMException('Cancelled','AbortError')),{once:true});});
  const createChart=(host,model,opts)=>{const chart=new lib.CanvasChart(host,model,{...opts,observeResize:false,layerCaching:false,dpr:()=>1,rendererFactory:()=>({kind:'canvas',render(){},dispose(){}})});env.charts.push(chart);env.models.push(model);return chart;};
- const args={...lib,...layoutHelpers,...presetHelpers,...historyHelpers,applyLayoutFrame,createLayoutMemory,createIndicatorEditor,safeCheckpointStringify,createChart,modelRequest,drawingImportMessage,createDrawingFileImport,prepareChartModel,matchMedia:()=>({matches:false}),setInterval:(fn,delay)=>{const id=++timerSerial;timers.set(id,{fn,delay});return id;},clearInterval:id=>timers.delete(id)};
+ const args={...lib,...layoutHelpers,...presetHelpers,...historyHelpers,applyLayoutFrame,createLayoutMemory,createIndicatorEditor,createIndicatorPicker,createLiveReadout,safeCheckpointStringify,createChart,modelRequest,drawingImportMessage,createDrawingFileImport,prepareChartModel,matchMedia:()=>({matches:false}),setInterval:(fn,delay)=>{const id=++timerSerial;timers.set(id,{fn,delay});return id;},clearInterval:id=>timers.delete(id)};
  const body=src.replace(/^import[^\n]+\n/gm,'').replaceAll('import.meta.url',JSON.stringify(new URL('examples/web/demo.mjs',root).href)).replace('await load();','const initialLoad=load(); return {initialLoad,load,addIndicator,install,importLayoutFile,get layoutHistoryStatus(){return layoutHistory.status();},get model(){return model;},get chart(){return chart;},get preparing(){return preparing;}};');
  const state=Function(...Object.keys(args),body)(...Object.values(args));
 
@@ -141,4 +143,26 @@ test('an observer error after partial layout undo rebases history and permits th
  f.$('layout-undo').onclick();api.invalidate=invalidate;
  assert.equal(notified,true);assert.equal(model.store.columns,columns);assert.equal(api.saveDrawings(),drawings);assert.equal(f.state.layoutHistoryStatus.depth,0);assert.match(f.$('indicator-layout-status').textContent,/observer failed/);
  f.$('reorder-panel').value='volume';f.$('panel-up').onclick();assert.equal(f.state.layoutHistoryStatus.depth,1);f.$('layout-undo').onclick();assert.equal(model.panels[0].id,'price');assert.equal(api.saveDrawings(),drawings);
+});
+
+test('empty indicator search keeps Add disabled across preparation and direct handler calls',async t=>{
+ const f=demo(t);await f.complete();await f.state.initialLoad;const search=f.$('indicator-search');
+ search.value='no-such-study';event(search,'input');assert.equal(f.$('indicator').value,'');assert.equal(f.$('add-indicator').disabled,true);assert.match(f.$('indicator-search-summary').textContent,/없습니다/);
+ const count=f.requests.length;await f.state.addIndicator();assert.equal(f.requests.length,count);
+ f.$('count').value='10000';const loading=f.$('count').onchange();await f.complete();await loading;assert.equal(f.$('add-indicator').disabled,true);
+ event(search,'keydown',{key:'Escape'});assert.equal(search.value,'');assert.equal(f.$('add-indicator').disabled,false);
+});
+
+test('a Korean indicator search passes the canonical selected name into preparation',async t=>{
+ const f=demo(t);await f.complete();await f.state.initialLoad;
+ f.$('indicator-search').value='볼린저';event(f.$('indicator-search'),'input');assert.equal(f.$('indicator').value,'bollinger');assert.equal(f.$('add-indicator').disabled,false);
+ const adding=f.state.addIndicator();assert.equal(f.requests.at(-1).request.options.indicators.at(-1).name,'bollinger');assert.equal(f.$('add-indicator').disabled,true);
+ f.$('cancel-compute').onclick();await adding;assert.equal(f.$('indicator').value,'bollinger');assert.equal(f.$('add-indicator').disabled,false);
+});
+
+test('the main readout follows renderer replacement and ignores the retired canvas',async t=>{
+ const f=demo(t);await f.complete();await f.state.initialLoad;const old=f.state.chart;old.drawNow();
+ const layout=old.timeLayout.layout,panel=layout.panels[0];f.state.model.crosshair={x:layout.x(2),y:(panel.top+panel.bottom)/2};event(old.canvas,'aster:render');assert.match(f.$('chart-readout').textContent,/십자선/);
+ f.$('renderer').onchange();assert.notEqual(f.state.chart,old);assert.match(f.$('chart-readout').textContent,/최신 봉/);
+ const after=f.$('chart-readout').textContent;event(old.canvas,'aster:render');assert.equal(f.$('chart-readout').textContent,after);
 });

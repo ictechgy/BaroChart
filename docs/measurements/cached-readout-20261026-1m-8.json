@@ -1,0 +1,72 @@
+{
+  "schema": "barochart.cached-readout.v1",
+  "timestamp": "2026-10-25T18:03:40.299Z",
+  "environment": {
+    "node": "v22.20.0",
+    "platform": "darwin",
+    "arch": "arm64",
+    "cpu": "Apple M4 Pro"
+  },
+  "fixture": {
+    "count": 1000000,
+    "studies": 8,
+    "visibleSeries": 9,
+    "capacity": 1048576,
+    "seed": 42,
+    "warmups": 200,
+    "samplesPerLane": 2000,
+    "order": "alternating warmed calculate/cached; separate dirty availability lane",
+    "gc": "before each lane; no forced GC inside samples"
+  },
+  "exact": {
+    "coldCalculateMs": 303.27937499999996,
+    "dirtyCalculateMs": 292.05166700000007,
+    "warmCalculateMs": {
+      "p50": 0.09012500000000045,
+      "p95": 0.11154099999998834,
+      "p99": 0.16937500000005912,
+      "max": 0.9958330000000046
+    },
+    "warmCachedMs": {
+      "p50": 0.053040999999893756,
+      "p95": 0.06720899999999119,
+      "p99": 0.12912499999993088,
+      "max": 0.7894999999999754
+    },
+    "cachedP95Ratio": 0.6025497350749789
+  },
+  "availability": {
+    "dirtyCachedMs": {
+      "p50": 0.04574999999999818,
+      "p95": 0.05583400000000438,
+      "p99": 0.11087500000007822,
+      "max": 0.3536659999999756
+    },
+    "returnedIndicatorStatus": "pending",
+    "indicatorCalculationAttempts": {
+      "get": 0,
+      "calculate": 0
+    }
+  },
+  "targets": {
+    "absoluteP95Ms": 0.25,
+    "warmRatioMaximum": 1.25,
+    "warmAbsoluteMet": true,
+    "pendingAbsoluteMet": true,
+    "warmRatioMet": true
+  },
+  "checks": {
+    "warmExactEquality": true,
+    "independentEMAExact": true,
+    "pendingHasNoOldValues": true,
+    "zeroLazyCalculation": true,
+    "sourceAndCacheUnchanged": true
+  },
+  "sourceSHA256": {
+    "src/core/data-explorer.mjs": "865ccaa5d9ee12f8d1d0d19dc04afe38bfce78acacec42460442f6a74993585e",
+    "src/core/indicators.mjs": "32e0b2caca39d8efd0452d7c6c22240abb22e7b3a3203726e54cfff57f1647b4",
+    "src/core/data.mjs": "92b8d50fe592d351154d46d393a05b6797b3fa9293b8a7d41693e492ad32136b",
+    "benchmarks/cached-readout.mjs": "25ad5fc9311907cad24eec6d9d276e6ad27687848518c0b8d5b84052b80ebd51"
+  },
+  "scope": "Synchronous Node scalar-query cost only. Exact warm output and dirty pending availability are different contracts and are not a speedup ratio. No renderer, browser responsiveness, display FPS, native-device or competitor performance claim."
+}
