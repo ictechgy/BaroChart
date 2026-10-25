@@ -43,6 +43,8 @@ chart.api.setPanelOrder(['price', 'oscillators', 'volume']);
 
 ## 저장과 실행 범위
 
+기본 데모의 배치 파일 저장·불러오기, 이 브라우저에서 기억, 지표별 기간·스타일 편집은 [배치 저장과 지표 설정](DEMO-LAYOUT-EDITOR.md)을 참고하세요.
+
 기존 [workspace](WORKSPACES.md)는 패널 순서, 축과 시리즈 바인딩을 이미 저장하므로 스키마 변경이 없습니다. `saveStudies()`도 지표 시리즈의 배치를 보존하지만, `loadStudies()`를 호출할 호스트가 필요한 패널·축을 먼저 준비해야 합니다. 같은 데이터셋에서 데모 데이터 수를 바꾸거나 렌더러를 교체해도 배치를 이어서 사용합니다.
 
 세 명령은 JavaScript API와 공통 native JSON command facade에서 사용할 수 있습니다. 웹 화면 조작은 기본 데모에 구현되며, 네이티브 화면의 이동 컨트롤을 추가한 것은 아닙니다.
