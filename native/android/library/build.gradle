@@ -1,6 +1,13 @@
 plugins { id 'com.android.library' }
 
-def sdkVersion = providers.gradleProperty('asterVersion').orElse('0.2.10').get()
+def packageManifest = file('../../../package.json')
+def packageVersion = providers.provider {
+    if (!packageManifest.isFile()) return null
+    def version = new groovy.json.JsonSlurper().parse(packageManifest).version
+    return version instanceof String && !version.trim().isEmpty() ? version.trim() : null
+}
+def sdkVersion = providers.gradleProperty('asterVersion').orElse(packageVersion).getOrNull()
+if (!sdkVersion) throw new GradleException('asterVersion is required when the repository package.json has no canonical version')
 def selectedCore = file(providers.gradleProperty('asterCoreFile').orElse('../../Resources/aster-core.js').get())
 def generatedAssets = layout.buildDirectory.dir('generated/asterAssets')
 if (providers.gradleProperty('asterBuildDir').isPresent()) layout.buildDirectory = file(providers.gradleProperty('asterBuildDir').get())

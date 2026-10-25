@@ -11,6 +11,7 @@ public class JSONObject {
     public Object get(String name) throws JSONException { throw new UnsupportedOperationException("Compile-only org.json stub"); }
     public String getString(String name) throws JSONException { throw new UnsupportedOperationException("Compile-only org.json stub"); }
     public JSONObject getJSONObject(String name) throws JSONException { throw new UnsupportedOperationException("Compile-only org.json stub"); }
+    public int length() { throw new UnsupportedOperationException("Compile-only org.json stub"); }
     public JSONArray getJSONArray(String name) throws JSONException { throw new UnsupportedOperationException("Compile-only org.json stub"); }
     public int getInt(String name) throws JSONException { throw new UnsupportedOperationException("Compile-only org.json stub"); }
     public long getLong(String name) throws JSONException { throw new UnsupportedOperationException("Compile-only org.json stub"); }
