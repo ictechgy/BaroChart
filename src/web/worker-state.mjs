@@ -5,19 +5,34 @@ import {ChartModel} from '../core/model.mjs';
 import {resolveIndicatorFactory,requirePortableFactory} from '../core/indicators.mjs';
 import {indicatorModule,validateIndicatorModuleBinding} from '../core/indicator-modules.mjs';
 import {validateIndicatorParams} from '../core/indicator-params.mjs';
-import {RESOURCE_LIMITS,sizeLimit,identifier,optionRecord,AXIS_KEYS,PANEL_KEYS,SERIES_KEYS} from '../core/contracts.mjs';
+import {RESOURCE_LIMITS,sizeLimit,identifier,optionRecord,AXIS_KEYS,PANEL_KEYS,SERIES_KEYS,THEME_KEYS} from '../core/contracts.mjs';
 import {encodeCheckpoints,LazyCheckpoints} from './checkpoint-codec.mjs';
 const seriesKeys=SERIES_KEYS;
 const optionKeys=['panels','axes','series','theme','precision','axisWidth','visibleBars','indicators'];
 const pick=(object,keys)=>Object.fromEntries(keys.filter(k=>object[k]!==undefined).map(k=>[k,object[k]]));
 const preparedPackets=new WeakMap(),PROTOCOL_VERSION=1;
+function ownDataOptions(value,keys,label){
+ if(!value||typeof value!=='object'||Array.isArray(value)||![Object.prototype,null].includes(Object.getPrototypeOf(value)))throw new TypeError(label+': plain object required');
+ const ownKeys=Reflect.ownKeys(value);if(ownKeys.length>keys.length)throw new TypeError(label+': unsupported field count');const copy={};
+ for(const key of ownKeys){if(typeof key!=='string'||!keys.includes(key)||['__proto__','constructor','prototype'].includes(key))throw new TypeError(label+': unsupported field');const descriptor=Object.getOwnPropertyDescriptor(value,key);if(!descriptor?.enumerable||!Object.hasOwn(descriptor,'value'))throw new TypeError(label+': own data properties required');Object.defineProperty(copy,key,{value:descriptor.value,writable:true,enumerable:true,configurable:true});}
+ return optionRecord(copy,keys,label);
+}
+function boundedArraySnapshot(value,max,label){
+ if(!Array.isArray(value)||Object.getPrototypeOf(value)!==Array.prototype)throw new TypeError(label+': dense array required');
+ const lengthDescriptor=Object.getOwnPropertyDescriptor(value,'length'),length=lengthDescriptor?.value;
+ if(!lengthDescriptor||!Object.hasOwn(lengthDescriptor,'value')||!Number.isSafeInteger(length)||length<0)throw new TypeError(label+': own length required');
+ sizeLimit(length,max,label);const keys=Reflect.ownKeys(value);if(keys.length!==length+1)throw new TypeError(label+': dense array required');
+ const result=new Array(length);for(let index=0;index<length;index++){const descriptor=Object.getOwnPropertyDescriptor(value,String(index));if(!descriptor||!descriptor.enumerable||!Object.hasOwn(descriptor,'value'))throw new TypeError(label+': own data properties required');result[index]=descriptor.value;}
+ return result;
+}
+function boundedRange(value,label){const range=boundedArraySnapshot(value,2,label);if(range.length!==2)throw new TypeError(label+': two values required');return range;}
 export function requestOptionsSnapshot(options={}){
- optionRecord(options,optionKeys,'Worker model options');const copy={...options};
- if(options.panels)copy.panels=options.panels.map(p=>{optionRecord(p,PANEL_KEYS,'Worker panel');if(p.formatter!==undefined)throw new TypeError('Worker unsupported panel formatter callback');return {...p,...(p.range?{range:[...p.range]}:{})};});
- copy.axes=(options.axes??[]).map(a=>{optionRecord(a,AXIS_KEYS,'Worker axis');if(a.formatter!==undefined)throw new TypeError('Worker unsupported axis formatter callback');return {...a,...(a.range?{range:[...a.range]}:{})};});
- if(options.theme)copy.theme={...options.theme};
- copy.series=(options.series??[]).map(s=>({...s}));
- copy.indicators=(options.indicators??[]).map(e=>{optionRecord(e,['id','name','params','module'],'Worker indicator');const params=validateIndicatorParams(e.params===undefined?{}:e.params),factory=resolveIndicatorFactory(e.name),module=requirePortableFactory(e.name,factory);if(e.module!==undefined)validateIndicatorModuleBinding(e.name,e.module);return {id:e.id,name:e.name,params:{...params},...(module?{module}:{})};});
+ const copy=ownDataOptions(options,optionKeys,'Worker model options');
+ if(copy.panels!==undefined)copy.panels=boundedArraySnapshot(copy.panels,RESOURCE_LIMITS.maxPanels,'Worker panels').map(value=>{const panel=ownDataOptions(value,PANEL_KEYS,'Worker panel');if(panel.formatter!==undefined)throw new TypeError('Worker unsupported panel formatter callback');if(panel.range)panel.range=boundedRange(panel.range,'Worker panel range');return panel;});
+ copy.axes=boundedArraySnapshot(copy.axes??[],RESOURCE_LIMITS.maxAxes,'Worker axes').map(value=>{const axis=ownDataOptions(value,AXIS_KEYS,'Worker axis');if(axis.formatter!==undefined)throw new TypeError('Worker unsupported axis formatter callback');if(axis.range)axis.range=boundedRange(axis.range,'Worker axis range');return axis;});
+ if(copy.theme)copy.theme=ownDataOptions(copy.theme,THEME_KEYS,'Worker theme');
+ copy.series=boundedArraySnapshot(copy.series??[],RESOURCE_LIMITS.maxSeries,'Worker series').map(value=>ownDataOptions(value,SERIES_KEYS,'Worker series'));
+ copy.indicators=boundedArraySnapshot(copy.indicators??[],RESOURCE_LIMITS.maxIndicators,'Worker indicators').map(value=>{const e=ownDataOptions(value,['id','name','params','module'],'Worker indicator'),params=validateIndicatorParams(e.params===undefined?{}:e.params),factory=resolveIndicatorFactory(e.name),module=requirePortableFactory(e.name,factory);if(e.module!==undefined)validateIndicatorModuleBinding(e.name,e.module);return {id:e.id,name:e.name,params:{...params},...(module?{module}:{})};});
  return copy;
 }
 export function modelRequest(model){

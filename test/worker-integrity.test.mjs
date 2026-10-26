@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {BarStore,ChartModel,seededColumns} from '../src/index.mjs';
+import {BarStore,ChartModel,seededColumns,RESOURCE_LIMITS} from '../src/index.mjs';
 import {computeRequest} from '../src/web/compute-worker.mjs';
 import {hydrateModel,modelRequest,installRecomputed,validatePreparedPacketAsync} from '../src/web/worker-state.mjs';
 import {prepareChartModel,recomputeInWorker} from '../src/web/worker.mjs';
@@ -35,6 +35,16 @@ test('whole-operation timeout during bounded validation preserves recompute data
 });
 test('public operation timeout is finite, positive and bounded before creating a worker',async()=>{
  const {workers,restore}=fake();try{for(const timeoutMs of [0,-1,NaN,Infinity,'10',null,120001])await assert.rejects(prepareChartModel({options:{}},{timeoutMs}),/timeout/i);assert.equal(workers.length,0);}finally{restore();}
+});
+test('worker option arrays enforce limits before reading index zero or creating a worker',async()=>{
+ const {workers,restore}=fake();try{for(const [key,max] of [['panels',RESOURCE_LIMITS.maxPanels],['axes',RESOURCE_LIMITS.maxAxes],['series',RESOURCE_LIMITS.maxSeries],['indicators',RESOURCE_LIMITS.maxIndicators]]){let reads=0;const input=[];Object.defineProperty(input,0,{enumerable:true,configurable:true,get(){reads++;throw Error('must not read');}});input.length=max+1;await assert.rejects(prepareChartModel({options:{[key]:input}}),/limit/i);assert.equal(reads,0,key);assert.equal(workers.length,0,key);}}finally{restore();}
+});
+test('worker option snapshots reject accessor records and exotic array slots without executing getters',async()=>{
+ const {workers,restore}=fake();try{
+  for(const [key,field] of [['theme','background'],['series','id']]){let reads=0,record={};Object.defineProperty(record,field,{enumerable:true,configurable:true,get(){reads++;throw Error('must not execute');}});const options=key==='series'?{series:[record]}:{theme:record};await assert.rejects(prepareChartModel({options}),/data propert|data field|data slot/i);assert.equal(reads,0,key);assert.equal(workers.length,0,key);}
+  const series=[{id:'line',type:'line',panel:'price'}];series[Symbol('extra')]=true;await assert.rejects(prepareChartModel({options:{series}}),/dense|field/i);assert.equal(workers.length,0);
+  const panels=[{id:'price',range:[1,2]}];let rangeReads=0;Object.defineProperty(panels[0].range,0,{enumerable:true,configurable:true,get(){rangeReads++;throw Error('must not execute');}});await assert.rejects(prepareChartModel({options:{panels}}),/data propert|data field|data slot|dense/i);assert.equal(rangeReads,0);assert.equal(workers.length,0);
+ }finally{restore();}
 });
 test('observer cancellation after the atomic publication point does not reject an already committed result',async()=>{
  const {workers,restore}=fake();try{const model=fixture(),controller=new AbortController(),event={kind:'correction',bar:{...model.store.at(0),high:1000,close:1000}};model.store.subscribe(()=>controller.abort());const pending=recomputeInWorker(model,event,{signal:controller.signal});await workers.at(-1).complete();assert.equal(await pending,model);assert.equal(model.store.at(0).close,1000);assert.equal(controller.signal.aborted,true);model.dispose();}finally{restore();}

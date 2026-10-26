@@ -1513,7 +1513,7 @@ public final class AsterEngine {
         // The async handle is published before its deferred JavaScript begin.
         // Guard this owner-only gap too; the core lease covers direct JS calls
         // after begin. Existing data mutations keep their stale-result policy.
-        if (activeAsync.map{!$0.isCommitted} ?? false) || activeWorkspace != nil || pendingWorkspaceRegistration.map{AsterWorkspaceRegistry.contains($0)} == true || activeParams != nil || pendingParamsRegistration.map{AsterParamsRegistry.contains($0)} == true {
+        if (activeAsync.map{!$0.isCommitted} ?? false) || activeWorkspace != nil || pendingWorkspaceRegistration.map({AsterWorkspaceRegistry.contains($0)}) == true || activeParams != nil || pendingParamsRegistration.map({AsterParamsRegistry.contains($0)}) == true {
             if ["compactData", "configureDataIngestion", "enqueueDataEvents", "drainDataEvents", "pauseDataIngestion", "resumeDataIngestion", "cancelDataEvents", "loadDataIngestion"].contains(operation) {throw AsterIngestionError(code:"BUSY",message:"Native asynchronous job is active")}
         }
         let result:JSValue
@@ -1529,6 +1529,14 @@ public final class AsterEngine {
             guard result.isObject,let removed=result.forProperty("removed"),removed.isNumber else {throw AsterError.invalidScene}
             let count=removed.toDouble()
             guard count.isFinite,count.rounded(.towardZero)==count,count>=0,count<=4194304 else {throw AsterError.invalidScene}
+            if count>0 {notifyChanges()}
+        } else if operation == "setPanelOrder" {
+            guard result.isBoolean else {throw AsterError.invalidScene}
+            if result.toBool() {notifyChanges()}
+        } else if operation == "setIndicatorPlacement" {
+            guard result.isObject, let changed=result.forProperty("changed"), changed.isNumber else {throw AsterError.invalidScene}
+            let count=changed.toDouble()
+            guard count.isFinite,count.rounded(.towardZero)==count,count>=0,count<=256 else {throw AsterError.invalidScene}
             if count>0 {notifyChanges()}
         } else if operation == "translateDrawings" {
             guard result.isObject,let changed=result.forProperty("changed"),changed.isNumber else {throw AsterError.invalidScene}

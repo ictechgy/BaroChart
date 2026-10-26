@@ -2,6 +2,13 @@ import {CanvasChart} from './canvas.mjs';
 import {renderCanvas} from './canvas.mjs';
 import {CacheAllocationError} from './cache-budget.mjs';
 
+const WEBGL_FRAME_INSTANCE_LIMIT=200000,WEBGL_PACKED_BYTE_LIMIT=16777216,COLOR_CACHE_LIMIT=256;
+// CPU packing and the matching GPU allocation both retain the grown capacity.
+// The 200k instance budget and fixed 16 MiB power-of-two ceiling bound
+// tessellation independently of document limits, preventing hundreds of MiB
+// of retained screen buffers per renderer.
+class WebGLCapacityError extends RangeError {constructor(kind,limit){super(`WebGL frame ${kind} limit ${limit}`);this.name='WebGLCapacityError';}}
+
 const VERTEX = `#version 300 es
 precision highp float;
 layout(location=0) in vec4 top;
@@ -55,7 +62,12 @@ export class WebGLRenderer {
   this.packed=new Float32Array(4096*16);this.capacityBytes=0;this.resetAtlas(1);
  }
  resetAtlas(dpr){this.glyphs.clear();this.atlasContext.clearRect(0,0,2048,2048);this.atlasX=1;this.atlasY=1;this.rowHeight=0;this.atlasDpr=dpr;this.atlasDirty=true;}
- color(css){let result=this.colors.get(css);if(result)return result;const c=this.colorContext;c.clearRect(0,0,1,1);c.fillStyle='#ffffff';c.fillStyle=css;c.fillRect(0,0,1,1);const p=c.getImageData(0,0,1,1).data;result=[p[0]/255,p[1]/255,p[2]/255,p[3]/255];this.colors.set(css,result);return result;}
+ color(css){
+  let result=this.colors.get(css);if(result){this.colors.delete(css);this.colors.set(css,result);return result;}
+  if(typeof css==='string'&&/^#[\da-f]{8}$/i.test(css)){const value=Number.parseInt(css.slice(1),16);result=[(value>>>24)/255,(value>>>16&255)/255,(value>>>8&255)/255,(value&255)/255];}
+  else{const c=this.colorContext;c.clearRect(0,0,1,1);c.fillStyle='#ffffff';c.fillStyle=css;c.fillRect(0,0,1,1);const p=c.getImageData(0,0,1,1).data;result=[p[0]/255,p[1]/255,p[2]/255,p[3]/255];}
+  this.colors.set(css,result);if(this.colors.size>COLOR_CACHE_LIMIT)this.colors.delete(this.colors.keys().next().value);return result;
+ }
  glyph(character,font){
   const key=font+'\0'+character;if(this.glyphs.has(key))return this.glyphs.get(key);const c=this.atlasContext,ratio=this.atlasDpr;c.font=font;const m=c.measureText(character),size=parseFloat(font.match(/([\d.]+)px/)?.[1]??'12');
   const left=Math.ceil(Math.max(0,m.actualBoundingBoxLeft??0))+2,right=Math.ceil(Math.max(m.width,m.actualBoundingBoxRight??m.width))+2,ascent=Math.ceil(m.actualBoundingBoxAscent??size)+2,descent=Math.ceil(m.actualBoundingBoxDescent??size*.3)+2;
@@ -66,7 +78,8 @@ export class WebGLRenderer {
  }
  quad(x0,y0,x1,y1,x2,y2,x3,y3,color,uv=null){
   if(!Number.isFinite(x0)||!Number.isFinite(y0)||!Number.isFinite(x1)||!Number.isFinite(y1)||!Number.isFinite(x2)||!Number.isFinite(y2)||!Number.isFinite(x3)||!Number.isFinite(y3))return;
-  const i=this.count*16;if(i+16>this.packed.length){const a=new Float32Array(this.packed.length*2);a.set(this.packed);this.packed=a;}
+  const next=this.count+1,bytes=next*64;if(next>WEBGL_FRAME_INSTANCE_LIMIT)throw new WebGLCapacityError('instance',WEBGL_FRAME_INSTANCE_LIMIT);if(bytes>WEBGL_PACKED_BYTE_LIMIT)throw new WebGLCapacityError('packed byte',WEBGL_PACKED_BYTE_LIMIT);
+  const i=this.count*16;if(i+16>this.packed.length){let length=this.packed.length;while(length<i+16){if(length*8>WEBGL_PACKED_BYTE_LIMIT){length=WEBGL_PACKED_BYTE_LIMIT/4;break;}length*=2;}if(length<i+16||length*4>WEBGL_PACKED_BYTE_LIMIT)throw new WebGLCapacityError('packed byte',WEBGL_PACKED_BYTE_LIMIT);const a=new Float32Array(length);a.set(this.packed);this.packed=a;}
   const a=this.packed;a[i]=x0;a[i+1]=y0;a[i+2]=x1;a[i+3]=y1;a[i+4]=x2;a[i+5]=y2;a[i+6]=x3;a[i+7]=y3;
   a[i+8]=color[0];a[i+9]=color[1];a[i+10]=color[2];a[i+11]=color[3];a[i+12]=uv?.[0]??0;a[i+13]=uv?.[1]??0;a[i+14]=uv?.[2]??0;a[i+15]=uv?.[3]??0;this.count++;
  }

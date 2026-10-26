@@ -20,7 +20,7 @@ export function saveStudySetup(model){
 }
 // Synchronous atomic parameter replacement. This preserves visual bindings;
 // changed output layout/offsets require an explicit remove/reconfigure operation.
-export function setStudyParams(model,id,params){
+export function setStudyParams(model,id,params,ownerGuard=null){
  if(model.disposed)throw new Error('Chart disposed');
  const engine=model.indicators,store=model.store,version=store.version,entriesMap=engine.entries,registryMap=engine.registry,entry=entriesMap.get(id);
  if(!entry)throw new Error('Missing indicator');
@@ -30,7 +30,7 @@ export function setStudyParams(model,id,params){
  if(!current())throw new Error('Indicator params stale: owner changed during snapshot');
  const same=(a,b)=>Object.keys(a).length===Object.keys(b).length&&Object.keys(a).every(k=>Object.hasOwn(b,k)&&Object.is(a[k],b[k]));
  const metadata=def=>({outputs:[...def.outputs],plotOffsets:{...def.plotOffsets}});
- if(same(entry.params,requested)){const result=metadata(entry.def);if(!current())throw new Error('Indicator params stale: owner changed during metadata');return result;}
+ if(same(entry.params,requested)){const result=metadata(entry.def);if(!current())throw new Error('Indicator params stale: owner changed during metadata');if(ownerGuard!==null){if(typeof ownerGuard!=='function')throw new TypeError('Owner guard callback required');ownerGuard();}return result;}
  const candidate=new IndicatorEngine(store,{checkpointSize:engine.checkpointSize,maxOutputBytes:engine.maxOutputBytes});
  candidate.registry=new Map(registry);candidate.entries=new Map(entries);candidate.entries.delete(id);
  try{
@@ -41,7 +41,7 @@ export function setStudyParams(model,id,params){
   const offset=(def,output)=>def.plotOffsets&&Object.hasOwn(def.plotOffsets,output)?def.plotOffsets[output]:0;
   if(entry.def.outputs.some(output=>!Object.is(offset(entry.def,output),offset(replacement.def,output))))throw new TypeError('Indicator parameter update cannot change plot offsets');
   const result=metadata(replacement.def);
-  if(!current())throw new Error('Indicator params stale: owner changed during staging');
+  if(!current())throw new Error('Indicator params stale: owner changed during staging');if(ownerGuard!==null){if(typeof ownerGuard!=='function')throw new TypeError('Owner guard callback required');ownerGuard();}
   entriesMap.set(id,replacement);retireNativeEntryIfReplaced(entriesMap,id);
   for(const s of series)if(s.indicator===id){s.rangeIndex=null;s.revision=undefined;s.dirtyFrom=0;}
   return result;
@@ -49,7 +49,7 @@ export function setStudyParams(model,id,params){
 }
 // Atomic additive import. Data, layout, existing studies and drawing history are
 // host-owned; all required panel/axis bindings must already exist.
-export function loadStudySetup(model,text){
+export function loadStudySetup(model,text,ownerGuard=null){
  if(model.disposed)throw new Error('Chart disposed');
  const doc=safeCheckpointParse(text);optionRecord(doc,['schema','version','indicators','series'],'Study setup');
  if(doc.schema!=='aster.studies'||doc.version!==1||!Array.isArray(doc.indicators)||!Array.isArray(doc.series)||doc.indicators.length>RESOURCE_LIMITS.maxIndicators||doc.series.length>RESOURCE_LIMITS.maxSeries)throw new TypeError('Study setup schema/count');
@@ -65,7 +65,7 @@ export function loadStudySetup(model,text){
   }
   const proxy=Object.create(model);proxy.indicators=candidate;const seriesIds=new Set(model.series.map(s=>s.id)),added=[];
   for(const s of doc.series){optionRecord(s,SERIES_KEYS.filter(k=>k!=='values'),'Study series');if(!ids.has(s.indicator))throw new Error('Study series requires an imported indicator');if(seriesIds.has(s.id))throw new Error('Duplicate study series id');seriesIds.add(s.id);added.push(proxy.normalizedSeries(portableStyle(s,['color','fill','upColor','downColor'],true)));}
-  if(model.disposed||model.store!==store||store.version!==version||model.indicators!==engine||engine.entries!==entriesMap||engine.registry!==registryMap||model.series!==series||studyConfigurationKey(model)!==key||entries.length!==engine.entries.size||entries.some(([id,e])=>engine.entries.get(id)!==e)||registry.length!==engine.registry.size||registry.some(([name,f])=>engine.registry.get(name)!==f))throw new Error('Study setup stale: owner changed during staging');
+  if(model.disposed||model.store!==store||store.version!==version||model.indicators!==engine||engine.entries!==entriesMap||engine.registry!==registryMap||model.series!==series||studyConfigurationKey(model)!==key||entries.length!==engine.entries.size||entries.some(([id,e])=>engine.entries.get(id)!==e)||registry.length!==engine.registry.size||registry.some(([name,f])=>engine.registry.get(name)!==f))throw new Error('Study setup stale: owner changed during staging');if(ownerGuard!==null){if(typeof ownerGuard!=='function')throw new TypeError('Owner guard callback required');ownerGuard();}
   for(const id of ids)engine.entries.set(id,candidate.entries.get(id));model.series=series.concat(added);
   return {indicators:ids.size,series:added.length};
  }finally{candidate.dispose();}

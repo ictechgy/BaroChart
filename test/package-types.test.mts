@@ -134,3 +134,10 @@ attachChartToolbar(document.body,webChart,{orientation:'diagonal'});
 inputPolicy.pointer=true;
 // @ts-expect-error tool list snapshots cannot be pushed
  toolbarState.tools.push('select');
+
+// Lifecycle state used by the official BFCache example is visible to packed consumers.
+declare const lifecycleChart: import("barochart").CanvasChart;
+declare const lifecycleModel: import("barochart/core").ChartModel;
+const chartClosed:boolean=lifecycleChart.disposed;
+const modelClosed:boolean|undefined=lifecycleModel.disposed;
+void [chartClosed,modelClosed];

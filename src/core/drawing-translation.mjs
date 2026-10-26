@@ -24,19 +24,20 @@ function translationChars(value){if(value===null)return 4;if(typeof value!=='obj
 function translationFrozen(d){for(const p of d.points)Object.freeze(p);Object.freeze(d.points);if(d.style)Object.freeze(d.style);return Object.freeze(d);}
 
 /** Explicit raw-coordinate group edit. No indicator/layout computation. */
-export function translateDrawings(api,ids,options){return drawingGroupEdit(api,ids,options,false);}
+export function translateDrawings(api,ids,options,ownerGuard=null){return drawingGroupEdit(api,ids,options,false,false,false,false,ownerGuard);}
 /** Mixed and orphan bindings may be removed without querying live metadata. */
-export function deleteDrawings(api,ids){return drawingGroupEdit(api,ids,null,true);}
+export function deleteDrawings(api,ids,ownerGuard=null){return drawingGroupEdit(api,ids,null,true,false,false,false,ownerGuard);}
 /** Partial portable style patch; mixed/orphan bindings require no live lookup. */
-export function setDrawingsStyle(api,ids,patch){return drawingGroupEdit(api,ids,patch,false,true);}
+export function setDrawingsStyle(api,ids,patch,ownerGuard=null){return drawingGroupEdit(api,ids,patch,false,true,false,false,ownerGuard);}
 /** Presentation visibility may change locked or orphan drawings, without live metadata. */
-export function setDrawingsVisibility(api,ids,visible){return drawingGroupEdit(api,ids,visible,false,false,true);}
+export function setDrawingsVisibility(api,ids,visible,ownerGuard=null){return drawingGroupEdit(api,ids,visible,false,false,true,false,ownerGuard);}
 /** Append unlocked copies in source z-order; zero offsets may retain orphan bindings. */
-export function duplicateDrawings(api,ids,options){return drawingGroupEdit(api,ids,options,false,false,false,true);}
-function drawingGroupEdit(api,ids,options,remove,styleEdit=false,visibilityEdit=false,duplicateEdit=false){
+export function duplicateDrawings(api,ids,options,ownerGuard=null){return drawingGroupEdit(api,ids,options,false,false,false,true,ownerGuard);}
+function drawingGroupEdit(api,ids,options,remove,styleEdit=false,visibilityEdit=false,duplicateEdit=false,ownerGuard=null){
+ if(ownerGuard!==null&&typeof ownerGuard!=='function')throw new TypeError('Owner guard callback required');ownerGuard?.();
  const duplicateOptions=duplicateEdit?translationRecord(options,['deltaTimeMs','deltaPrice']):null;
  const metadata=!(remove||styleEdit||visibilityEdit||duplicateEdit&&duplicateOptions.deltaTimeMs===0&&duplicateOptions.deltaPrice===0);
- const guards=[],a=translationCapture(api,['model','controller','invalidate'],guards),model=a.model;
+ const guards=[],a=translationCapture(api,['model','controller','invalidate'],guards),model=a.model;if(ownerGuard)guards.push(ownerGuard);
  const m=translationCapture(model,!metadata?['disposed','drawings']:['disposed','drawings','panels','axes','series'],guards);
  if(m.disposed)throw new Error('Chart disposed');if(!(m.drawings instanceof DrawingStore))throw new TypeError('Drawing group edit managed store required');
  const d=m.drawings,s=translationCapture(d,['items','undoStack','redoStack','selected','serial','transaction','maxDrawings','maxPoints','maxDocumentChars','historyLimit','historyBytes','retainedHistoryBytes'],guards,['items','undoStack','redoStack']);

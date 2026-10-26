@@ -1,5 +1,5 @@
 import {retireNativeEntryIfReplaced} from '../core/native-checkpoints.mjs';
-import {ChartAPI} from '../core/api.mjs';
+import {assertChartAPIActive} from '../core/api.mjs';
 import {BarStore,FIELDS} from '../core/data.mjs';
 import {requirePortableFactory} from '../core/indicators.mjs';
 import {indicatorModule} from '../core/indicator-modules.mjs';
@@ -16,7 +16,7 @@ export function setIndicatorParamsAsync(chart,id,params,options={}){
  let model,token,notification,report;
  const release=()=>{if(token&&model&&activeParameterJobs.get(model)?.get(id)===token){const jobs=activeParameterJobs.get(model);jobs.delete(id);if(!jobs.size)activeParameterJobs.delete(model);}};
  const operation=runCalculationJob(options,async context=>{
-  if(!(chart instanceof ChartAPI))throw new TypeError('Actual ChartAPI required');model=paramSlot(chart,'model');if(!model||model.disposed)throw new Error('Chart disposed');identifier(id,'Indicator id');
+  model=assertChartAPIActive(chart);identifier(id,'Indicator id');
   report=options.onObserverError;if(report!==undefined&&typeof report!=='function')throw new TypeError('Observer error callback required');notification=paramSlot(chart,'invalidate');if(typeof notification!=='function')throw new TypeError('Chart invalidation callback required');
   let jobs=activeParameterJobs.get(model);if(jobs?.has(id))throw paramError('BusyError','Indicator parameter job already active');if(!jobs){jobs=new Map();activeParameterJobs.set(model,jobs);}token={};jobs.set(id,token);
   const engine=model.indicators,store=model.store;if(!(store instanceof BarStore))throw new TypeError('Actual BarStore required');
@@ -24,7 +24,7 @@ export function setIndicatorParamsAsync(chart,id,params,options={}){
   if(!entry)throw new Error('Missing indicator');if(engine.checkpointSize!==256)throw new RangeError('Async parameter checkpoint size must be256');
   sizeLimit(length,RESOURCE_LIMITS.maxBars,'Parameter source length');if(!Number.isSafeInteger(capacity)||capacity<16||capacity<length||capacity>RESOURCE_LIMITS.maxBars||(capacity&(capacity-1)))throw new RangeError('Parameter source capacity');
   const source=FIELDS.map(k=>paramVector(paramSlot(columns,k),Float64Array,length));
-  let currentKey=key;const guard=()=>{if(chart.model!==model||model.disposed||model.indicators!==engine||model.store!==store||paramSlot(store,'version')!==version||paramSlot(store,'length')!==length||paramSlot(store,'capacity')!==capacity||paramSlot(store,'columns')!==columns||FIELDS.some((k,i)=>paramSlot(columns,k)!==source[i])||engine.entries!==entriesMap||engine.registry!==registryMap||model.series!==series||series.length!==bindings.length||bindings.some((s,i)=>series[i]!==s)||entries.length!==entriesMap.size||entries.some(([k,e])=>entriesMap.get(k)!==e)||registry.length!==registryMap.size||registry.some(([k,f])=>registryMap.get(k)!==f)||model.panels!==panels||model.axes!==axes||panels.length!==panelBindings.length||panelBindings.some((p,i)=>panels[i]!==p)||axes.length!==axisBindings.length||axisBindings.some((a,i)=>axes[i]!==a)||currentKey!==key)throw paramError('StaleSourceError','Indicator parameters stale: owner changed');};context.guard=guard;context.current=()=>{currentKey=paramConfiguration(model);guard();};
+  let currentKey=key;const guard=()=>{if(assertChartAPIActive(chart)!==model||model.indicators!==engine||model.store!==store||paramSlot(store,'version')!==version||paramSlot(store,'length')!==length||paramSlot(store,'capacity')!==capacity||paramSlot(store,'columns')!==columns||FIELDS.some((k,i)=>paramSlot(columns,k)!==source[i])||engine.entries!==entriesMap||engine.registry!==registryMap||model.series!==series||series.length!==bindings.length||bindings.some((s,i)=>series[i]!==s)||entries.length!==entriesMap.size||entries.some(([k,e])=>entriesMap.get(k)!==e)||registry.length!==registryMap.size||registry.some(([k,f])=>registryMap.get(k)!==f)||model.panels!==panels||model.axes!==axes||panels.length!==panelBindings.length||panelBindings.some((p,i)=>panels[i]!==p)||axes.length!==axisBindings.length||axisBindings.some((a,i)=>axes[i]!==a)||currentKey!==key)throw paramError('StaleSourceError','Indicator parameters stale: owner changed');};context.guard=guard;context.current=()=>{currentKey=paramConfiguration(model);guard();};
   validateIndicatorParams(params);const requested={...params};validateIndicatorParams(requested);context.current();
   const oldLayout=paramLayout(entry.def);context.current();
   if(paramSame(entry.params,requested)){const metadata=paramLayout(entry.def);context.current();context.publish(()=>metadata);return;}

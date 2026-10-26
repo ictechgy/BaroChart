@@ -160,7 +160,7 @@ reset의 기존 fit 정책, 비어 있지 않은 backfill의 follow 값과 도�
 실행 결과를 뜻하지 않습니다.
 
 
-CanvasChart는 pointer capture, lostcapture, wheel preventDefault, 키보드 및 ResizeObserver를 연결합니다. Ctrl/Cmd+Z, Shift+Z/Y, Delete/Backspace, Escape와 Arrow(+Shift10px/Ctrl pan), +/- zoom, Home fit, End recent, PageUp/PageDown 도형 선택을 지원합니다. 선택이 없으면 PageUp은 마지막 도형, PageDown은 첫 도형에서 시작하며 기존 선택이 있으면 순서대로 순환합니다. 기존대로 잠긴 도형과 연결 대상이 사라진 도형도 목록 순서에 포함됩니다. `destroy({disposeModel:true})`는 RAF·observer·DOM 이벤트·저장소 구독을 해제하고 자신이 소유한 모델을 dispose합니다. 여러 렌더러가 하나의 모델을 공유하면 마지막 소유자가 model.dispose를 호출해야 합니다. 호스트가 만든 timer/stream 구독은 호스트가 해제합니다.
+CanvasChart는 pointer capture, lostcapture, wheel preventDefault, 키보드 및 ResizeObserver를 연결합니다. Ctrl/Cmd+Z, Shift+Z/Y, Delete/Backspace, Escape와 Arrow(+Shift10px/Ctrl pan), +/- zoom, Home fit, End recent, PageUp/PageDown 도형 선택을 지원합니다. 선택이 없으면 PageUp은 마지막 도형, PageDown은 첫 도형에서 시작하며 기존 선택이 있으면 순서대로 순환합니다. 기존대로 잠긴 도형과 연결 대상이 사라진 도형도 목록 순서에 포함됩니다. `destroy({disposeModel:true})`는 RAF·observer·DOM 이벤트·저장소 구독을 해제하고 자신이 소유한 모델을 dispose합니다. 여러 렌더러가 하나의 모델을 공유하면 마지막 소유자가 model.dispose를 호출해야 합니다. 호스트가 만든 timer/stream 구독은 호스트가 해제합니다. 종료한 차트가 발급한 API와 controller는 모델을 계속 공유하더라도 재사용할 수 없습니다. 새 차트나 별도 `ChartAPI`를 생성하세요. 공개 객체 참조를 교체해도 종료 처리는 생성 당시 소유한 controller·canvas·모델을 기준으로 수행합니다.
 
 웹 canvas의 일반 모드에서는 Alt 조합을 소비하지 않습니다. Ctrl/Cmd 조합은
 기존 undo/redo(Z, Shift+Z, Y)와 화살표 이동만 처리하며, 다른 조합은
@@ -180,7 +180,7 @@ modifier 없는 탐색 키 계약을 유지합니다. 이는 웹 이벤트 라�
 
 `createChart(container,model,{renderer:'canvas'|'webgl2'|'auto',onFallback})` 또는 `new GPUChart`를 사용합니다. 기본은 Canvas이며 auto는 GPU 시도/실패 폴백을 뜻하고 density 자동 선택은 아닙니다. WebGL2 instancing은 화면 좌표만 Float32로 업로드합니다. 코어 가격·시각·지표·anchors는 변환하지 않습니다. 초기화/렌더 오류 및 contextlost 때 canvas를 교체하고 동일 모델로 Canvas를 연결합니다. 선택/제스처는 취소하고 데이터·완료된 도형은 유지합니다. GPU로 자동 복귀하지 않습니다. destroy는 GL buffer/VAO/program/texture/context도 해제합니다.
 
-문자 atlas는2048², DPR 변경 시 재구성합니다. 용량 초과는 Canvas 폴백입니다. GPU는 기본적인 glyph 배치와 선분별 butt 접합/타원 근사를 사용하며 Canvas의 모든 문자 shaping/line join과 동일한 픽셀은 보장하지 않습니다. 고밀도·단순 캔들의 비용은 다르므로 측정에 따라 선택하세요.
+GPU 프레임은 최대 200,000 instance와 최대 16 MiB의 packed 화면 버퍼를 허용하며, 이를 넘으면 추가 할당 전에 Canvas로 전환합니다. 대응 GPU 버퍼도 같은 packed 용량으로 제한합니다. 색상 캐시는 형식 전체를 합쳐 최대 256개입니다. 문자 atlas는2048², DPR 변경 시 재구성합니다. 용량 초과는 Canvas 폴백입니다. GPU는 기본적인 glyph 배치와 선분별 butt 접합/타원 근사를 사용하며 Canvas의 모든 문자 shaping/line join과 동일한 픽셀은 보장하지 않습니다. 고밀도·단순 캔들의 비용은 다르므로 측정에 따라 선택하세요.
 
 지표 정의의 `plotOffsets:{output:integer}`와 시리즈 `offset`은 원본 계산을 바꾸지 않고 화면 logical 위치만 이동합니다. Ichimoku는 spanA/B +26, chikou −26입니다. `get()`은 outputs와 plotOffsets를 반환하고 addSeries는 이를 기본 offset으로 사용합니다. fit/follow는 양의 선행 이동 공간을 포함합니다. 숨긴 시리즈는 autoscale과 이 공간 계산에서 제외합니다.
 

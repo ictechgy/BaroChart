@@ -5,6 +5,16 @@ import {createLayout} from './model.mjs';
 import {optionRecord,identifier} from './contracts.mjs';
 import {drawingHitTest, DRAWING_TYPES, drawingPointCount} from './drawings.mjs';
 
+const interactionOwners=new WeakMap();
+function interactionActive(controller){
+ const state=interactionOwners.get(controller);if(!state)throw new TypeError('Actual interaction controller required');
+ const descriptor=Object.getOwnPropertyDescriptor(controller,'model');if(!descriptor||!Object.hasOwn(descriptor,'value'))throw new TypeError('Interaction controller own model required');
+ if(state.owner.active!==true)throw new Error('Chart disposed');
+ if(descriptor.value!==state.model){const error=new Error('Interaction controller owner changed');error.name='StaleSourceError';throw error;}
+ if(Object.getOwnPropertyDescriptor(state.model,'disposed')?.value)throw new Error('Chart disposed');
+ return state.model;
+}
+
 // Pan/pinch snapshots own only one short-lived source reference and scalar view
 // state. Detect topology/external-view changes on input, without subscriptions.
 function viewportState(controller){const m=controller.model;return {store:m.store,identity:m.store.geometryIdentity,timeVersion:m.store.timeVersion,from:m.view.from,to:m.view.to,follow:m.follow};}
@@ -33,17 +43,18 @@ function magnetDrawingPoint(controller,layout,x,y,target,type,free=layout.fromSc
 
 // DOM-free pointer state machine shared by browser, native host, and tests.
 export class InteractionController {
-  constructor(model, size, invalidate = () => {}) {this.model = model; this.size = size; this.invalidate = invalidate; this.pointers = new Map(); this.tool = 'select'; this.gesture = null; this.text = 'Note';this.drawingTarget=null;this._drawingMagnet=Object.freeze({mode:'off',radiusPx:8});this._crosshairSnap=Object.freeze({mode:'free',target:null});this._crosshairOwner={};this._crosshairPointer=null;}
-  get drawingMagnet(){return this._drawingMagnet;}
-  setDrawingMagnet(options,{notify=true}={}){optionRecord(options,['mode','radiusPx'],'Drawing magnet');const mode=options.mode,radiusPx=options.radiusPx===undefined?8:options.radiusPx;if(!['off','weak','strong'].includes(mode))throw new TypeError('Drawing magnet mode: off, weak or strong required');if(!Number.isFinite(radiusPx)||radiusPx<1||radiusPx>32)throw new RangeError('Drawing magnet radius must be 1..32 logical pixels');if(mode===this.drawingMagnet.mode&&radiusPx===this.drawingMagnet.radiusPx)return;this.cancel({notify:false,ownedDrawingsOnly:true});this._drawingMagnet=Object.freeze({mode,radiusPx});if(notify)this.invalidate();}
-  get crosshairSnap(){return this._crosshairSnap;}
-  setCrosshairSnap(options,{notify=true}={}){const next=crosshairSnapOptions(this.model,options),old=this.crosshairSnap;if(next.mode===old.mode&&next.target?.panel===old.target?.panel&&next.target?.axisId===old.target?.axisId&&next.target?.seriesId===old.target?.seriesId)return;this._crosshairSnap=next;updatePointerCrosshair(this);if(notify)this.invalidate('hover');}
-  releaseCrosshair(){releasePointerCrosshair(this);}
-  layout() {const {width, height} = this.size(); return createLayout(this.model, width, height);}
-  drawingProjection(layout,panel,axisId){const axis=layout.axis(panel,axisId);return axis?[axis.left,axis.right,axis.top,axis.bottom,axis.min,axis.max,axis.scale,axis.inverted,axis.base,this.model.view.from,this.model.view.to,this.model.store.geometryIdentity,this.model.store.timeVersion]:null;}
-  setTool(tool,{notify=true}={}) {if (tool !== 'select' && !DRAWING_TYPES.includes(tool)) throw new Error('Unknown drawing tool'); this.cancel({notify:false}); this.tool = tool; if(notify)this.invalidate();}
-  setDrawingTarget(target,{notify=true}={}){if(target!==null){optionRecord(target,['panel','axisId','seriesId'],'Drawing target');const next={panel:'price',...target};identifier(next.panel,'Drawing target panel');if(next.seriesId!=null&&next.axisId===undefined){const s=this.model.series.find(s=>s.id===next.seriesId);if(s)next.axisId=s.axisId??null;}this.model.validateDrawingBinding(next);this.cancel({notify:false});this.drawingTarget=next;}else{this.cancel({notify:false});this.drawingTarget=null;}if(notify)this.invalidate();}
+  constructor(model, size, invalidate = () => {}, owner=null) {if(Object.getOwnPropertyDescriptor(model??{},'disposed')?.value)throw new Error('Chart disposed');const token=owner??{active:true};if(token.active===false)throw new Error('Chart disposed');this.model = model; this.size = size; this.invalidate = invalidate; this.pointers = new Map(); this.tool = 'select'; this.gesture = null; this.text = 'Note';this.drawingTarget=null;this._drawingMagnet=Object.freeze({mode:'off',radiusPx:8});this._crosshairSnap=Object.freeze({mode:'free',target:null});this._crosshairOwner={};this._crosshairPointer=null;interactionOwners.set(this,{model,owner:token});}
+  get drawingMagnet(){interactionActive(this);return this._drawingMagnet;}
+  setDrawingMagnet(options,{notify=true}={}){interactionActive(this);optionRecord(options,['mode','radiusPx'],'Drawing magnet');const mode=options.mode,radiusPx=options.radiusPx===undefined?8:options.radiusPx;if(!['off','weak','strong'].includes(mode))throw new TypeError('Drawing magnet mode: off, weak or strong required');if(!Number.isFinite(radiusPx)||radiusPx<1||radiusPx>32)throw new RangeError('Drawing magnet radius must be 1..32 logical pixels');if(mode===this.drawingMagnet.mode&&radiusPx===this.drawingMagnet.radiusPx)return;this.cancel({notify:false,ownedDrawingsOnly:true});this._drawingMagnet=Object.freeze({mode,radiusPx});if(notify)this.invalidate();}
+  get crosshairSnap(){interactionActive(this);return this._crosshairSnap;}
+  setCrosshairSnap(options,{notify=true}={}){interactionActive(this);const next=crosshairSnapOptions(this.model,options),old=this.crosshairSnap;if(next.mode===old.mode&&next.target?.panel===old.target?.panel&&next.target?.axisId===old.target?.axisId&&next.target?.seriesId===old.target?.seriesId)return;this._crosshairSnap=next;updatePointerCrosshair(this);if(notify)this.invalidate('hover');}
+  releaseCrosshair(){interactionActive(this);releasePointerCrosshair(this);}
+  layout() {interactionActive(this);const {width, height} = this.size();interactionActive(this);const layout=createLayout(this.model, width, height);interactionActive(this);return layout;}
+  drawingProjection(layout,panel,axisId){interactionActive(this);const axis=layout.axis(panel,axisId);return axis?[axis.left,axis.right,axis.top,axis.bottom,axis.min,axis.max,axis.scale,axis.inverted,axis.base,this.model.view.from,this.model.view.to,this.model.store.geometryIdentity,this.model.store.timeVersion]:null;}
+  setTool(tool,{notify=true}={}) {interactionActive(this);if (tool !== 'select' && !DRAWING_TYPES.includes(tool)) throw new Error('Unknown drawing tool'); this.cancel({notify:false}); this.tool = tool; if(notify)this.invalidate();}
+  setDrawingTarget(target,{notify=true}={}){interactionActive(this);if(target!==null){optionRecord(target,['panel','axisId','seriesId'],'Drawing target');const next={panel:'price',...target};identifier(next.panel,'Drawing target panel');if(next.seriesId!=null&&next.axisId===undefined){const s=this.model.series.find(s=>s.id===next.seriesId);if(s)next.axisId=s.axisId??null;}this.model.validateDrawingBinding(next);this.cancel({notify:false});this.drawingTarget=next;}else{this.cancel({notify:false});this.drawingTarget=null;}if(notify)this.invalidate();}
   down(id, x, y, hitTolerance = 8) {
+    interactionActive(this);
     if(!Number.isFinite(hitTolerance)||hitTolerance<1||hitTolerance>32)throw new RangeError('Pointer hit tolerance must be 1..32 logical pixels');
     if (![x, y].every(Number.isFinite)) return;
     stopStaleViewport(this);
@@ -70,6 +81,7 @@ export class InteractionController {
     this.invalidate('drawings');
   }
   move(id, x, y) {
+    interactionActive(this);
     if(![x,y].every(Number.isFinite))return;
     if(stopStaleDrawing(this)){this.invalidate('drawings');return;}
     stopStaleViewport(this);
@@ -100,6 +112,7 @@ export class InteractionController {
     this.invalidate(g.kind==='pan'||g.kind==='pinch'?'all':'drawings');
   }
   up(id) {
+    interactionActive(this);
     if(stopStaleDrawing(this)){this.invalidate('drawings');return;}
     stopStaleViewport(this);
     if (!this.pointers.has(id)) return; this.pointers.delete(id);
@@ -110,9 +123,10 @@ export class InteractionController {
   }
   // Renderer teardown may only roll back its captured drawing transaction.
   // Explicit/native cancel keeps its existing global cancellation contract.
-  cancel({notify=true,ownedDrawingsOnly=false}={}) {if(!ownedDrawingsOnly||this.gesture?.transaction&&this.gesture.transaction===this.model.drawings.transaction)this.model.drawings.cancel(); if (this.gesture?.view&&viewportCurrent(this,this.gesture)) {this.model.view = {...this.gesture.view}; this.model.follow = this.gesture.follow;} this.gesture = null; this.pointers.clear(); if(notify)this.invalidate();}
-  wheel(delta, x) {if (this.gesture) return; const p = this.layout().panels[0]; this.model.zoom(Math.exp(Math.max(-1, Math.min(1, delta * .001))), (x - p.left) / (p.right - p.left)); this.invalidate();}
+  cancel({notify=true,ownedDrawingsOnly=false}={}) {interactionActive(this);if(!ownedDrawingsOnly||this.gesture?.transaction&&this.gesture.transaction===this.model.drawings.transaction)this.model.drawings.cancel(); if (this.gesture?.view&&viewportCurrent(this,this.gesture)) {this.model.view = {...this.gesture.view}; this.model.follow = this.gesture.follow;} this.gesture = null; this.pointers.clear(); if(notify)this.invalidate();}
+  wheel(delta, x) {interactionActive(this);if (this.gesture) return; const p = this.layout().panels[0]; this.model.zoom(Math.exp(Math.max(-1, Math.min(1, delta * .001))), (x - p.left) / (p.right - p.left)); this.invalidate();}
   key(key, {ctrl = false, shift = false} = {}) {
+    interactionActive(this);
     if(this.model.drawings.items.some(d=>d.id===this.model.drawings.selected&&d.visible===false))this.model.drawings.selected=null;
     const undo = ctrl && key.toLowerCase() === 'z' && !shift, redo = ctrl && (key.toLowerCase() === 'y' || key.toLowerCase() === 'z' && shift), deleting = ['Delete', 'Backspace'].includes(key);
     if(key==='Escape'){this.cancel();this.model.drawings.selected=null;this.model.crosshair=null;}
@@ -129,4 +143,20 @@ export class InteractionController {
     }
     this.invalidate();
   }
+}
+
+// Canvas teardown cannot call public controller operations after its model has
+// been disposed. Retire the shared owner token and release only state this
+// controller still owns; a replacement owner's drawing transaction is kept.
+export function retireInteractionController(controller){
+ const state=interactionOwners.get(controller);if(!state||state.owner.active!==true)return false;
+ state.owner.active=false;const descriptor=Object.getOwnPropertyDescriptor(controller,'model'),model=descriptor&&Object.hasOwn(descriptor,'value')?descriptor.value:null;
+ try{
+  if(model===state.model){
+   releasePointerCrosshair(controller);
+   const gesture=controller.gesture;if(gesture?.transaction&&gesture.transaction===model.drawings.transaction)model.drawings.cancel();
+   if(gesture?.view&&viewportCurrent(controller,gesture)){model.view={...gesture.view};model.follow=gesture.follow;}
+  }
+ }finally{controller.gesture=null;controller.pointers?.clear();}
+ return true;
 }

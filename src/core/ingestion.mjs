@@ -71,7 +71,8 @@ export class DataIngestion {
   }
  }
  rejection(error,count=0){if(!this.closed){if(this.counters.rejectedPackets<Number.MAX_SAFE_INTEGER)this.counters.rejectedPackets++;this.counters.rejectedEvents=Math.min(Number.MAX_SAFE_INTEGER,this.counters.rejectedEvents+count);}throw error instanceof IngestionError?error:new IngestionError('INVALID_INPUT',String(error.message).slice(0,256),error);}
- enqueue(packet){
+ enqueue(packet,ownerGuard=null){
+  if(ownerGuard!==null&&typeof ownerGuard!=='function')throw new TypeError('Owner guard callback required');ownerGuard?.();let ownerFailed=false;const guard=()=>{if(!ownerGuard)return;try{ownerGuard();}catch(error){ownerFailed=true;throw error;}};
   let events=[];try{
    this.active();if(this.leased)throw new IngestionError('BUSY','Async ingestion lease active');if(this.paused)throw new IngestionError('PAUSED','Ingestion paused');this.source();
    const version=this.store.version,next=this.nextSequence,epoch=this.epoch,row=ingestionRecord(packet,['streamId','generation','firstSequence','events'],'Packet');events=snapshotIngestionEvents(row.events);
@@ -80,12 +81,12 @@ export class DataIngestion {
    if(row.streamId!==this.policy.streamId||row.generation!==this.policy.generation)throw new IngestionError('STREAM_MISMATCH','Packet stream/generation mismatch');
    ingestionInteger(row.firstSequence,0,Number.MAX_SAFE_INTEGER,'firstSequence');if(row.firstSequence!==this.nextSequence)throw new IngestionError('SEQUENCE_MISMATCH','Packet firstSequence must equal nextSequence');
    if(events.length>this.capacity-this.count)throw new IngestionError('QUEUE_BUDGET','Packet exceeds queued event/typed-byte budget');
-   if(this.nextSequence>Number.MAX_SAFE_INTEGER-events.length||this.counters.accepted>Number.MAX_SAFE_INTEGER-events.length)throw new IngestionError('SEQUENCE_LIMIT','Sequence/counter limit');
+   if(this.nextSequence>Number.MAX_SAFE_INTEGER-events.length||this.counters.accepted>Number.MAX_SAFE_INTEGER-events.length)throw new IngestionError('SEQUENCE_LIMIT','Sequence/counter limit');guard();
    for(let i=0;i<events.length;i++){const at=(this.head+this.count+i)%this.capacity,e=events[i];for(const k of FIELDS)this.columns[k][at]=e.bar[k];this.kinds[at]=INGESTION_KINDS.indexOf(e.kind);}
    const firstSequence=this.nextSequence;if(!this.count)this.firstPendingSequence=firstSequence;this.count+=events.length;this.nextSequence+=events.length;this.counters.accepted+=events.length;this.epoch++;
    this.counters.peakPendingEvents=Math.max(this.counters.peakPendingEvents,this.count);this.counters.peakPendingBytes=this.counters.peakPendingEvents*INGESTION_BYTES;
    return {events:events.length,firstSequence,nextSequence:this.nextSequence,pendingEvents:this.count,pendingBytes:this.count*INGESTION_BYTES};
-  }catch(error){return this.rejection(error,events.length);}
+  }catch(error){if(ownerFailed)throw error;guard();return this.rejection(error,events.length);}
  }
  prefix(count=this.count){const result=[];for(let i=0;i<count;i++){const at=(this.head+i)%this.capacity;result.push({kind:INGESTION_KINDS[this.kinds[at]],bar:Object.fromEntries(FIELDS.map(k=>[k,this.columns[k][at]]))});}return result;}
  drain(maxEvents=this.policy.maxBatchEvents){

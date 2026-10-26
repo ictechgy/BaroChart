@@ -25,6 +25,7 @@ function ownData(object,key,label,optional=false){
   return descriptor.value;
 }
 function staleError(message){const error=new Error(message);error.name='StaleSourceError';return error;}
+function runOwnerGuard(guard){if(guard!==null&&guard!==undefined){if(typeof guard!=='function')throw new TypeError('Owner guard callback required');guard();}}
 function sameDataDescriptor(current,expected){return !!current&&!!expected&&Object.hasOwn(current,'value')&&Object.hasOwn(expected,'value')&&current.value===expected.value&&current.writable===expected.writable&&current.enumerable===expected.enumerable&&current.configurable===expected.configurable;}
 function chartOwnerCurrent(model,owner,controller){
   const disposedDescriptor=Object.getOwnPropertyDescriptor(model,'disposed');if(disposedDescriptor&&!Object.hasOwn(disposedDescriptor,'value'))return false;
@@ -144,12 +145,12 @@ export class ChartModel {
     // follow the tail like append, or retain an explicitly unfollowed view.
     panels.forEach(p => this.addPanel(p));if(!Array.isArray(axes))throw new TypeError('Axes array required');axes.forEach(a=>this.addAxis(a));this.indicators=new IndicatorEngine(store);try{this.drawings=new DrawingStore(); this.unsubscribe = store._subscribeInternal(({kind, from, added, appended}) => {if(kind==='compact')return;if (kind === 'prepend' && store.length > added) {this.view.from += added; this.view.to += added;} else if (kind === 'reset') this.fit(); if ((kind === 'append'||kind==='batch'&&appended>0||kind==='prepend'&&added>0&&store.length===added) && this.follow) {const span = this.view.to - this.view.from; this.view.to = store.length + this.forwardOffset() - .5; this.view.from = this.view.to - span;} for (const s of this.series) s.dirtyFrom = Math.min(s.dirtyFrom ?? Infinity, from);});registerStoreOwner(this,store,'model');}catch(error){try{this.indicators.dispose();}catch{}throw error;}
   }
-  addPanel(options) {optionRecord(options,PANEL_KEYS,'Panel');identifier(options.id,'Panel id');if(this.panels.length>=RESOURCE_LIMITS.maxPanels)throw new RangeError('Panel limit');if (!options?.id || this.panels.some(p => p.id === options.id) || !Number.isFinite(options.weight ?? 1) || (options.weight ?? 1) <= 0) throw new Error('Unique panel id and positive weight'); const p = {weight: 1, scale: 'linear', inverted: false, padding: .08, ...options}; this.validatePanel(p);if(this.drawings?.transaction)throw new Error('Panel layout change during drawing transaction'); this.panels.push(p); return p.id;}
+  addPanel(options,{ownerGuard=null}={}) {optionRecord(options,PANEL_KEYS,'Panel');identifier(options.id,'Panel id');if(this.panels.length>=RESOURCE_LIMITS.maxPanels)throw new RangeError('Panel limit');if (!options?.id || this.panels.some(p => p.id === options.id) || !Number.isFinite(options.weight ?? 1) || (options.weight ?? 1) <= 0) throw new Error('Unique panel id and positive weight'); const p = {weight: 1, scale: 'linear', inverted: false, padding: .08, ...options}; this.validatePanel(p);if(this.drawings?.transaction)throw new Error('Panel layout change during drawing transaction');runOwnerGuard(ownerGuard); this.panels.push(p); return p.id;}
   validatePanel(p) {if(p.axisVisible!==undefined&&typeof p.axisVisible!=='boolean'||p.axisSide!==undefined&&!['left','right'].includes(p.axisSide))throw new TypeError('Panel axis visibility/side');if(typeof p.inverted!=='boolean'||p.label!==undefined&&typeof p.label!=='string'||p.formatter!==undefined&&typeof p.formatter!=='function'||p.range&&(!Array.isArray(p.range)||p.range.length!==2))throw new TypeError('Panel label, inverted, formatter or range');if(p.label!==undefined)boundedText(p.label,256,'Panel label');if (!Number.isFinite(p.weight) || p.weight <= 0 || p.base !== undefined && !Number.isFinite(p.base) || !['linear', 'log', 'percent'].includes(p.scale) || !Number.isFinite(p.padding) || p.padding < 0 || p.padding > 1 || p.precision !== undefined && (!Number.isInteger(p.precision) || p.precision < 0 || p.precision > 18) || (p.range && (!Number.isFinite(p.range[0]) || !Number.isFinite(p.range[1]) || p.range[0] >= p.range[1] || p.scale === 'log' && p.range[0] <= 0)) || p.scale === 'percent' && p.base === 0) throw new RangeError('Panel scale/range');}
   drawingProjectionChange(previous,next,keys){return keys.some(key=>Array.isArray(previous[key])&&Array.isArray(next[key])?previous[key].length!==next[key].length||previous[key].some((v,i)=>!Object.is(v,next[key][i])):!Object.is(previous[key],next[key]));}
   drawingMarginsChange(panels=this.panels,axes=this.axes){const before=axisStripWidths(this.panels,this.axes,this.axisWidth),after=axisStripWidths(panels,axes,this.axisWidth);return before.some((value,index)=>value!==after[index]);}
-  setPanel(id, patch) {optionRecord(patch,PANEL_KEYS.filter(k=>k!=='id'),'Panel patch');const i=this.panels.findIndex(p=>p.id===id);if(i<0)throw new Error('Missing panel');const previous=this.panels[i],next={...previous,...patch};this.validatePanel(next);if(this.drawings?.transaction&&(this.drawingProjectionChange(previous,next,['weight'])||this.drawingMarginsChange(this.panels.map((p,j)=>j===i?next:p))||this.drawingProjectionChange(previous,next,['scale','inverted','padding','range','base','axisVisible','axisSide'])&&[...this.drawings.items,...this.drawings.transaction].some(d=>d.panel===id)))throw new Error('Panel projection change during drawing transaction');this.panels[i]=next;}
-  setPanelOrder(ids,{owner=null,controller=null}={}) {
+  setPanel(id, patch,{ownerGuard=null}={}) {optionRecord(patch,PANEL_KEYS.filter(k=>k!=='id'),'Panel patch');const i=this.panels.findIndex(p=>p.id===id);if(i<0)throw new Error('Missing panel');const previous=this.panels[i],next={...previous,...patch};this.validatePanel(next);if(this.drawings?.transaction&&(this.drawingProjectionChange(previous,next,['weight'])||this.drawingMarginsChange(this.panels.map((p,j)=>j===i?next:p))||this.drawingProjectionChange(previous,next,['scale','inverted','padding','range','base','axisVisible','axisSide'])&&[...this.drawings.items,...this.drawings.transaction].some(d=>d.panel===id)))throw new Error('Panel projection change during drawing transaction');runOwnerGuard(ownerGuard);this.panels[i]=next;}
+  setPanelOrder(ids,{owner=null,controller=null,ownerGuard=null}={}) {
     const disposedDescriptor=Object.getOwnPropertyDescriptor(this,'disposed');if(disposedDescriptor&&!Object.hasOwn(disposedDescriptor,'value'))throw new TypeError('Chart disposed own data slot required');if(disposedDescriptor?.value)throw new Error('Chart disposed');
     const drawings=ownData(this,'drawings','Chart'),snapshot={...managedPanels(this),drawings},requested=strictArrayValues(ids,'Panel order');
     if(requested.length!==snapshot.ids.length)throw new TypeError('Panel order must contain every current panel exactly once');
@@ -161,11 +162,12 @@ export class ChartModel {
     panelOwnerGuard(this,owner,{...snapshot,controller});
     rejectOwnedInput(controller,this);
     if(changed&&ownData(drawings,'transaction','Drawing store'))throw new Error('Panel layout change during drawing transaction');
+    runOwnerGuard(ownerGuard);
     if(!changed)return false;
     this.panels=ordered;
     return true;
   }
-  removePanel(id,{owner=null,controller=null,controllerTarget=undefined,controllerTargetSlot=undefined}={}) {
+  removePanel(id,{owner=null,controller=null,controllerTarget=undefined,controllerTargetSlot=undefined,ownerGuard=null}={}) {
     const disposedDescriptor=Object.getOwnPropertyDescriptor(this,'disposed');if(disposedDescriptor&&!Object.hasOwn(disposedDescriptor,'value'))throw new TypeError('Chart disposed own data slot required');if(disposedDescriptor?.value)throw new Error('Chart disposed');identifier(id,'Panel id');
     rejectOwnedInput(controller,this);
     const snapshot=managedPanels(this),index=snapshot.ids.indexOf(id);if(index<0)throw new Error('Missing panel');
@@ -177,13 +179,13 @@ export class ChartModel {
     panelOwnerGuard(this,owner,{...snapshot,controller});
     if(ownData(this,'series','Chart')!==series||ownData(this,'axes','Chart')!==axes||ownData(this,'drawings','Chart')!==drawings)throw staleError('Panel removal owner changed');
     if(controller&&controllerTargetSlot!==undefined&&(!sameDataDescriptor(Object.getOwnPropertyDescriptor(controller,'drawingTarget'),controllerTargetSlot)||ownData(controller,'drawingTarget','Interaction controller',true)!==controllerTarget))throw staleError('Panel removal owner changed');
-    seriesStateGuard(seriesState);axisStateGuard(axisState);drawingHistoryGuard(drawingState);panelOwnerGuard(this,owner,{...snapshot,controller});rejectOwnedInput(controller,this);
+    seriesStateGuard(seriesState);axisStateGuard(axisState);drawingHistoryGuard(drawingState);panelOwnerGuard(this,owner,{...snapshot,controller});rejectOwnedInput(controller,this);runOwnerGuard(ownerGuard);
     this.panels=snapshot.refs.filter((_,entryIndex)=>entryIndex!==index);
   }
   _setIndicatorPlacement(id,placement,options={}) {return this._applyIndicatorBindings(id,{kind:'placement',value:placement},options);}
   _restoreIndicatorBindings(id,bindings,options={}) {return this._applyIndicatorBindings(id,{kind:'records',value:bindings},options);}
   _applyIndicatorBindings(id,request,options={}) {
-    const {owner=null,controller=null,updateControllerTarget=false}=options;
+    const {owner=null,controller=null,updateControllerTarget=false,ownerGuard=null}=options;
     const disposedDescriptor=Object.getOwnPropertyDescriptor(this,'disposed');if(disposedDescriptor&&!Object.hasOwn(disposedDescriptor,'value'))throw new TypeError('Chart disposed own data slot required');if(disposedDescriptor?.value)throw new Error('Chart disposed');identifier(id,'Indicator id');
     const engine=ownData(this,'indicators','Chart'),entries=ownData(engine,'entries','Indicator engine'),entry=Map.prototype.get.call(entries,id);if(!entry)throw new Error('Missing indicator');
     const store=ownData(this,'store','Chart'),series=ownData(this,'series','Chart'),drawings=ownData(this,'drawings','Chart'),panels=managedPanels(this),axes=managedAxes(this);
@@ -207,12 +209,13 @@ export class ChartModel {
     } else throw new TypeError('Indicator binding request required');
     rejectOwnedInput(controller,this);indicatorOwnerGuard(this,owner,snapshot);
     const changed=bound.filter((record,index)=>record.panel!==targets[index].panel||record.axisId!==targets[index].axisId).length;
-    if(!changed){indicatorOwnerGuard(this,owner,snapshot,true,true);rejectOwnedInput(controller,this);if(ownData(drawings,'transaction','Drawing store'))throw new Error('Indicator placement during drawing transaction');return {changed:0,panel:targets[0].panel,axisId:targets[0].axisId,boundIds:bound.map(record=>record.id)};}
+    if(!changed){indicatorOwnerGuard(this,owner,snapshot,true,true);rejectOwnedInput(controller,this);if(ownData(drawings,'transaction','Drawing store'))throw new Error('Indicator placement during drawing transaction');runOwnerGuard(ownerGuard);return {changed:0,panel:targets[0].panel,axisId:targets[0].axisId,boundIds:bound.map(record=>record.id)};}
     const targetRecord=targetSeriesId!==undefined&&targetSeriesId!==null?targets.find(target=>target.id===targetSeriesId):undefined,targetNeedsUpdate=!!targetRecord;if(targetNeedsUpdate&&(!snapshot.targetSlot||snapshot.targetSlot.writable!==true))throw new TypeError('Interaction controller drawing target must be writable own data');
     const targetsById=new Map(targets.map(target=>[target.id,target])),nextSeries=seriesRefs.slice();for(const [index,record] of seriesState.records.entries())if(record.indicator===id){const target=targetsById.get(record.id);if(record.panel!==target.panel||record.axisId!==target.axisId)nextSeries[index]=cloneSeriesPlacement(record.ref,target.panel,target.axisId);}
     if(ownData(drawings,'transaction','Drawing store'))throw new Error('Indicator placement during drawing transaction');
     indicatorOwnerGuard(this,owner,snapshot,true,true);rejectOwnedInput(controller,this);
     if(ownData(drawings,'transaction','Drawing store'))throw new Error('Indicator placement during drawing transaction');
+    runOwnerGuard(ownerGuard);
     const seriesSlot=Object.getOwnPropertyDescriptor(this,'series');if(!seriesSlot||!Object.hasOwn(seriesSlot,'value')||seriesSlot.writable!==true)throw new TypeError('Chart series owner is not writable');
     this.series=nextSeries;
     if(updateControllerTarget&&targetNeedsUpdate)controller.drawingTarget=cloneDrawingTarget(targetTemplate,targetRecord.panel,targetRecord.axisId);
@@ -227,8 +230,8 @@ export class ChartModel {
     if(a.scale==='percent'&&(!Number.isFinite(a.base)||a.base===0))throw new RangeError('Independent percent axis requires an explicit nonzero base');
     return true;
   }
-  addAxis(options) {optionRecord(options,AXIS_KEYS,'Axis');if(this.axes.length>=RESOURCE_LIMITS.maxAxes)throw new RangeError('Axis limit');if(this.axes.some(a=>a.id===options.id))throw new Error('Duplicate axis');const a={side:'right',scale:'linear',inverted:false,padding:.08,visible:true,tickFormat:'fixed',...options};this.validateAxis(a);if(this.drawings?.transaction&&this.drawingMarginsChange(this.panels,[...this.axes,a]))throw new Error('Axis layout change during drawing transaction');this.axes.push(a);return a.id;}
-  setAxis(id,patch) {optionRecord(patch,AXIS_KEYS.filter(k=>k!=='id'&&k!=='panel'),'Axis patch');const i=this.axes.findIndex(a=>a.id===id);if(i<0)throw new Error('Missing axis');const previous=this.axes[i],a={...previous,...patch};this.validateAxis(a);if(this.drawings?.transaction&&(this.drawingMarginsChange(this.panels,this.axes.map((axis,j)=>j===i?a:axis))||this.drawingProjectionChange(previous,a,['scale','inverted','padding','range','base','width','side','visible'])&&[...this.drawings.items,...this.drawings.transaction].some(d=>d.axisId===id)))throw new Error('Axis projection change during drawing transaction');this.axes[i]=a;}
+  addAxis(options,{ownerGuard=null}={}) {optionRecord(options,AXIS_KEYS,'Axis');if(this.axes.length>=RESOURCE_LIMITS.maxAxes)throw new RangeError('Axis limit');if(this.axes.some(a=>a.id===options.id))throw new Error('Duplicate axis');const a={side:'right',scale:'linear',inverted:false,padding:.08,visible:true,tickFormat:'fixed',...options};this.validateAxis(a);if(this.drawings?.transaction&&this.drawingMarginsChange(this.panels,[...this.axes,a]))throw new Error('Axis layout change during drawing transaction');runOwnerGuard(ownerGuard);this.axes.push(a);return a.id;}
+  setAxis(id,patch,{ownerGuard=null}={}) {optionRecord(patch,AXIS_KEYS.filter(k=>k!=='id'&&k!=='panel'),'Axis patch');const i=this.axes.findIndex(a=>a.id===id);if(i<0)throw new Error('Missing axis');const previous=this.axes[i],a={...previous,...patch};this.validateAxis(a);if(this.drawings?.transaction&&(this.drawingMarginsChange(this.panels,this.axes.map((axis,j)=>j===i?a:axis))||this.drawingProjectionChange(previous,a,['scale','inverted','padding','range','base','width','side','visible'])&&[...this.drawings.items,...this.drawings.transaction].some(d=>d.axisId===id)))throw new Error('Axis projection change during drawing transaction');runOwnerGuard(ownerGuard);this.axes[i]=a;}
   removeAxis(id) {if(this.series.some(s=>s.axisId===id)||[...this.drawings.items,...this.drawings.transaction??[],...this.drawings.undoStack.flat(),...this.drawings.redoStack.flat()].some(d=>d.axisId===id))throw new Error('Axis is referenced by series or drawing history/transaction');const axes=this.axes.filter(a=>a.id!==id);if(this.drawings.transaction&&this.drawingMarginsChange(this.panels,axes))throw new Error('Axis layout change during drawing transaction');this.axes=axes;}
   validateDrawingBinding(d,{allowOrphanSeries=false}={}) {
     if(d.panel!==undefined)identifier(d.panel,'Drawing panel');for(const key of ['axisId','seriesId'])if(d[key]!==undefined&&d[key]!==null)identifier(d[key],'Drawing '+key);
@@ -253,7 +256,7 @@ export class ChartModel {
     if (!Number.isInteger(offset) || Math.abs(offset) > 10000 || ['candles','ohlc'].includes(options.type) && offset !== 0) throw new RangeError('Series plot offset');
     return {color:'#7898ff',width:['candles','ohlc'].includes(options.type)?1:1.5,...options,offset,dirtyFrom:0};
   }
-  addSeries(options){if(this.series.length>=RESOURCE_LIMITS.maxSeries)throw new RangeError('Series limit');if(this.series.some(s=>s.id===options?.id))throw new Error('Duplicate series');const validated=this.normalizedSeries(options);this.series.push(validated);return validated.id;}
+  addSeries(options,{ownerGuard=null}={}){if(this.series.length>=RESOURCE_LIMITS.maxSeries)throw new RangeError('Series limit');if(this.series.some(s=>s.id===options?.id))throw new Error('Duplicate series');const validated=this.normalizedSeries(options);runOwnerGuard(ownerGuard);this.series.push(validated);return validated.id;}
   removeSeries(id) {this.series = this.series.filter(s => s.id !== id);}
   setSeriesValues(id, values) {const s = this.series.find(s => s.id === id); if (!s || !(values instanceof Float64Array) || values.length !== this.store.length) throw new TypeError('Aligned values and existing series required'); if(['candles','ohlc'].includes(s.type)||s.indicator)throw new TypeError('External values require a general non-indicator series');s.values = values; s.dirtyFrom = 0;this.seriesValueRevisions.set(s,(this.seriesValueRevisions.get(s)??0)+1);this.seriesValuesRevision=(this.seriesValuesRevision??0)+1;}
   seriesData(s) {

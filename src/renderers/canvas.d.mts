@@ -1,7 +1,7 @@
 import type {ChartModel,ChartAPI,InteractionController,Scene,DrawingType,DrawingDuplicateOptions,DrawingDuplicateReceipt,DrawingStylePresets} from '../core/index.mjs';
 export function renderCanvas(ctx:CanvasRenderingContext2D,scene:Pick<Scene,'width'|'height'|'background'|'commands'>,dpr?:number):void;
 export class CanvasChart {
- constructor(container:HTMLElement,model:ChartModel,options?:ChartOptions);readonly canvas:HTMLCanvasElement;readonly controller:InteractionController;readonly api:ChartAPI;readonly lastScene?:Scene|null;readonly timings:number[];readonly lastError?:Error|null;readonly rendererKind:'canvas'|'webgl2';readonly fallbackReason?:string;
+ constructor(container:HTMLElement,model:ChartModel,options?:ChartOptions);readonly disposed:boolean;readonly canvas:HTMLCanvasElement;readonly controller:InteractionController;readonly api:ChartAPI;readonly lastScene?:Scene|null;readonly timings:number[];readonly lastError?:Error|null;readonly rendererKind:'canvas'|'webgl2';readonly fallbackReason?:string;
  readonly interactionOptions:Readonly<InteractionOptions>;setInteractionOptions(patch:Partial<InteractionOptions>):Readonly<InteractionOptions>;
  readonly dataExploration:DataExplorationState;readonly timeCursor:TimeCursorState|null;
  setDataExploration(active:boolean):DataExplorationState;readExploration():DataExplorationState;

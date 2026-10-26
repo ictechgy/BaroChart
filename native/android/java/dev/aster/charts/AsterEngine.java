@@ -139,6 +139,22 @@ public final class AsterEngine implements AutoCloseable {
             return value>0;
         }
     }
+    // Layout commands return either a strict Boolean or a bounded changed count.
+    // Keep this decoder package-private so it can be checked without initializing
+    // the JNI-backed Engine or adding another public API surface.
+    static final class LayoutReceipt {
+        private LayoutReceipt() {}
+        static boolean panelOrder(Object result) throws JSONException {
+            if(!(result instanceof Boolean))throw new JSONException("Panel order receipt must be boolean");
+            return ((Boolean)result).booleanValue();
+        }
+        static boolean indicatorPlacement(Object result) throws JSONException {
+            if(!(result instanceof Number))throw new JSONException("Indicator placement changed must be numeric");
+            double value=((Number)result).doubleValue();
+            if(!Double.isFinite(value)||value!=Math.rint(value)||value<0||value>256)throw new JSONException("Indicator placement changed integer range");
+            return value>0;
+        }
+    }
     public Object command(String operation,Object... args) throws JSONException {
         check();Object result;
         // Cover the deferred begin gap as well as core's active ingestion lease.
@@ -173,6 +189,11 @@ public final class AsterEngine implements AutoCloseable {
                 if(row.length()!=2||!(source instanceof String)||!(id instanceof String))throw new JSONException("Drawing duplication row fields");String a=(String)source,b=(String)id;
                 if(a.isEmpty()||a.length()>128||b.isEmpty()||b.length()>128||a.equals(b)||!sources.add(a)||!ids.add(b))throw new JSONException("Drawing duplication row identifiers");}
             notifyChanges();
+        }else if("setPanelOrder".equals(operation)){
+            if(LayoutReceipt.panelOrder(result))notifyChanges();
+        }else if("setIndicatorPlacement".equals(operation)){
+            if(!(result instanceof JSONObject))throw new JSONException("Indicator placement receipt object required");
+            if(LayoutReceipt.indicatorPlacement(((JSONObject)result).get("changed")))notifyChanges();
         }else if(!operation.equals("inspect")&&!operation.equals("indicatorValues")&&!operation.equals("saveDrawings")&&!operation.equals("positionMetrics")&&!operation.equals("crosshairValues")&&!operation.equals("crosshairSnapshot")&&!operation.equals("dataAt")&&!operation.equals("saveStudies")&&!operation.equals("indicatorValueAt")&&!operation.equals("dataIngestionStats")&&!operation.equals("saveDataIngestion"))notifyChanges();return result;
     }
     private void notifyChanges(){revision++;pendingNotifications++;if(notifying)return;notifying=true;observerErrors.clear();try{while(pendingNotifications>0){pendingNotifications--;for(Runnable observer:new java.util.ArrayList<>(observers)){try{observer.run();}catch(RuntimeException error){if(observerErrors.size()<32)observerErrors.add(error);try{if(onObserverError!=null)onObserverError.accept(error);}catch(RuntimeException reporting){if(observerErrors.size()<32)observerErrors.add(reporting);}}}}}finally{notifying=false;}}

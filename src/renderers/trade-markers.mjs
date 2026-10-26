@@ -27,19 +27,19 @@ export function attachTradeMarkers(container,chart,options={}){
  function snapshot(){if(!valid())throw new Error('Trade markers disposed or owner changed');return projected()&&stateFrame===record.projection?states:inactive();}
  function refresh(){
   if(!valid())throw new Error('Trade markers disposed or owner changed');if(!projected()){hide();return snapshot();}
-  const frame=record.projection,version=++epoch,current=()=>valid()&&epoch===version&&record.projection===frame&&projected(),abandon=()=>{if(valid()&&epoch===version)hide();},effect=fn=>{if(!current()){abandon();return false;}try{fn();}catch(error){abandon();throw error;}if(!current()){abandon();return false;}return true;},next=[],used=new Set();
+  const frame=record.projection,version=++epoch,current=()=>valid()&&epoch===version&&record.projection===frame&&projected(),abandon=()=>{if(valid()&&epoch===version)hide();},effect=fn=>{if(!current()){abandon();return false;}try{fn();}catch(error){abandon();throw error;}if(!current()){abandon();return false;}return true;},style=(node,key,value)=>{if(node.style[key]!==value)node.style[key]=value;},next=[],used=new Set(),prepared=new Set();
   for(const marker of items){const row=nodes.get(marker.id),axis=frame.layout.axis(marker.panel,marker.axisId);let status='unbound',x=null,y=null;
    if(axis){let lo=0,hi=frame.length;while(lo<hi){const mid=Math.floor((lo+hi)/2);if(frame.columns.time[mid]<marker.time)lo=mid+1;else hi=mid;}status='unmatched';if(lo<frame.length&&frame.columns.time[lo]===marker.time){x=axis.left+(lo-frame.from)/(frame.to-frame.from)*(axis.right-axis.left);y=axis.scale==='log'&&marker.price<=0?NaN:axis.y(marker.price);status=Number.isFinite(x)&&Number.isFinite(y)&&x>=axis.left&&x<=axis.right&&y>=axis.top&&y<=axis.bottom?'visible':'offscreen';}}
    const state=Object.freeze({marker,status,x:status==='visible'?x:null,y:status==='visible'?y:null});next.push(state);
-   if(status!=='visible'){if(row.button===doc.activeElement&&!effect(()=>chart.canvas.focus()))return null;if(!effect(()=>row.button.hidden=true))return null;continue;}
+   if(status!=='visible'){if(row.button===doc.activeElement&&!effect(()=>chart.canvas.focus()))return null;if(!effect(()=>{if(!row.button.hidden)row.button.hidden=true;}))return null;continue;}
    used.add(marker.panel);let clip=clips.get(marker.panel);if(!clip){clip=doc.createElement('div');clip.style.cssText='position:absolute;overflow:hidden;pointer-events:none;';clips.set(marker.panel,clip);if(!effect(()=>root.append(clip)))return null;}
-   if(!effect(()=>{clip.style.left=axis.left+'px';clip.style.top=axis.top+'px';clip.style.width=(axis.right-axis.left)+'px';clip.style.height=(axis.bottom-axis.top)+'px';}))return null;
+   if(!prepared.has(marker.panel)){if(!effect(()=>{style(clip,'left',axis.left+'px');style(clip,'top',axis.top+'px');style(clip,'width',(axis.right-axis.left)+'px');style(clip,'height',(axis.bottom-axis.top)+'px');}))return null;prepared.add(marker.panel);}
    if(row.button.parentNode!==clip&&!effect(()=>clip.append(row.button)))return null;
-   if(!effect(()=>{row.button.style.left=(x-axis.left)+'px';row.button.style.top=(y-axis.top)+'px';}))return null;
-   if(!effect(()=>row.button.hidden=false))return null;
+   if(!effect(()=>{style(row.button,'left',(x-axis.left)+'px');style(row.button,'top',(y-axis.top)+'px');}))return null;
+   if(!effect(()=>{if(row.button.hidden)row.button.hidden=false;}))return null;
   }
   for(const [panel,clip]of clips)if(!used.has(panel)){if(!effect(()=>clip.remove()))return null;clips.delete(panel);}
-  if(!current()){abandon();return null;}states=Object.freeze(next);stateFrame=frame;if(!effect(()=>root.hidden=false))return null;return states;
+  if(!current()){abandon();return null;}states=Object.freeze(next);stateFrame=frame;if(!effect(()=>{if(root.hidden)root.hidden=false;}))return null;return states;
  }
  function build(rows){const next=new Map();try{for(const marker of rows){const button=doc.createElement('button');button.type='button';button.hidden=true;button.disabled=!onSelect;button.textContent=(marker.side==='buy'?'▲ ':marker.side==='sell'?'▼ ':'● ')+(marker.label||marker.tradeID);button.setAttribute('aria-label',[marker.label||'Trade annotation',marker.tradeID,marker.side??'',new Date(marker.time).toISOString(),'price '+marker.price].filter(Boolean).join(' · '));button.setAttribute('data-trade-marker',marker.id);button.style.cssText='position:absolute;transform:translate(-50%,-50%);pointer-events:auto;min-width:24px;min-height:24px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:inherit;';const click=()=>{if(selecting||!onSelect||!projected()||stateFrame!==record.projection||root.hidden||nodes.get(marker.id)?.button!==button||!states.some(s=>s.marker===marker&&s.status==='visible'))return;selecting=true;try{onSelect(marker);}finally{selecting=false;}};button.addEventListener('click',click);next.set(marker.id,{button,click});}return next;}catch(error){retire(next);throw error;}}
  function retire(map){for(const{button,click}of map.values()){button.removeEventListener('click',click);button.remove();}}
