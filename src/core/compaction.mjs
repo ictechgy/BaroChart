@@ -35,11 +35,13 @@ function compactionPending(ingestion,source,refs,removed,guards){
  }
  guards.push(()=>{for(let i=0;i<q.count;i++){const at=(q.head+i)%q.capacity;if(q.kinds[at]!==kinds[i])compactionStale();for(const key of FIELDS)if(!Object.is(columns[key][at],snapshot[key][i]))compactionStale();}});
 }
-export function compactData(api,options){
- const guards=[],a=compactionCapture(api,['model','controller'],guards),model=a.model;
+export function compactData(api,options,ownerGuard=null){
+ if(ownerGuard!==null&&typeof ownerGuard!=='function')throw new TypeError('Owner guard callback required');
+ const guards=[],a=compactionCapture(api,['model','controller'],guards),model=a.model;if(ownerGuard)guards.push(ownerGuard);
  if(!model)throw new Error('Chart disposed');
  const m=compactionCapture(model,['store','indicators','series','panels','axes','drawings','view','follow','crosshair','dataIngestion','disposed'],guards,['view','crosshair']);
  if(m.disposed)throw new Error('Chart disposed');
+ ownerGuard?.();
  const store=m.store,s=compactionCapture(store,['columns','index','length','capacity','maxBars','version','timeVersion'],guards,['columns','index','length','capacity','version','timeVersion']);
  const refs=compactionCapture(s.columns,FIELDS,guards);
  if(!(store instanceof BarStore))throw new TypeError('Compaction BarStore required');

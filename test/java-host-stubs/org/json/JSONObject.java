@@ -17,6 +17,7 @@ public class JSONObject {
     public boolean getBoolean(String name) throws JSONException { throw new UnsupportedOperationException("Compile-only org.json stub"); }
     public int optInt(String name, int fallback) { throw new UnsupportedOperationException("Compile-only org.json stub"); }
     public boolean has(String name) { throw new UnsupportedOperationException("Compile-only org.json stub"); }
+    public int length() { throw new UnsupportedOperationException("Compile-only org.json stub"); }
     public Iterator<String> keys() { throw new UnsupportedOperationException("Compile-only org.json stub"); }
     public JSONObject put(String name, Object value) throws JSONException { throw new UnsupportedOperationException("Compile-only org.json stub"); }
     public JSONObject put(String name, boolean value) throws JSONException { throw new UnsupportedOperationException("Compile-only org.json stub"); }

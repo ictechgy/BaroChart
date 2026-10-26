@@ -210,6 +210,8 @@ Native paths are not WebViews. React Native/Flutter adapters are not supplied. L
 
 Node contract tests, strict TypeScript and offline packed-consumer checks are automated checks, not browser/device certification. Float64 is not arbitrary-precision decimal arithmetic; workspaces need matching host-provided data; workers still incur snapshot/allocation costs. [Full validation history and limits](docs/PUBLIC-VALIDATION.md) · [state/ownership roadmap](docs/MARKET-ROADMAP.md).
 
+[2026-10-26 quality audit](docs/QUALITY-AUDIT-20261026.md) records the input, rendering, lifecycle, native notification and light-theme fixes with their verification scope.
+
 <details>
 <summary>Earlier validation records, including the retained failure</summary>
 

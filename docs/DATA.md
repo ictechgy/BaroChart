@@ -45,7 +45,7 @@ const columns = {
 store.setColumns(columns);
 ```
 
-`normalizeOHLCV(rows,{format:'tuples',timeUnit:'s'})`는 `[timestamp,open,high,low,close,volume]`의 숫자/비어 있지 않은 숫자 문자열을 객체 봉으로 변환합니다. `format:'objects'`도 지원합니다. 시간 단위는 어댑터에서 명시하세요. 원본 공급자 스키마·심볼·조정 메타데이터 변환은 호스트의 책임입니다.
+`normalizeOHLCV(rows,{format:'tuples',timeUnit:'s'})`는 `[timestamp,open,high,low,close,volume]`의 숫자/비어 있지 않은 숫자 문자열을 객체 봉으로 변환합니다. `format:'objects'`도 지원합니다. 입력은 최대 4,194,304행의 조밀한 일반 배열이며 각 행은 own data 필드를 가진 객체 또는 정확히 6칸인 튜플이어야 합니다. 희소 배열·접근자·상속 필드는 거절하고, 행 한도를 변환·복사 전에 검사합니다. 시간 단위는 어댑터에서 명시하세요. 원본 공급자 스키마·심볼·조정 메타데이터 변환은 호스트의 책임입니다.
 
 정규화 어댑터의 **문자열 timestamp**는 binary64로 먼저 반올림하지 않고 십진수 자릿수로 정수 밀리초 여부를 검사합니다. 예를 들어 `timeUnit:'s'`의 `'1.001'`은 정확히 `1001`이 됩니다. 부호, 소수점(`'.001'`, `'1.'`), 지수 표기 및 주변 공백을 허용합니다. 원문은 공백 포함 최대 128자, 지수 절댓값은 최대 10,000이며 결과는 Date 범위의 정수 밀리초여야 합니다. 소수 밀리초는 반올림·절삭하지 않고 거절합니다. `'1e-400'`이나 `'1700000000000.00001'`(ms)은 0 또는 근처 봉으로 바꾸지 않습니다. `'-0'`은 -0을 보존합니다. timestamp의 16진수·2진수·8진수 문자열은 이제 거절합니다. 가격·거래량의 기존 Number 변환은 바꾸지 않습니다.
 
@@ -117,7 +117,7 @@ const session = calendar.at(utcMilliseconds, ['regular','extended']);
 
 `TickAggregator`는 외부에서 받은 `{id?,time,price,volume}`를 캘린더 기준 OHLCV로 묶는 참조 구현입니다. tick volume은 누적 거래량이 아닌 해당 거래의 양입니다. 기본 latePolicy는 `reject`, 선택적으로 `correct`는 보관된 bucket의 tick을 시간순 재정렬하여 시가·종가도 수정합니다. 같은 bucket 안의 동일 id는 중복으로 무시합니다. 빈 문자열도 명시된 ID이며 중복 제거합니다. ID 없이 중복을 판별하지 않습니다. 같은 millisecond 거래는 수신 순서를 사용합니다. 변경된 ID의 거래 교체/거래 취소는 지원하지 않고 완성된 봉 correction으로 주입해야 합니다.
 
-기본 256 bucket, bucket당 최대 100,000 tick으로 detail 보관을 제한합니다. 두 보관 제한은 양의 safe integer여야 합니다. 숫자 interval도 양의 safe integer 밀리초이며 `day`/`week`/`month`를 사용할 수 있습니다. 입력은 `time`/`price`/`volume`/`id`만 한 번씩 읽어 복사합니다. 추가 속성은 읽거나 보관하지 않습니다. 입력 검사·보관 한도·거래량 합계 overflow가 실패하면 bucket, 중복 ID, 수신 순서, 마지막 시각을 변경하지 않습니다. 합계는 기존 안정 시간순 정렬과 같은 Float64 덧셈 순서로 계산하며 비유한 OHLCV를 발행하지 않습니다. 늦은 tick의 대상 bucket이 보관되지 않았다면 누락된 구간이든 퇴거된 과거든 `outside-correction-window`로 상태 변경 없이 거절합니다. 역사 중간 삽입은 별도 데이터 reset으로 처리해야 하며 봉이 없는 구간을 만들어 채우지 않습니다. 고빈도 체결용 범용 feed 엔진으로 성능 검증한 기능은 아닙니다. 고성능 경로는 외부에서 집계한 OHLCV를 주입하는 방식입니다.
+기본 256 bucket, bucket당 최대 100,000 tick으로 detail 보관을 제한합니다. 두 보관 제한은 1..4,194,304 범위의 safe integer여야 합니다. 시간순으로 도착한 tick은 유지한 OHLCV에 한 번 반영하며 전체 bucket을 다시 정렬하지 않습니다. 늦은 정정만 해당 bucket을 시간순으로 재계산합니다. 숫자 interval도 양의 safe integer 밀리초이며 `day`/`week`/`month`를 사용할 수 있습니다. 입력은 `time`/`price`/`volume`/`id`만 한 번씩 읽어 복사합니다. 추가 속성은 읽거나 보관하지 않습니다. 입력 검사·보관 한도·거래량 합계 overflow가 실패하면 bucket, 중복 ID, 수신 순서, 마지막 시각을 변경하지 않습니다. 합계는 기존 안정 시간순 정렬과 같은 Float64 덧셈 순서로 계산하며 비유한 OHLCV를 발행하지 않습니다. 늦은 tick의 대상 bucket이 보관되지 않았다면 누락된 구간이든 퇴거된 과거든 `outside-correction-window`로 상태 변경 없이 거절합니다. 역사 중간 삽입은 별도 데이터 reset으로 처리해야 하며 봉이 없는 구간을 만들어 채우지 않습니다. 고빈도 체결용 범용 feed 엔진으로 성능 검증한 기능은 아닙니다. 고성능 경로는 외부에서 집계한 OHLCV를 주입하는 방식입니다.
 
 0.2.2는 복사한 컬럼/한 번 읽은 봉 snapshot을 검사하여 getter·overridden TypedArray helper 경계에서 검사와 commit을 일치시킵니다. 기본 maxBars4,194,304를 더 낮출 수 있습니다. 구독 예외는 성공 commit을 취소하지 않고 listenerErrors/onListenerError로 보고하며 뒤 구독을 계속 통지합니다. reentrant 변경은 FIFO notification으로 전달합니다. JSON/native/Worker 이동 비용과 제한은 AUDIT.md (not included in this source distribution)를 참고하세요.
 

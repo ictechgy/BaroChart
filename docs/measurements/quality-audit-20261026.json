@@ -1,0 +1,231 @@
+{
+  "schema": "barochart.quality-audit",
+  "date": "2026-10-26",
+  "baseline": "cf20d0cbe427933e588eddb7364437ef0b7f7af8",
+  "browser": "Chrome/156.0.8078.48",
+  "sourceSHA256": {
+    "src/core/api.mjs": "6255660acee979c2fa1aa618a929aea5c52b242015f6d77354224183fa68aac2",
+    "src/core/interaction.mjs": "c1682e5448157e2e0e316dff9c97f5fd4af35f07a3361deaa771509f3c00830c",
+    "src/core/markets.mjs": "acb2175f066ccc7b789dcf671f3cf0fc16e1b097dd08a79961b975be4985f233",
+    "src/core/model.mjs": "42e7f11c6ba62438dd803c5f991541d0ed411f313c323a9547f361e23dbb3304",
+    "src/core/study-setup.mjs": "ce0c0b0a1d679264d63e74520847ccc6e2325e79d30803fb9cfe943aa6cb753d",
+    "src/core/drawing-translation.mjs": "001bda342e71ffad9df0f3b7ffce3787e873548a2575e1a4db93ed8e9ca7a80e",
+    "src/core/compaction.mjs": "9dc9bc9e0320d4915e95377130186f01a7a79502ae39c421773e7e8ff6e1f72f",
+    "src/core/ingestion.mjs": "a19148e3f9d6d46788ead956be6cefb6fe7f29bc662b9ae13efd66cb4eddcde5",
+    "src/renderers/canvas.mjs": "12d9e9a730e7d48721367af961a673bade7c52a51793be446225183b80bdb6ca",
+    "src/renderers/webgl.mjs": "8e95f4bef031022adce01f701ecbf30b706c190ef727ad3e7d5129692ca3e871",
+    "src/renderers/trade-markers.mjs": "2672dd32af27818734b3b80785357031d550aeb2ed8385d7d449f36f78b55b1f",
+    "src/web/worker-state.mjs": "583b782c54aae2cadb144ac8f52c0c22fb8f43de69f5b563127339bebffcb510",
+    "src/web/indicator-params-async.mjs": "6ee9bd7e830b103fe1b7f1b55753de3450a1757ef913215d2c82f90bcf9646c7",
+    "native/Resources/aster-core.js": "f61ff8398aceec6db492213d7ba84fe90793655cb2be492b0cffb38703a6a178",
+    "native/AsterNative.swift": "03aa11b351ad18acf01d45a067749b962d7a15dd2cd0c7f60fbdb8e982c12a41",
+    "native/android/java/dev/aster/charts/AsterEngine.java": "180ac180d7588562f2c96b43d0b3affc5a649cdf081310df6177859b35a9df66",
+    "examples/web/demo.mjs": "32703ff0d9f56794555a17c07985ca8ecd543f4dec513e2c6179b9478cf455c8"
+  },
+  "analysis": {
+    "checks": 128,
+    "behavior": {
+      "storedBars": 100000,
+      "studies": 32,
+      "renders": 300,
+      "queries": 300,
+      "getCalls": 0,
+      "baseRedraws": 0,
+      "queryMs": {
+        "p50": 0.20000004768371582,
+        "p95": 0.3000001907348633,
+        "p99": 0.40000009536743164
+      },
+      "stableRows": true,
+      "preserved": true,
+      "error": null,
+      "webglContextLossExecuted": true
+    }
+  },
+  "customization": {
+    "checks": 54,
+    "responsiveWidths": [
+      320,
+      390,
+      768,
+      1280
+    ]
+  },
+  "ux": {
+    "checks": [
+      "unselected delete disabled",
+      "keyboard drawing edit creates undo",
+      "HTML-shaped text never evaluated",
+      "same-market count preserves drawing",
+      "same-market count preserves exact anchors",
+      "same-market count preserves undo",
+      "clearing an indicator preserves its annotated panel and scale",
+      "cancel preserves prior model and canvas",
+      "worker million-bar load completes",
+      "historical worker correction is atomic",
+      "light palette uses higher-contrast EMA",
+      "light price series exceeds 3:1 contrast against its background",
+      "375px layout has usable plot and touch targets",
+      "accessible OHLCV table exists",
+      "back navigation restores chart/data"
+    ],
+    "worker": {
+      "elapsedMs": 552.0999999046326,
+      "longTasks": [],
+      "maxLongTaskMs": 0,
+      "storedBars": 1000000
+    },
+    "asyncCorrection": {
+      "unchanged": true,
+      "close": 1000,
+      "elapsedMs": 264.09999990463257
+    },
+    "contrast": {
+      "color": "#285bb9ff",
+      "bg": "#f8fafcff",
+      "ratio": 6.105836116726206
+    },
+    "mobile": {
+      "scroll": 375,
+      "viewport": 375,
+      "plotWidth": 252,
+      "targetWidth": 44,
+      "targetHeight": 48,
+      "panelHeights": [
+        307,
+        64,
+        82,
+        82
+      ]
+    },
+    "restored": {
+      "persisted": true,
+      "canvases": 1,
+      "bars": 1000000
+    },
+    "platform": "User Mac; installed Google Chrome, owned headless profile; no physical mobile/VoiceOver claim"
+  },
+  "gpu": {
+    "checks": 102,
+    "results": [
+      {
+        "dpr": 1,
+        "mae": 0.3316875,
+        "badForegroundFraction": 0.013429805840403935,
+        "contextLossFallback": true
+      },
+      {
+        "dpr": 2,
+        "mae": 0.17005555555555554,
+        "badForegroundFraction": 0.008493913135229956,
+        "contextLossFallback": true
+      }
+    ]
+  },
+  "independentRendererProbe": {
+    "checks": 54,
+    "dpr": [
+      1,
+      2
+    ],
+    "canonicalAlphaPixel": [
+      128,
+      0,
+      0,
+      255
+    ],
+    "cssAlphaPixel": [
+      0,
+      64,
+      0,
+      255
+    ],
+    "colorCacheEntriesAfterPressure": 256,
+    "reusedColorArrayIdentity": true,
+    "acceptedEllipses": 1000,
+    "fallbackReason": "WebGL frame instance limit 200000",
+    "packedBytesAtDisposal": 16777216,
+    "instancesAtDisposal": 200000,
+    "gpuBytesBeforeFallback": 262144,
+    "glHandlesDeleted": true,
+    "contextLost": true,
+    "drawingJournalPreserved": true,
+    "canvasRerendered": true,
+    "visibleTradeMarkers": 256,
+    "unchangedMarkerAttributeMutations": {
+      "hover": 0,
+      "draw": 0,
+      "refresh": 0
+    },
+    "panResizeStaleHiddenAndFresh": true,
+    "exceptions": 0,
+    "crashes": 0,
+    "externalRequests": 0,
+    "boundary": "Independent in-memory Chrome/CDP probe; owned random-loopback server and isolated profiles; not physical-device FPS"
+  },
+  "swift": {
+    "boundary": "Actual public Swift SDK and macOS JavaScriptCore; owner-thread observer/revision contract; no Android/JNI, UI or device evidence",
+    "callbacks": 2,
+    "checks": [
+      "same panel order does not notify",
+      "same panel order returns false",
+      "changed panel order notifies once",
+      "changed panel order returns true",
+      "repeated changed order becomes a silent no-op",
+      "same study placement does not notify",
+      "same study placement returns zero",
+      "changed study placement notifies once",
+      "changed study placement reports its output",
+      "repeated study placement is silent",
+      "rejected placement does not notify"
+    ],
+    "failed": false,
+    "failures": [],
+    "passed": 11,
+    "schema": "barochart.native-layout-notifications"
+  },
+  "offlineAST": {
+    "tool": "Local TypeScript 5.9.3 AST",
+    "offline": true,
+    "files": 84,
+    "rules": [
+      "dynamic eval/Function calls",
+      "innerHTML/outerHTML assignments"
+    ],
+    "findings": [],
+    "allowlistedTrustedApplicationCode": [
+      {
+        "file": "src/core/api.mjs",
+        "line": 214,
+        "call": "Function",
+        "reason": "Explicit trusted application indicator source API; excluded from data dispatch. Not a sandbox."
+      }
+    ],
+    "limitations": "Narrow syntactic rules only; no interprocedural taint, dependency/CVE or complete vulnerability scan. Vendored sources/native code excluded here. This script does not invoke external scanners or fetch vulnerability data."
+  },
+  "limits": [
+    "No new dependency CVE feed queried",
+    "Java decoder and compile-only host signatures; no Android/JNI observer runtime",
+    "No physical mobile or screen-reader execution",
+    "Local Chrome measurements are not vendor comparison or general FPS guarantees"
+  ],
+  "node": {
+    "version": "v22.20.0",
+    "tests": 5706,
+    "passed": 5706,
+    "failed": 0,
+    "skipped": 0,
+    "syntaxModules": 594,
+    "strictTypeScript": "5.9.3",
+    "offlinePackedConsumer": "passed"
+  },
+  "java": {
+    "jdk": "21",
+    "scenarios": 19,
+    "checks": 32,
+    "sourceLevel": 8,
+    "bytecodeTarget": 8,
+    "productionDecoderRuntimeTested": true,
+    "androidJniObserverRuntimeTested": false
+  }
+}

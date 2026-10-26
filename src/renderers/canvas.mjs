@@ -19,14 +19,23 @@ import {registerTimeCursorHost,disposeTimeCursorHost,timeCursorState,refreshTime
 export {TimeCursorGroup} from './time-cursor.mjs';
 import {KeyboardDataExplorer,explorerInputAllowed} from './keyboard-explorer.mjs';
 import {buildScene} from '../core/scene.mjs';
-import {InteractionController} from '../core/interaction.mjs';
+import {InteractionController,retireInteractionController} from '../core/interaction.mjs';
 import {ChartAPI} from '../core/api.mjs';
 import {RESOURCE_LIMITS} from '../core/contracts.mjs';
 import {SceneCache} from './scene-cache.mjs';
 import {LayerCacheBudget,defaultLayerCacheBudget,CacheAllocationError} from './cache-budget.mjs';
 export {LayerCacheBudget} from './cache-budget.mjs';
 const explorerNodeOwners=new WeakMap();
+const canvasOwners=new WeakMap();
 const FRAME_RENDER = Symbol('scheduled layered frame');
+function notifyFallback(chart,reason){
+  const model=chart.model,canvas=chart.canvas,controller=chart.controller,api=chart.api;
+  try{chart.onFallback?.(reason);}catch(error){chart.reportError(error);}
+  if(chart.disposed)return false;
+  if(Object.getOwnPropertyDescriptor(model,'disposed')?.value){chart.destroy();return false;}
+  if(chart.model!==model||chart.canvas!==canvas||chart.controller!==controller||chart.api!==api)return !chart.disposed;
+  chart.invalidate();return !chart.disposed;
+}
 
 export function renderCanvas(ctx, scene, dpr = 1) {
   drawCanvasCommands(ctx, scene, dpr, true);
@@ -52,22 +61,25 @@ export class CanvasChart {
     if(typeof dpr!=='function'||onError!==null&&typeof onError!=='function')throw new TypeError('DPR/error callback');this.onError=onError;this.lastError=null;
     if(typeof layerCaching!=='boolean'||!Number.isSafeInteger(maxCachedPixels)||maxCachedPixels<0||maxCachedPixels>RESOURCE_LIMITS.maxCanvasPixels)throw new RangeError('Layer cache options');
     if(!['auto','always','never'].includes(rasterCaching)||!(cacheBudget instanceof LayerCacheBudget))throw new TypeError('Raster cache policy/budget');this.rasterCaching=rasterCaching;this.cacheBudget=cacheBudget;this.rasterPolicy=null;this.failedRasterKey=null;
-    if (!container || !model) throw new TypeError('Container and model required'); this.container = container; this.model = model; this.dpr = dpr; this.disposed = false; this.drawGeneration=0;this.invalidationGeneration=0; this.listeners = []; this.frame = null; this.timings = [];
+    if (!container || !model) throw new TypeError('Container and model required');if(Object.getOwnPropertyDescriptor(model,'disposed')?.value)throw new Error('Chart disposed');const owner={active:true,model,controller:undefined,api:undefined};canvasOwners.set(this,owner); this.container = container; this.model = model; this.dpr = dpr; this.disposed = false; this.drawGeneration=0;this.invalidationGeneration=0; this.listeners = []; this.frame = null; this.timings = [];this.pendingFallback=false;this.pendingFallbackReason=null;
     this.interactive = interactive; this.onFallback = onFallback;this.layerCaching=layerCaching;this.maxCachedPixels=maxCachedPixels;this.sceneCache=new SceneCache();this.fullDirty=true;this.layerSurfaces=null;this.lastRatio=null;this.renderMetrics=null;
-    this.canvas = document.createElement('canvas'); this.canvas.tabIndex = 0; this.canvas.setAttribute('role', 'group');this.canvas.setAttribute('aria-roledescription','Financial chart'); this.canvas.setAttribute('aria-label', 'Financial chart. Arrows pan or move the selected drawing; +/- zoom; Page Up/Down select drawings; Escape cancels; Delete deletes.'); this.canvas.style.cssText = 'width:100%;height:100%;display:block;touch-action:none;outline-offset:-2px;'; this.applyInteractionPresentation(); container.append(this.canvas);
-    if (rendererFactory) {try {this.renderer = rendererFactory(this.canvas, reason => this.fallback(reason));} catch (e) {this.fallback(e.message);}}
+    this.canvas = owner.canvas = document.createElement('canvas'); this.canvas.tabIndex = 0; this.canvas.setAttribute('role', 'group');this.canvas.setAttribute('aria-roledescription','Financial chart'); this.canvas.setAttribute('aria-label', 'Financial chart. Arrows pan or move the selected drawing; +/- zoom; Page Up/Down select drawings; Escape cancels; Delete deletes.'); this.canvas.style.cssText = 'width:100%;height:100%;display:block;touch-action:none;outline-offset:-2px;'; this.applyInteractionPresentation(); container.append(this.canvas);
+    try {
+    if (rendererFactory) {try {const renderer=rendererFactory(this.canvas, reason => this.fallback(reason));if(this.pendingFallback){renderer?.dispose();this.renderer=null;}else this.renderer=renderer;} catch (e) {this.fallback(e.message);}}
     if (!this.renderer) {this.ctx = this.canvas.getContext('2d', {alpha: false}); if (!this.ctx) {this.canvas.remove(); throw new Error('Canvas 2D unavailable');}}
     this.rendererKind = this.renderer?.kind ?? 'canvas';
-    try {
-    this.controller = new InteractionController(model, () => this.size(), kind => this.invalidate(kind));
-    this.api = new ChartAPI(model,{controller:this.controller,invalidate:kind=>this.invalidate(kind)});
+    this.controller = owner.controller = new InteractionController(model, () => this.size(), kind => this.invalidate(kind),owner);
+    this.api = owner.api = new ChartAPI(model,{controller:this.controller,invalidate:kind=>this.invalidate(kind)},owner);
     this.setupDataExplorer(dataExplorer);
     if (interactive) this.bind();
     if (observeResize) {this.observer = new ResizeObserver(() => this.invalidate()); this.observer.observe(container);}
-    registerTimeRangeHost(this,model,()=>this.invalidate());this.unsubscribe = model.store.subscribe(() => this.invalidate()); registerTimeCursorHost(this,model,()=>{try{this.invalidate('hover');}catch(error){if(!this.disposed)this.reportError(error);}});this.invalidate();
-    }catch(error){disposeTimeRangeHost(this);disposeTimeCursorHost(this);this.disposeDataExplorer();this.observer?.disconnect();this.unsubscribe?.();this.renderer?.dispose();this.releaseLayers();this.sceneCache.clear();for(const [type,fn,options] of this.listeners)this.canvas.removeEventListener(type,fn,options);this.listeners=[];this.canvas.remove();this.disposed=true;throw error;}
+    registerTimeRangeHost(this,model,()=>this.invalidate());this.unsubscribe = model.store.subscribe(() => this.invalidate()); registerTimeCursorHost(this,model,()=>{try{this.invalidate('hover');}catch(error){if(!this.disposed)this.reportError(error);}});
+    if(this.pendingFallback){const reason=this.pendingFallbackReason;this.pendingFallback=false;this.pendingFallbackReason=null;if(!notifyFallback(this,reason))throw new Error('Chart disposed during fallback callback');}
+    if(!this.disposed)this.invalidate();
+    }catch(error){retireInteractionController(owner.controller);owner.active=false;disposeTimeRangeHost(this);disposeTimeCursorHost(this);this.disposeDataExplorer();this.observer?.disconnect();this.unsubscribe?.();this.renderer?.dispose();this.releaseLayers();this.sceneCache.clear();if(this.frame!==null)cancelAnimationFrame(this.frame);this.frame=null;for(const [type,fn,options] of this.listeners)owner.canvas.removeEventListener(type,fn,options);this.listeners=[];owner.canvas.remove();owner.canvas.width=owner.canvas.height=0;this.disposed=true;throw error;}
   }
   fallback(reason = 'GPU context lost') {
+    if(this.disposed)return;const owner=canvasOwners.get(this);if(!owner||this.model!==owner.model||this.controller!==owner.controller||this.api!==owner.api||this.canvas!==owner.canvas){const error=new Error('Chart owner changed');error.name='StaleSourceError';throw error;}
     const sourceCanvas=this.canvas,sourceController=this.controller,sourcePointerToken=this.timePointerToken;
     const current=()=>!this.disposed&&this.canvas===sourceCanvas&&this.controller===sourceController;
     if(this.explorer?.active)this.setDataExploration(false);
@@ -77,9 +89,11 @@ export class CanvasChart {
     this.renderer?.dispose();if(!current())return;this.renderer = null;
     this.releaseLayers();this.sceneCache?.clear();this.fullDirty=true;
     for (const [type, fn, options] of this.listeners) this.canvas.removeEventListener(type, fn, options); this.listeners = [];
-    const old = this.canvas; this.canvas = old.cloneNode(false); old.replaceWith(this.canvas); this.ctx = this.canvas.getContext('2d', {alpha:false}); this.rendererKind = 'canvas'; this.fallbackReason = reason;
+    const old = this.canvas; this.canvas = owner.canvas = old.cloneNode(false); old.replaceWith(this.canvas); this.ctx = this.canvas.getContext('2d', {alpha:false}); this.rendererKind = 'canvas'; this.fallbackReason = reason;
     if (!this.ctx) throw new Error('Canvas fallback unavailable');
-    if(this.controller&&this.interactive)this.bind();try{this.onFallback?.(reason);}catch(error){this.reportError(error);}if(this.controller)this.invalidate();
+    if(this.controller&&this.interactive)this.bind();
+    if(!this.controller){this.pendingFallback=true;this.pendingFallbackReason=reason;return;}
+    notifyFallback(this,reason);
   }
   get interactionOptions(){return this._interaction;}
   applyInteractionPresentation(){
@@ -223,5 +237,5 @@ export class CanvasChart {
   }
   setTool(tool) {this.controller.setTool(tool);}
   resize() {this.invalidate();}
-  destroy({disposeModel = false} = {}) {if (this.disposed) return; this.disposed = true;disposeTimeRangeHost(this);disposeDrawingPanels(this);disposeChartToolbars(this);disposeChartOverlays(this);disposeChartNavigators(this);disposeTradeMarkers(this);disposeTimeCursorHost(this);this.timeLayout=null; this.disposeDataExplorer();this.controller.releaseCrosshair();this.controller.cancel({ownedDrawingsOnly:true}); if (this.frame !== null) cancelAnimationFrame(this.frame); this.frame = null; this.observer?.disconnect(); this.unsubscribe(); for (const [type, fn, options] of this.listeners) this.canvas.removeEventListener(type, fn, options); this.listeners = [];this.releaseLayers();this.sceneCache.clear(); this.renderer?.dispose(); this.canvas.remove();this.canvas.width=this.canvas.height=0; this.lastScene = null;this.renderMetrics=null; this.timings = []; if (disposeModel) this.model.dispose();}
+  destroy({disposeModel = false} = {}) {if (this.disposed) return; this.disposed = true;const owner=canvasOwners.get(this),canvas=owner?.canvas;retireInteractionController(owner?.controller);if(owner)owner.active=false;disposeTimeRangeHost(this);disposeDrawingPanels(this);disposeChartToolbars(this);disposeChartOverlays(this);disposeChartNavigators(this);disposeTradeMarkers(this);disposeTimeCursorHost(this);this.timeLayout=null; this.disposeDataExplorer(); if (this.frame !== null) cancelAnimationFrame(this.frame); this.frame = null; this.observer?.disconnect(); this.unsubscribe?.(); for (const [type, fn, options] of this.listeners) canvas?.removeEventListener(type, fn, options); this.listeners = [];this.releaseLayers();this.sceneCache.clear(); this.renderer?.dispose(); canvas?.remove();if(canvas)canvas.width=canvas.height=0; this.lastScene = null;this.renderMetrics=null; this.timings = []; if (disposeModel) owner?.model.dispose();}
 }

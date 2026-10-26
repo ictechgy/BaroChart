@@ -31,6 +31,24 @@ export function validateSymbol(symbol) {
   zonedParts(0, symbol.timezone); return Object.freeze({...symbol});
 }
 export function formatPrice(value, symbol) {return value.toFixed(symbol.priceDecimals);}
+function boundedDenseArray(value,max,label,exactLength){
+  if(!Array.isArray(value)||Object.getPrototypeOf(value)!==Array.prototype)throw new TypeError(label+' dense array required');
+  const lengthDescriptor=Object.getOwnPropertyDescriptor(value,'length'),length=lengthDescriptor?.value;
+  if(!lengthDescriptor||!Object.hasOwn(lengthDescriptor,'value')||!Number.isSafeInteger(length)||length<0)throw new TypeError(label+' own length required');
+  if(length>max)throw new RangeError(label+': limit '+max);if(exactLength!==undefined&&length!==exactLength)throw new TypeError(label+' length '+exactLength+' required');
+  if(Object.getOwnPropertySymbols(value).length)throw new TypeError(label+' dense array required');
+  return length;
+}
+function ownArrayValue(value,index,label){
+  const descriptor=Object.getOwnPropertyDescriptor(value,String(index));
+  if(!descriptor||!descriptor.enumerable||!Object.hasOwn(descriptor,'value'))throw new TypeError(label+' own data slot required');
+  return descriptor.value;
+}
+function requireDenseSlots(value,length,label){for(let index=0;index<length;index++){const descriptor=Object.getOwnPropertyDescriptor(value,String(index));if(!descriptor||!descriptor.enumerable||!Object.hasOwn(descriptor,'value'))throw new TypeError(label+' own data slot required');}}
+function ownObjectValues(value,label){
+  if(!value||typeof value!=='object'||Array.isArray(value)||![Object.prototype,null].includes(Object.getPrototypeOf(value)))throw new TypeError(label+' plain object required');
+  return FIELDS.map(key=>{const descriptor=Object.getOwnPropertyDescriptor(value,key);if(!descriptor||!descriptor.enumerable||!Object.hasOwn(descriptor,'value'))throw new TypeError(label+' own data slot required');return descriptor.value;});
+}
 // Timestamp strings use decimal arithmetic before conversion to binary64. Bounds
 // prevent unbounded coefficient/exponent expansion; OHLCV values remain Number.
 function decimalTime(value, timeUnit) {
@@ -52,7 +70,12 @@ function decimalTime(value, timeUnit) {
 }
 export function normalizeOHLCV(rows, {timeUnit = 'ms', format = 'objects'} = {}) {
   if (!['ms', 's'].includes(timeUnit) || !['objects', 'tuples'].includes(format)) throw new TypeError('Explicit format/time unit required');
-  return rows.map(row => {const b = Object.fromEntries(FIELDS.map((k, i) => {const value = format === 'tuples' ? row[i] : row[k]; if(k==='time'&&typeof value==='string')return [k,decimalTime(value,timeUnit)]; if (typeof value !== 'number' && (typeof value !== 'string' || !value.trim())) throw new TypeError('Numeric fields or nonempty numeric strings required'); return [k, k==='time' ? value*(timeUnit==='s'?1000:1) : Number(value)];})); validateBar(b); return b;});
+  const length=boundedDenseArray(rows,RESOURCE_LIMITS.maxBars,'OHLCV rows');requireDenseSlots(rows,length,'OHLCV row');const result=new Array(length);
+  for(let rowIndex=0;rowIndex<length;rowIndex++){
+    const row=ownArrayValue(rows,rowIndex,'OHLCV row'),values=format==='tuples'?(()=>{boundedDenseArray(row,FIELDS.length,'OHLCV tuple',FIELDS.length);return FIELDS.map((_key,index)=>ownArrayValue(row,index,'OHLCV tuple'));})():ownObjectValues(row,'OHLCV object');
+    const b=Object.fromEntries(FIELDS.map((k,i)=>{const value=values[i];if(k==='time'&&typeof value==='string')return [k,decimalTime(value,timeUnit)];if(typeof value!=='number'&&(typeof value!=='string'||!value.trim()))throw new TypeError('Numeric fields or nonempty numeric strings required');return [k,k==='time'?value*(timeUnit==='s'?1000:1):Number(value)];}));validateBar(b);result[rowIndex]=b;
+  }
+  return result;
 }
 
 /** Exact timestamp join onto an existing timeline. Unmatched values remain NaN.
@@ -130,6 +153,7 @@ export class SessionCalendar {
 export class TickAggregator {
   constructor({calendar, interval = 60000, kinds = ['regular'], latePolicy = 'reject', maxBuckets = 256, maxTicksPerBucket = 100000} = {}) {
     if (!(calendar instanceof SessionCalendar) || !['reject', 'correct'].includes(latePolicy) || !Number.isSafeInteger(maxBuckets) || maxBuckets < 1 || !Number.isSafeInteger(maxTicksPerBucket) || maxTicksPerBucket < 1) throw new TypeError('Aggregation policy/calendar');
+    if(maxBuckets>RESOURCE_LIMITS.maxBars||maxTicksPerBucket>RESOURCE_LIMITS.maxBars)throw new RangeError('Aggregation retention limit '+RESOURCE_LIMITS.maxBars);
     if (!(Number.isSafeInteger(interval) && interval > 0) && !['day', 'week', 'month'].includes(interval)) throw new TypeError('Interval must be positive exact milliseconds/day/week/month');
     this.calendar = calendar; this.interval = interval; this.kinds = kinds; this.latePolicy = latePolicy; this.maxBuckets = maxBuckets; this.maxTicksPerBucket = maxTicksPerBucket; this.buckets = new Map(); this.lastTime = -Infinity; this.sequence = 0;
   }
@@ -148,23 +172,27 @@ export class TickAggregator {
     const ticks = entry?.ticks ?? [];
     if (ticks.length >= this.maxTicksPerBucket) throw new RangeError('Tick retention limit; externally aggregate higher-volume feeds');
     const copy = {time, price, volume, ...(id === undefined ? {} : {id}), order: this.sequence};
-    let at = ticks.length;
-    if (late) {at = ticks.findIndex(t => t.time > time); if (at < 0) at = ticks.length;}
-    // Evaluate the stable chronological merge before committing any state. The
-    // order of Float64 additions remains identical to stable sorting all ticks.
-    const bar = {time: bucket.time, open: at === 0 ? price : ticks[0].price, high: -Infinity, low: Infinity, close: at === ticks.length ? price : ticks[ticks.length - 1].price, volume: 0};
-    for (let i = 0; i <= ticks.length; i++) {
-      const t = i === at ? copy : ticks[i < at ? i : i - 1];
-      bar.high = Math.max(bar.high, t.price); bar.low = Math.min(bar.low, t.price); bar.volume += t.volume;
+    let at=ticks.length,bar;
+    if(!late){
+      const previous=entry?.bar;bar=previous?{time:bucket.time,open:previous.open,high:Math.max(previous.high,price),low:Math.min(previous.low,price),close:price,volume:previous.volume+volume}:{time:bucket.time,open:price,high:price,low:price,close:price,volume:0+volume};
+    }else{
+      at=ticks.findIndex(t=>t.time>time);if(at<0)at=ticks.length;
+      // Accepted late corrections rebuild in stable chronological order. This
+      // also resets the incremental aggregate to the exact cold-oracle sum.
+      bar={time:bucket.time,open:at===0?price:ticks[0].price,high:-Infinity,low:Infinity,close:at===ticks.length?price:ticks[ticks.length-1].price,volume:0};
+      for(let i=0;i<=ticks.length;i++){const t=i===at?copy:ticks[i<at?i:i-1];bar.high=Math.max(bar.high,t.price);bar.low=Math.min(bar.low,t.price);bar.volume+=t.volume;}
     }
     if (!Number.isFinite(bar.volume)) throw new RangeError('Aggregated tick volume must remain finite');
     validateBar(bar);
-    const committed = entry ?? {ticks, ids: new Set()};
+    const committed = entry ?? {ticks, ids: new Set(),bar:null};
     ticks.splice(at, 0, copy); if (id !== undefined) committed.ids.add(id);
+    committed.bar=bar;
     if (!entry) this.buckets.set(bucket.time, committed);
     this.sequence++; this.lastTime = Math.max(this.lastTime, time);
-    while (this.buckets.size > this.maxBuckets) this.buckets.delete(Math.min(...this.buckets.keys()));
-    return {status: late ? 'correction' : ticks.length === 1 ? 'append' : 'update', bar, sessionDate: bucket.sessionDate, sessionKind: bucket.kind};
+    // Missing historical buckets are rejected above, so new entries arrive in
+    // time order and Map insertion order identifies the oldest retained bucket.
+    while(this.buckets.size>this.maxBuckets)this.buckets.delete(this.buckets.keys().next().value);
+    return {status: late ? 'correction' : ticks.length === 1 ? 'append' : 'update', bar:{...bar}, sessionDate: bucket.sessionDate, sessionKind: bucket.kind};
   }
   reset() {this.buckets.clear(); this.lastTime = -Infinity; this.sequence = 0;}
 }
