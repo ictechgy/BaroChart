@@ -37,10 +37,12 @@ public final class AsterEngine implements AutoCloseable {
     private AsyncJob activeJob;
     public AsterEngine(Context context,int count) throws IOException,JSONException {this(context,count,null);}
     public AsterEngine(Context context,int count,JSONObject options) throws IOException,JSONException {
-        try(InputStream in=context.getAssets().open("aster-core.js")){ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] buffer=new byte[8192];int size;while((size=in.read(buffer))!=-1)out.write(buffer,0,size);sourceBundle=new String(out.toByteArray(),StandardCharsets.UTF_8);handle=create(sourceBundle);}
-        try {invoke("nativeInit",count,options==null?JSONObject.NULL:options);}catch(JSONException|RuntimeException e){free(handle);handle=0;throw e;}
+        try(InputStream in=context.getAssets().open("aster-core.js")){ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] buffer=new byte[8192];int size;while((size=in.read(buffer))!=-1)out.write(buffer,0,size);sourceBundle=new String(out.toByteArray(),StandardCharsets.UTF_8);}
+        handle=create(sourceBundle);
+        try {invoke("nativeInit",count,options==null?JSONObject.NULL:options);}catch(JSONException|RuntimeException|Error error){long released=handle;handle=0;try{free(released);}catch(Throwable cleanup){if(cleanup!=error)error.addSuppressed(cleanup);}throw error;}
     }
-    private void check(){if(Thread.currentThread()!=owner)throw new IllegalStateException("Use the engine on its owning thread before close");if(activeWorkspace!=null&&activeWorkspace.job.pendingOwnerCleanup())activeWorkspace.job.resumeOwnerCleanup();if(activeParams!=null&&activeParams.job.pendingOwnerCleanup())activeParams.job.resumeOwnerCleanup();if(handle==0)throw new IllegalStateException("Use the engine on its owning thread before close");}
+    private void check(){if(Thread.currentThread()!=owner)throw new IllegalStateException("Use the engine on its owning thread before close");if(activeWorkspace!=null&&activeWorkspace.job.pendingOwnerCleanup())activeWorkspace.job.resumeOwnerCleanup();if(activeParams!=null&&activeParams.job.pendingOwnerCleanup())activeParams.job.resumeOwnerCleanup();if(handle==0)throw new IllegalStateException("Use the engine on its owning thread before close");if(closing)throw new IllegalStateException("Engine closing");}
+    private void checkCleanup(){if(Thread.currentThread()!=owner)throw new IllegalStateException("Use the engine on its owning thread before close");if(!closing){if(activeWorkspace!=null&&activeWorkspace.job.pendingOwnerCleanup())activeWorkspace.job.resumeOwnerCleanup();if(activeParams!=null&&activeParams.job.pendingOwnerCleanup())activeParams.job.resumeOwnerCleanup();}if(handle==0)throw new IllegalStateException("Use the engine on its owning thread before close");}
     public Object invoke(String name,Object... args) throws JSONException {check();if(name==null||name.length()==0||name.length()>128||args.length>16)throw new IllegalArgumentException("Native function name/argument limit");return new JSONArray("["+call(handle,name,new JSONArray(args).toString())+"]").get(0);}
     static final class SceneTiming {
         final long jniNanos,envelopeParseNanos,bodyParseNanos;final int jsonChars;
@@ -102,7 +104,7 @@ public final class AsterEngine implements AutoCloseable {
         ScenePacket result=new ScenePacket((String)transfer[0],(double[])transfer[1]);long afterJava=System.nanoTime();
         sceneTiming=new SceneTiming(afterJNI-start,0,afterJava-afterJNI,((String)transfer[0]).length(),"f64",result.metadataParseNanos,result.numericValidationNanos,result.numbers.length*8L,result.commandCount,result.strings.length);return result;
     }
-    void releaseFrameCache(String token) throws JSONException {invoke("nativeReleaseFrameCache",token);}
+    void releaseFrameCache(String token) throws JSONException {checkCleanup();invokeHandle(handle,"nativeReleaseFrameCache",token);}
     void addCloseListener(Runnable observer){check();closeObservers.add(observer);}
     void removeCloseListener(Runnable observer){if(Thread.currentThread()!=owner)throw new IllegalStateException("Remove close listener on owning thread");closeObservers.remove(observer);}
     /** Stable errors from the common model-owned ingestion session. */

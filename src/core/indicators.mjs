@@ -25,6 +25,13 @@ function roll(s, key, value, n) {
   else { q.sum += value - q.a[q.head]; q.a[q.head] = value; q.head = (q.head + 1) % n; }
   return q.a.length === n ? q.sum / n : NaN;
 }
+// Preserve raw FIFO addition and overflow gaps while dropping stale rolling error.
+function rebaseRoll(q) {
+  let sum = 0;
+  for (let j = 0; j < q.a.length; j++) sum += q.a[(q.head + j) % q.a.length];
+  q.sum = sum;
+  return sum;
+}
 // SMA alone recovers nonfinite sums without changing the shared rolling state
 // schema or normal-path addition order used by the other builtins.
 function smaRoll(s,key,value,n){
@@ -83,6 +90,15 @@ function emaRecover(s,key,value,n,alpha){
  return result;
 }
 function trueRange(b, previous) { return Number.isFinite(previous) ? Math.max(b.high - b.low, Math.abs(b.high - previous), Math.abs(b.low - previous)) : b.high - b.low; }
+// Replaying Welford over the live ring matches a cold window after cancellation.
+function rebaseBollinger(s) {
+  let mean = 0, m2 = 0;
+  for (let j = 0; j < s.a.length; j++) {
+    const value = s.a[(s.head + j) % s.a.length], count = j + 1, delta = value - mean;
+    mean += delta / count; m2 += delta * (value - mean);
+  }
+  s.mean = mean; s.m2 = m2;
+}
 // Monotonic queues give amortized O(1) rolling highs/lows. Snapshot compaction
 // also prevents stale queue storage from growing with the full data history.
 function extreme(s, key, value, n, i, maximum) {
@@ -122,9 +138,20 @@ add('macd', ({fast = 12, slow = 26, signal = 9} = {}) => {period(fast); period(s
   const value = smooth(s, 'f', b.close, fast, 2 / (fast + 1)) - smooth(s, 'l', b.close, slow, 2 / (slow + 1)), sig = smooth(s, 's', value, signal, 2 / (signal + 1)); return [value, sig, value - sig];
 });});
 add('bollinger', ({period: p = 20, deviation = 2} = {}) => {period(p); if (!Number.isFinite(deviation) || deviation < 0) throw new RangeError('Deviation'); return definition(['middle', 'upper', 'lower'], {mean: 0, m2: 0, a: [], head: 0}, (s, b) => {
-  if (s.a.length === p) {const old = s.a[s.head]; if (p > 1) {const next = (p * s.mean - old) / (p - 1); s.m2 -= (old - s.mean) * (old - next); s.mean = next;} else {s.mean = 0; s.m2 = 0;} s.a[s.head] = b.close; s.head = (s.head + 1) % p;}
+  let cancellation = false;
+  if (s.a.length === p) {const old = s.a[s.head]; if (p > 1) {
+    // The centered form avoids p*mean overflow; a finite cancellation rebases
+    // only when the removed sample accounts for most of the prior dispersion.
+    const total = p * s.mean, remaining = total - old;
+    const next = Number.isFinite(total) ? remaining / (p - 1) : s.mean + (s.mean - old) / (p - 1);
+    const removedM2 = (old - s.mean) * (old - next), scale = Math.max(Math.abs(total), Math.abs(old));
+    const severe = Number.isFinite(total) && scale > 0 && Math.abs(remaining) <= scale * Number.EPSILON * 4 * p;
+    cancellation = !Number.isFinite(next) || severe && Number.isFinite(removedM2) && Number.isFinite(s.m2) && Math.abs(removedM2) >= Math.abs(s.m2) / 2;
+    s.m2 -= removedM2; s.mean = next;
+  } else {s.mean = 0; s.m2 = 0;} s.a[s.head] = b.close; s.head = (s.head + 1) % p;}
   else s.a.push(b.close);
   const count = s.a.length, delta = b.close - s.mean; s.mean += delta / count; s.m2 += delta * (b.close - s.mean);
+  if (count === p && p > 1 && (cancellation || s.m2 < 0)) rebaseBollinger(s);
   if (count < p) return [NaN, NaN, NaN]; const d = deviation * Math.sqrt(Math.max(0, s.m2) / p); return [s.mean, s.mean + d, s.mean - d];
 });});
 add('donchian', ({period: p = 20} = {}) => {period(p); return definition(['middle', 'upper', 'lower'], {}, (s, b, i) => {const h = extreme(s, 'h', b.high, p, i, true), l = extreme(s, 'l', b.low, p, i, false); return [(h + l) / 2, h, l];});});
@@ -139,7 +166,7 @@ add('aroon', ({period: p = 25} = {}) => {period(p); return definition(['up', 'do
 add('stochastic', ({period: p = 14, smoothK = 3, smoothD = 3} = {}) => {period(p); period(smoothK); period(smoothD); return definition(['k', 'd'], {}, (s, b, i) => {const h = extreme(s, 'h', b.high, p, i, true), l = extreme(s, 'l', b.low, p, i, false), raw = !Number.isFinite(h) ? NaN : h === l ? 50 : 100 * (b.close - l) / (h - l), k = roll(s, 'k', raw, smoothK); return [k, roll(s, 'd', k, smoothD)];});});
 add('roc', ({period: p = 12} = {}) => {period(p); return definition(['value'], {a: [], head: 0}, (s, b) => {let result = NaN; if (s.a.length === p) {const old = s.a[s.head]; result = old === 0 ? NaN : (b.close / old - 1) * 100; s.a[s.head] = b.close; s.head = (s.head + 1) % p;} else s.a.push(b.close); return [result];});});
 add('williamsR', ({period: p = 14} = {}) => {period(p); return definition(['value'], {}, (s, b, i) => {const h = extreme(s, 'h', b.high, p, i, true), l = extreme(s, 'l', b.low, p, i, false); return [!Number.isFinite(h) ? NaN : h === l ? -50 : -100 * (h - b.close) / (h - l)];});});
-add('cci', ({period: p = 20} = {}) => {period(p); return definition(['value'], {}, (s, b) => {const tp = (b.high + b.low + b.close) / 3, mean = roll(s, 'tp', tp, p); if (!Number.isFinite(mean)) return [NaN]; const dev = s.tp.a.reduce((v, x) => v + Math.abs(x - mean), 0) / p; return [dev === 0 ? 0 : (tp - mean) / (0.015 * dev)];});});
+add('cci', ({period: p = 20} = {}) => {period(p); return definition(['value'], {}, (s, b) => {const tp = (b.high + b.low + b.close) / 3; roll(s, 'tp', tp, p); if (s.tp.a.length < p) return [NaN]; const mean = rebaseRoll(s.tp) / p; if (!Number.isFinite(mean)) return [NaN]; const dev = s.tp.a.reduce((v, x) => v + Math.abs(x - mean), 0) / p; return [dev === 0 ? 0 : (tp - mean) / (0.015 * dev)];});});
 add('obv', () => definition(['value'], {previous: NaN, value: 0}, (s, b) => {if (Number.isFinite(s.previous)) s.value += Math.sign(b.close - s.previous) * b.volume; s.previous = b.close; return [s.value];}));
 add('vwap',vwapDefinition);
 add('mfi', ({period: p = 14} = {}) => {period(p); return definition(['value'], {previous: NaN}, (s, b) => {const tp = (b.high + b.low + b.close) / 3, sign = Math.sign(tp - s.previous); s.previous = tp; if (!Number.isFinite(sign)) return [NaN]; const pos = roll(s, 'p', sign > 0 ? tp * b.volume : 0, p), neg = roll(s, 'n', sign < 0 ? tp * b.volume : 0, p); return [!Number.isFinite(pos) ? NaN : pos === 0 && neg === 0 ? 50 : neg === 0 ? 100 : 100 - 100 / (1 + pos / neg)];});});

@@ -27,6 +27,7 @@ const apiColumnSet=Float64Array.prototype.set;
 const apiOwnValue=(object,key)=>Object.getOwnPropertyDescriptor(object,key)?.value;
 function apiOwnData(object,key,label,optional=false){const descriptor=object&&Object.getOwnPropertyDescriptor(object,key);if(!descriptor){if(optional)return undefined;throw new TypeError(label+' own data slot required');}if(!Object.hasOwn(descriptor,'value'))throw new TypeError(label+' own data slot required');return descriptor.value;}
 function apiControllerSlot(controller,key,label,optional=false){return apiOwnData(controller,key,label,optional);}
+function apiSameDataDescriptor(current,expected){return !!current&&!!expected&&Object.hasOwn(current,'value')&&Object.hasOwn(expected,'value')&&current.value===expected.value&&current.writable===expected.writable&&current.enumerable===expected.enumerable&&current.configurable===expected.configurable;}
 const apiOwners=new WeakMap();
 function apiActive(api){
  const state=apiOwners.get(api);if(!state)throw new TypeError('Actual ChartAPI required');
@@ -100,7 +101,7 @@ export class ChartAPI {
  ingestion(){apiActive(this);if(!this.model.dataIngestion)throw new IngestionError('NOT_CONFIGURED','Configure data ingestion first');return this.model.dataIngestion;}
  configureDataIngestion(options){apiActive(this);assertDataIngestionIdle(this.model);const old=this.model.dataIngestion;old?.idle();if(old?.count)throw new IngestionError('PENDING_DATA','Drain or cancel pending data before reconfiguration');const candidate=new DataIngestion(this.model,options);try{assertDataIngestionIdle(this.model);old?.idle();apiActive(this);if(this.model.dataIngestion!==old||old?.count)throw new IngestionError('SOURCE_CHANGED','Ingestion owner changed during configuration');this.model.dataIngestion=candidate;old?.dispose();return candidate.stats();}catch(error){candidate.dispose();throw error;}}
  enqueueDataEvents(packet){return this.ingestion().enqueue(packet,()=>apiActive(this));}
- drainDataEvents(maxEvents){const receipt=this.ingestion().drain(maxEvents);if(receipt.events)this.invalidate();return receipt;}
+ drainDataEvents(maxEvents){const receipt=this.ingestion().drain(maxEvents);return receipt.events?this.changed(receipt):receipt;}
  pauseDataIngestion(){return this.ingestion().pause();}
  resumeDataIngestion(){return this.ingestion().resume();}
  cancelDataEvents(){return this.ingestion().cancel();}
@@ -113,7 +114,36 @@ export class ChartAPI {
   removePanel(id) {apiActive(this);const model=apiOwnData(this,'model','Chart API'),controller=apiOwnData(this,'controller','Chart API',true);apiOwnData(this,'invalidate','Chart API');let target=null,clear=false,targetSlot=null;if(controller&&apiControllerSlot(controller,'model','Interaction controller',true)===model){targetSlot=Object.getOwnPropertyDescriptor(controller,'drawingTarget');if(!targetSlot||!Object.hasOwn(targetSlot,'value'))throw new TypeError('Interaction controller drawing target must be own data');target=apiControllerSlot(controller,'drawingTarget','Interaction controller',true);clear=target!==null&&target!==undefined&&apiControllerSlot(target,'panel','Drawing target',true)===id;if(clear&&targetSlot.writable!==true)throw new TypeError('Interaction controller drawing target must be writable own data');}model.removePanel(id,{owner:this,controller,controllerTarget:target,controllerTargetSlot:targetSlot,ownerGuard:()=>apiActive(this)});if(clear)controller.drawingTarget=null;return this.changed();}
  addAxis(options){apiActive(this);return this.changed(this.model.addAxis(options,{ownerGuard:()=>apiActive(this)}));}
  setAxis(id,patch){apiActive(this);optionRecord(patch,AXIS_KEYS.filter(k=>k!=='id'&&k!=='panel'),'Axis patch');const next={...patch};if(next.range===null)next.range=undefined;if(next.base===null)next.base=undefined;apiActive(this);this.model.setAxis(id,next,{ownerGuard:()=>apiActive(this)});return this.changed();}
- removeAxis(id){apiActive(this);this.model.removeAxis(id);if(this.controller?.drawingTarget?.axisId===id)this.controller.setDrawingTarget(null,{notify:false});return this.changed();}
+ removeAxis(id){
+  apiActive(this);
+  const model=apiOwnData(this,'model','Chart API'),controller=apiOwnData(this,'controller','Chart API',true),invalidate=apiOwnData(this,'invalidate','Chart API');
+  if(model!==apiActive(this))throw apiStale('Chart API owner changed');
+  let targetSlot,target,targetNeedsClear=false;
+  if(controller!==undefined&&controller!==null){
+   if(apiControllerSlot(controller,'model','Interaction controller',true)!==model)throw apiStale('Interaction controller owner changed');
+   targetSlot=Object.getOwnPropertyDescriptor(controller,'drawingTarget');
+   if(!targetSlot||!Object.hasOwn(targetSlot,'value'))throw new TypeError('Interaction controller drawing target must be own data');
+   target=targetSlot.value;
+   if(target!==null&&target!==undefined){
+    const axisSlot=Object.getOwnPropertyDescriptor(target,'axisId');
+    if(axisSlot&&!Object.hasOwn(axisSlot,'value'))throw new TypeError('Drawing target axisId must be own data');
+    targetNeedsClear=axisSlot?.value===id;
+    if(targetNeedsClear&&targetSlot.writable!==true)throw new TypeError('Interaction controller drawing target must be writable own data');
+   }
+  }
+  const ownerGuard=()=>{
+   if(apiOwnData(this,'model','Chart API')!==model||apiOwnData(this,'controller','Chart API',true)!==controller||apiOwnData(this,'invalidate','Chart API')!==invalidate)throw apiStale('Chart API owner changed');
+   if(controller!==undefined&&controller!==null){
+    if(apiControllerSlot(controller,'model','Interaction controller',true)!==model)throw apiStale('Interaction controller owner changed');
+    const current=Object.getOwnPropertyDescriptor(controller,'drawingTarget');
+    if(!apiSameDataDescriptor(current,targetSlot)||current.value!==target)throw apiStale('Interaction controller owner changed');
+   }
+   apiActive(this);
+  };
+  model.removeAxis(id,{ownerGuard,controller});
+  if(targetNeedsClear)Object.defineProperty(controller,'drawingTarget',{...targetSlot,value:null});
+  return this.changed();
+ }
  setDrawingTarget(target){apiActive(this);if(!this.controller)throw new Error('Interaction controller required');this.controller.setDrawingTarget(target,{notify:false});return this.changed();}
  setDrawingMagnet(options){apiActive(this);if(!this.controller)throw new Error('Interaction controller required');this.controller.setDrawingMagnet(options,{notify:false});return this.changed();}
  dataAt(query,options={}){apiActive(this);const d=Object.getOwnPropertyDescriptor(this,'model');if(!d||!Object.hasOwn(d,'value'))throw new TypeError('Data query own model required');const model=d.value,result=dataAt(model,query,options),current=Object.getOwnPropertyDescriptor(this,'model');if(!current||!Object.hasOwn(current,'value')||current.value!==model){const error=new Error('Data query API owner changed');error.name='StaleSourceError';throw error;}return result;}

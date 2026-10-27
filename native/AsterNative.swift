@@ -1381,6 +1381,7 @@ public final class AsterEngine {
         try asyncPreflight(timeout)
         guard !id.isEmpty, id.utf16.count <= 128, maxBarsPerStep >= 1, maxBarsPerStep <= 16384, revision <= 9007199254740991 else {throw AsterAsyncError.invalidProtocol("Params request bounds")}
         let source = context, capturedRevision = revision
+        guard JSONSerialization.isValidJSONObject(params) else {throw AsterAsyncError.invalidProtocol("Params request must be valid JSON")}
         let data = try JSONSerialization.data(withJSONObject:params,options:[.sortedKeys])
         guard data.count <= 131072, let owned = try JSONSerialization.jsonObject(with:data) as? [String:Any] else {throw AsterAsyncError.invalidProtocol("Params request size")}
         try asyncPreflight(timeout)
@@ -1398,6 +1399,7 @@ public final class AsterEngine {
         try asyncPreflight(timeout)
         guard document.utf16.count <= 2097152, maxBarsPerStep >= 1, maxBarsPerStep <= 16384, revision <= 9007199254740991 else {throw AsterAsyncError.invalidProtocol("Workspace request bounds")}
         let source = context, capturedRevision = revision
+        guard JSONSerialization.isValidJSONObject(datasetBinding) else {throw AsterAsyncError.invalidProtocol("Workspace binding must be valid JSON")}
         let data = try JSONSerialization.data(withJSONObject:datasetBinding,options:[.sortedKeys])
         guard data.count <= 32768, let binding = try JSONSerialization.jsonObject(with:data) as? [String:Any] else {throw AsterAsyncError.invalidProtocol("Workspace binding bounds")}
         try asyncPreflight(timeout)
@@ -1420,6 +1422,7 @@ public final class AsterEngine {
         try workspaceAvailability()
         guard activeAsync == nil else {throw AsterAsyncError.busy}
         guard timeout.isFinite, timeout > 0, timeout <= 3600 else {throw AsterAsyncError.invalidProtocol("Invalid timeout")}
+        guard JSONSerialization.isValidJSONObject(event) else {throw AsterAsyncError.invalidProtocol("Data event must be valid JSON")}
         let data = try JSONSerialization.data(withJSONObject:event,options:[.sortedKeys])
         guard data.count <= 8388608,let eventJSON = String(data:data,encoding:.utf8) else {throw AsterAsyncError.invalidProtocol("Oversized data event")}
         return startAsync(json:eventJSON,kind:.correction,columns:nil,timeout:timeout,progress:progress,completion:completion,inputOwnershipMs:0)
