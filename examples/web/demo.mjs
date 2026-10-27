@@ -106,7 +106,8 @@ function palette(){
  chart.api.setTheme(light?LIGHT_THEME:DARK_THEME);
  const colors={price:['#58cadb','#285bb9'],ema:['#f0b755','#946200'],rsi:['#aa91f7','#7150ba'],upper:['#63779e','#4a6084'],lower:['#63779e','#4a6084']};
  const extraColors=[['#f0b755','#946200'],['#aa91f7','#7150ba'],['#58cadb','#17687c']];
- for(const s of model.series){const extra=s.indicator?.startsWith('extra-'),pair=colors[s.id]??(extra?extraColors[serial%3]:null);if(!pair||s.id==='price'&&!['line','area','histogram'].includes(s.type))continue;
+ const extraColorIndex=id=>{const value=String(id??''),match=/^extra-(\d+)$/.exec(value),suffix=match?Number(match[1]):NaN;if(Number.isSafeInteger(suffix)&&suffix>0)return(suffix-1)%extraColors.length;let hash=0;for(const character of value)hash=(hash*31+character.codePointAt(0))%extraColors.length;return hash;};
+ for(const s of model.series){const extra=s.indicator?.startsWith('extra-'),pair=colors[s.id]??(extra?extraColors[extraColorIndex(s.indicator)]:null);if(!pair||s.id==='price'&&!['line','area','histogram'].includes(s.type))continue;
   // Known demo palette values follow the preset; other host colors survive.
   const patch={};if(s.color===undefined||(extra?extraColors.flat():pair).some(color=>s.color===color||s.color===color+'ff'))patch.color=pair[light?1:0];
   if(s.id==='price'&&(s.fill===undefined||['#58cadb22','#285bb933'].includes(s.fill)))patch.fill=light?'#285bb933':'#58cadb22';

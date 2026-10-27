@@ -223,6 +223,21 @@ function validateIndicatorMembership(state,placements){
  for(const [seriesId,current] of state.indicatorSeries)if(!placements.some(placement=>placement.seriesId===seriesId&&placement.indicatorId===current.indicatorId))throw stale('Indicator series membership changed');
 }
 
+function verifyExactPlacements(model,placements){
+ const state=readCurrentState(model),seriesById=new Map(state.series.map(record=>[record.id,record]));
+ validateIndicatorMembership(state,placements);
+ for(const placement of placements){
+  const current=seriesById.get(placement.seriesId);
+  if(!current||current.indicatorId!==placement.indicatorId||current.panel!==placement.panelId||current.axisId!==placement.axisId)throw stale('Indicator series placement changed during layout');
+ }
+ return state;
+}
+
+function verifyPanelOrder(model,expected){
+ const current=readArray(model,'panels','Chart panels',RESOURCE_LIMITS.maxPanels).map(panel=>resourceId(panel,'Chart panel'));
+ if(current.length!==expected.length||current.some((id,index)=>id!==expected[index]))throw stale('Panel order changed during layout');
+}
+
 function verifyProtectedTargets(model,frameValue,targetAxisParents,{allowUncreatedGenerated=false,existingPanelIds=new Set(),existingAxisIds=new Set(),generatedPanelById=new Map(),generatedAxisById=new Map()}={}){
  const state=readCurrentState(model);
  for(const id of frameValue.panelOrder)if(!state.panelIds.has(id)&&!(allowUncreatedGenerated&&generatedPanelById.has(id)&&!existingPanelIds.has(id)))throw stale('Target panel was removed during layout cleanup');
@@ -306,6 +321,7 @@ export function applyLayoutFrame({api,frame,generatedPanelIds,generatedAxisIds,a
   cleanup(domains,protectedTargets());assertStable(api,model,controller,assertOwner);state=verifyProtectedTargets(model,frameValue,targetAxisParents);validateIndicatorMembership(state,frameValue.placements);
   const currentPanels=readArray(model,'panels','Chart panels',RESOURCE_LIMITS.maxPanels),currentIds=currentPanels.map(panel=>resourceId(panel,'Chart panel'));
   const order=mergePanelOrder(currentIds,frameValue.panelOrder);if(order.some((id,index)=>id!==currentIds[index])){api.setPanelOrder(order);assertStable(api,model,controller,assertOwner);}
+  assertStable(api,model,controller,assertOwner);verifyProtectedTargets(model,frameValue,targetAxisParents);verifyPanelOrder(model,order);verifyExactPlacements(model,frameValue.placements);
   return {changed:!sameState(before,structuralState(model))};
  }catch(error){
   rollbackCreated({api,model,controller,assertOwner,createdPanels,createdAxes,generatedPanelIds:generatedPanelIds??new Set(),generatedAxisIds:generatedAxisIds??new Set(),addedPanelOwnership,addedAxisOwnership});

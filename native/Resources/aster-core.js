@@ -355,9 +355,10 @@ class BarStore {
     return t[i] + (index - i) * (t[i + 1] - t[i]);
   }
   aggregate(start, end, maxBuckets) {
-    start = Math.max(0, Math.floor(start)); end = Math.min(this.length, Math.ceil(end));
-    if (end <= start) return [];
     if (!Number.isInteger(maxBuckets) || maxBuckets < 1) throw new RangeError('Positive bucket count required');
+    start = Math.max(0, Math.floor(start)); end = Math.min(this.length, Math.ceil(end));
+    if (Number.isNaN(start) || Number.isNaN(end)) throw new RangeError('Aggregate bounds must not be NaN');
+    if (end <= start) return [];
     const n = Math.min(end - start, maxBuckets), c = this.columns, out = new Array(n);
     for (let b = 0; b < n; b++) {
       const a = start + Math.floor(b * (end - start) / n), z = start + Math.floor((b + 1) * (end - start) / n), q = this.index.query(a, z);
@@ -964,6 +965,13 @@ function roll(s, key, value, n) {
   else { q.sum += value - q.a[q.head]; q.a[q.head] = value; q.head = (q.head + 1) % n; }
   return q.a.length === n ? q.sum / n : NaN;
 }
+// Preserve raw FIFO addition and overflow gaps while dropping stale rolling error.
+function rebaseRoll(q) {
+  let sum = 0;
+  for (let j = 0; j < q.a.length; j++) sum += q.a[(q.head + j) % q.a.length];
+  q.sum = sum;
+  return sum;
+}
 // SMA alone recovers nonfinite sums without changing the shared rolling state
 // schema or normal-path addition order used by the other builtins.
 function smaRoll(s,key,value,n){
@@ -1022,6 +1030,15 @@ function emaRecover(s,key,value,n,alpha){
  return result;
 }
 function trueRange(b, previous) { return Number.isFinite(previous) ? Math.max(b.high - b.low, Math.abs(b.high - previous), Math.abs(b.low - previous)) : b.high - b.low; }
+// Replaying Welford over the live ring matches a cold window after cancellation.
+function rebaseBollinger(s) {
+  let mean = 0, m2 = 0;
+  for (let j = 0; j < s.a.length; j++) {
+    const value = s.a[(s.head + j) % s.a.length], count = j + 1, delta = value - mean;
+    mean += delta / count; m2 += delta * (value - mean);
+  }
+  s.mean = mean; s.m2 = m2;
+}
 // Monotonic queues give amortized O(1) rolling highs/lows. Snapshot compaction
 // also prevents stale queue storage from growing with the full data history.
 function extreme(s, key, value, n, i, maximum) {
@@ -1061,9 +1078,20 @@ add('macd', ({fast = 12, slow = 26, signal = 9} = {}) => {period(fast); period(s
   const value = smooth(s, 'f', b.close, fast, 2 / (fast + 1)) - smooth(s, 'l', b.close, slow, 2 / (slow + 1)), sig = smooth(s, 's', value, signal, 2 / (signal + 1)); return [value, sig, value - sig];
 });});
 add('bollinger', ({period: p = 20, deviation = 2} = {}) => {period(p); if (!Number.isFinite(deviation) || deviation < 0) throw new RangeError('Deviation'); return definition(['middle', 'upper', 'lower'], {mean: 0, m2: 0, a: [], head: 0}, (s, b) => {
-  if (s.a.length === p) {const old = s.a[s.head]; if (p > 1) {const next = (p * s.mean - old) / (p - 1); s.m2 -= (old - s.mean) * (old - next); s.mean = next;} else {s.mean = 0; s.m2 = 0;} s.a[s.head] = b.close; s.head = (s.head + 1) % p;}
+  let cancellation = false;
+  if (s.a.length === p) {const old = s.a[s.head]; if (p > 1) {
+    // The centered form avoids p*mean overflow; a finite cancellation rebases
+    // only when the removed sample accounts for most of the prior dispersion.
+    const total = p * s.mean, remaining = total - old;
+    const next = Number.isFinite(total) ? remaining / (p - 1) : s.mean + (s.mean - old) / (p - 1);
+    const removedM2 = (old - s.mean) * (old - next), scale = Math.max(Math.abs(total), Math.abs(old));
+    const severe = Number.isFinite(total) && scale > 0 && Math.abs(remaining) <= scale * Number.EPSILON * 4 * p;
+    cancellation = !Number.isFinite(next) || severe && Number.isFinite(removedM2) && Number.isFinite(s.m2) && Math.abs(removedM2) >= Math.abs(s.m2) / 2;
+    s.m2 -= removedM2; s.mean = next;
+  } else {s.mean = 0; s.m2 = 0;} s.a[s.head] = b.close; s.head = (s.head + 1) % p;}
   else s.a.push(b.close);
   const count = s.a.length, delta = b.close - s.mean; s.mean += delta / count; s.m2 += delta * (b.close - s.mean);
+  if (count === p && p > 1 && (cancellation || s.m2 < 0)) rebaseBollinger(s);
   if (count < p) return [NaN, NaN, NaN]; const d = deviation * Math.sqrt(Math.max(0, s.m2) / p); return [s.mean, s.mean + d, s.mean - d];
 });});
 add('donchian', ({period: p = 20} = {}) => {period(p); return definition(['middle', 'upper', 'lower'], {}, (s, b, i) => {const h = extreme(s, 'h', b.high, p, i, true), l = extreme(s, 'l', b.low, p, i, false); return [(h + l) / 2, h, l];});});
@@ -1078,7 +1106,7 @@ add('aroon', ({period: p = 25} = {}) => {period(p); return definition(['up', 'do
 add('stochastic', ({period: p = 14, smoothK = 3, smoothD = 3} = {}) => {period(p); period(smoothK); period(smoothD); return definition(['k', 'd'], {}, (s, b, i) => {const h = extreme(s, 'h', b.high, p, i, true), l = extreme(s, 'l', b.low, p, i, false), raw = !Number.isFinite(h) ? NaN : h === l ? 50 : 100 * (b.close - l) / (h - l), k = roll(s, 'k', raw, smoothK); return [k, roll(s, 'd', k, smoothD)];});});
 add('roc', ({period: p = 12} = {}) => {period(p); return definition(['value'], {a: [], head: 0}, (s, b) => {let result = NaN; if (s.a.length === p) {const old = s.a[s.head]; result = old === 0 ? NaN : (b.close / old - 1) * 100; s.a[s.head] = b.close; s.head = (s.head + 1) % p;} else s.a.push(b.close); return [result];});});
 add('williamsR', ({period: p = 14} = {}) => {period(p); return definition(['value'], {}, (s, b, i) => {const h = extreme(s, 'h', b.high, p, i, true), l = extreme(s, 'l', b.low, p, i, false); return [!Number.isFinite(h) ? NaN : h === l ? -50 : -100 * (h - b.close) / (h - l)];});});
-add('cci', ({period: p = 20} = {}) => {period(p); return definition(['value'], {}, (s, b) => {const tp = (b.high + b.low + b.close) / 3, mean = roll(s, 'tp', tp, p); if (!Number.isFinite(mean)) return [NaN]; const dev = s.tp.a.reduce((v, x) => v + Math.abs(x - mean), 0) / p; return [dev === 0 ? 0 : (tp - mean) / (0.015 * dev)];});});
+add('cci', ({period: p = 20} = {}) => {period(p); return definition(['value'], {}, (s, b) => {const tp = (b.high + b.low + b.close) / 3; roll(s, 'tp', tp, p); if (s.tp.a.length < p) return [NaN]; const mean = rebaseRoll(s.tp) / p; if (!Number.isFinite(mean)) return [NaN]; const dev = s.tp.a.reduce((v, x) => v + Math.abs(x - mean), 0) / p; return [dev === 0 ? 0 : (tp - mean) / (0.015 * dev)];});});
 add('obv', () => definition(['value'], {previous: NaN, value: 0}, (s, b) => {if (Number.isFinite(s.previous)) s.value += Math.sign(b.close - s.previous) * b.volume; s.previous = b.close; return [s.value];}));
 add('vwap',vwapDefinition);
 add('mfi', ({period: p = 14} = {}) => {period(p); return definition(['value'], {previous: NaN}, (s, b) => {const tp = (b.high + b.low + b.close) / 3, sign = Math.sign(tp - s.previous); s.previous = tp; if (!Number.isFinite(sign)) return [NaN]; const pos = roll(s, 'p', sign > 0 ? tp * b.volume : 0, p), neg = roll(s, 'n', sign < 0 ? tp * b.volume : 0, p); return [!Number.isFinite(pos) ? NaN : pos === 0 && neg === 0 ? 50 : neg === 0 ? 100 : 100 - 100 / (1 + pos / neg)];});});
@@ -1519,10 +1547,10 @@ function chartOwnerCurrent(model,owner,controller){
   const controllerModelDescriptor=controller&&Object.getOwnPropertyDescriptor(controller,'model');if(controller&&(!controllerModelDescriptor||!Object.hasOwn(controllerModelDescriptor,'value')||controllerModelDescriptor.value!==model))return false;
   return true;
 }
-function rejectOwnedInput(controller,model){
+function rejectOwnedInput(controller,model,required=true){
   if(!controller)return;
   const controllerModel=Object.getOwnPropertyDescriptor(controller,'model');if(!controllerModel||!Object.hasOwn(controllerModel,'value')||controllerModel.value!==model)return;
-  const gesture=ownData(controller,'gesture','Interaction controller',true),pointers=ownData(controller,'pointers','Interaction controller',true);let pointerCount=0;if(pointers!==undefined&&pointers!==null){try{pointerCount=intrinsicMapSize.call(pointers);}catch{throw new TypeError('Interaction controller pointers map required');}}if(gesture||pointerCount)throw new Error('Panel layout change during active gesture');
+  const gesture=ownData(controller,'gesture','Interaction controller',true),pointers=ownData(controller,'pointers','Interaction controller',true);let pointerCount=0;if(pointers!==undefined&&pointers!==null){try{pointerCount=intrinsicMapSize.call(pointers);}catch{throw new TypeError('Interaction controller pointers map required');}}if(required&&(gesture||pointerCount))throw new Error('Panel layout change during active gesture');
 }
 function strictArrayValues(value,label,max=RESOURCE_LIMITS.maxPanels){
   if(!Array.isArray(value)||Object.getPrototypeOf(value)!==Array.prototype)throw new TypeError(label+' dense array required');
@@ -1578,8 +1606,8 @@ function drawingHistorySnapshot(drawings){
   const stack=(value,label)=>managedArraySnapshot(value,label,10000,frame=>({ref:frame,snapshot:drawingFrameSnapshot(frame,label+' frame')}));
   return {drawings,items:drawingFrameSnapshot(items,'Drawing items'),undo:stack(undo,'Drawing undo history'),redo:stack(redo,'Drawing redo history')};
 }
-function drawingHistoryGuard(snapshot){
-  const drawings=snapshot.drawings;if(ownData(drawings,'transaction','Drawing store'))throw staleError('Drawing history owner changed');
+function drawingHistoryGuard(snapshot,{allowTransaction=false}={}){
+  const drawings=snapshot.drawings;if(!allowTransaction&&ownData(drawings,'transaction','Drawing store'))throw staleError('Drawing history owner changed');
   if(ownData(drawings,'items','Drawing store')!==snapshot.items.array||ownData(drawings,'undoStack','Drawing store')!==snapshot.undo.array||ownData(drawings,'redoStack','Drawing store')!==snapshot.redo.array)throw staleError('Drawing history owner changed');
   drawingFrameGuard(snapshot.items,'Drawing items');
   for(const stack of [snapshot.undo,snapshot.redo]){const refs=strictArrayValues(stack.array,stack===snapshot.undo?'Drawing undo history':'Drawing redo history',10000);if(refs.length!==stack.refs.length||refs.some((frame,index)=>frame!==stack.refs[index]))throw staleError('Drawing history owner changed');for(const record of stack.records)drawingFrameGuard(record.snapshot,stack===snapshot.undo?'Drawing undo history frame':'Drawing redo history frame');}
@@ -1715,7 +1743,24 @@ class ChartModel {
   }
   addAxis(options,{ownerGuard=null}={}) {optionRecord(options,AXIS_KEYS,'Axis');if(this.axes.length>=RESOURCE_LIMITS.maxAxes)throw new RangeError('Axis limit');if(this.axes.some(a=>a.id===options.id))throw new Error('Duplicate axis');const a={side:'right',scale:'linear',inverted:false,padding:.08,visible:true,tickFormat:'fixed',...options};this.validateAxis(a);if(this.drawings?.transaction&&this.drawingMarginsChange(this.panels,[...this.axes,a]))throw new Error('Axis layout change during drawing transaction');runOwnerGuard(ownerGuard);this.axes.push(a);return a.id;}
   setAxis(id,patch,{ownerGuard=null}={}) {optionRecord(patch,AXIS_KEYS.filter(k=>k!=='id'&&k!=='panel'),'Axis patch');const i=this.axes.findIndex(a=>a.id===id);if(i<0)throw new Error('Missing axis');const previous=this.axes[i],a={...previous,...patch};this.validateAxis(a);if(this.drawings?.transaction&&(this.drawingMarginsChange(this.panels,this.axes.map((axis,j)=>j===i?a:axis))||this.drawingProjectionChange(previous,a,['scale','inverted','padding','range','base','width','side','visible'])&&[...this.drawings.items,...this.drawings.transaction].some(d=>d.axisId===id)))throw new Error('Axis projection change during drawing transaction');runOwnerGuard(ownerGuard);this.axes[i]=a;}
-  removeAxis(id) {if(this.series.some(s=>s.axisId===id)||[...this.drawings.items,...this.drawings.transaction??[],...this.drawings.undoStack.flat(),...this.drawings.redoStack.flat()].some(d=>d.axisId===id))throw new Error('Axis is referenced by series or drawing history/transaction');const axes=this.axes.filter(a=>a.id!==id);if(this.drawings.transaction&&this.drawingMarginsChange(this.panels,axes))throw new Error('Axis layout change during drawing transaction');this.axes=axes;}
+  removeAxis(id,{ownerGuard=null,controller=null}={}) {
+    const disposedDescriptor=Object.getOwnPropertyDescriptor(this,'disposed');if(disposedDescriptor&&!Object.hasOwn(disposedDescriptor,'value'))throw new TypeError('Chart disposed own data slot required');if(disposedDescriptor?.value)throw new Error('Chart disposed');identifier(id,'Axis id');
+    const panels=ownData(this,'panels','Chart'),panelState=managedPanels(this),axes=ownData(this,'axes','Chart'),axisState=axisStateSnapshot(axes),index=axisState.records.findIndex(axis=>axis.id===id),series=ownData(this,'series','Chart'),seriesState=seriesStateSnapshot(series);
+    if(seriesState.records.some(record=>record.axisId===id))throw new Error('Axis is referenced by series or drawing history/transaction');
+    const drawings=ownData(this,'drawings','Chart'),transaction=ownData(drawings,'transaction','Drawing store'),drawingState=drawingHistorySnapshot(drawings);
+    const drawingRefs=drawingState.items.refs.concat(...drawingState.undo.records.map(record=>record.snapshot.refs),...drawingState.redo.records.map(record=>record.snapshot.refs));
+    const axisInDrawing=drawing=>{const descriptor=Object.getOwnPropertyDescriptor(drawing,'axisId');if(descriptor&&!Object.hasOwn(descriptor,'value'))throw new TypeError('Drawing axisId must be own data');return descriptor?.value===id;};
+    const transactionRefs=transaction===null?[]:strictArrayValues(transaction,'Drawing transaction',RESOURCE_LIMITS.maxDrawings);
+    if(drawingRefs.some(axisInDrawing)||transactionRefs.some(axisInDrawing))throw new Error('Axis is referenced by series or drawing history/transaction');
+    const nextAxes=index<0?axisState.refs.slice():axisState.refs.filter((_,entryIndex)=>entryIndex!==index);
+    const layoutChange=this.drawingMarginsChange(panels,nextAxes);if(transaction&&layoutChange)throw new Error('Axis layout change during drawing transaction');rejectOwnedInput(controller,this,layoutChange);
+    axisStateGuard(axisState);seriesStateGuard(seriesState);drawingHistoryGuard(drawingState,{allowTransaction:true});
+    if(ownData(drawings,'transaction','Drawing store')!==transaction)throw staleError('Axis removal owner changed');
+    if(transaction!==null){const current=strictArrayValues(transaction,'Drawing transaction',RESOURCE_LIMITS.maxDrawings);if(current.length!==transactionRefs.length||current.some((drawing,entryIndex)=>drawing!==transactionRefs[entryIndex]))throw staleError('Axis removal owner changed');}
+    if(ownData(this,'panels','Chart')!==panels||ownData(this,'axes','Chart')!==axes||ownData(this,'series','Chart')!==series||ownData(this,'drawings','Chart')!==drawings)throw staleError('Axis removal owner changed');
+    panelOwnerGuard(this,null,{...panelState,controller:null});
+    runOwnerGuard(ownerGuard);this.axes=nextAxes;
+  }
   validateDrawingBinding(d,{allowOrphanSeries=false}={}) {
     if(d.panel!==undefined)identifier(d.panel,'Drawing panel');for(const key of ['axisId','seriesId'])if(d[key]!==undefined&&d[key]!==null)identifier(d[key],'Drawing '+key);
     if(!this.panels.some(p=>p.id===(d.panel??'price')))throw new Error('Missing drawing panel');
@@ -1741,7 +1786,7 @@ class ChartModel {
   }
   addSeries(options,{ownerGuard=null}={}){if(this.series.length>=RESOURCE_LIMITS.maxSeries)throw new RangeError('Series limit');if(this.series.some(s=>s.id===options?.id))throw new Error('Duplicate series');const validated=this.normalizedSeries(options);runOwnerGuard(ownerGuard);this.series.push(validated);return validated.id;}
   removeSeries(id) {this.series = this.series.filter(s => s.id !== id);}
-  setSeriesValues(id, values) {const s = this.series.find(s => s.id === id); if (!s || !(values instanceof Float64Array) || values.length !== this.store.length) throw new TypeError('Aligned values and existing series required'); if(['candles','ohlc'].includes(s.type)||s.indicator)throw new TypeError('External values require a general non-indicator series');s.values = values; s.dirtyFrom = 0;this.seriesValueRevisions.set(s,(this.seriesValueRevisions.get(s)??0)+1);this.seriesValuesRevision=(this.seriesValuesRevision??0)+1;}
+  setSeriesValues(id, values) {if(this.disposed)throw new Error('Chart disposed');const s = this.series.find(s => s.id === id); if (!s || !(values instanceof Float64Array) || values.length !== this.store.length) throw new TypeError('Aligned values and existing series required'); if(['candles','ohlc'].includes(s.type)||s.indicator)throw new TypeError('External values require a general non-indicator series');s.values = values; s.dirtyFrom = 0;this.seriesValueRevisions.set(s,(this.seriesValueRevisions.get(s)??0)+1);this.seriesValuesRevision=(this.seriesValuesRevision??0)+1;}
   seriesData(s) {
     if(this.disposed)throw new Error('Chart disposed');
     let values, revision, computedFrom = 0,computedUntil=this.store.length;
@@ -2821,6 +2866,7 @@ const apiColumnSet=Float64Array.prototype.set;
 const apiOwnValue=(object,key)=>Object.getOwnPropertyDescriptor(object,key)?.value;
 function apiOwnData(object,key,label,optional=false){const descriptor=object&&Object.getOwnPropertyDescriptor(object,key);if(!descriptor){if(optional)return undefined;throw new TypeError(label+' own data slot required');}if(!Object.hasOwn(descriptor,'value'))throw new TypeError(label+' own data slot required');return descriptor.value;}
 function apiControllerSlot(controller,key,label,optional=false){return apiOwnData(controller,key,label,optional);}
+function apiSameDataDescriptor(current,expected){return !!current&&!!expected&&Object.hasOwn(current,'value')&&Object.hasOwn(expected,'value')&&current.value===expected.value&&current.writable===expected.writable&&current.enumerable===expected.enumerable&&current.configurable===expected.configurable;}
 const apiOwners=new WeakMap();
 function apiActive(api){
  const state=apiOwners.get(api);if(!state)throw new TypeError('Actual ChartAPI required');
@@ -2894,7 +2940,7 @@ class ChartAPI {
  ingestion(){apiActive(this);if(!this.model.dataIngestion)throw new IngestionError('NOT_CONFIGURED','Configure data ingestion first');return this.model.dataIngestion;}
  configureDataIngestion(options){apiActive(this);assertDataIngestionIdle(this.model);const old=this.model.dataIngestion;old?.idle();if(old?.count)throw new IngestionError('PENDING_DATA','Drain or cancel pending data before reconfiguration');const candidate=new DataIngestion(this.model,options);try{assertDataIngestionIdle(this.model);old?.idle();apiActive(this);if(this.model.dataIngestion!==old||old?.count)throw new IngestionError('SOURCE_CHANGED','Ingestion owner changed during configuration');this.model.dataIngestion=candidate;old?.dispose();return candidate.stats();}catch(error){candidate.dispose();throw error;}}
  enqueueDataEvents(packet){return this.ingestion().enqueue(packet,()=>apiActive(this));}
- drainDataEvents(maxEvents){const receipt=this.ingestion().drain(maxEvents);if(receipt.events)this.invalidate();return receipt;}
+ drainDataEvents(maxEvents){const receipt=this.ingestion().drain(maxEvents);return receipt.events?this.changed(receipt):receipt;}
  pauseDataIngestion(){return this.ingestion().pause();}
  resumeDataIngestion(){return this.ingestion().resume();}
  cancelDataEvents(){return this.ingestion().cancel();}
@@ -2907,7 +2953,36 @@ class ChartAPI {
   removePanel(id) {apiActive(this);const model=apiOwnData(this,'model','Chart API'),controller=apiOwnData(this,'controller','Chart API',true);apiOwnData(this,'invalidate','Chart API');let target=null,clear=false,targetSlot=null;if(controller&&apiControllerSlot(controller,'model','Interaction controller',true)===model){targetSlot=Object.getOwnPropertyDescriptor(controller,'drawingTarget');if(!targetSlot||!Object.hasOwn(targetSlot,'value'))throw new TypeError('Interaction controller drawing target must be own data');target=apiControllerSlot(controller,'drawingTarget','Interaction controller',true);clear=target!==null&&target!==undefined&&apiControllerSlot(target,'panel','Drawing target',true)===id;if(clear&&targetSlot.writable!==true)throw new TypeError('Interaction controller drawing target must be writable own data');}model.removePanel(id,{owner:this,controller,controllerTarget:target,controllerTargetSlot:targetSlot,ownerGuard:()=>apiActive(this)});if(clear)controller.drawingTarget=null;return this.changed();}
  addAxis(options){apiActive(this);return this.changed(this.model.addAxis(options,{ownerGuard:()=>apiActive(this)}));}
  setAxis(id,patch){apiActive(this);optionRecord(patch,AXIS_KEYS.filter(k=>k!=='id'&&k!=='panel'),'Axis patch');const next={...patch};if(next.range===null)next.range=undefined;if(next.base===null)next.base=undefined;apiActive(this);this.model.setAxis(id,next,{ownerGuard:()=>apiActive(this)});return this.changed();}
- removeAxis(id){apiActive(this);this.model.removeAxis(id);if(this.controller?.drawingTarget?.axisId===id)this.controller.setDrawingTarget(null,{notify:false});return this.changed();}
+ removeAxis(id){
+  apiActive(this);
+  const model=apiOwnData(this,'model','Chart API'),controller=apiOwnData(this,'controller','Chart API',true),invalidate=apiOwnData(this,'invalidate','Chart API');
+  if(model!==apiActive(this))throw apiStale('Chart API owner changed');
+  let targetSlot,target,targetNeedsClear=false;
+  if(controller!==undefined&&controller!==null){
+   if(apiControllerSlot(controller,'model','Interaction controller',true)!==model)throw apiStale('Interaction controller owner changed');
+   targetSlot=Object.getOwnPropertyDescriptor(controller,'drawingTarget');
+   if(!targetSlot||!Object.hasOwn(targetSlot,'value'))throw new TypeError('Interaction controller drawing target must be own data');
+   target=targetSlot.value;
+   if(target!==null&&target!==undefined){
+    const axisSlot=Object.getOwnPropertyDescriptor(target,'axisId');
+    if(axisSlot&&!Object.hasOwn(axisSlot,'value'))throw new TypeError('Drawing target axisId must be own data');
+    targetNeedsClear=axisSlot?.value===id;
+    if(targetNeedsClear&&targetSlot.writable!==true)throw new TypeError('Interaction controller drawing target must be writable own data');
+   }
+  }
+  const ownerGuard=()=>{
+   if(apiOwnData(this,'model','Chart API')!==model||apiOwnData(this,'controller','Chart API',true)!==controller||apiOwnData(this,'invalidate','Chart API')!==invalidate)throw apiStale('Chart API owner changed');
+   if(controller!==undefined&&controller!==null){
+    if(apiControllerSlot(controller,'model','Interaction controller',true)!==model)throw apiStale('Interaction controller owner changed');
+    const current=Object.getOwnPropertyDescriptor(controller,'drawingTarget');
+    if(!apiSameDataDescriptor(current,targetSlot)||current.value!==target)throw apiStale('Interaction controller owner changed');
+   }
+   apiActive(this);
+  };
+  model.removeAxis(id,{ownerGuard,controller});
+  if(targetNeedsClear)Object.defineProperty(controller,'drawingTarget',{...targetSlot,value:null});
+  return this.changed();
+ }
  setDrawingTarget(target){apiActive(this);if(!this.controller)throw new Error('Interaction controller required');this.controller.setDrawingTarget(target,{notify:false});return this.changed();}
  setDrawingMagnet(options){apiActive(this);if(!this.controller)throw new Error('Interaction controller required');this.controller.setDrawingMagnet(options,{notify:false});return this.changed();}
  dataAt(query,options={}){apiActive(this);const d=Object.getOwnPropertyDescriptor(this,'model');if(!d||!Object.hasOwn(d,'value'))throw new TypeError('Data query own model required');const model=d.value,result=dataAt(model,query,options),current=Object.getOwnPropertyDescriptor(this,'model');if(!current||!Object.hasOwn(current,'value')||current.value!==model){const error=new Error('Data query API owner changed');error.name='StaleSourceError';throw error;}return result;}

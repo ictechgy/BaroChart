@@ -80,18 +80,44 @@ export class CanvasChart {
   }
   fallback(reason = 'GPU context lost') {
     if(this.disposed)return;const owner=canvasOwners.get(this);if(!owner||this.model!==owner.model||this.controller!==owner.controller||this.api!==owner.api||this.canvas!==owner.canvas){const error=new Error('Chart owner changed');error.name='StaleSourceError';throw error;}
-    const sourceCanvas=this.canvas,sourceController=this.controller,sourcePointerToken=this.timePointerToken;
-    const current=()=>!this.disposed&&this.canvas===sourceCanvas&&this.controller===sourceController;
+    const sourceCanvas=this.canvas,sourceController=this.controller,sourceApi=this.api,sourceModel=this.model,sourcePointerToken=this.timePointerToken;
+    const current=()=>!this.disposed&&canvasOwners.get(this)===owner&&owner.active&&this.model===sourceModel&&owner.model===sourceModel&&this.canvas===sourceCanvas&&owner.canvas===sourceCanvas&&this.controller===sourceController&&owner.controller===sourceController&&this.api===sourceApi&&owner.api===sourceApi;
+    const installed=()=>!this.disposed&&canvasOwners.get(this)===owner&&owner.active&&this.model===sourceModel&&owner.model===sourceModel&&this.canvas===replacement&&owner.canvas===replacement&&this.controller===sourceController&&owner.controller===sourceController&&this.api===sourceApi&&owner.api===sourceApi;
+    let replacement,context;
+    const releaseStaged=()=>{if(!replacement||installed())return;replacement.remove?.();replacement.width=replacement.height=0;};
+    const abort=()=>{releaseStaged();};
+    try {
+      replacement=sourceCanvas.cloneNode(false);
+      context=replacement.getContext('2d',{alpha:false});
+    } catch(error) {
+      if(!current()){abort();return;}
+      abort();
+      throw error;
+    }
+    if(!current()){abort();return;}
+    if(!context){abort();throw new Error('Canvas fallback unavailable');}
     if(this.explorer?.active)this.setDataExploration(false);
-    if(!current())return;clearTimeCursorOrigin(this,'pointer',sourcePointerToken);if(!current())return;this.timeLayout=null;
-    if(!current())return;
-    this.controller?.cancel({ownedDrawingsOnly:true});if(!current())return;
-    this.renderer?.dispose();if(!current())return;this.renderer = null;
-    this.releaseLayers();this.sceneCache?.clear();this.fullDirty=true;
+    if(!current()){abort();return;}clearTimeCursorOrigin(this,'pointer',sourcePointerToken);if(!current()){abort();return;}this.timeLayout=null;
+    if(!current()){abort();return;}
+    this.controller?.cancel({ownedDrawingsOnly:true});if(!current()){abort();return;}
+    this.renderer?.dispose();if(!current()){abort();return;}this.renderer = null;
+    this.releaseLayers();if(!current()){abort();return;}this.sceneCache?.clear();this.fullDirty=true;if(!current()){abort();return;}
     for (const [type, fn, options] of this.listeners) this.canvas.removeEventListener(type, fn, options); this.listeners = [];
-    const old = this.canvas; this.canvas = owner.canvas = old.cloneNode(false); old.replaceWith(this.canvas); this.ctx = this.canvas.getContext('2d', {alpha:false}); this.rendererKind = 'canvas'; this.fallbackReason = reason;
-    if (!this.ctx) throw new Error('Canvas fallback unavailable');
-    if(this.controller&&this.interactive)this.bind();
+    if(!current()){abort();return;}
+    // Mount beside the old canvas before publishing, then publish before old
+    // removal hooks can destroy, nest another fallback, or retarget the node.
+    const parent=sourceCanvas.parentNode;
+    try {
+      if(parent){if(typeof parent.insertBefore==='function')parent.insertBefore(replacement,sourceCanvas);else if(typeof sourceCanvas.before==='function')sourceCanvas.before(replacement);else parent.append(replacement);}
+    } catch(error) {
+      if(!current()){abort();return;}
+      abort();throw error;
+    }
+    if(!current()){abort();return;}
+    this.canvas = owner.canvas = replacement;
+    try {sourceCanvas.remove();} catch(error) {if(!installed()){abort();return;}throw error;}
+    if(!installed()){abort();return;}this.ctx = context; this.rendererKind = 'canvas'; this.fallbackReason = reason;
+    if(this.controller&&this.interactive){this.bind();if(!installed()){abort();return;}}
     if(!this.controller){this.pendingFallback=true;this.pendingFallbackReason=reason;return;}
     notifyFallback(this,reason);
   }

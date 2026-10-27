@@ -41,7 +41,9 @@ export function clearSyntheticRange({model,api,pins,kind,id,assertOwner=()=>{}})
  const entry=pins.get(id),resource=resourceFor(model,kind,id);
  if(!entry)return false;
  if(!resource||entry.model!==model||resource.range!==entry.rangeRef||!sameRange(entry.range,resource.range)){pins.delete(id);return false;}
- rangeAPI(api,kind,id,null);assertOwner();pins.delete(id);return true;
+ const originalModel=entry.model,originalRangeRef=entry.rangeRef;
+ try{rangeAPI(api,kind,id,null);assertOwner();return true;}
+ finally{if(pins.get(id)===entry&&entry.model===originalModel&&entry.rangeRef===originalRangeRef&&resourceFor(model,kind,id)?.range!==originalRangeRef)pins.delete(id);}
 }
 
 export function rebindSyntheticRangePins(model,panelPins=new Map(),axisPins=new Map()){

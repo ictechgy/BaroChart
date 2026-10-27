@@ -136,17 +136,27 @@ export function hydrateModel(packet,expectedOptions=packet.options,validation){
  const expected=requestOptionsSnapshot(expectedOptions),store=new BarStore(),model=new ChartModel({store,...expected});
  try{const staged=stagedState(model,packet,-1,expected,validation);publish(model,staged);model.series=expected.series.map(s=>model.normalizedSeries({...s,...(s.values!==undefined?{values:packet.options.series.find(reply=>reply.id===s.id).values}:{})}));attachCaches(model,staged.caches);model.setVisibleRange(packet.view.from,packet.view.to);model.follow=packet.follow;return model;}catch(error){model.dispose();throw error;}
 }
+function preparedEventField(value,key,label){const descriptor=value&&typeof value==='object'&&!Array.isArray(value)?Object.getOwnPropertyDescriptor(value,key):null;if(!descriptor?.enumerable||!Object.hasOwn(descriptor,'value'))throw new TypeError(label+' own data property');return descriptor.value;}
+function preparedEventTime(value,label){const time=preparedEventField(value,'time',label);if(!Number.isSafeInteger(time))throw new TypeError(label+' timestamp');return time;}
 export function installRecomputed(model,packet,event,expectedOptions=modelRequest(model),validation,beforePublish){
  if(model.disposed)throw new Error('Model disposed');
- if(!event||!['reset','append','update','correction','prepend','batch'].includes(event.kind))throw new TypeError('Prepared event kind');const kind=event.kind==='correction'?'update':event.kind;
- if(kind==='update'&&(!event.bar||!Number.isSafeInteger(event.bar.time))||kind==='prepend'&&!Array.isArray(event.bars))throw new TypeError('Prepared event metadata');
+ const requestedKind=preparedEventField(event,'kind','Prepared event');if(!['reset','append','update','correction','prepend','batch'].includes(requestedKind))throw new TypeError('Prepared event kind');const kind=requestedKind==='correction'?'update':requestedKind;
+ const eventTime=['append','update'].includes(kind)?preparedEventTime(preparedEventField(event,'bar','Prepared event'),'Prepared event bar'):null;
+ const prependTimes=kind==='prepend'?boundedArraySnapshot(preparedEventField(event,'bars','Prepared event'),RESOURCE_LIMITS.maxBars,'Prepared prepend bars').map((bar,index)=>preparedEventTime(bar,'Prepared prepend bar '+index)):null;
+ const sourceLength=model.store.length,preparedLength=packet?.store?.length;let added=0;
+ if(kind==='append'&&preparedLength!==sourceLength+1)throw new TypeError('Prepared append count');
+ if(kind==='prepend'&&(preparedLength-sourceLength!==prependTimes.length||preparedLength<sourceLength))throw new TypeError('Prepared prepend count');
+ if(kind==='prepend')added=preparedLength-sourceLength;
+ if(kind==='update'&&preparedLength!==sourceLength)throw new TypeError('Prepared update count');
  const version=model.store.version+1,staged=stagedState(model,packet,version,expectedOptions,validation);let from=0;
  let appended=0,to=staged.store.length;
  if(kind==='batch'){dataIngestionBatchLimits(model,event,staged.store.length,staged.store.capacity);const events=snapshotIngestionEvents(event.events);if(events.some(e=>e.kind==='append')&&model.series.some(s=>s.values))throw new TypeError('Prepared length-changing batch requires external values alignment');from=staged.store.length;to=0;for(const e of events){const times=staged.store.columns.time;let a=0,b=staged.store.length;while(a<b){const mid=(a+b)>>>1;if(times[mid]<e.bar.time)a=mid+1;else b=mid;}if(a>=staged.store.length||times[a]!==e.bar.time)throw new TypeError('Prepared batch timestamp');from=Math.min(from,a);to=Math.max(to,a+1);appended+=Number(e.kind==='append');}if(staged.store.length!==model.store.length+appended)throw new TypeError('Prepared batch count');}
- else if(kind==='update'){const times=staged.store.columns.time;let a=0,b=staged.store.length;while(a<b){const mid=(a+b)>>>1;if(times[mid]<event.bar.time)a=mid+1;else b=mid;}from=a;if(from>=staged.store.length||times[from]!==event.bar.time)throw new TypeError('Prepared event timestamp');}else if(kind==='append')from=model.store.length;
+ else if(kind==='update'){const times=staged.store.columns.time;let a=0,b=staged.store.length;while(a<b){const mid=(a+b)>>>1;if(times[mid]<eventTime)a=mid+1;else b=mid;}from=a;if(from>=staged.store.length||times[from]!==eventTime)throw new TypeError('Prepared event timestamp');}
+ else if(kind==='append'){from=sourceLength;if(staged.store.columns.time[from]!==eventTime)throw new TypeError('Prepared append timestamp binding');}
+ else if(kind==='prepend')for(let index=0;index<prependTimes.length;index++)if(staged.store.columns.time[index]!==prependTimes[index])throw new TypeError('Prepared prepend timestamp binding');
  beforePublish?.();publish(model,staged);
  const published=model.series.map(series=>({series,index:series.rangeIndex,values:series.values,revision:series.revision,valuesRevision:model.seriesValueRevisions.get(series)}));
- model.store.changed(from,kind,{...(kind==='prepend'?{added:event.bars.length}:kind==='batch'?{appended,to}:{})});
+ model.store.changed(from,kind,{...(kind==='prepend'?{added}:kind==='batch'?{appended,to}:{})});
  // Publication does not replace UI state. Owner callbacks run after commit and
  // may change the viewport; never replay a pre-notification view over them.
  if(model.store.version===version){for(const state of published){const s=state.series;if(!model.series.includes(s)||s.rangeIndex!==state.index||s.values!==state.values||s.revision!==state.revision||model.seriesValueRevisions.get(s)!==state.valuesRevision)continue;if(s.rangeIndex)s.dirtyFrom=Infinity;if(!s.indicator)s.revision=version;}}

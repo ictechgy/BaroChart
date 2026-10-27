@@ -1,0 +1,556 @@
+{
+  "schema": "barochart.eight-model-review",
+  "date": "2026-10-28",
+  "reviewRunToken": "ultra-review:1fc9af48-9b5c-41f8-be9f-2f360885d222",
+  "baselineReviewedCommit": "88466199de33b128bf59462c77e05cc7cf206c0e",
+  "scopePolicy": "Risk-based source shards, not complete line coverage. External responses reviewed baseline; final source hashes identify locally verified fixes. Prepared-only and failed-before-model scopes excluded.",
+  "providerResponseCounts": {
+    "claude": 2,
+    "agy": 0,
+    "grok": 2,
+    "devin": 2,
+    "glm": 3,
+    "deepseek": 2,
+    "qwen": 3,
+    "kimi": 1
+  },
+  "providerGaps": {
+    "agy": "Selected login format unsupported; guarded call stopped before model start. No unsafe fallback.",
+    "kimiAdditionalOptionalScope": "Login expired; no second refresh or model response for this optional scope."
+  },
+  "consensusPolicy": "Only qwen-model and deepseek-model passed strict output and citation validation. Other responses were leads, not consensus votes. Codex independently reproduced and verified fixes. No external approval of patched revision is claimed.",
+  "completedResponseScopes": [
+    {
+      "provider": "claude",
+      "scope": "claude-lifecycle",
+      "files": [
+        "src/core/api.mjs",
+        "src/core/interaction.mjs"
+      ],
+      "originalLineRanges": {},
+      "redactedTargetSHA256": "7b9edd4ac6c3ccbaf95b0d609d32805b004fd8e12d4118ad522bb567dcd0e0e4",
+      "strictOutputAndCitationsPassed": false,
+      "disposition": "independently-triaged"
+    },
+    {
+      "provider": "claude",
+      "scope": "claude-native-engine",
+      "files": [
+        "native/AsterNative.swift"
+      ],
+      "originalLineRanges": {
+        "native/AsterNative.swift": [
+          1294,
+          1831
+        ]
+      },
+      "redactedTargetSHA256": "3b4f892ec9658ec3cfe74762a0802b9685587ea5e3904f43a48e0c9b1becc87b",
+      "strictOutputAndCitationsPassed": false,
+      "disposition": "independently-triaged"
+    },
+    {
+      "provider": "grok",
+      "scope": "grok-worker-state",
+      "files": [
+        "src/web/worker-state.mjs",
+        "src/web/calculation-job.mjs"
+      ],
+      "originalLineRanges": {},
+      "redactedTargetSHA256": "8e55bfdbe246a8b3148e140465ec3ccc6330d7c05b99a2941574baaf64b76880",
+      "strictOutputAndCitationsPassed": false,
+      "disposition": "independently-triaged"
+    },
+    {
+      "provider": "grok",
+      "scope": "grok-native-java",
+      "files": [
+        "native/android/java/dev/aster/charts/AsterEngine.java"
+      ],
+      "originalLineRanges": {
+        "native/android/java/dev/aster/charts/AsterEngine.java": [
+          1,
+          328
+        ]
+      },
+      "redactedTargetSHA256": "3b5f1713d0760ef7df1490bb5e6dcb791874489c0b8e502233e9d64885149019",
+      "strictOutputAndCitationsPassed": false,
+      "disposition": "independently-triaged"
+    },
+    {
+      "provider": "devin",
+      "scope": "devin-layout-apply",
+      "files": [
+        "examples/web/apply-layout-frame.mjs",
+        "examples/web/indicator-layout.mjs"
+      ],
+      "originalLineRanges": {},
+      "redactedTargetSHA256": "01e9db63e37a9cd500c2418aba731b523b4bd4c583a219b433b47fe863a8ec42",
+      "strictOutputAndCitationsPassed": false,
+      "disposition": "independently-triaged"
+    },
+    {
+      "provider": "devin",
+      "scope": "devin-main-ui",
+      "files": [
+        "examples/web/demo.mjs",
+        "examples/web/style.css"
+      ],
+      "originalLineRanges": {
+        "examples/web/demo.mjs": [
+          1,
+          434
+        ],
+        "examples/web/style.css": [
+          1,
+          29
+        ]
+      },
+      "redactedTargetSHA256": "ea03d135e9e214860e2506e858034148a62e1b1ef6ff88dd7542c03e428a5ee5",
+      "strictOutputAndCitationsPassed": false,
+      "disposition": "independently-triaged"
+    },
+    {
+      "provider": "glm",
+      "scope": "glm-data",
+      "files": [
+        "src/core/data.mjs",
+        "src/core/data-batch-options.mjs"
+      ],
+      "originalLineRanges": {},
+      "redactedTargetSHA256": "512924cb21e71c1d7c0a9f5873bcab19295dfc4d58b48784933c727417a79a4a",
+      "strictOutputAndCitationsPassed": false,
+      "disposition": "independently-triaged"
+    },
+    {
+      "provider": "glm",
+      "scope": "glm-native-async",
+      "files": [
+        "native/AsterNative.swift"
+      ],
+      "originalLineRanges": {
+        "native/AsterNative.swift": [
+          1,
+          612
+        ]
+      },
+      "redactedTargetSHA256": "8a78d11af367861813b3cb8f6dbf061585e66040e9821a870bab517014aed5a1",
+      "strictOutputAndCitationsPassed": false,
+      "disposition": "independently-triaged"
+    },
+    {
+      "provider": "glm",
+      "scope": "glm-native-java-jobs",
+      "files": [
+        "native/android/java/dev/aster/charts/AsterEngine.java",
+        "native/android/java/dev/aster/charts/WorkspaceRestoreJob.java"
+      ],
+      "originalLineRanges": {
+        "native/android/java/dev/aster/charts/AsterEngine.java": [
+          329,
+          656
+        ],
+        "native/android/java/dev/aster/charts/WorkspaceRestoreJob.java": [
+          1,
+          96
+        ]
+      },
+      "redactedTargetSHA256": "6fd4b755551116befb0e8fcebbadd8d0d1cb51b49373478ab71cee34f17a980b",
+      "strictOutputAndCitationsPassed": false,
+      "disposition": "independently-triaged"
+    },
+    {
+      "provider": "qwen",
+      "scope": "qwen-indicators",
+      "files": [
+        "src/core/indicators.mjs",
+        "src/core/indicator-params.mjs"
+      ],
+      "originalLineRanges": {},
+      "redactedTargetSHA256": "d2261bbec89690c1c50f40fac428848098f5f8bd5206a4beb90b705a35e8e94c",
+      "strictOutputAndCitationsPassed": false,
+      "disposition": "independently-triaged"
+    },
+    {
+      "provider": "qwen",
+      "scope": "qwen-model",
+      "files": [
+        "src/core/model.mjs",
+        "src/core/contracts.mjs"
+      ],
+      "originalLineRanges": {},
+      "redactedTargetSHA256": "65bb1181fb236a21624ec69aa18bccdad4107f1f19b0a125ff45df20c5281ff3",
+      "strictOutputAndCitationsPassed": true,
+      "disposition": "independently-triaged"
+    },
+    {
+      "provider": "qwen",
+      "scope": "qwen-native-view",
+      "files": [
+        "native/android/java/dev/aster/charts/AsterChartView.java",
+        "native/android/java/dev/aster/charts/NativeJobBudget.java"
+      ],
+      "originalLineRanges": {
+        "native/android/java/dev/aster/charts/AsterChartView.java": [
+          1,
+          209
+        ],
+        "native/android/java/dev/aster/charts/NativeJobBudget.java": [
+          1,
+          16
+        ]
+      },
+      "redactedTargetSHA256": "f041c01f027fbc2172ea22ae5dd1c1c177df05b7047cc4ed3af3b5b312e1cca5",
+      "strictOutputAndCitationsPassed": false,
+      "disposition": "independently-triaged"
+    },
+    {
+      "provider": "kimi",
+      "scope": "kimi-canvas",
+      "files": [
+        "src/renderers/canvas.mjs"
+      ],
+      "originalLineRanges": {},
+      "redactedTargetSHA256": "910470312fc9041999cfeceb2db8f2659b49ae5ebcc668b921518ba48f0b5831",
+      "strictOutputAndCitationsPassed": false,
+      "disposition": "independently-triaged"
+    },
+    {
+      "provider": "deepseek",
+      "scope": "deepseek-model",
+      "files": [
+        "src/core/model.mjs",
+        "src/core/contracts.mjs"
+      ],
+      "originalLineRanges": {},
+      "redactedTargetSHA256": "65bb1181fb236a21624ec69aa18bccdad4107f1f19b0a125ff45df20c5281ff3",
+      "strictOutputAndCitationsPassed": true,
+      "disposition": "independently-triaged"
+    },
+    {
+      "provider": "deepseek",
+      "scope": "deepseek-native-jobs",
+      "files": [
+        "native/AsterNative.swift"
+      ],
+      "originalLineRanges": {
+        "native/AsterNative.swift": [
+          613,
+          1293
+        ]
+      },
+      "redactedTargetSHA256": "8627aba190c581375b09ae23f7851365476a93334b0363360e625c809a0b1cfa",
+      "strictOutputAndCitationsPassed": false,
+      "disposition": "independently-triaged"
+    }
+  ],
+  "finalSourceSHA256": {
+    "examples/web/apply-layout-frame.mjs": "c12dfbd2bc68cc1172a785c9daafefd1d1d109cc7a363b08a4f771c6417c6612",
+    "examples/web/demo.mjs": "2d023d82859cb34bd50206b79323c484ed6174f6f66b90a8e5f8cc3014c9848f",
+    "examples/web/indicator-layout.mjs": "743c6d62b0e3cf1e6ce827b28d54400776bcde56465b08d7c37f5543def8e566",
+    "examples/web/style.css": "55aa89e2e19868b9583e578057e82896bbb0f3bfaaeeb68fd96b0a710bae7411",
+    "native/AsterNative.swift": "78ecc52c8f8ce20b42f8b602fcf1be8484a76c72553e66e836bee5bd1a7a8fc8",
+    "native/Resources/aster-core.js": "b2ea1a4ca3bdf7e3dbf1770b93c636abd8e99440df8cfc49fb982b9f46685a65",
+    "native/android/java/dev/aster/charts/AsterEngine.java": "a9305673b08c1b546d5a505a6750fc92004fc859cf03ba5b5e7a5684fb9f71e7",
+    "src/core/api.mjs": "06820db529ab06d591afc21bb23ddaf00094b95ac3b94717c15ddbaf505fdc2b",
+    "src/core/data.mjs": "4abba0d1ea3fd2e73d3cca968ba09b17a40f14f4a479bc260a55a230b9134d0b",
+    "src/core/indicators.mjs": "8c1743ee91fb8f2797c175fe3dd0dcdd75932f6c642203459ac1b859c4cc9c7a",
+    "src/core/model.mjs": "5e846e34a6350a4446c36cbadb49238c1d81ad657a59d9fd7b41859c68ea9b55",
+    "src/renderers/canvas.mjs": "7e766fa16057b900a93a9d3c5d76ae6df19c2e2344cb3cd41504e1ab67f17d57",
+    "src/web/worker-state.mjs": "0ea7a0bb2b655a20abaca0d6c0a68582a59a8fc6326dcd8577a89fef6e368215"
+  },
+  "fixes": {
+    "P1": 2,
+    "P2": 10,
+    "P3": 3,
+    "confirmedOpenP1P2": 0
+  },
+  "node": {
+    "version": "v22.20.0",
+    "tests": 5760,
+    "pass": 5760,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "syntaxModules": 604,
+    "strictTypeScript": "5.9.3",
+    "offlinePackedConsumer": "passed"
+  },
+  "browser": "Chrome/156.0.8078.48",
+  "analysis": {
+    "checks": 128,
+    "analysis": {
+      "storedBars": 100000,
+      "studies": 32,
+      "renders": 300,
+      "queries": 300,
+      "getCalls": 0,
+      "baseRedraws": 0,
+      "queryMs": {
+        "p50": 0.20000004768371582,
+        "p95": 0.3000001907348633,
+        "p99": 0.40000009536743164
+      },
+      "stableRows": true,
+      "preserved": true,
+      "error": null,
+      "webglContextLossExecuted": true
+    },
+    "responsiveWidths": [
+      320,
+      390,
+      1280
+    ]
+  },
+  "customization": {
+    "checks": 54,
+    "responsiveWidths": [
+      320,
+      390,
+      768,
+      1280
+    ]
+  },
+  "gpu": {
+    "checks": 102,
+    "results": [
+      {
+        "dpr": 1,
+        "mae": 0.3316875,
+        "badForegroundFraction": 0.013429805840403935,
+        "contextLossFallback": true
+      },
+      {
+        "dpr": 2,
+        "mae": 0.17005555555555554,
+        "badForegroundFraction": 0.008493913135229956,
+        "contextLossFallback": true
+      }
+    ]
+  },
+  "ux": {
+    "checks": [
+      "unselected delete disabled",
+      "keyboard drawing edit creates undo",
+      "HTML-shaped text never evaluated",
+      "same-market count preserves drawing",
+      "same-market count preserves exact anchors",
+      "same-market count preserves undo",
+      "clearing an indicator preserves its annotated panel and scale",
+      "cancel preserves prior model and canvas",
+      "worker million-bar load completes",
+      "historical worker correction is atomic",
+      "light palette uses higher-contrast EMA",
+      "light price series exceeds 3:1 contrast against its background",
+      "375px layout has usable plot and touch targets",
+      "accessible OHLCV table exists",
+      "back navigation restores chart/data"
+    ],
+    "worker": {
+      "elapsedMs": 589.2999999523163,
+      "longTasks": [],
+      "maxLongTaskMs": 0,
+      "storedBars": 1000000
+    },
+    "asyncCorrection": {
+      "unchanged": true,
+      "close": 1000,
+      "elapsedMs": 306.90000009536743
+    },
+    "contrast": {
+      "color": "#285bb9ff",
+      "bg": "#f8fafcff",
+      "ratio": 6.105836116726206
+    },
+    "mobile": {
+      "scroll": 375,
+      "viewport": 375,
+      "plotWidth": 252,
+      "targetWidth": 44,
+      "targetHeight": 48,
+      "panelHeights": [
+        307,
+        64,
+        82,
+        82
+      ]
+    },
+    "restored": {
+      "persisted": true,
+      "canvases": 1,
+      "bars": 1000000
+    },
+    "platform": "User Mac; installed Google Chrome, owned headless profile; no physical mobile/VoiceOver claim"
+  },
+  "extraIndicatorPalette": {
+    "checks": [
+      "three added studies retain distinct dark colors",
+      "three added studies retain distinct light colors",
+      "dark round trip restores each study color",
+      "custom study color survives theme toggle",
+      "disabled dark button remains neutral during actual hover"
+    ],
+    "dark": [
+      {
+        "id": "extra-1-value",
+        "indicator": "extra-1",
+        "color": "#f0b755ff"
+      },
+      {
+        "id": "extra-2-value",
+        "indicator": "extra-2",
+        "color": "#aa91f7ff"
+      },
+      {
+        "id": "extra-3-value",
+        "indicator": "extra-3",
+        "color": "#58cadbff"
+      }
+    ],
+    "light": [
+      {
+        "id": "extra-1-value",
+        "indicator": "extra-1",
+        "color": "#946200ff"
+      },
+      {
+        "id": "extra-2-value",
+        "indicator": "extra-2",
+        "color": "#7150baff"
+      },
+      {
+        "id": "extra-3-value",
+        "indicator": "extra-3",
+        "color": "#17687cff"
+      }
+    ],
+    "disabled": {
+      "before": {
+        "disabled": true,
+        "color": "rgb(130, 150, 174)",
+        "background": "rgb(17, 29, 46)",
+        "x": 1070.203125,
+        "y": 450
+      },
+      "after": {
+        "hover": true,
+        "color": "rgb(130, 150, 174)",
+        "background": "rgb(17, 29, 46)"
+      }
+    },
+    "boundary": "Installed Chrome; owned headless profile, synthetic bars and actual demo controls; no physical device or screen-reader claim"
+  },
+  "swiftJSON": {
+    "passed": 110,
+    "failed": false,
+    "schema": "aster.native.json-inputs",
+    "probeSHA256": "9fdb4c46994d0876ccf5185a49e9658b02fcb76c287003d952ba7666166b05e6",
+    "boundary": "Actual public Swift SDK and macOS JavaScriptCore; invalid JSON admission and unchanged callbacks/revisions."
+  },
+  "swiftLayout": {
+    "passed": 11,
+    "failed": false,
+    "sourceSHA256": {
+      "native/AsterNative.swift": "78ecc52c8f8ce20b42f8b602fcf1be8484a76c72553e66e836bee5bd1a7a8fc8",
+      "native/AsterColumns.swift": "80f3b5d965211b03b38e7514e4962f94dd7f2ca8395c0480649cdb037ef9ebcd",
+      "native/AsterFrameRenderer.swift": "55971eb0d4b94013b3bbce8c15c1a5a5be0a4c005a72c292237970acea9ee5bc",
+      "native/Resources/aster-core.js": "b2ea1a4ca3bdf7e3dbf1770b93c636abd8e99440df8cfc49fb982b9f46685a65",
+      "examples/native/layout-notification-verification.swift": "68e43d4a85ff6acb8b14b61a1a0b21f24a477f4d6f309116b5b02351b4334461"
+    }
+  },
+  "javaLifecycle": {
+    "schema": "aster.java-engine-lifecycle",
+    "scenarios": 5,
+    "checks": 26,
+    "passedScenarios": [
+      "asset-close-precedes-handle-acquisition",
+      "constructor-error-releases-handle",
+      "constructor-cleanup-failure-suppressed",
+      "close-reentrant-command-rejected",
+      "close-owned-cleanup-allowed"
+    ],
+    "sourceSHA256": {
+      "native/android/java/dev/aster/charts/AsterEngine.java": "a9305673b08c1b546d5a505a6750fc92004fc859cf03ba5b5e7a5684fb9f71e7",
+      "native/android/java/dev/aster/charts/AsterColumns.java": "2a275267f0763cd706cea4e7ea80d89436107e97b51c0836c70791a5fc1b055d",
+      "native/android/java/dev/aster/charts/WorkspaceRestoreJob.java": "327320bdae3e4def7f81d317faca902e08e8e323fbad7da12289ca539b65aaef",
+      "native/android/java/dev/aster/charts/NativeJobBudget.java": "d8a022914e042daaacf9dcb0fd11a1d28b417b70c4f6bb66bac54b381c015dd9",
+      "native/android/java/dev/aster/charts/ParamsUpdateJob.java": "2159dfcecbf5df2c99353514ee06ae0591da04b7d1dc100f12ddf2e7aad22419",
+      "test/java-engine-lifecycle/android/content/Context.java": "e12f919bab9623d27a373fe5da726f228dc624c0cd47d2ee5fc77f5195edf1a3",
+      "test/java-engine-lifecycle/android/content/res/AssetManager.java": "a6cd184d0f3e00ceb3b46ea29de55facebb65346c68ddfc27d08818fc6029ba1",
+      "test/java-engine-lifecycle/android/os/Debug.java": "89ad89d0464a51933ee4ab2afc519f91c37f2308694372c6319b190f265ea009",
+      "test/java-engine-lifecycle/android/os/Handler.java": "e711bc02c3483923ba5a5e92b3c72f3c3938931121677767da442330bd18dd16",
+      "test/java-engine-lifecycle/android/os/Looper.java": "885d89cbf27f2c4a36ad1c79f2514a30802afa73c22a6b168d6f4ae7c0f5208c",
+      "test/java-engine-lifecycle/android/util/Log.java": "f6d17ae5c6ebb29d88d124554c2aa7db8d7585d5450b4a640b4b76c1bc16122c",
+      "test/java-engine-lifecycle/dev/aster/charts/EngineLifecycleHarness.java": "3770ed5a0a9a70d4261f00fc72736ef84417c9286c8107d13ecf554d5e0bedc7",
+      "test/java-engine-lifecycle/org/json/JSONArray.java": "a3cc16f8d03ea7b4f2d7e954f9f3238c7d1d6b711fa405109f5225d916c442bc",
+      "test/java-engine-lifecycle/org/json/JSONException.java": "0d935550aaa6c7b5ea8d7b03f25a8aa10d875c3a8b2268c62cd8ac5a8db63667",
+      "test/java-engine-lifecycle/org/json/JSONObject.java": "f474dce4aad90e5ebe93d0d084436ea03056c7fe704802f6f7257e826d73e067",
+      "test/java-engine-lifecycle/org/json/JSONTokener.java": "2ce28dcdb345b4fe5be742225e5357031bb88aeeb67fa7a390a57271b68e3349"
+    },
+    "runnerSHA256": "1992a7411ad7eabdce05c12bc2dcd5a425851e38f4364b8873ab0d0ea0e9fdf7",
+    "nativeStubSHA256": "eef7be613cf3355c70aac699f752bf87a71c9e0389167a0d5fc80d2a06e542ee",
+    "productionJavaFacadeExecuted": true,
+    "hostJNIStubExecuted": true,
+    "productionAndroidJNIExecuted": false,
+    "productionNativeRuntimeExecuted": false,
+    "androidRuntimeExecuted": false,
+    "androidSDKCompiled": false,
+    "allGeneratedClassesJava8Bytecode": true,
+    "warningsAsErrors": true
+  },
+  "javaLayout": {
+    "schema": "aster.java-layout-notification-receipt",
+    "scenarios": 19,
+    "checks": 32,
+    "sourceSHA256": {
+      "native/android/java/dev/aster/charts/AsterEngine.java": "a9305673b08c1b546d5a505a6750fc92004fc859cf03ba5b5e7a5684fb9f71e7",
+      "native/android/java/dev/aster/charts/AsterColumns.java": "2a275267f0763cd706cea4e7ea80d89436107e97b51c0836c70791a5fc1b055d",
+      "native/android/java/dev/aster/charts/WorkspaceRestoreJob.java": "327320bdae3e4def7f81d317faca902e08e8e323fbad7da12289ca539b65aaef",
+      "native/android/java/dev/aster/charts/NativeJobBudget.java": "d8a022914e042daaacf9dcb0fd11a1d28b417b70c4f6bb66bac54b381c015dd9",
+      "native/android/java/dev/aster/charts/ParamsUpdateJob.java": "2159dfcecbf5df2c99353514ee06ae0591da04b7d1dc100f12ddf2e7aad22419",
+      "test/java-host-stubs/android/content/Context.java": "d0832655ba37adad57f1db259669d59347d74cddfbe06850384bbaec03f223e8",
+      "test/java-host-stubs/android/content/res/AssetManager.java": "8879e1548c2dc90efd665835ce5c7328fdc34c6db18b8a32d69fe53515ed9353",
+      "test/java-host-stubs/android/os/Debug.java": "fdcf45fec159df5ec99646757e335f80de9f76cbdfd53633491b8eb45c8131d9",
+      "test/java-host-stubs/android/os/Handler.java": "13907b46813dbd2d8d322bd7896004ce995051068b3a203bfdfbef0fa2f05f28",
+      "test/java-host-stubs/android/os/Looper.java": "d42a6bcd6a14b2a7914d2629291b148c066a607a5b5c6b375b5a93089d466896",
+      "test/java-host-stubs/android/util/Log.java": "c9eed6b7e797e746abe6cf14a8cad2e6063b358290090243fea755ecb990dd92",
+      "test/java-host-stubs/org/json/JSONArray.java": "afaf51a02ff1d41828d86e28afa6ffd63c7a50176627cc4a003325240132c19e",
+      "test/java-host-stubs/org/json/JSONException.java": "1fa40eea1ca53b888698210bd0d5b6f504202896a3fb63d3117e0c699c0868a0",
+      "test/java-host-stubs/org/json/JSONTokener.java": "970c05baa3c351ae5452fbdeaa1e1dc28a7eda839fa3f6321864b84a7085317f",
+      "test/java-layout-receipt/org/json/JSONObject.java": "3b6cfa3569208f4ba608e2e9211480231e765e35a13f136d5c81093a83f50c56",
+      "test/java-layout-receipt/dev/aster/charts/LayoutReceiptTest.java": "2fcb9b4b4df96308dd4f154d20a7a4f960f1786094324020366a643669459e84"
+    },
+    "productionDecoderRuntimeTested": true,
+    "androidRuntimeExecuted": false,
+    "jniExecuted": false
+  },
+  "offlineAST": {
+    "timestamp": "2026-10-27T17:30:26.558Z",
+    "tool": "Local TypeScript 5.9.3 AST",
+    "offline": true,
+    "files": 84,
+    "rules": [
+      "dynamic eval/Function calls",
+      "innerHTML/outerHTML assignments"
+    ],
+    "findings": [],
+    "allowlistedTrustedApplicationCode": [
+      {
+        "file": "src/core/api.mjs",
+        "line": 250,
+        "call": "Function",
+        "reason": "Explicit trusted application indicator source API; excluded from data dispatch. Not a sandbox."
+      }
+    ],
+    "limitations": "Narrow syntactic rules only; no interprocedural taint, dependency/CVE or complete vulnerability scan. Vendored sources/native code excluded here. This script does not invoke external scanners or fetch vulnerability data."
+  },
+  "limits": [
+    "No AGY model response",
+    "Strict usable external scopes limited to Qwen/model and DeepSeek/model; other responses independently triaged",
+    "No patched-revision external model approval",
+    "No complete repository line-coverage claim",
+    "Java lifecycle uses host JNI stub and test-only Android/JSON fixtures; no production Android/JNI/device execution",
+    "No physical mobile or screen-reader execution",
+    "No new dependency CVE feed queried",
+    "No deterministic arbitrary-third-thread stale-read stress test for Java workspace cancellation"
+  ]
+}

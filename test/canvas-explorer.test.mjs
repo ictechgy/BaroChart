@@ -434,12 +434,16 @@ for (const trigger of ['fallback', 'pointerdown', 'wheel']) for (const action of
       assert.equal(chart.explorer, null); assert.equal(chart.explorerNodes, null);
       assert.equal(h.controls[0].listenerCount(), 0); assert.equal(h.controls[1].listenerCount(), 0);
       assert.equal(h.frames.size, 0); assert.deepEqual(fallbackCalls, []);
-      assert.equal(h.elements.filter(node => node.tagName === 'CANVAS').length, 1);
+      const canvases = h.elements.filter(node => node.tagName === 'CANVAS'), staged = canvases.find(node => node !== old);
+      assert.equal(canvases.length, trigger === 'fallback' ? 2 : 1);
+      if (trigger === 'fallback') {assert.equal(staged.isConnected, false); assert.equal(staged.width, 0); assert.equal(staged.height, 0); assert.equal(staged.listenerCount(), 0);}
     } else {
       assert.notEqual(chart.canvas, old); assert.equal(chart.canvas.listenerCount(), ownListeners);
       assert.equal(chart.canvas.isConnected, true); assert.equal(chart.dataExploration.active, false);
       assert.deepEqual(fallbackCalls, ['observer replacement']);
-      assert.equal(h.elements.filter(node => node.tagName === 'CANVAS').length, 2);
+      const canvases = h.elements.filter(node => node.tagName === 'CANVAS'), staged = canvases.find(node => node !== old && node !== chart.canvas);
+      assert.equal(canvases.length, trigger === 'fallback' ? 3 : 2);
+      if (trigger === 'fallback') {assert.equal(staged.isConnected, false); assert.equal(staged.width, 0); assert.equal(staged.height, 0); assert.equal(staged.listenerCount(), 0);}
       assert.equal(h.controls[0].listenerCount('focusout'), 1);
       chart.destroy(); assert.equal(chart.canvas.listenerCount(), 0);
     }

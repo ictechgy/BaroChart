@@ -278,9 +278,10 @@ export class BarStore {
     return t[i] + (index - i) * (t[i + 1] - t[i]);
   }
   aggregate(start, end, maxBuckets) {
-    start = Math.max(0, Math.floor(start)); end = Math.min(this.length, Math.ceil(end));
-    if (end <= start) return [];
     if (!Number.isInteger(maxBuckets) || maxBuckets < 1) throw new RangeError('Positive bucket count required');
+    start = Math.max(0, Math.floor(start)); end = Math.min(this.length, Math.ceil(end));
+    if (Number.isNaN(start) || Number.isNaN(end)) throw new RangeError('Aggregate bounds must not be NaN');
+    if (end <= start) return [];
     const n = Math.min(end - start, maxBuckets), c = this.columns, out = new Array(n);
     for (let b = 0; b < n; b++) {
       const a = start + Math.floor(b * (end - start) / n), z = start + Math.floor((b + 1) * (end - start) / n), q = this.index.query(a, z);

@@ -36,10 +36,10 @@ function chartOwnerCurrent(model,owner,controller){
   const controllerModelDescriptor=controller&&Object.getOwnPropertyDescriptor(controller,'model');if(controller&&(!controllerModelDescriptor||!Object.hasOwn(controllerModelDescriptor,'value')||controllerModelDescriptor.value!==model))return false;
   return true;
 }
-function rejectOwnedInput(controller,model){
+function rejectOwnedInput(controller,model,required=true){
   if(!controller)return;
   const controllerModel=Object.getOwnPropertyDescriptor(controller,'model');if(!controllerModel||!Object.hasOwn(controllerModel,'value')||controllerModel.value!==model)return;
-  const gesture=ownData(controller,'gesture','Interaction controller',true),pointers=ownData(controller,'pointers','Interaction controller',true);let pointerCount=0;if(pointers!==undefined&&pointers!==null){try{pointerCount=intrinsicMapSize.call(pointers);}catch{throw new TypeError('Interaction controller pointers map required');}}if(gesture||pointerCount)throw new Error('Panel layout change during active gesture');
+  const gesture=ownData(controller,'gesture','Interaction controller',true),pointers=ownData(controller,'pointers','Interaction controller',true);let pointerCount=0;if(pointers!==undefined&&pointers!==null){try{pointerCount=intrinsicMapSize.call(pointers);}catch{throw new TypeError('Interaction controller pointers map required');}}if(required&&(gesture||pointerCount))throw new Error('Panel layout change during active gesture');
 }
 function strictArrayValues(value,label,max=RESOURCE_LIMITS.maxPanels){
   if(!Array.isArray(value)||Object.getPrototypeOf(value)!==Array.prototype)throw new TypeError(label+' dense array required');
@@ -95,8 +95,8 @@ function drawingHistorySnapshot(drawings){
   const stack=(value,label)=>managedArraySnapshot(value,label,10000,frame=>({ref:frame,snapshot:drawingFrameSnapshot(frame,label+' frame')}));
   return {drawings,items:drawingFrameSnapshot(items,'Drawing items'),undo:stack(undo,'Drawing undo history'),redo:stack(redo,'Drawing redo history')};
 }
-function drawingHistoryGuard(snapshot){
-  const drawings=snapshot.drawings;if(ownData(drawings,'transaction','Drawing store'))throw staleError('Drawing history owner changed');
+function drawingHistoryGuard(snapshot,{allowTransaction=false}={}){
+  const drawings=snapshot.drawings;if(!allowTransaction&&ownData(drawings,'transaction','Drawing store'))throw staleError('Drawing history owner changed');
   if(ownData(drawings,'items','Drawing store')!==snapshot.items.array||ownData(drawings,'undoStack','Drawing store')!==snapshot.undo.array||ownData(drawings,'redoStack','Drawing store')!==snapshot.redo.array)throw staleError('Drawing history owner changed');
   drawingFrameGuard(snapshot.items,'Drawing items');
   for(const stack of [snapshot.undo,snapshot.redo]){const refs=strictArrayValues(stack.array,stack===snapshot.undo?'Drawing undo history':'Drawing redo history',10000);if(refs.length!==stack.refs.length||refs.some((frame,index)=>frame!==stack.refs[index]))throw staleError('Drawing history owner changed');for(const record of stack.records)drawingFrameGuard(record.snapshot,stack===snapshot.undo?'Drawing undo history frame':'Drawing redo history frame');}
@@ -232,7 +232,24 @@ export class ChartModel {
   }
   addAxis(options,{ownerGuard=null}={}) {optionRecord(options,AXIS_KEYS,'Axis');if(this.axes.length>=RESOURCE_LIMITS.maxAxes)throw new RangeError('Axis limit');if(this.axes.some(a=>a.id===options.id))throw new Error('Duplicate axis');const a={side:'right',scale:'linear',inverted:false,padding:.08,visible:true,tickFormat:'fixed',...options};this.validateAxis(a);if(this.drawings?.transaction&&this.drawingMarginsChange(this.panels,[...this.axes,a]))throw new Error('Axis layout change during drawing transaction');runOwnerGuard(ownerGuard);this.axes.push(a);return a.id;}
   setAxis(id,patch,{ownerGuard=null}={}) {optionRecord(patch,AXIS_KEYS.filter(k=>k!=='id'&&k!=='panel'),'Axis patch');const i=this.axes.findIndex(a=>a.id===id);if(i<0)throw new Error('Missing axis');const previous=this.axes[i],a={...previous,...patch};this.validateAxis(a);if(this.drawings?.transaction&&(this.drawingMarginsChange(this.panels,this.axes.map((axis,j)=>j===i?a:axis))||this.drawingProjectionChange(previous,a,['scale','inverted','padding','range','base','width','side','visible'])&&[...this.drawings.items,...this.drawings.transaction].some(d=>d.axisId===id)))throw new Error('Axis projection change during drawing transaction');runOwnerGuard(ownerGuard);this.axes[i]=a;}
-  removeAxis(id) {if(this.series.some(s=>s.axisId===id)||[...this.drawings.items,...this.drawings.transaction??[],...this.drawings.undoStack.flat(),...this.drawings.redoStack.flat()].some(d=>d.axisId===id))throw new Error('Axis is referenced by series or drawing history/transaction');const axes=this.axes.filter(a=>a.id!==id);if(this.drawings.transaction&&this.drawingMarginsChange(this.panels,axes))throw new Error('Axis layout change during drawing transaction');this.axes=axes;}
+  removeAxis(id,{ownerGuard=null,controller=null}={}) {
+    const disposedDescriptor=Object.getOwnPropertyDescriptor(this,'disposed');if(disposedDescriptor&&!Object.hasOwn(disposedDescriptor,'value'))throw new TypeError('Chart disposed own data slot required');if(disposedDescriptor?.value)throw new Error('Chart disposed');identifier(id,'Axis id');
+    const panels=ownData(this,'panels','Chart'),panelState=managedPanels(this),axes=ownData(this,'axes','Chart'),axisState=axisStateSnapshot(axes),index=axisState.records.findIndex(axis=>axis.id===id),series=ownData(this,'series','Chart'),seriesState=seriesStateSnapshot(series);
+    if(seriesState.records.some(record=>record.axisId===id))throw new Error('Axis is referenced by series or drawing history/transaction');
+    const drawings=ownData(this,'drawings','Chart'),transaction=ownData(drawings,'transaction','Drawing store'),drawingState=drawingHistorySnapshot(drawings);
+    const drawingRefs=drawingState.items.refs.concat(...drawingState.undo.records.map(record=>record.snapshot.refs),...drawingState.redo.records.map(record=>record.snapshot.refs));
+    const axisInDrawing=drawing=>{const descriptor=Object.getOwnPropertyDescriptor(drawing,'axisId');if(descriptor&&!Object.hasOwn(descriptor,'value'))throw new TypeError('Drawing axisId must be own data');return descriptor?.value===id;};
+    const transactionRefs=transaction===null?[]:strictArrayValues(transaction,'Drawing transaction',RESOURCE_LIMITS.maxDrawings);
+    if(drawingRefs.some(axisInDrawing)||transactionRefs.some(axisInDrawing))throw new Error('Axis is referenced by series or drawing history/transaction');
+    const nextAxes=index<0?axisState.refs.slice():axisState.refs.filter((_,entryIndex)=>entryIndex!==index);
+    const layoutChange=this.drawingMarginsChange(panels,nextAxes);if(transaction&&layoutChange)throw new Error('Axis layout change during drawing transaction');rejectOwnedInput(controller,this,layoutChange);
+    axisStateGuard(axisState);seriesStateGuard(seriesState);drawingHistoryGuard(drawingState,{allowTransaction:true});
+    if(ownData(drawings,'transaction','Drawing store')!==transaction)throw staleError('Axis removal owner changed');
+    if(transaction!==null){const current=strictArrayValues(transaction,'Drawing transaction',RESOURCE_LIMITS.maxDrawings);if(current.length!==transactionRefs.length||current.some((drawing,entryIndex)=>drawing!==transactionRefs[entryIndex]))throw staleError('Axis removal owner changed');}
+    if(ownData(this,'panels','Chart')!==panels||ownData(this,'axes','Chart')!==axes||ownData(this,'series','Chart')!==series||ownData(this,'drawings','Chart')!==drawings)throw staleError('Axis removal owner changed');
+    panelOwnerGuard(this,null,{...panelState,controller:null});
+    runOwnerGuard(ownerGuard);this.axes=nextAxes;
+  }
   validateDrawingBinding(d,{allowOrphanSeries=false}={}) {
     if(d.panel!==undefined)identifier(d.panel,'Drawing panel');for(const key of ['axisId','seriesId'])if(d[key]!==undefined&&d[key]!==null)identifier(d[key],'Drawing '+key);
     if(!this.panels.some(p=>p.id===(d.panel??'price')))throw new Error('Missing drawing panel');
@@ -258,7 +275,7 @@ export class ChartModel {
   }
   addSeries(options,{ownerGuard=null}={}){if(this.series.length>=RESOURCE_LIMITS.maxSeries)throw new RangeError('Series limit');if(this.series.some(s=>s.id===options?.id))throw new Error('Duplicate series');const validated=this.normalizedSeries(options);runOwnerGuard(ownerGuard);this.series.push(validated);return validated.id;}
   removeSeries(id) {this.series = this.series.filter(s => s.id !== id);}
-  setSeriesValues(id, values) {const s = this.series.find(s => s.id === id); if (!s || !(values instanceof Float64Array) || values.length !== this.store.length) throw new TypeError('Aligned values and existing series required'); if(['candles','ohlc'].includes(s.type)||s.indicator)throw new TypeError('External values require a general non-indicator series');s.values = values; s.dirtyFrom = 0;this.seriesValueRevisions.set(s,(this.seriesValueRevisions.get(s)??0)+1);this.seriesValuesRevision=(this.seriesValuesRevision??0)+1;}
+  setSeriesValues(id, values) {if(this.disposed)throw new Error('Chart disposed');const s = this.series.find(s => s.id === id); if (!s || !(values instanceof Float64Array) || values.length !== this.store.length) throw new TypeError('Aligned values and existing series required'); if(['candles','ohlc'].includes(s.type)||s.indicator)throw new TypeError('External values require a general non-indicator series');s.values = values; s.dirtyFrom = 0;this.seriesValueRevisions.set(s,(this.seriesValueRevisions.get(s)??0)+1);this.seriesValuesRevision=(this.seriesValuesRevision??0)+1;}
   seriesData(s) {
     if(this.disposed)throw new Error('Chart disposed');
     let values, revision, computedFrom = 0,computedUntil=this.store.length;
