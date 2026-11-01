@@ -6,7 +6,7 @@ DOM 없는 Float64 코어, Canvas/WebGL2 렌더러, 선택형 React 어댑터와
 
 [English](README.md) · [빠른 시작](#빠른-시작) · [웹·모바일 웹 화면](#웹모바일-웹-화면) · [API](docs/API.md)
 
-> **개발 프리뷰 · 0.2.13 · Apache-2.0.** npm 미출시입니다. [지원·검증 범위](#지원과-검증-범위)를 확인하세요.
+> **개발 프리뷰 · 0.3.0-dev · Apache-2.0.** npm 미출시입니다. [지원·검증 범위](#지원과-검증-범위)를 확인하세요.
 
 <p align="center">
 <picture>
@@ -134,7 +134,7 @@ mkdir -p /tmp/barochart-pack
 npm pack --ignore-scripts --pack-destination /tmp/barochart-pack
 
 # 사용할 앱의 디렉터리에서:
-npm install /tmp/barochart-pack/barochart-0.2.13.tgz
+npm install /tmp/barochart-pack/barochart-0.3.0-dev.tgz
 ```
 
 설치 후에는 소스 상대 경로 대신 다음 import를 사용합니다.
@@ -158,6 +158,39 @@ export function PriceChart({ bars }) {
 ```
 
 앱이 React 18.3.1/19와 ReactDOM을 제공합니다. [React 소유권·스트림·SSR 계약](docs/REACT.md) · [실행 가능한 TypeScript 예제](examples/react-web/README.md).
+
+## 네이티브 앱 (iOS·Android)
+
+같은 차트를 WebView 없이 네이티브 앱에 넣습니다. 차트 코어는 JavaScriptCore(iOS) 또는 내장 QuickJS(Android)에서 돌고, 화면은 각 플랫폼이 직접 그립니다.
+
+| | iOS | Android |
+| --- | --- | --- |
+| 패키지 | Swift 패키지 제품 `BaroChart` | `kr.coden:barochart-android`, 선택 `kr.coden:barochart-compose` |
+| UI | SwiftUI `BaroChartView`, UIKit `BaroChartUIView` | Compose `BaroChart`, View `BaroChartView` |
+| 최소 | iOS 17 | API 26, `arm64-v8a` + `x86_64` |
+| 오류 | `BaroChartError` | `BaroChartException` |
+| 가이드 | [iOS 가이드](docs/IOS-GUIDE.ko.md) | [Android 가이드](docs/ANDROID-GUIDE.ko.md) |
+
+```swift
+let engine = try BaroChartEngine(options: BaroChartEngineOptions())
+try engine.setBars(bars)
+try engine.addIndicator(.ema(period: 20), id: "ema20")
+// SwiftUI
+BaroChartView(engine: engine).frame(height: 320)
+```
+
+```kotlin
+val engine = BaroChartEngine.create(context, EngineOptions.defaults())
+engine.setBars(bars)
+engine.addIndicator(Indicator.ema(20), "ema20")
+// Compose
+BaroChart(engine = engine, modifier = Modifier.height(320.dp))
+```
+
+아직 SwiftPM 태그와 Maven Central에 릴리스를 공개하지 않았습니다. 그동안 로컬 체크아웃에 의존하는 방법은 가이드에 있습니다.
+
+- 실행 예제: [SwiftUI](examples/swiftui-sample) · [Compose](examples/compose-sample)
+- `Aster*` 이름에서 옮기기: [마이그레이션 가이드](docs/MIGRATING-FROM-ASTER.ko.md)
 
 ## UI·UX 커스터마이징
 
@@ -202,10 +235,10 @@ toolbar.setOptions({labels: {select: '이동', fit: '전체 보기'}});
 | 일반 웹 | Canvas/WebGL2와 HTML 컨트롤 | 과거 Chrome의 일부 흐름 확인. 최신 UI·기기 동작은 브라우저 QA 필요 |
 | React 웹 | 선택형 `AsterChart` 어댑터 | 최신 모의 hooks 테스트가 실제 React/SSR 실행을 대신하지 않음 |
 | 모바일 웹 | 명시적 입력 프리셋·반응형 예제 CSS | 이미지는 설명용 미리보기. 터치·스크롤·보조 기술 미검증 |
-| Apple 네이티브 | JavaScriptCore/CoreGraphics·SwiftPM | [Swift SDK](docs/SWIFT-SDK.md). 최근 호스트 변경은 실제 SDK·기기 검증 필요 |
-| Android 네이티브 | QuickJS/JNI/Canvas·library/AAR 경로 | [Android SDK](docs/ANDROID-SDK.md). 최근 호스트 변경은 실제 SDK·기기 검증 필요 |
+| Apple 네이티브 | Swift 패키지 `BaroChart`: 타입 API, SwiftUI/UIKit 뷰, 개인정보 매니페스트 | [iOS 가이드](docs/IOS-GUIDE.ko.md). iOS 27 시뮬레이터와 macOS JavaScriptCore에서 runner 통과. 기록되면 [실기기 측정](docs/measurements/native-device-performance.json) |
+| Android 네이티브 | `kr.coden:barochart-android` + Compose 모듈: 타입 API, View/Compose, 두 ABI | [Android 가이드](docs/ANDROID-GUIDE.ko.md). API 36 에뮬레이터에서 runner 통과, x86_64는 CI. 기록되면 [실기기 측정](docs/measurements/native-device-performance.json) |
 
-네이티브 경로는 WebView가 아닙니다. React Native/Flutter 어댑터는 없습니다. `AsterChart`, `BaroChart`, `BaroChartEngine`, `kr.coden.barochart`, `aster.*` 식별자는 호환성을 위해 유지하며 저장 스키마 이름을 바꾸면 안 됩니다.
+네이티브 경로는 WebView가 아닙니다. React Native/Flutter 어댑터는 없습니다. 0.3.0부터 네이티브 SDK는 `BaroChart` 이름을 씁니다([마이그레이션 가이드](docs/MIGRATING-FROM-ASTER.ko.md)). 저장 스키마 `aster.*`와 웹 React export `AsterChart`는 호환을 위해 이름을 유지합니다. 저장 스키마 이름을 바꾸면 안 됩니다.
 
 Node 계약 테스트, strict TypeScript, 오프라인 패키지 소비자 검사는 자동 검사이며 브라우저·기기 인증은 아닙니다. Float64는 임의 정밀도 십진수가 아니며 workspace 복원에는 맞는 호스트 데이터가 필요하고 Worker에도 복사·할당 비용이 있습니다. [전체 검증 이력·한계](docs/PUBLIC-VALIDATION.md) · [상태·소유권 로드맵](docs/MARKET-ROADMAP.md).
 

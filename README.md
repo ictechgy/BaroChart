@@ -6,7 +6,7 @@ A financial chart library with a DOM-free Float64 core, Canvas/WebGL2 rendering,
 
 [한국어](README.ko.md) · [Quick start](#quick-start) · [Web & mobile gallery](#web--mobile-web) · [API](docs/API.md)
 
-> **Development preview · 0.2.13 · Apache-2.0.** Not published to npm. [Support and validation limits](#support-and-validation).
+> **Development preview · 0.3.0-dev · Apache-2.0.** Not published to npm. [Support and validation limits](#support-and-validation).
 
 <p align="center">
 <picture>
@@ -134,7 +134,7 @@ mkdir -p /tmp/barochart-pack
 npm pack --ignore-scripts --pack-destination /tmp/barochart-pack
 
 # Run in your application's directory:
-npm install /tmp/barochart-pack/barochart-0.2.13.tgz
+npm install /tmp/barochart-pack/barochart-0.3.0-dev.tgz
 ```
 
 Then replace the source import with:
@@ -158,6 +158,36 @@ export function PriceChart({ bars }) {
 ```
 
 Your app supplies React 18.3.1/19 and ReactDOM. [React ownership/streaming/SSR contract](docs/REACT.md) · [Runnable TypeScript consumer](examples/react-web/README.md).
+
+## Native apps (iOS & Android)
+
+Put the same chart in native apps without a WebView. The chart core runs in JavaScriptCore (iOS) or an embedded QuickJS engine (Android), and each platform draws natively.
+
+| | iOS | Android |
+| --- | --- | --- |
+| Package | Swift package product `BaroChart` | `kr.coden:barochart-android`, optional `kr.coden:barochart-compose` |
+| UI | SwiftUI `BaroChartView`, UIKit `BaroChartUIView` | Compose `BaroChart`, View `BaroChartView` |
+| Minimum | iOS 17 | API 26, `arm64-v8a` + `x86_64` |
+| Errors | `BaroChartError` | `BaroChartException` |
+| Guide | [iOS guide](docs/IOS-GUIDE.md) | [Android guide](docs/ANDROID-GUIDE.md) |
+
+```swift
+let engine = try BaroChartEngine(options: BaroChartEngineOptions())
+try engine.setBars(bars)
+try engine.addIndicator(.ema(period: 20), id: "ema20")
+// SwiftUI
+BaroChartView(engine: engine).frame(height: 320)
+```
+
+```kotlin
+val engine = BaroChartEngine.create(context, EngineOptions.defaults())
+engine.setBars(bars)
+engine.addIndicator(Indicator.ema(20), "ema20")
+// Compose
+BaroChart(engine = engine, modifier = Modifier.height(320.dp))
+```
+
+Releases are not published to SwiftPM tags or Maven Central yet; the guides show how to depend on a local checkout until then. Runnable samples: [SwiftUI](examples/swiftui-sample) · [Compose](examples/compose-sample). Upgrading from the `Aster*` names: [migration guide](docs/MIGRATING-FROM-ASTER.md).
 
 ## Customize the experience
 
@@ -203,10 +233,10 @@ toolbar.setOptions({labels: {select: 'Pan', fit: 'Fit view'}});
 | Plain web | Canvas/WebGL2 and HTML controls | Selected historical Chrome flows checked; newer UI/device behavior needs browser QA |
 | React web | Optional `AsterChart` adapter | Latest modeled-hook tests do not establish React runtime/SSR behavior |
 | Mobile web | Explicit input preset and responsive example CSS | Preview images are illustrations; touch, scrolling and assistive technology remain unverified |
-| Apple native | JavaScriptCore/CoreGraphics, SwiftPM | [Swift SDK](docs/SWIFT-SDK.md); recent host changes need actual SDK/device validation |
-| Android native | QuickJS/JNI/Canvas, library/AAR path | [Android SDK](docs/ANDROID-SDK.md); recent host changes need actual SDK/device validation |
+| Apple native | Swift package `BaroChart`: typed API, SwiftUI/UIKit views, privacy manifest | [iOS guide](docs/IOS-GUIDE.md); runners pass on iOS 27 Simulator and macOS JavaScriptCore; [device measurements](docs/measurements/native-device-performance.json) when recorded |
+| Android native | `kr.coden:barochart-android` + Compose module: typed API, View/Compose, two ABIs | [Android guide](docs/ANDROID-GUIDE.md); runners pass on an API 36 emulator, x86_64 in CI; [device measurements](docs/measurements/native-device-performance.json) when recorded |
 
-Native paths are not WebViews. React Native/Flutter adapters are not supplied. Legacy API/schema names (`AsterChart`, `BaroChart`, `BaroChartEngine`, `kr.coden.barochart`, `aster.*`) remain for compatibility; do not rename serialized schemas.
+Native paths are not WebViews. React Native/Flutter adapters are not supplied. Since 0.3.0 the native SDK uses `BaroChart` names ([migration guide](docs/MIGRATING-FROM-ASTER.md)); serialized `aster.*` schemas and the web React export `AsterChart` keep their names for compatibility. Do not rename serialized schemas.
 
 Node contract tests, strict TypeScript and offline packed-consumer checks are automated checks, not browser/device certification. Float64 is not arbitrary-precision decimal arithmetic; workspaces need matching host-provided data; workers still incur snapshot/allocation costs. [Full validation history and limits](docs/PUBLIC-VALIDATION.md) · [state/ownership roadmap](docs/MARKET-ROADMAP.md).
 
