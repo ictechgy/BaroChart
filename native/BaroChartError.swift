@@ -29,6 +29,7 @@ public struct BaroChartError: Error, CustomStringConvertible, Sendable {
         self.underlyingDescription = underlyingDescription
     }
 
+    /// A one-line description with the code, message and recovery advice.
     public var description: String { "BaroChartError.\(code.rawValue): \(message) — \(recovery)" }
 }
 

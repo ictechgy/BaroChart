@@ -14,8 +14,11 @@ import UIKit
 /// ```
 @MainActor
 public struct BaroChartView: UIViewRepresentable {
+    /// The engine to show. The app owns it; the view never closes it.
     public let engine: BaroChartEngine
+    /// Called after touch or accessibility input changes the chart.
     public var onInteraction: (() -> Void)?
+    /// Called for failures that cannot be thrown, such as drawing a closed engine.
     public var onError: ((BaroChartError) -> Void)?
 
     /// - Parameters:
@@ -28,6 +31,7 @@ public struct BaroChartView: UIViewRepresentable {
         self.onError = onError
     }
 
+    /// Creates the underlying ``BaroChartContainerView`` for `engine`.
     public func makeUIView(context: Context) -> BaroChartContainerView {
         let container = BaroChartContainerView(engine: engine)
         container.chartView.onInteraction = onInteraction
@@ -35,12 +39,14 @@ public struct BaroChartView: UIViewRepresentable {
         return container
     }
 
+    /// Applies the current callbacks and replaces the chart view if `engine` changed.
     public func updateUIView(_ container: BaroChartContainerView, context: Context) {
         if container.chartView.engine !== engine { container.replaceEngine(engine) }
         container.chartView.onInteraction = onInteraction
         container.chartView.onError = onError
     }
 
+    /// Disposes the underlying chart view. The engine stays open and can be shown again.
     public static func dismantleUIView(_ container: BaroChartContainerView, coordinator: ()) {
         container.chartView.dispose()
     }

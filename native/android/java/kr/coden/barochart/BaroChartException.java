@@ -16,23 +16,28 @@ public final class BaroChartException extends RuntimeException {
 
     /** Stable failure categories, shared with the Swift SDK. */
     public enum Code {
-        ENGINE_CLOSED("Create a new BaroChartEngine; a closed engine cannot be reused."),
-        WRONG_THREAD("Call the engine from the thread that created it; engines attached to a view must be created on the main thread."),
-        INVALID_ARGUMENT("Check the value against the documented range and current chart state, then retry."),
-        JAVASCRIPT("The chart core rejected the operation; check the message and the operation order."),
-        INVALID_SCENE("Lay out the view with a positive size and redraw."),
-        BUDGET_EXCEEDED("Reduce the data or request size, or raise the documented resource budget."),
-        CANCELLED("The operation was cancelled or timed out; retry if the result is still needed."),
-        CLEANUP_PENDING("Wait for the pending cleanup to finish or retry cleanup before starting another job."),
-        UNAVAILABLE("The engine cannot run this now; retry after the active job finishes or recreate the engine.");
+        /** The engine is already closed. */ ENGINE_CLOSED("Create a new BaroChartEngine; a closed engine cannot be reused."),
+        /** The engine was used from a thread other than its owner. */ WRONG_THREAD("Call the engine from the thread that created it; engines attached to a view must be created on the main thread."),
+        /** An argument or the current chart state is not valid for the operation. */ INVALID_ARGUMENT("Check the value against the documented range and current chart state, then retry."),
+        /** The chart core rejected the operation. */ JAVASCRIPT("The chart core rejected the operation; check the message and the operation order."),
+        /** The view could not produce a valid scene, for example before it has a size. */ INVALID_SCENE("Lay out the view with a positive size and redraw."),
+        /** A data, request or resource budget was exceeded. */ BUDGET_EXCEEDED("Reduce the data or request size, or raise the documented resource budget."),
+        /** The operation was cancelled or timed out. */ CANCELLED("The operation was cancelled or timed out; retry if the result is still needed."),
+        /** Cleanup from an earlier job is still pending. */ CLEANUP_PENDING("Wait for the pending cleanup to finish or retry cleanup before starting another job."),
+        /** The engine cannot run the operation right now. */ UNAVAILABLE("The engine cannot run this now; retry after the active job finishes or recreate the engine.");
 
         private final String defaultRecovery;
         Code(String defaultRecovery) { this.defaultRecovery = defaultRecovery; }
-        /** Standard advice for this category. */
+        /**
+         * Standard advice for this category.
+         * @return the advice text
+         */
         public String defaultRecovery() { return defaultRecovery; }
     }
 
+    /** Failure category. */
     private final Code code;
+    /** Suggested next step. */
     private final String recovery;
 
     /**
@@ -49,10 +54,16 @@ public final class BaroChartException extends RuntimeException {
         this.recovery = recovery != null ? recovery : code.defaultRecovery();
     }
 
-    /** Failure category. */
+    /**
+     * Failure category.
+     * @return the failure category
+     */
     public Code getCode() { return code; }
 
-    /** Suggested next step, in English. */
+    /**
+     * Suggested next step, in English.
+     * @return the recovery advice
+     */
     public String getRecovery() { return recovery; }
 
     @Override public String toString() { return "BaroChartException." + code + ": " + getMessage() + " — " + recovery; }

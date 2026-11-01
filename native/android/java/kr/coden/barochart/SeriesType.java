@@ -4,10 +4,13 @@ import androidx.annotation.NonNull;
 
 /** Series renderers supported by the chart core. */
 public enum SeriesType {
-    CANDLES("candles"), OHLC("ohlc"), LINE("line"), AREA("area"), HISTOGRAM("histogram");
+    /** Candlesticks. */ CANDLES("candles"), /** OHLC bars. */ OHLC("ohlc"), /** Line. */ LINE("line"), /** Filled area. */ AREA("area"), /** Histogram bars, for example volume. */ HISTOGRAM("histogram");
 
     private final String wireName;
     SeriesType(String wireName) { this.wireName = wireName; }
-    /** The chart core name. */
+    /**
+     * The chart core name.
+     * @return the renderer name used by the chart core
+     */
     @NonNull public String wireName() { return wireName; }
 }

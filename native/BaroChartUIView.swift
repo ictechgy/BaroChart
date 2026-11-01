@@ -5,6 +5,7 @@ import UIKit
 /// interactive view per engine because input state and theme belong to it.
 /// Window detach is reversible; dispose permanently disconnects this view.
 public final class BaroChartUIView: UIView {
+    /// The borrowed engine this view draws. The view never closes it.
     public let engine: BaroChartEngine
     private var pointerIDs: [ObjectIdentifier: Int] = [:]
     private var nextID = 0
@@ -21,9 +22,13 @@ public final class BaroChartUIView: UIView {
     private var lastInputSize: CGSize?
     private static let fontPattern = try! NSRegularExpression(pattern: "^((?:(?:bold|italic|normal)\\s+)*)([0-9]+(?:\\.[0-9]+)?)px\\s+(.+)$")
 
+    /// Whether the view caches the chart in bitmap layers. Changing it clears the cache and redraws. Defaults to `true`.
     public var layerCachingEnabled = true { didSet {frameRenderer?.release();setNeedsDisplay()} }
+    /// Description of the latest failure that could not be thrown, or `nil` after a successful draw.
     public private(set) var lastError: String?
+    /// ``BaroChartEngine/revision`` of the engine state drawn last.
     public private(set) var renderedRevision: UInt64 = 0
+    /// Whether ``dispose()`` has run. A disposed view ignores input and no longer draws.
     @objc public private(set) var isDisposed = false
     /// Opt in to scaling the caller's logical CSS font with UIFontMetrics.
     /// The original font remains the base; caller replacements reset that base.
@@ -31,6 +36,7 @@ public final class BaroChartUIView: UIView {
     @objc public var adjustsFontForContentSizeCategory = false {
         didSet {precondition(Thread.isMainThread);if adjustsFontForContentSizeCategory {synchronizeFont()} else {restoreFont(releaseBase: true)}}
     }
+    /// Text style whose Dynamic Type scaling is applied when ``adjustsFontForContentSizeCategory`` is on. Defaults to `.caption1`.
     public var dynamicTypeTextStyle: UIFont.TextStyle = .caption1 {didSet {synchronizeFont()}}
     /// Owner-thread notification after controller input, for external readouts.
     public var onInteraction: (() -> Void)?
@@ -38,6 +44,7 @@ public final class BaroChartUIView: UIView {
     /// touch input, accessibility actions and Dynamic Type updates. `lastError` keeps the latest description.
     public var onError: ((BaroChartError) -> Void)?
 
+    /// Creates a view for `engine`. Main thread only.
     public init(engine: BaroChartEngine, frame: CGRect = .zero) {
         precondition(Thread.isMainThread)
         self.engine = engine
@@ -48,6 +55,7 @@ public final class BaroChartUIView: UIView {
         accessibilityHint = "Swipe up or down to zoom. Use actions to pan, select drawings, edit or cancel."
         installAccessibilityActions()
     }
+    /// Not supported; create the view with ``init(engine:frame:)``.
     public required init?(coder: NSCoder) { return nil }
     deinit {detachResources()}
 
@@ -164,12 +172,16 @@ public final class BaroChartUIView: UIView {
             setNeedsDisplay();onInteraction?();return true
         } catch {report(error);return false}
     }
+    /// Zooms in (VoiceOver swipe up).
     public override func accessibilityIncrement() {_ = performAccessibleAction("Zoom in")}
+    /// Zooms out (VoiceOver swipe down).
     public override func accessibilityDecrement() {_ = performAccessibleAction("Zoom out")}
     /// VoiceOver standard escape (two-finger scrub) cancels the active input session and selection,
     /// matching the "Cancel interaction" custom action. Returns false when the view cannot act.
     public override func accessibilityPerformEscape() -> Bool {performAccessibleAction("Cancel interaction")}
+    /// `true` until the view is disposed, so hardware keyboard commands can reach it.
     public override var canBecomeFirstResponder: Bool {!isDisposed && !disposing}
+    /// Hardware keyboard commands: arrow keys, plus, minus, escape and backspace (each also with Shift), and Command-Z and Command-Shift-Z for undo and redo. Empty once the view is disposed.
     public override var keyCommands: [UIKeyCommand]? {
         guard !isDisposed,!disposing else {return []}
         return [UIKeyCommand.inputLeftArrow,UIKeyCommand.inputRightArrow,UIKeyCommand.inputUpArrow,UIKeyCommand.inputDownArrow,"+","-","\u{1b}","\u{8}"].flatMap {input in [UIKeyCommand(input: input,modifierFlags: [],action: #selector(chartKey(_:))),UIKeyCommand(input: input,modifierFlags: .shift,action: #selector(chartKey(_:)))]} + [UIKeyCommand(input: "z",modifierFlags: .command,action: #selector(chartKey(_:))),UIKeyCommand(input: "z",modifierFlags: [.command,.shift],action: #selector(chartKey(_:)))]
@@ -196,6 +208,7 @@ public final class BaroChartUIView: UIView {
             onInteraction?()
         } catch {report(error)}
     }
+    /// Resizes the chart to the view's bounds (at least 100 by 80 points) and cancels any active input if the size changed.
     public override func layoutSubviews() {
         super.layoutSubviews()
         let size = CGSize(width: max(100,bounds.width),height: max(80,bounds.height))
@@ -204,6 +217,7 @@ public final class BaroChartUIView: UIView {
         }
         lastInputSize = size;fire("nativeResize",[size.width,size.height])
     }
+    /// Draws the engine's current scene, through the cached frame renderer when ``layerCachingEnabled`` is on. Failures are reported through ``onError`` and ``lastError``.
     public override func draw(_ rect: CGRect) {
         guard !isDisposed,!disposing,!suspended,let context = UIGraphicsGetCurrentContext() else {return}
         do {
@@ -214,6 +228,7 @@ public final class BaroChartUIView: UIView {
             lastError = nil;renderedRevision = engine.revision;refreshAccessibility()
         } catch {report(error)}
     }
+    /// Starts tracking each touch as a pointer for the chart's gestures.
     public override func touchesBegan(_ touches: Set<UITouch>,with event: UIEvent?) {
         guard !isDisposed,!disposing,!suspended else {return};becomeFirstResponder()
         let generation = inputGeneration
@@ -222,10 +237,15 @@ public final class BaroChartUIView: UIView {
             nextID += 1;pointerIDs[ObjectIdentifier(touch)] = nextID;let p = touch.location(in: self);fire("nativePointer",["down",nextID,p.x,p.y,22])
         }
     }
+    /// Forwards moved touches to the chart.
     public override func touchesMoved(_ touches: Set<UITouch>,with event: UIEvent?) {for touch in touches {guard let id = pointerIDs[ObjectIdentifier(touch)] else {continue};let p = touch.location(in: self);fire("nativePointer",["move",id,p.x,p.y])}}
+    /// Ends the tracked pointers for these touches.
     public override func touchesEnded(_ touches: Set<UITouch>,with event: UIEvent?) {for touch in touches {if let id = pointerIDs.removeValue(forKey: ObjectIdentifier(touch)) {fire("nativePointer",["up",id,0,0])}}}
+    /// Cancels the active input session.
     public override func touchesCancelled(_ touches: Set<UITouch>,with event: UIEvent?) {cancelInteraction(clearCrosshair: false);setNeedsDisplay()}
+    /// Cancels input and releases drawing resources when the view leaves its window. Reversible: moving back into a window reattaches.
     public override func willMove(toWindow newWindow: UIWindow?) {if newWindow == nil {cancelInteraction(clearCrosshair: true);detachResources()};super.willMove(toWindow: newWindow)}
+    /// Reattaches resources (engine subscription, Dynamic Type observation) when the view enters a window.
     public override func didMoveToWindow() {super.didMoveToWindow();if window != nil {attachResources()}}
     /// Sets crosshair snapping. Throws `BaroChartError` instead of recording a silent failure.
     public func setCrosshairSnap(_ options: [String: Any]) throws {try performViewCommand {try engine.setCrosshairSnap(options)}}

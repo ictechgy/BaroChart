@@ -3,6 +3,7 @@ import android.content.Context;import android.content.res.Configuration;import a
 
 /** Android Canvas/Skia native view consuming the shared renderer-neutral scene. */
 public final class BaroChartView extends View {
+    /** The engine this view draws and sends input to. The view never closes it. */
     public final BaroChartEngine engine;
     private final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG),bitmapPaint=new Paint(),baseBitmapPaint=new Paint();
     private final float density;
@@ -26,10 +27,15 @@ public final class BaroChartView extends View {
     private String baseFont,lastAppliedFont;
     // Weak values avoid a value -> View -> engine path keeping a weak key alive.
     private static final java.util.WeakHashMap<BaroChartEngine,java.lang.ref.WeakReference<BaroChartView>> FONT_OWNERS=new java.util.WeakHashMap<>();
+    /**
+     * Custom accessibility action ids, in order: zoom in, zoom out, clear the crosshair and cancel the current
+     * interaction.
+     */
     public static final int ACTION_ZOOM_IN=0x41535401,ACTION_ZOOM_OUT=0x41535402,ACTION_CLEAR_CROSSHAIR=0x41535403,ACTION_CANCEL_INTERACTION=0x41535404;
     private String lastError=null;
     private OnChartErrorListener errorListener;
     private Runnable interactionListener;
+    /** The engine revision captured after the most recent successful draw. */
     public long renderedRevision=0;
     private final Runnable onChange=()->{if(systemFontScaleEnabled&&!applyingFont&&inputDepth==0)try{applySystemFontScale();}catch(Exception error){report(error);}invalidate();};
     private final Runnable onClose=()->{engineClosed=true;resetTouch();releaseFontOwner();baseFont=lastAppliedFont=null;evictBitmapCache();drawProbe=null;invalidate();};
@@ -45,24 +51,51 @@ public final class BaroChartView extends View {
     private DrawProbe drawProbe;
     void setDrawProbe(DrawProbe probe){drawProbe=probe;}
     private static void viewOwner(){if(Looper.myLooper()!=Looper.getMainLooper())throw new IllegalStateException("Chart View requires main thread");}
+    /**
+     * Creates a view for an engine. The view listens to the engine while it is attached to a window.
+     * @param context the Android context
+     * @param engine the engine to draw; the view does not close it
+     */
     public BaroChartView(Context context,BaroChartEngine engine){super(context);this.engine=engine;density=getResources().getDisplayMetrics().density;touchSlop=ViewConfiguration.get(context).getScaledTouchSlop();baseBitmapPaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.SRC));setFocusable(true);setClickable(true);setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_YES);setContentDescription("Financial chart");}
     private static int color(String s){if(s.matches("#[0-9a-fA-F]{8}"))s="#"+s.substring(7,9)+s.substring(1,7);return Color.parseColor(s);}
     /** 내부 입력 경로(터치·키·hover·크기 변경) 전용: 실패를 던지지 않고 리스너로 보고해 입력 처리 중 앱이 죽지 않게 한다 */
     private void dispatchInput(String name,Object... args){inputDepth++;boolean applied=false;try{engine.invoke(name,args);applied=true;}catch(Exception e){report(e);}finally{inputDepth--;invalidate();}if(applied&&interactionListener!=null&&!"nativeResize".equals(name))interactionListener.run();}
-    /** Invokes a core input command. Throws {@link BaroChartException} instead of recording a silent failure. */
+    /**
+     * Invokes a core input command. Throws {@link BaroChartException} instead of recording a silent failure.
+     * @param name core input command name
+     * @param args command arguments
+     */
     public void fire(String name,Object... args){inputDepth++;try{engine.invoke(name,args);}catch(Exception e){throw BaroChartException.wrap(e);}finally{inputDepth--;invalidate();}}
+    /**
+     * Configures pointer crosshair snapping. Throws {@link BaroChartException} when the engine rejects the options.
+     * @param options snap options as JSON, such as {@code mode}
+     */
     public void setCrosshairSnap(JSONObject options){try{engine.setCrosshairSnap(options);lastError=null;}catch(Exception e){throw BaroChartException.wrap(e);}}
+    /**
+     * Configures the drawing magnet. Throws {@link BaroChartException} when the engine rejects the options.
+     * @param options magnet options as JSON, such as {@code mode} and {@code radiusPx}
+     */
     public void setDrawingMagnet(JSONObject options){try{engine.setDrawingMagnet(options);lastError=null;}catch(Exception e){throw BaroChartException.wrap(e);}}
-    /** Selects a drawing tool by core name. Throws {@link BaroChartException} for unknown tools or a closed engine. */
+    /**
+     * Selects a drawing tool by core name. Throws {@link BaroChartException} for unknown tools or a closed engine.
+     * @param tool core tool name, see {@link DrawingTool#wireName()}
+     */
     public void setTool(String tool){try{engine.setTool(tool);lastError=null;}catch(Exception e){throw BaroChartException.wrap(e);}}
-    /** Opt in to system fontScale by updating the engine's logical theme font.
+    /**
+     * Opt in to system fontScale by updating the engine's logical theme font.
      * One View may own scaling per engine. A caller theme font becomes the new base.
-     * Disable/detach restores only a font still equal to this View's last applied value. */
+     * Disable/detach restores only a font still equal to this View's last applied value.
+     * @param enabled true to scale the theme font by the system font scale, false to restore it
+     */
     public void setSystemFontScaleEnabled(boolean enabled){viewOwner();if(engineClosed)throw new IllegalStateException("Chart engine closed");if(enabled==systemFontScaleEnabled)return;
         if(enabled){claimFontOwner();systemFontScaleEnabled=true;try{applySystemFontScale();}catch(Exception error){systemFontScaleEnabled=false;releaseFontOwner();baseFont=lastAppliedFont=null;throw new IllegalStateException("Cannot apply system fontScale",error);}}
         else {restoreSystemFont();systemFontScaleEnabled=false;releaseFontOwner();baseFont=lastAppliedFont=null;}
         invalidate();
     }
+    /**
+     * Tells whether system font scaling is enabled for this view. Call on the main thread.
+     * @return true when system font scaling is enabled
+     */
     public boolean isSystemFontScaleEnabled(){viewOwner();return systemFontScaleEnabled;}
     private void claimFontOwner(){java.lang.ref.WeakReference<BaroChartView> ref=FONT_OWNERS.get(engine);BaroChartView owner=ref==null?null:ref.get();if(owner!=null&&owner!=this)throw new IllegalStateException("One fontScale owner View per engine");FONT_OWNERS.put(engine,new java.lang.ref.WeakReference<>(this));}
     private void releaseFontOwner(){java.lang.ref.WeakReference<BaroChartView> ref=FONT_OWNERS.get(engine);if(ref!=null&&ref.get()==this)FONT_OWNERS.remove(engine);}
@@ -75,12 +108,33 @@ public final class BaroChartView extends View {
     }
     private void restoreSystemFont(){if(engineClosed||lastAppliedFont==null||baseFont==null)return;try{if(themeFont().equals(lastAppliedFont)&&!baseFont.equals(lastAppliedFont)){cancelTouch();applyingFont=true;try{engine.setTheme(new JSONObject().put("font",baseFont));}finally{applyingFont=false;}}}catch(Exception error){report(error);}}
     @Override protected void onConfigurationChanged(Configuration config){super.onConfigurationChanged(config);if(systemFontScaleEnabled)try{applySystemFontScale();}catch(Exception error){report(error);}invalidate();}
-    /** Disable for low-memory clients or direct-render diagnostics. */
+    /**
+     * Disable for low-memory clients or direct-render diagnostics.
+     * @param enabled true (the default) to cache rendered bitmaps
+     */
     public void setRenderCacheEnabled(boolean enabled){viewOwner();if(renderCacheEnabled!=enabled){renderCacheEnabled=enabled;evictBitmapCache();retryAt=0;invalidate();}}
+    /**
+     * Tells whether the render cache is enabled for this view. Call on the main thread.
+     * @return true when the render cache is enabled
+     */
     public boolean isRenderCacheEnabled(){viewOwner();return renderCacheEnabled;}
-    /** Process-wide CPU bitmap budget. Zero selects direct rendering. Default64MiB. */
+    /**
+     * Process-wide CPU bitmap budget. Zero selects direct rendering. Default64MiB.
+     * @param bytes budget in bytes; zero selects direct rendering
+     */
     public static void setSharedCacheBudgetBytes(long bytes){BaroChartBitmapCachePool.INSTANCE.setBudget(bytes);}
+    /**
+     * Returns metrics of the process-wide bitmap cache.
+     * @return the metrics as JSON
+     * @throws JSONException if the metrics cannot be encoded
+     */
     public static JSONObject sharedCacheMetrics() throws JSONException {return BaroChartBitmapCachePool.INSTANCE.metrics();}
+    /**
+     * Returns diagnostic counters of this view's render cache, such as owned bitmap bytes, cache hits, rebuilds and
+     * fallbacks. Call on the main thread.
+     * @return the counters as JSON
+     * @throws JSONException if the counters cannot be encoded
+     */
     public JSONObject renderCacheMetrics() throws JSONException {viewOwner();return new JSONObject().put("ownedBitmapBytes",bitmapBytes()).put("cacheHits",cacheHits).put("baseRebuilds",baseRebuilds).put("drawingRebuilds",drawingRebuilds).put("fallbacks",fallbacks).put("failure",cacheFailure==null?JSONObject.NULL:cacheFailure).put("enabled",renderCacheEnabled).put("engineClosed",engineClosed).put("frameCacheCreated",frameCacheCreated).put("packetAttempts",packetAttempts).put("packetFrames",packetFrames).put("legacyFrames",legacyFrames).put("packetFailures",packetFailures).put("packetReleaseFailures",packetReleaseFailures).put("packetNumericBytes",packetNumericBytes).put("packetMetadataChars",packetMetadataChars).put("packetFailure",packetFailure==null?JSONObject.NULL:packetFailure);}
     private long bitmapBytes(){return (baseBitmap==null?0L:baseBitmap.getAllocationByteCount())+(drawingBitmap==null?0L:drawingBitmap.getAllocationByteCount());}
     // Drop Java ownership instead of recycle(): a hardware display list may still use a bitmap.
@@ -197,6 +251,12 @@ public final class BaroChartView extends View {
             else if(op==6){FontSpec font=prepared.fonts[(int)a[h+13]];paint.setStyle(Paint.Style.FILL);paint.setTypeface(font.typeface);paint.setTextSize(font.size);canvas.drawText(packet.strings[(int)a[h+12]],(float)a[start],(float)a[start+1],paint);}
         }finally{canvas.restore();}}
     }
+    /**
+     * Draws a scene JSON, as returned by {@link BaroChartEngine#scene(double, double)}, onto a canvas.
+     * @param canvas the canvas to draw on
+     * @param scene the scene as JSON, with {@code background} and {@code commands}
+     * @throws JSONException if the scene JSON is malformed
+     */
     public void render(Canvas canvas,JSONObject scene) throws JSONException {
         canvas.drawColor(color(scene.getString("background")),PorterDuff.Mode.SRC);renderCommands(canvas,scene.getJSONArray("commands"));
     }
@@ -212,11 +272,20 @@ public final class BaroChartView extends View {
         }
     }
     private static final java.util.regex.Pattern FONT=java.util.regex.Pattern.compile("^((?:(?:bold|italic|normal)\\s+)*)([0-9]+(?:\\.[0-9]+)?)px\\s+(.+)$");
-    /** Latest failure description recorded by this view, or {@code null} after a successful draw. */
+    /**
+     * Latest failure description recorded by this view, or {@code null} after a successful draw.
+     * @return the error description, or {@code null}
+     */
     public String getLastError(){return lastError;}
-    /** Sets the main-thread listener for failures that cannot be thrown; {@code null} removes it. */
+    /**
+     * Sets the main-thread listener for failures that cannot be thrown; {@code null} removes it.
+     * @param listener the listener, or {@code null} to remove it
+     */
     public void setOnChartErrorListener(OnChartErrorListener listener){errorListener=listener;}
-    /** Sets a main-thread callback run after touch, key or hover input changes the chart; {@code null} removes it. */
+    /**
+     * Sets a main-thread callback run after touch, key or hover input changes the chart; {@code null} removes it.
+     * @param listener the callback, or {@code null} to remove it
+     */
     public void setOnInteractionListener(Runnable listener){interactionListener=listener;}
     /** 던질 수 없는 경로의 오류를 lastError에 남기고 리스너로 알린다 */
     private void report(Throwable error){BaroChartException typed=BaroChartException.wrap(error);lastError=typed.toString();if(errorListener!=null)errorListener.onChartError(typed);}

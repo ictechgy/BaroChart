@@ -3,56 +3,95 @@ import JavaScriptCore
 import CoreGraphics
 import CoreText
 
+/// Low-level errors thrown by the dictionary API and the core bridge: a JavaScript exception, an unavailable JavaScript context, a scene that cannot be produced, or a call from a thread that does not own the engine.
+///
+/// Typed API methods convert these to ``BaroChartError``.
 public enum BaroChartLowLevelError: Error { case javaScript(String), unavailableContext, invalidScene, wrongThread }
 /// Stable queue/admission error from the shared ingestion contract. Original
 /// owner/closed-engine failures keep their existing BaroChartLowLevelError/BaroChartAsyncError.
 public struct BaroChartIngestionError: Error, CustomStringConvertible {
+    /// Stable ingestion error code from the shared ingestion contract.
     public let code: String
+    /// Human-readable detail for ``code``.
     public let message: String
+    /// Creates an ingestion error from a stable `code` and a human-readable `message`.
     public init(code: String, message: String) {self.code=code;self.message=message}
+    /// A one-line description containing the code and message.
     public var description: String {"IngestionError[\(code)]: \(message)"}
 }
+/// One OHLCV bar. `time` is a UTC epoch timestamp in milliseconds.
 public struct BaroChartBar: Codable, Equatable, Sendable {
+    /// Bar time (UTC epoch milliseconds), then open, high, low and close prices, and volume.
     public let time, open, high, low, close, volume: Double
+    /// Creates a bar from its time (UTC epoch milliseconds), prices and volume.
     public init(time: Double, open: Double, high: Double, low: Double, close: Double, volume: Double) {
         self.time = time; self.open = open; self.high = high; self.low = low; self.close = close; self.volume = volume
     }
 }
+/// One drawing primitive of a ``BaroChartScene``, decoded from the core's scene JSON.
+///
+/// `op` selects the primitive; only the fields that primitive uses are set.
 public struct BaroChartCommand: Decodable {
+    /// Primitive name: `lines`, `rects`, `path`, `box`, `ellipse` or `text`. ``BaroChartCoreGraphicsRenderer`` skips any other name.
     public let op: String
+    /// Numeric arrays. `coords` holds groups of four numbers (line segment endpoints for `lines`; x, y, width, height for `rects`). `points` is a flat x, y polyline for `path`. `clip` is an x, y, width, height clip rectangle. `dash` is a line-dash length pattern.
     public let coords, points, clip, dash: [Double]?
+    /// Geometry in scene pixels: `x`, `y`, `w` and `h` for `box`, `ellipse` and `text` positions; `width` is the stroke width (1 when absent); `baseline` is the y coordinate that closes a filled `path`.
     public let x, y, w, h, width, baseline: Double?
+    /// Stroke or text color, fill color, label text and CSS-style font (for example `12px monospace`). Colors are CSS hex strings.
     public let color, fill, text, font: String?
     /// Optional label semantics from the shared core. Older scene bundles omit
     /// these fields; raw data/anchors remain separate from display commands.
     public let role, fullText, panelId, axisId: String?
+    /// Label bounds reported by the core for label commands. Absent in older scene bundles.
     public let labelBounds: [Double]?
 }
+/// A drawable chart frame decoded from the core: canvas size, background color and the ordered drawing commands.
+///
+/// Render it with ``BaroChartCoreGraphicsRenderer``.
 public struct BaroChartScene: Decodable {
+    /// Scene width and height in logical (CSS) pixels.
     public let width, height: Double
+    /// Background color as a CSS hex string.
     public let background: String
+    /// Drawing commands in paint order.
     public let commands: [BaroChartCommand]
+    /// Frame statistics reported by the core, as named integer counters.
     public let stats: [String: Int]
 }
 
+/// Errors from owner checks and opt-in asynchronous jobs: wrong owner, a busy engine, cancellation, a missed deadline, a closed or released engine, or a protocol violation.
+///
+/// Typed API methods convert these to ``BaroChartError``.
 public enum BaroChartAsyncError: Error {
     case mainOwnerRequired, busy, cancelled, timedOut, engineClosed, sourceDeallocated
     case invalidProtocol(String)
 }
+/// Progress snapshot delivered to an asynchronous job's progress callback.
 public struct BaroChartAsyncProgress {
+    /// Name of the job phase being reported.
     public let phase: String
+    /// Units completed and total units for the reported phase.
     public let done, total: Int
 }
+/// Timing and memory measurements of a finished asynchronous job. Durations are milliseconds; byte counts are logical sizes, not process footprint.
 public struct BaroChartAsyncMetrics {
     /// Logical six-column input bytes retained during preparation. Swift COW
     /// aliases may use less physical storage; this is not a process footprint.
     public internal(set) var retainedInputBytes = 0, inputOwnershipMs = 0.0
+    /// Bytes copied for the job, bytes of checkpoint JSON, and the largest single chunk in bytes.
     public internal(set) var copiedBytes = 0, checkpointJSONBytes = 0, maximumChunkBytes = 0
+    /// Durations in milliseconds of the capture, target copy, compute and worker initialization phases.
     public internal(set) var captureMs = 0.0, targetCopyMs = 0.0, computeMs = 0.0, workerInitMs = 0.0
+    /// Durations in milliseconds of the begin phase, time spent waiting for the owner queue, and the commit phase.
     public internal(set) var beginMs = 0.0, queueWaitMs = 0.0, commitMs = 0.0
+    /// Durations in milliseconds of the UI state phase, the finish phase and the whole job.
     public internal(set) var uiStateMs = 0.0, finishMs = 0.0, totalMs = 0.0
+    /// UI state transfer counters: chunk count, total bytes, largest chunk in bytes, and worker import time in milliseconds.
     public internal(set) var uiChunkCount = 0, uiTransferBytes = 0, maximumUIChunkBytes = 0, workerUIImportMs = 0.0
+    /// Process resident memory in bytes sampled when the job started, and the peak sampled during the job.
     public internal(set) var baselineResidentBytes: UInt64 = 0, peakResidentBytes: UInt64 = 0
+    /// Number of times the progress callback threw an error.
     public internal(set) var progressCallbackErrors = 0
 }
 
@@ -175,6 +214,7 @@ public final class BaroChartAsyncJob {
         }
         metrics.baselineResidentBytes = asterResidentBytes();metrics.peakResidentBytes = metrics.baselineResidentBytes
     }
+    /// Requests cancellation. Safe from any thread. Cancellation is cooperative at chunk boundaries and has no effect once the result has been committed.
     public func cancel() {stop(BaroChartAsyncError.cancelled)}
     fileprivate var isCommitted: Bool {lock.lock();defer{lock.unlock()};return committed}
     // Internal fixture probe observes actual retained fields. Completed handles
@@ -298,11 +338,16 @@ private final class BaroChartRuntimeRetirement {
 }
 /// Reports restoration failure, not successful cleanup. Retry explicitly on main.
 public enum BaroChartWorkspaceError: Error {case cleanupPending(registration: Int)}
+/// Measurements of a finished workspace restore. Byte counts are logical sizes, not process footprint; `totalMs` is in milliseconds.
 public struct BaroChartWorkspaceMetrics {
+    /// Bytes copied, logical bytes admitted against the native budget, and the number of times the progress callback threw.
     public internal(set) var copiedBytes = 0, logicalAdmissionBytes = 0, progressCallbackErrors = 0
+    /// Total duration of the restore in milliseconds.
     public internal(set) var totalMs = 0.0
 }
+/// State of one workspace restore whose runtime cleanup is still pending. Read it with ``BaroChartEngine/workspaceCleanupStatus()``.
 public struct BaroChartWorkspaceCleanupStatus {
+    /// `registration` identifies the restore, `admittedLogicalBytes` is the logical size admitted against the native budget, and `retryFailures` counts failed cleanup attempts.
     public let registration, admittedLogicalBytes, retryFailures: Int
     /// Unadmitted zero bytes means unknown retained cost, bounded by slots only.
     public let admitted, awaitingCreatorCleanup: Bool
@@ -624,13 +669,16 @@ public final class BaroChartWorkspaceJob {
     private let sourceRevision: UInt64, timeout: Double, maxBars: Int
     private let started = asterClock()
     private var metrics = BaroChartWorkspaceMetrics()
+    /// Identifier of this restore. It matches `registration` in ``BaroChartWorkspaceCleanupStatus``.
     public let registration: Int
     fileprivate init(engine: BaroChartEngine, record: BaroChartWorkspaceSourceRecord, document: String, binding: [String:Any], timeout: Double, maxBars: Int,
                      progress: ((BaroChartAsyncProgress) throws -> Void)?, completion: @escaping (Result<BaroChartWorkspaceMetrics,Error>) -> Void) {
         self.engine = engine;self.record = record;self.document = document;self.binding = binding;self.timeout = timeout;self.maxBars = maxBars
         self.progress = progress;self.completion = completion;sourceRevision = engine.revision;registration = record.registration
     }
+    /// Requests cancellation. Safe from any thread; it has no effect once the restore has committed.
     public func cancel() {lock.lock();if !terminal && !committed {cancelled = true};lock.unlock()}
+    /// Whether this restore's runtime cleanup is still pending. Main thread only.
     public var cleanupPending: Bool {precondition(Thread.isMainThread);return BaroChartWorkspaceRegistry.status().contains{$0.registration == registration}}
     fileprivate func check() throws {
         lock.lock();let stopped = cancelled, finished = terminal || finishing;lock.unlock()
@@ -886,15 +934,24 @@ private final class BaroChartWorkspaceRuntime: BaroChartContextRuntime {
 /// Publication and cleanup are independent. Unknown is never permission to retry
 /// the mutation. Use retryParamsCleanup with the original registration instead.
 public enum BaroChartParamsCommitOutcome: String {case notCommitted, committed, unchanged, unknown}
+/// Thrown when a parameter job finished but runtime cleanup is still pending. `outcome` tells whether the parameters were published; retry cleanup with the original registration, never the mutation.
 public enum BaroChartParamsError: Error {case cleanupPending(registration: Int, outcome: BaroChartParamsCommitOutcome)}
+/// State of one parameter job whose runtime cleanup is still pending. Read it with ``BaroChartEngine/paramsCleanupStatus()``.
 public struct BaroChartParamsStatus {
+    /// `registration` identifies the job, `admittedLogicalBytes` is the logical size admitted against the native budget, and `retryFailures` counts failed cleanup attempts.
     public let registration, admittedLogicalBytes, retryFailures: Int
+    /// Whether the parameters were published.
     public let outcome: BaroChartParamsCommitOutcome
+    /// `cleanupPending` is true while runtime cleanup has not finished; `awaitingCreatorCleanup` is true while the creating runtime has not yet finished its own cleanup.
     public let cleanupPending, awaitingCreatorCleanup: Bool
 }
+/// Measurements of a finished parameter job. Byte counts are logical sizes, not process footprint; `totalMs` is in milliseconds.
 public struct BaroChartParamsMetrics {
+    /// Bytes copied, logical bytes admitted against the native budget, and the number of times the progress callback threw.
     public internal(set) var copiedBytes = 0, logicalAdmissionBytes = 0, progressCallbackErrors = 0
+    /// Total duration of the job in milliseconds.
     public internal(set) var totalMs = 0.0
+    /// Whether the parameters were published.
     public internal(set) var outcome: BaroChartParamsCommitOutcome = .notCommitted
 }
 // Main-only minimal recovery owner. Client callbacks and Error are never stored.
@@ -1059,15 +1116,20 @@ public final class BaroChartParamsJob {
     private let sourceRevision: UInt64, timeout: Double, maxBars: Int
     private let started = asterClock()
     private var metrics = BaroChartParamsMetrics()
+    /// Identifier of this job. It matches `registration` in ``BaroChartParamsStatus``.
     public let registration: Int
     fileprivate init(engine: BaroChartEngine, record: BaroChartParamsSourceRecord, params: [String:Any], timeout: Double, maxBars: Int,
                      progress: ((BaroChartAsyncProgress) throws -> Void)?, completion: @escaping (Result<BaroChartParamsMetrics,Error>) -> Void) {
         self.engine = engine;self.record = record;self.params = params;self.timeout = timeout;self.maxBars = maxBars
         self.progress = progress;self.completion = completion;sourceRevision = engine.revision;registration = record.registration;record.job = self
     }
+    /// Requests cancellation. Safe from any thread; it has no effect once publication has started.
     public func cancel() {lock.lock();if !terminal && !publishing {cancelled = true};lock.unlock()}
+    /// Whether the parameters were published. Safe to read from any thread.
     public var commitOutcome: BaroChartParamsCommitOutcome {lock.lock();defer {lock.unlock()};return outcome}
+    /// Whether this job's runtime cleanup is still pending. Main thread only.
     public var cleanupPending: Bool {precondition(Thread.isMainThread);return BaroChartParamsRegistry.status(registration).contains{$0.cleanupPending}}
+    /// Retries this job's cleanup once and returns the resulting statuses. Throws ``BaroChartAsyncError`` (main-owner required) when not called on the main thread.
     @discardableResult public func retryCleanup() throws -> [BaroChartParamsStatus] {
         guard Thread.isMainThread else {throw BaroChartAsyncError.mainOwnerRequired}
         return BaroChartParamsRegistry.retry(registration)
@@ -1291,6 +1353,11 @@ public final class BaroChartParamsJob {
     }
 }
 
+/// A chart engine: the chart core running in a JavaScriptCore context, with its data, series, indicators, drawings and view state.
+///
+/// An engine belongs to the thread that created it and must be used only there; engines attached to a view must be created on the main thread. The typed methods (``BaroChartBar``, ``BaroChartSeries``, ``BaroChartDrawing`` and related value types) throw only ``BaroChartError``. The dictionary-based methods in this file are an advanced low-level API that may change within 1.x and throw their original error types. Times are UTC epoch milliseconds and indices are bar indices.
+///
+/// Show an engine with ``BaroChartUIView`` or ``BaroChartView``; a view borrows the engine and never closes it.
 public final class BaroChartEngine {
     /// Opt-in async success replaces this context. Re-read it after completion;
     /// cached raw JSContext/JSValue objects from the retired VM are unsupported.
@@ -1318,15 +1385,30 @@ public final class BaroChartEngine {
     func checkFrameOwner()throws{guard Thread.current===owner else{throw BaroChartLowLevelError.wrongThread};guard !closed else{throw BaroChartAsyncError.engineClosed}}
     func registerFrameCleanup(_ cleanup:@escaping()->Void)throws->UUID{try checkFrameOwner();let token=UUID();frameCleanup[token]=cleanup;return token}
     func removeFrameCleanup(_ token:UUID){frameCleanup.removeValue(forKey:token)}
+    /// Errors thrown by observers during the latest notification pass; at most 32 are kept.
     public private(set) var observerErrors: [Error] = []
+    /// Called for each error thrown by a change observer, on the engine's owner thread.
     public var onObserverError: ((Error) -> Void)?
+    /// Counter that increases (wrapping) each time chart state changes and observers are notified. Compare it with ``BaroChartUIView/renderedRevision`` to see whether a view has drawn the latest state.
     public private(set) var revision: UInt64 = 0
     #if SWIFT_PACKAGE
+    /// Creates an engine from the core bundled in the Swift package resources. Available when building as a Swift package.
+    ///
+    /// - Parameters:
+    ///   - count: Number of deterministic demonstration bars (seed 42) to load at start; `0` starts empty.
+    ///   - options: Core options dictionary (panels, series, theme), or `nil` for the labeled demonstration layout with price and volume panels.
     public convenience init(count: Int = 0, options: [String: Any]? = nil) throws {
         guard let url = Bundle.module.url(forResource: "aster-core", withExtension: "js") else {throw BaroChartLowLevelError.invalidScene}
         try self.init(bundleURL: url, count: count, options: options)
     }
     #endif
+    /// Creates an engine from the core JavaScript bundle at `bundleURL`. The calling thread becomes the owner thread.
+    ///
+    /// - Parameters:
+    ///   - bundleURL: File URL of the core bundle.
+    ///   - count: Number of deterministic demonstration bars (seed 42) to load at start; `0` starts empty.
+    ///   - options: Core options dictionary (panels, series, theme), or `nil` for the labeled demonstration layout with price and volume panels.
+    /// - Throws: ``BaroChartLowLevelError`` if the JavaScript context cannot be created or the bundle fails to load or initialize. Low-level API; prefer ``init(options:)``.
     public init(bundleURL: URL, count: Int = 0, options: [String: Any]? = nil) throws {
         guard let context = JSContext() else { throw BaroChartLowLevelError.unavailableContext }
         self.contextBacking = context
@@ -1338,6 +1420,7 @@ public final class BaroChartEngine {
     private func checkException() throws {
         if let exception = context.exception { context.exception = nil; throw BaroChartLowLevelError.javaScript(exception.toString() ?? "Unknown JS error") }
     }
+    /// Calls a global function of the core bundle by name and returns its JavaScript result. Owner thread only; throws ``BaroChartLowLevelError`` for a wrong thread or a missing function, and ``BaroChartAsyncError`` for a closed engine. Advanced low-level API.
     @discardableResult public func call(_ name: String, _ arguments: [Any] = []) throws -> JSValue {
         guard Thread.current === owner else {throw BaroChartLowLevelError.wrongThread}
         guard !closed else {throw BaroChartAsyncError.engineClosed}
@@ -1358,6 +1441,7 @@ public final class BaroChartEngine {
         guard activeParams == nil else {throw BaroChartAsyncError.busy}
         guard activeWorkspace == nil else {throw BaroChartAsyncError.busy}
     }
+    /// Lists workspace restores whose runtime cleanup is still pending. Main thread only; throws ``BaroChartAsyncError`` otherwise.
     public static func workspaceCleanupStatus() throws -> [BaroChartWorkspaceCleanupStatus] {
         guard Thread.isMainThread else {throw BaroChartAsyncError.mainOwnerRequired}
         return BaroChartWorkspaceRegistry.status()
@@ -1367,6 +1451,7 @@ public final class BaroChartEngine {
         guard Thread.isMainThread else {throw BaroChartAsyncError.mainOwnerRequired}
         BaroChartWorkspaceRegistry.retry();return BaroChartWorkspaceRegistry.status()
     }
+    /// Lists parameter jobs whose runtime cleanup is still pending. Main thread only; throws ``BaroChartAsyncError`` otherwise.
     public static func paramsCleanupStatus() throws -> [BaroChartParamsStatus] {
         guard Thread.isMainThread else {throw BaroChartAsyncError.mainOwnerRequired}
         return BaroChartParamsRegistry.status()
@@ -1508,6 +1593,7 @@ public final class BaroChartEngine {
         if workspaceContextInstalled {contextBacking = nil}
         contextRuntime?.retire()
     }
+    /// Replaces every bar of the primary series. Low-level form that throws its original error types; the typed `setBars(_:)` throws only ``BaroChartError``.
     public func setData(_ bars: [BaroChartBar]) throws {
         let data = try JSONEncoder().encode(bars)
         let object = try JSONSerialization.jsonObject(with: data)
@@ -1583,14 +1669,17 @@ public final class BaroChartEngine {
         revision &+= 1;pendingNotifications += 1;if notifying {return};notifying=true;observerErrors=[];defer{notifying=false}
         while pendingNotifications>0 {pendingNotifications -= 1;for notify in Array(observers.values) {do{try notify()}catch{if observerErrors.count<32{observerErrors.append(error)};onObserverError?(error)}}}
     }
+    /// Registers a closure that runs on the owner thread after each change to chart state, and returns a token for ``removeObserver(_:)``. Errors thrown by the closure are recorded in ``observerErrors`` and reported to ``onObserverError``.
     @discardableResult public func observeChanges(_ notify: @escaping () throws -> Void) throws -> UUID {
         guard Thread.current === owner else {throw BaroChartLowLevelError.wrongThread}
         guard !closed else {throw BaroChartAsyncError.engineClosed}
         let token = UUID(); observers[token] = notify; return token
     }
+    /// Removes the observer registered under `token`. Owner thread only.
     public func removeObserver(_ token: UUID) throws {
         guard Thread.current === owner else {throw BaroChartLowLevelError.wrongThread}; observers.removeValue(forKey: token)
     }
+    /// Applies one streaming or correction event given as a core event dictionary. The typed `apply(_:)` takes a ``BaroChartDataEvent`` instead.
     public func applyDataEvent(_ event: [String: Any]) throws {try command("applyDataEvent", [event])}
     /// Ordered append/update/correction burst. The core validates the complete
     /// burst before one data publication; it never sorts, merges or evicts rows.
@@ -1668,32 +1757,45 @@ public final class BaroChartEngine {
     @discardableResult public func drainDataEvents(_ maxEvents: Int? = nil) throws -> [String: Any] {
         try ingestionCommand("drainDataEvents",maxEvents.map{[$0 as Any]} ?? [])
     }
+    /// Pauses the ingestion queue and returns the core's receipt dictionary. Low-level API.
     @discardableResult public func pauseDataIngestion() throws -> [String: Any] {try ingestionCommand("pauseDataIngestion")}
+    /// Resumes the ingestion queue and returns the core's receipt dictionary. Low-level API.
     @discardableResult public func resumeDataIngestion() throws -> [String: Any] {try ingestionCommand("resumeDataIngestion")}
     /// Explicit pending-payload cancellation; accepted cursors remain advanced.
     @discardableResult public func cancelDataEvents() throws -> [String: Any] {try ingestionCommand("cancelDataEvents")}
     /// Fresh policy/cursor/ledger and logical typed-byte counts, not process RSS.
+    /// Returns ingestion statistics from the core (policy, cursors, ledger and logical typed-byte counts) as a dictionary.
     public func dataIngestionStats() throws -> [String: Any] {try ingestionCommand("dataIngestionStats")}
     /// Bounded special-number document. Feed data and UI are separately owned;
     /// restore those first. Active asynchronous lease state is never serialized.
+    /// Saves the ingestion state as a document string; restore it with ``loadDataIngestion(_:)``.
     public func saveDataIngestion() throws -> String {
         guard let text=try command("saveDataIngestion").toString() else{throw BaroChartLowLevelError.invalidScene};return text
     }
+    /// Restores ingestion state from a document made by ``saveDataIngestion()`` and returns the core's receipt dictionary.
     @discardableResult public func loadDataIngestion(_ document: String) throws -> [String: Any] {
         try ingestionCommand("loadDataIngestion",[document])
     }
     private func ingestionCommand(_ operation: String,_ arguments: [Any] = []) throws -> [String: Any] {
         guard let result=try command(operation,arguments).toDictionary() as? [String: Any] else{throw BaroChartLowLevelError.invalidScene};return result
     }
+    /// Replaces the primary OHLCV from column arrays keyed by column name (`time`, `open`, `high`, `low`, `close`, `volume`). Low-level API.
     public func setColumns(_ columns: [String: [Double]]) throws {try command("setColumns", [columns])}
+    /// Adds a panel from a core options dictionary. Low-level API.
     public func addPanel(_ options: [String: Any]) throws {try command("addPanel", [options])}
+    /// Applies a patch dictionary to the panel with `id`. Low-level API.
     public func setPanel(_ id: String, _ patch: [String: Any]) throws {try command("setPanel", [id, patch])}
+    /// Adds an explicit value axis from a core options dictionary. Low-level API.
     public func addAxis(_ options: [String: Any]) throws {try command("addAxis", [options])}
+    /// Applies a patch dictionary to the axis with `id`. Low-level API.
     public func setAxis(_ id: String, _ patch: [String: Any]) throws {try command("setAxis", [id, patch])}
+    /// Removes the axis with `id`. Low-level API.
     public func removeAxis(_ id: String) throws {try command("removeAxis", [id])}
+    /// Sets the panel and series that new drawings attach to, as a core target dictionary. `nil` is sent to the core as null. Low-level API.
     public func setDrawingTarget(_ target: [String: Any]?) throws {try command("setDrawingTarget", [target as Any? ?? NSNull()])}
     /// Bounded readout at a stored timestamp/index. May calculate lazy studies;
     /// no layout, rounding or change notification is requested by this read.
+    /// Reads the core's data readout for a query dictionary, or `nil` when the core returns none. Low-level API.
     public func dataAt(_ query: [String: Any], options: [String: Any] = [:]) throws -> [String: Any]? {
         let value = try command("dataAt", [query, options])
         if value.isNull {return nil}
@@ -1726,11 +1828,15 @@ public final class BaroChartEngine {
             return result
         }
     }
+    /// Turns data exploration on or off and returns the core's state dictionary.
     public func setDataExploration(_ active: Bool) throws -> [String: Any] {try dataExploration("setActive", active)}
+    /// Sends a navigation key name to data exploration and returns the core's state dictionary.
     public func navigateDataExploration(_ key: String) throws -> [String: Any] {try dataExploration("navigate", key)}
+    /// Refreshes data exploration and returns the core's state dictionary.
     public func refreshDataExploration() throws -> [String: Any] {try dataExploration("refresh")}
     /// Explicit read may synchronously calculate all visible dirty studies.
     public func readDataExploration() throws -> [String: Any] {try dataExploration("read")}
+    /// Returns the core's crosshair readout for a view of the given size in CSS pixels, or `nil` when there is none. The typed `crosshair(width:height:)` returns ``BaroChartCrosshairValues``.
     public func crosshairValues(width: Double, height: Double) throws -> [String: Any]? {try command("crosshairValues", [width, height]).toDictionary() as? [String: Any]}
     /// Fresh layout may calculate dirty studies; the snapshot contains raw OHLC identity.
     public func crosshairSnapshot(width: Double, height: Double) throws -> [String: Any]? {
@@ -1739,12 +1845,19 @@ public final class BaroChartEngine {
         guard let result = value.toDictionary() as? [String: Any] else {throw BaroChartLowLevelError.invalidScene}
         return result
     }
+    /// Adds a series from a core options dictionary. Low-level API.
     public func addSeries(_ options: [String: Any]) throws {try command("addSeries", [options])}
+    /// Applies a patch dictionary to the series with `id`. Low-level API.
     public func setSeries(_ id: String, _ patch: [String: Any]) throws {try command("setSeries", [id, patch])}
+    /// Removes the series with `id`. Throws only ``BaroChartError``.
     public func removeSeries(_ id: String) throws {try BaroChartError.mapping {try command("removeSeries", [id])}}
+    /// Sets the values of a general series. `nil` entries are sent to the core as null. Low-level API.
     public func setSeriesValues(_ id: String, _ values: [Double?]) throws {try command("setSeriesValues", [id, values.map { $0.map { $0 as Any } ?? NSNull() }])}
+    /// Adds an indicator named `name` (a core indicator name) under `id` and returns the core's JavaScript result. Low-level API.
     @discardableResult public func addIndicator(_ id: String, _ name: String, _ params: [String: Any] = [:]) throws -> JSValue {try command("addIndicator", [id, name, params])}
+    /// Replaces parameters of the indicator with `id` synchronously and returns the core's JavaScript result. Low-level API.
     @discardableResult public func setIndicatorParams(_ id: String, _ params: [String: Any]) throws -> JSValue {try command("setIndicatorParams", [id, params])}
+    /// Removes the indicator with `id`. Throws only ``BaroChartError``.
     public func removeIndicator(_ id: String) throws {try BaroChartError.mapping {try command("removeIndicator", [id])}}
     /// Select an application-linked module by id/version. This does not fetch
     /// or evaluate source code. Returned names are the canonical factory names.
@@ -1781,19 +1894,23 @@ public final class BaroChartEngine {
         guard let result = try command("indicatorValueAt",[id,output as Any? ?? NSNull(),index,options]).toDictionary() as? [String: Any] else {throw BaroChartLowLevelError.invalidScene}
         return result
     }
+    /// Registers JavaScript indicator factory source under `name` in the core context and notifies observers. The source is evaluated, so pass only code your app trusts. Synchronous API only.
     public func registerIndicatorSource(_ name: String, _ source: String) throws {try call("nativeRegisterIndicatorSource",[name,source]);notifyChanges()}
+    /// Adds a drawing from a core options dictionary and returns its id. Low-level API.
     @discardableResult public func addDrawing(_ options: [String: Any]) throws -> String {try command("addDrawing", [options]).toString() ?? ""}
     /// Raw annotation metrics only; no source data, indicator work or redraw notification.
     public func positionMetrics(_ id: String) throws -> [String: Any] {
         guard let result = try command("positionMetrics", [id]).toDictionary() as? [String: Any] else {throw BaroChartLowLevelError.invalidScene}
         return result
     }
+    /// Applies a patch dictionary to the drawing with `id`. Low-level API.
     public func editDrawing(_ id: String, _ patch: [String: Any]) throws {try command("editDrawing", [id, patch])}
     /// Raw-coordinate group edit with one core undo. A zero-change receipt does not notify.
     /// Receipt conversion failure after execution does not imply rollback.
     @discardableResult public func translateDrawings(_ ids: [String], deltaTimeMs: Double, deltaPrice: Double) throws -> [String: Any] {
         try ingestionCommand("translateDrawings",[ids,["deltaTimeMs":deltaTimeMs,"deltaPrice":deltaPrice]])
     }
+    /// Deletes the drawing with `id`. Returns `true` if a drawing was removed and `false` if no drawing matched.
     @discardableResult public func deleteDrawing(_ id: String) throws -> Bool {try command("deleteDrawing", [id]).toBool()}
     /// Partial portable style merge, one core undo; zero stored changes do not notify.
     /// Receipt conversion failure after execution does not imply rollback.
@@ -1804,6 +1921,7 @@ public final class BaroChartEngine {
     @discardableResult public func setDrawingVisibility(_ id: String, visible: Bool) throws -> [String: Any] {
         try ingestionCommand("setDrawingVisibility",[id,visible])
     }
+    /// Shows or hides several drawings and returns the core's receipt dictionary. Visibility is presentation-only.
     @discardableResult public func setDrawingsVisibility(_ ids: [String], visible: Bool) throws -> [String: Any] {
         try ingestionCommand("setDrawingsVisibility",[ids,visible])
     }
@@ -1811,6 +1929,7 @@ public final class BaroChartEngine {
     @discardableResult public func duplicateDrawing(_ id: String, deltaTimeMs: Double, deltaPrice: Double) throws -> [String: Any] {
         try ingestionCommand("duplicateDrawing",[id,["deltaTimeMs":deltaTimeMs,"deltaPrice":deltaPrice]])
     }
+    /// Duplicates several drawings with the given offsets and returns the core's receipt dictionary. `deltaTimeMs` is in milliseconds and `deltaPrice` is in price units.
     @discardableResult public func duplicateDrawings(_ ids: [String], deltaTimeMs: Double, deltaPrice: Double) throws -> [String: Any] {
         try ingestionCommand("duplicateDrawings",[ids,["deltaTimeMs":deltaTimeMs,"deltaPrice":deltaPrice]])
     }
@@ -1818,25 +1937,39 @@ public final class BaroChartEngine {
     @discardableResult public func deleteDrawings(_ ids: [String]) throws -> [String: Any] {
         try ingestionCommand("deleteDrawings",[ids])
     }
+    /// Selects the drawing with `id`. `nil` is sent to the core as null. Throws only ``BaroChartError``.
     public func selectDrawing(_ id: String?) throws {try BaroChartError.mapping {try command("selectDrawing", [id as Any? ?? NSNull()])}}
+    /// Applies a theme patch dictionary. The typed overload takes a complete ``BaroChartTheme``.
     public func setTheme(_ patch: [String: Any]) throws {try command("setTheme", [patch])}
+    /// Sets instrument metadata from a core symbol dictionary. The typed overload takes a ``BaroChartSymbol``.
     public func setSymbol(_ symbol: [String: Any]) throws {try command("setSymbol", [symbol])}
+    /// Sets crosshair snapping from a core options dictionary (`mode` `free`, `close` or `ohlc`, optional `target`).
     public func setCrosshairSnap(_ options: [String: Any]) throws { try command("setCrosshairSnap", [options]) }
+    /// Sets drawing magnet behavior from a core options dictionary (`mode` `off`, `weak` or `strong`, optional `radiusPx`).
     public func setDrawingMagnet(_ options: [String: Any]) throws { try command("setDrawingMagnet", [options]) }
+    /// Selects the active tool by core name. The typed overload takes a ``BaroChartDrawingTool``.
     public func setTool(_ tool: String) throws {try command("setTool", [tool])}
+    /// Sets the text used by the next text drawing the user creates (up to 2000 characters).
     public func setText(_ text: String) throws {try command("setText", [text])}
+    /// Undoes the last undoable change. Throws only ``BaroChartError``.
     public func undo() throws {try BaroChartError.mapping {try command("undo")}}
+    /// Redoes the last undone change. Throws only ``BaroChartError``.
     public func redo() throws {try BaroChartError.mapping {try command("redo")}}
+    /// Fits the visible range to the data. Throws only ``BaroChartError``.
     public func fit() throws {try BaroChartError.mapping {try command("fit")}}
+    /// Builds the chart frame for a view of the given size in CSS pixels. Owner thread only. Low-level API that throws its original error types.
     public func scene(width: Double, height: Double) throws -> BaroChartScene {
         let value = try call("nativeSceneJSON", [width, height])
         guard let json = value.toString()?.data(using: .utf8) else { throw BaroChartLowLevelError.invalidScene }
         return try JSONDecoder().decode(BaroChartScene.self, from: json)
     }
+    /// Saves the drawings as a document string; restore it with ``loadDrawings(_:)``. Throws only ``BaroChartError``.
     public func saveDrawings() throws -> String {try BaroChartError.mapping {try call("nativeSave").toString() ?? ""}}
+    /// Restores drawings from a document made by ``saveDrawings()``. Throws only ``BaroChartError``.
     public func loadDrawings(_ document: String) throws {try BaroChartError.mapping {try command("loadDrawings", [document])}}
 }
 
+/// Paints a ``BaroChartScene`` into a Core Graphics context.
 public enum BaroChartCoreGraphicsRenderer {
     private static let defaultFont = CTFontCreateWithName("Menlo-Regular" as CFString,12,nil)
     private static let fontPattern = try! NSRegularExpression(pattern: "^((?:(?:bold|italic|normal)\\s+)*)([0-9]+(?:\\.[0-9]+)?)px\\s+(.+)$")

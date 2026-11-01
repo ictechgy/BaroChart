@@ -23,6 +23,10 @@ public final class BaroChartEngine implements AutoCloseable {
     private long revision=0;
     private int pendingNotifications=0;private boolean notifying=false;
     private final java.util.List<Throwable> observerErrors=new java.util.ArrayList<>();
+    /**
+     * Optional hook called with each exception thrown by a change listener or async callback; failures of the hook
+     * itself are recorded too. Set to {@code null} to disable it. Cleared by {@link #close()}.
+     */
     public java.util.function.Consumer<Throwable> onObserverError;
     private static native long create(String source);
     private static native String call(long handle,String name,String arguments);
@@ -35,7 +39,23 @@ public final class BaroChartEngine implements AutoCloseable {
     private static native long[] memoryStats(long handle);
     private static native byte[] indicatorSlice(long handle,String id,String output,int offset,int count);
     private AsyncJob activeJob;
+    /**
+     * Creates an engine with the labeled demonstration chart, owned by the calling thread. Prefer {@link
+     * #create(Context, EngineOptions)} in apps.
+     * @param context used to read the bundled core asset
+     * @param count number of demonstration bars; 0 creates an engine without bars
+     * @throws IOException if the bundled {@code aster-core.js} asset cannot be read
+     * @throws JSONException if the core rejects the initialization
+     */
     public BaroChartEngine(Context context,int count) throws IOException,JSONException {this(context,count,null);}
+    /**
+     * Creates an engine owned by the calling thread. Engines attached to a view must be created on the main thread.
+     * @param context used to read the bundled core asset
+     * @param count number of demonstration bars; 0 creates an engine without bars
+     * @param options initial layout options as core JSON, or {@code null} for the default layout
+     * @throws IOException if the bundled {@code aster-core.js} asset cannot be read
+     * @throws JSONException if the core rejects the options
+     */
     public BaroChartEngine(Context context,int count,JSONObject options) throws IOException,JSONException {
         try(InputStream in=context.getAssets().open("aster-core.js")){ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] buffer=new byte[8192];int size;while((size=in.read(buffer))!=-1)out.write(buffer,0,size);sourceBundle=new String(out.toByteArray(),StandardCharsets.UTF_8);}
         handle=create(sourceBundle);
@@ -43,6 +63,14 @@ public final class BaroChartEngine implements AutoCloseable {
     }
     private void check(){if(Thread.currentThread()!=owner)throw new IllegalStateException("Use the engine on its owning thread before close");if(activeWorkspace!=null&&activeWorkspace.job.pendingOwnerCleanup())activeWorkspace.job.resumeOwnerCleanup();if(activeParams!=null&&activeParams.job.pendingOwnerCleanup())activeParams.job.resumeOwnerCleanup();if(handle==0)throw new IllegalStateException("Engine closed");if(closing)throw new IllegalStateException("Engine closing");}
     private void checkCleanup(){if(Thread.currentThread()!=owner)throw new IllegalStateException("Use the engine on its owning thread before close");if(!closing){if(activeWorkspace!=null&&activeWorkspace.job.pendingOwnerCleanup())activeWorkspace.job.resumeOwnerCleanup();if(activeParams!=null&&activeParams.job.pendingOwnerCleanup())activeParams.job.resumeOwnerCleanup();}if(handle==0)throw new IllegalStateException("Engine closed");}
+    /**
+     * Calls a chart core function by name with JSON-encoded arguments. Advanced API that may change within 1.x. Call
+     * on the engine's owner thread.
+     * @param name core function name, 1 to 128 characters
+     * @param args arguments, at most 16
+     * @return the decoded JSON result
+     * @throws JSONException if the arguments cannot be encoded or the core returns invalid JSON
+     */
     public Object invoke(String name,Object... args) throws JSONException {check();if(name==null||name.length()==0||name.length()>128||args.length>16)throw new IllegalArgumentException("Native function name/argument limit");return new JSONArray("["+call(handle,name,new JSONArray(args).toString())+"]").get(0);}
     static final class SceneTiming {
         final long jniNanos,envelopeParseNanos,bodyParseNanos;final int jsonChars;
@@ -96,6 +124,14 @@ public final class BaroChartEngine implements AutoCloseable {
         JSONObject scene=new JSONObject(body);long afterBody=System.nanoTime();
         sceneTiming=new SceneTiming(afterJNI-start,afterEnvelope-afterJNI,afterBody-afterEnvelope,body.length());return scene;
     }
+    /**
+     * Builds the current scene as JSON for a view of the given size. Advanced API that may change within 1.x. Call on
+     * the engine's owner thread.
+     * @param width view width
+     * @param height view height
+     * @return the scene JSON
+     * @throws JSONException if the core fails or returns an invalid scene
+     */
     public JSONObject scene(double width,double height) throws JSONException {return sceneJSON("nativeSceneJSON",width,height);}
     JSONObject renderFrame(String token,double width,double height,boolean force) throws JSONException {return sceneJSON("nativeRenderFrameJSON",token,width,height,force);}
     ScenePacket scenePacket(String mode,String token,double width,double height,boolean force)throws JSONException {
@@ -110,7 +146,16 @@ public final class BaroChartEngine implements AutoCloseable {
     /** Stable errors from the common model-owned ingestion session. */
     public static final class IngestionException extends IllegalStateException {
         private static final long serialVersionUID=1L;
+        /**
+         * Stable error code from the core ingestion session, for example {@code BUSY} while an asynchronous
+         * calculation is active.
+         */
         public final String code;
+        /**
+         * Creates an ingestion error.
+         * @param code stable error code
+         * @param message description of the failure
+         */
         public IngestionException(String code,String message){super(message);this.code=code;}
     }
     private static boolean ingestionCommand(String operation){if(operation==null)return false;switch(operation){
@@ -157,6 +202,14 @@ public final class BaroChartEngine implements AutoCloseable {
             return value>0;
         }
     }
+    /**
+     * Runs a core command by name and notifies change listeners when the command changes the chart. Read-only
+     * commands do not notify. Advanced API that may change within 1.x. Call on the engine's owner thread.
+     * @param operation core command name
+     * @param args command arguments
+     * @return the decoded command result
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public Object command(String operation,Object... args) throws JSONException {
         check();Object result;
         // Cover the deferred begin gap as well as core's active ingestion lease.
@@ -201,16 +254,64 @@ public final class BaroChartEngine implements AutoCloseable {
     private void notifyChanges(){revision++;pendingNotifications++;if(notifying)return;notifying=true;observerErrors.clear();try{while(pendingNotifications>0){pendingNotifications--;for(Runnable observer:new java.util.ArrayList<>(observers)){try{observer.run();}catch(RuntimeException error){recordObserverFailure(error);}}}}finally{notifying=false;}}
     /** 관찰자 실패를 최대 32개까지 남기고 앱의 onObserverError 훅에 알린다(훅 실패도 기록) */
     private void recordObserverFailure(RuntimeException error){if(observerErrors.size()<32)observerErrors.add(error);try{if(onObserverError!=null)onObserverError.accept(error);}catch(RuntimeException reporting){if(observerErrors.size()<32)observerErrors.add(reporting);}}
+    /**
+     * Returns the failures recorded from change listeners and async callbacks, at most 32. The list is cleared when a
+     * new notification round starts and on {@link #close()}. Call on the engine's owner thread.
+     * @return a copy of the recorded failures
+     */
     public java.util.List<Throwable> observerErrors(){check();return new java.util.ArrayList<>(observerErrors);}
+    /**
+     * Returns the host revision, which increases each time change listeners are notified. Read-only commands do not
+     * change it. Call on the engine's owner thread.
+     * @return the revision counter
+     */
     public long revision(){check();return revision;}
+    /**
+     * Returns QuickJS memory and native handle counters for diagnostics. Advanced API that may change within 1.x.
+     * Call on the engine's owner thread.
+     * @return the counters as JSON
+     * @throws JSONException if the metrics cannot be encoded
+     */
     public JSONObject runtimeMetrics() throws JSONException {check();long[] stats=memoryStats(handle);return new JSONObject().put("requestedLiveBytes",stats[0]).put("requestedPeakBytes",stats[1]).put("processLiveNativeHandles",stats[2]).put("processNativeHandlesCreated",stats[3]).put("processNativeHandlesFreed",stats[4]).put("scope","QuickJS requested bytes including aligned allocator headers; live handle counts include all engines and current isolated workers in this process");}
     byte[] indicatorBytes(String id,String output,int offset,int count){check();if(id==null||output==null||id.length()>128||output.length()>128||offset<0||count<1||count>262144)throw new IllegalArgumentException("Indicator byte slice limits");return indicatorSlice(handle,id,output,offset,count);}
+    /**
+     * Registers a listener run after each chart change. A {@code RuntimeException} it throws is recorded in {@link
+     * #observerErrors()} and does not stop other listeners. Call on the engine's owner thread.
+     * @param observer the listener to add
+     */
     public void addChangeListener(Runnable observer){check();observers.add(observer);}
+    /**
+     * Removes a change listener; unknown listeners are ignored. Call on the engine's owner thread.
+     * @param observer the listener to remove
+     */
     public void removeChangeListener(Runnable observer){if(Thread.currentThread()!=owner)throw new IllegalStateException("Remove listener on owning thread");observers.remove(observer);}
+    /**
+     * Replaces every bar from a JSON array of bar objects with {@code time}, {@code open}, {@code high}, {@code low},
+     * {@code close} and {@code volume}. Advanced API that may change within 1.x. Call on the engine's owner thread.
+     * @param bars the bars as JSON
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public void setData(JSONArray bars) throws JSONException {command("setData",bars);}
+    /**
+     * Replaces every bar from column-oriented JSON. Advanced API that may change within 1.x. Call on the engine's
+     * owner thread.
+     * @param columns the bar columns as JSON
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public void setColumns(JSONObject columns) throws JSONException {command("setColumns",columns);}
+    /**
+     * Applies one data event given as JSON, with {@code kind} and the matching {@code bar}, {@code bars} or {@code
+     * events}. Advanced API that may change within 1.x. Call on the engine's owner thread.
+     * @param event the event as JSON
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public void applyDataEvent(JSONObject event) throws JSONException {command("applyDataEvent",event);}
-    /** Atomic, explicitly ordered burst; legacy scalar errors remain unchanged. */
+    /**
+     * Atomic, explicitly ordered burst; legacy scalar errors remain unchanged.
+     * @param events the events as a JSON array, applied in order
+     * @return the core receipt as JSON
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public JSONObject applyDataEvents(JSONArray events) throws JSONException {return (JSONObject)command("applyDataEvents",events);}
     static final class DataBatchReceipt {
         private DataBatchReceipt() {}
@@ -226,8 +327,14 @@ public final class BaroChartEngine implements AutoCloseable {
             if(events<1||appended>events||capacity<1||capacity<length||(cap&(cap-1))!=0||bytes!=96*capacity||from>=to||to>length||after<before||version<before||version>after||(same?(appended!=0||version!=before||after!=before):(version!=before+1)))throw new JSONException("Data batch inconsistent receipt");return same;
         }
     }
-    /** Opt-in exact final-value deduplication. False preserves the legacy path.
+    /**
+     * Opt-in exact final-value deduplication. False preserves the legacy path.
      * A failed true-path response can follow commit: do not automatically retry.
+     * @param events the events as a JSON array, applied in order
+     * @param skipUnchanged true to skip publishing when the final values equal the current bars; false behaves like
+     *     {@link #applyDataEvents(JSONArray)}
+     * @return the core receipt as JSON; with {@code skipUnchanged} it has an {@code unchanged} flag
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
      */
     public JSONObject applyDataEvents(JSONArray events,boolean skipUnchanged) throws JSONException {
         if(!skipUnchanged)return applyDataEvents(events);
@@ -245,41 +352,171 @@ public final class BaroChartEngine implements AutoCloseable {
         }
         if(!unchanged||revision!=beforeRevision)notifyChanges();return receipt;
     }
-    /** Synchronous retained-window maintenance. Requires explicit studyHistory:"restart".
+    /**
+     * Synchronous retained-window maintenance. Requires explicit studyHistory:"restart".
      * Pause/drain upstream first; large copies can block the owner thread.
      * A zero-removal receipt changes neither host revision nor notifications.
      * Transport/receipt failure after native execution does not prove rollback.
+     * @param options compaction options as JSON; {@code studyHistory} must be {@code restart}
+     * @return the core receipt as JSON, with the number of removed bars in {@code removed}
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
      */
     public JSONObject compactData(JSONObject options) throws JSONException {return (JSONObject)command("compactData",options);}
-    /** Raw-coordinate group edit with one core undo. Zero changes do not notify.
-     * Receipt/transport failure after execution does not imply rollback. */
+    /**
+     * Raw-coordinate group edit with one core undo. Zero changes do not notify.
+     * Receipt/transport failure after execution does not imply rollback.
+     * @param ids ids of the drawings to move
+     * @param deltaTimeMs time offset in milliseconds, added to every anchor
+     * @param deltaPrice price offset, added to every anchor
+     * @return the core receipt as JSON, with the number of changed drawings in {@code changed}
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public JSONObject translateDrawings(JSONArray ids,double deltaTimeMs,double deltaPrice) throws JSONException {
         JSONObject options=new JSONObject().put("deltaTimeMs",deltaTimeMs).put("deltaPrice",deltaPrice);
         return (JSONObject)command("translateDrawings",ids,options);
     }
-    /** Partial portable style merge, one core undo; zero stored changes do not notify.
-     * Receipt/transport failure after execution does not imply rollback. */
+    /**
+     * Partial portable style merge, one core undo; zero stored changes do not notify.
+     * Receipt/transport failure after execution does not imply rollback.
+     * @param ids ids of the drawings to restyle
+     * @param patch style fields to merge, as JSON
+     * @return the core receipt as JSON, with the number of changed drawings in {@code changed}
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public JSONObject setDrawingsStyle(JSONArray ids,JSONObject patch) throws JSONException {return (JSONObject)command("setDrawingsStyle",ids,patch);}
-    /** Presentation-only visibility may change locked drawings. Active gestures reject. */
+    /**
+     * Presentation-only visibility may change locked drawings. Active gestures reject.
+     * @param id id of the drawing
+     * @param visible true to show the drawing, false to hide it
+     * @return the core receipt as JSON, with the number of changed drawings in {@code changed}
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public JSONObject setDrawingVisibility(String id,boolean visible) throws JSONException {return (JSONObject)command("setDrawingVisibility",id,visible);}
+    /**
+     * Shows or hides several drawings at once; like {@link #setDrawingVisibility(String, boolean)} it is
+     * presentation-only. Advanced API that may change within 1.x. Call on the engine's owner thread.
+     * @param ids ids of the drawings
+     * @param visible true to show the drawings, false to hide them
+     * @return the core receipt as JSON, with the number of changed drawings in {@code changed}
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public JSONObject setDrawingsVisibility(JSONArray ids,boolean visible) throws JSONException {return (JSONObject)command("setDrawingsVisibility",ids,visible);}
-    /** Chart-local unlocked copies; explicit raw offsets and one atomic core undo. */
+    /**
+     * Chart-local unlocked copies; explicit raw offsets and one atomic core undo.
+     * @param id id of the drawing to copy
+     * @param deltaTimeMs time offset in milliseconds
+     * @param deltaPrice price offset
+     * @return the core receipt as JSON, with {@code changed} and the {@code created} source and new ids
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public JSONObject duplicateDrawing(String id,double deltaTimeMs,double deltaPrice) throws JSONException {return (JSONObject)command("duplicateDrawing",id,new JSONObject().put("deltaTimeMs",deltaTimeMs).put("deltaPrice",deltaPrice));}
+    /**
+     * Copies several drawings as unlocked chart-local drawings with explicit raw offsets and one atomic core undo.
+     * Advanced API that may change within 1.x. Call on the engine's owner thread.
+     * @param ids ids of the drawings to copy
+     * @param deltaTimeMs time offset in milliseconds
+     * @param deltaPrice price offset
+     * @return the core receipt as JSON, with {@code changed} and the {@code created} source and new ids
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public JSONObject duplicateDrawings(JSONArray ids,double deltaTimeMs,double deltaPrice) throws JSONException {return (JSONObject)command("duplicateDrawings",ids,new JSONObject().put("deltaTimeMs",deltaTimeMs).put("deltaPrice",deltaPrice));}
-    /** Explicit group deletion with one core undo. Empty/missing/locked IDs reject. */
+    /**
+     * Explicit group deletion with one core undo. Empty/missing/locked IDs reject.
+     * @param ids ids of the drawings to delete
+     * @return the core receipt as JSON, with the number of deleted drawings in {@code changed}
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public JSONObject deleteDrawings(JSONArray ids) throws JSONException {return (JSONObject)command("deleteDrawings",ids);}
+    /**
+     * Configures the core-owned data ingestion queue. Throws {@link IngestionException} for stable queue errors and
+     * while an async calculation is active. Advanced API that may change within 1.x. Call on the engine's owner
+     * thread.
+     * @param policy queue policy as JSON, such as {@code streamId}, {@code generation}, {@code firstSequence} and the
+     *     queue and store limits
+     * @return the ingestion statistics as JSON
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public JSONObject configureDataIngestion(JSONObject policy) throws JSONException {return (JSONObject)command("configureDataIngestion",policy);}
+    /**
+     * Adds an ordered packet of data events to the ingestion queue. Advanced API that may change within 1.x. Call on
+     * the engine's owner thread.
+     * @param packet the packet as JSON, with {@code streamId}, {@code generation}, {@code firstSequence} and {@code
+     *     events}
+     * @return the core receipt as JSON
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public JSONObject enqueueDataEvents(JSONObject packet) throws JSONException {return (JSONObject)command("enqueueDataEvents",packet);}
+    /**
+     * Applies queued events, up to the configured batch size. The host chooses when to drain. Advanced API that may
+     * change within 1.x. Call on the engine's owner thread.
+     * @return the core receipt as JSON
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public JSONObject drainDataEvents() throws JSONException {return (JSONObject)command("drainDataEvents");}
+    /**
+     * Applies up to {@code maxEvents} queued events. The host chooses when to drain. Advanced API that may change
+     * within 1.x. Call on the engine's owner thread.
+     * @param maxEvents maximum number of events to apply, at most the configured batch size
+     * @return the core receipt as JSON
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public JSONObject drainDataEvents(int maxEvents) throws JSONException {return (JSONObject)command("drainDataEvents",maxEvents);}
+    /**
+     * Pauses data ingestion. Advanced API that may change within 1.x. Call on the engine's owner thread.
+     * @return the ingestion statistics as JSON
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public JSONObject pauseDataIngestion() throws JSONException {return (JSONObject)command("pauseDataIngestion");}
+    /**
+     * Resumes paused data ingestion. Advanced API that may change within 1.x. Call on the engine's owner thread.
+     * @return the ingestion statistics as JSON
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public JSONObject resumeDataIngestion() throws JSONException {return (JSONObject)command("resumeDataIngestion");}
+    /**
+     * Discards the queued events that have not been applied. Advanced API that may change within 1.x. Call on the
+     * engine's owner thread.
+     * @return the core receipt as JSON
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public JSONObject cancelDataEvents() throws JSONException {return (JSONObject)command("cancelDataEvents");}
+    /**
+     * Reads the ingestion queue statistics without changing the chart. Advanced API that may change within 1.x. Call
+     * on the engine's owner thread.
+     * @return the statistics as JSON
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public JSONObject dataIngestionStats() throws JSONException {return (JSONObject)command("dataIngestionStats");}
+    /**
+     * Saves the ingestion session state as text. Advanced API that may change within 1.x. Call on the engine's owner
+     * thread.
+     * @return the saved state
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public String saveDataIngestion() throws JSONException {return (String)command("saveDataIngestion");}
+    /**
+     * Restores ingestion session state saved with {@link #saveDataIngestion()}. Advanced API that may change within
+     * 1.x. Call on the engine's owner thread.
+     * @param text the saved state
+     * @return the core receipt as JSON
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public JSONObject loadDataIngestion(String text) throws JSONException {return (JSONObject)command("loadDataIngestion",text);}
-    /** Layout-independent readout; null means no available selected row. */
+    /**
+     * Layout-independent readout; null means no available selected row.
+     * @param query the row to read, by {@code index} or {@code time}, as JSON
+     * @return the readout as JSON, or {@code null} when no row is available
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public JSONObject dataAt(JSONObject query) throws JSONException {return dataAt(query,new JSONObject());}
+    /**
+     * Reads the values at a bar; like {@link #dataAt(JSONObject)} with options. Advanced API that may change within
+     * 1.x. Call on the engine's owner thread.
+     * @param query the row to read, by {@code index} or {@code time}, as JSON
+     * @param options read options as JSON, such as {@code asOfIndex} and {@code includeHidden}
+     * @return the readout as JSON, or {@code null} when no row is available
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public JSONObject dataAt(JSONObject query,JSONObject options) throws JSONException {
         Object result=command("dataAt",query,options);if(result==JSONObject.NULL)return null;
         if(!(result instanceof JSONObject))throw new JSONException("Data query object receipt");return (JSONObject)result;
@@ -292,64 +529,257 @@ public final class BaroChartEngine implements AutoCloseable {
         if(!(result instanceof JSONObject))throw new JSONException("Exploration object receipt");
         return (JSONObject)result;
     }
+    /**
+     * Turns data exploration on or off; it is off by default. Advanced API that may change within 1.x. Call on the
+     * engine's owner thread.
+     * @param active true to enable exploration, false to disable it
+     * @return the exploration state as JSON
+     * @throws JSONException if the core rejects the request
+     */
     public JSONObject setDataExploration(boolean active) throws JSONException {return dataExploration("setActive",active);}
+    /**
+     * Moves the exploration selection. Advanced API that may change within 1.x. Call on the engine's owner thread.
+     * @param key one of {@code ArrowLeft}, {@code ArrowRight}, {@code ArrowUp}, {@code ArrowDown}, {@code Home} or
+     *     {@code End}
+     * @return the exploration state as JSON
+     * @throws JSONException if the core rejects the request
+     */
     public JSONObject navigateDataExploration(String key) throws JSONException {return dataExploration("navigate",key);}
+    /**
+     * Reconciles the exploration selection with the stored bars and visible series, without reading values. Advanced
+     * API that may change within 1.x. Call on the engine's owner thread.
+     * @return the exploration state as JSON
+     * @throws JSONException if the core rejects the request
+     */
     public JSONObject refreshDataExploration() throws JSONException {return dataExploration("refresh",JSONObject.NULL);}
-    /** May synchronously calculate every visible dirty indicator through dataAt. */
+    /**
+     * May synchronously calculate every visible dirty indicator through dataAt.
+     * @return the exploration state as JSON, with the readout text
+     * @throws JSONException if the core rejects the request
+     */
     public JSONObject readDataExploration() throws JSONException {return dataExploration("read",JSONObject.NULL);}
+    /**
+     * Adds a panel from core options. Advanced API that may change within 1.x. Call on the engine's owner thread.
+     * @param options panel options as JSON, such as {@code id}, {@code weight} and {@code label}
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public void addPanel(JSONObject options) throws JSONException {command("addPanel",options);}
+    /**
+     * Changes a panel. Advanced API that may change within 1.x. Call on the engine's owner thread.
+     * @param id panel id
+     * @param patch panel fields to change, as JSON
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public void setPanel(String id,JSONObject patch) throws JSONException {command("setPanel",id,patch);}
+    /**
+     * Adds a series from core options. Advanced API that may change within 1.x. Call on the engine's owner thread.
+     * @param options series options as JSON
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public void addSeries(JSONObject options) throws JSONException {command("addSeries",options);}
+    /**
+     * Changes a series. Advanced API that may change within 1.x. Call on the engine's owner thread.
+     * @param id series id
+     * @param patch series fields to change, as JSON
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public void setSeries(String id,JSONObject patch) throws JSONException {command("setSeries",id,patch);}
+    /**
+     * Sets externally supplied values for a series. Advanced API that may change within 1.x. Call on the engine's
+     * owner thread.
+     * @param id series id
+     * @param values the values as a JSON array
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public void setSeriesValues(String id,JSONArray values) throws JSONException {command("setSeriesValues",id,values);}
-    /** Removes a series. Throws {@link BaroChartException}. */
+    /**
+     * Removes a series. Throws {@link BaroChartException}.
+     * @param id series id
+     */
     public void removeSeries(String id){typed(()->command("removeSeries",id));}
+    /**
+     * Adds an indicator under an id. Advanced API that may change within 1.x. Call on the engine's owner thread.
+     * @param id id for the indicator
+     * @param name core indicator name, see {@link IndicatorKind#wireName()}
+     * @param params parameters as JSON
+     * @return the core receipt as JSON
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public JSONObject addIndicator(String id,String name,JSONObject params) throws JSONException {return (JSONObject)command("addIndicator",id,name,params);}
+    /**
+     * Replaces indicator parameters synchronously. Advanced API that may change within 1.x. Call on the engine's
+     * owner thread.
+     * @param id indicator id
+     * @param params parameters as JSON
+     * @return the core receipt as JSON
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public JSONObject setIndicatorParams(String id,JSONObject params) throws JSONException {return (JSONObject)command("setIndicatorParams",id,params);}
-    /** Removes an indicator. Throws {@link BaroChartException}. */
+    /**
+     * Removes an indicator. Throws {@link BaroChartException}.
+     * @param id indicator id
+     */
     public void removeIndicator(String id){typed(()->command("removeIndicator",id));}
+    /**
+     * Registers a custom indicator from source text and notifies change listeners. Pass only source you trust.
+     * Advanced API that may change within 1.x. Call on the engine's owner thread.
+     * @param name name for the indicator
+     * @param source the indicator source
+     * @throws JSONException if the core rejects the source
+     */
     public void registerIndicatorSource(String name,String source) throws JSONException {invoke("nativeRegisterIndicatorSource",name,source);notifyChanges();}
-    /** Registers application-linked exports; no source evaluation or URL loading. */
+    /**
+     * Registers application-linked exports; no source evaluation or URL loading.
+     * @param id module id
+     * @param version module version
+     * @return the registration result as JSON
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public JSONArray registerIndicatorModule(String id,int version) throws JSONException {return (JSONArray)command("registerIndicatorModule",id,version);}
-    /** Definitions and related series only; data/layout/drawing state are host-owned. */
+    /**
+     * Definitions and related series only; data/layout/drawing state are host-owned.
+     * @return the saved studies document as text
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public String saveStudies() throws JSONException {return (String)command("saveStudies");}
-    /** Bounded portable metadata only. Synchronous owner-thread read; no redraw/revision notification. */
+    /**
+     * Bounded portable metadata only. Synchronous owner-thread read; no redraw/revision notification.
+     * @param datasetBinding the dataset binding as JSON, with {@code key}, {@code revision}, {@code
+     *     adjustmentVersion}, {@code priceUnit} and {@code adjustment}
+     * @return the workspace document as text
+     * @throws JSONException if the core cannot save the workspace
+     */
     public String saveWorkspace(JSONObject datasetBinding) throws JSONException {
         Object result=invoke("nativeSaveWorkspace",datasetBinding);
         if(!(result instanceof String))throw new JSONException("Workspace document string required");
         return (String)result;
     }
-    /** Validated-only metadata/source assertion. Does not calculate, restore, reserve a job or swap context. */
+    /**
+     * Validated-only metadata/source assertion. Does not calculate, restore, reserve a job or swap context.
+     * @param document a workspace document as text
+     * @param datasetBinding the dataset binding as JSON
+     * @return the preflight receipt as JSON
+     * @throws JSONException if the document or binding is rejected
+     */
     public JSONObject preflightWorkspace(String document,JSONObject datasetBinding) throws JSONException {
         Object result=invoke("nativePreflightWorkspace",document,datasetBinding);
         if(!(result instanceof JSONObject))throw new JSONException("Workspace preflight receipt required");
         return (JSONObject)result;
     }
 
-    /** Atomic additive merge; required panels/axes must exist, duplicate IDs reject. */
+    /**
+     * Atomic additive merge; required panels/axes must exist, duplicate IDs reject.
+     * @param text a document saved with {@link #saveStudies()}
+     * @return the core receipt as JSON
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public JSONObject loadStudies(String text) throws JSONException {return (JSONObject)command("loadStudies",text);}
+    /**
+     * Reads one indicator output at a bar index. Advanced API that may change within 1.x. Call on the engine's owner
+     * thread.
+     * @param id indicator id
+     * @param output output name
+     * @param index bar index
+     * @return the value as JSON; unknown {@code value}, {@code sourceIndex} and {@code sourceTime} are {@code
+     *     JSONObject.NULL}
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public JSONObject indicatorValueAt(String id,String output,int index) throws JSONException {return indicatorValueAt(id,output,index,null);}
-    /** mode raw/plot; asOfIndex hides unavailable value/sourceIndex/sourceTime. */
+    /**
+     * mode raw/plot; asOfIndex hides unavailable value/sourceIndex/sourceTime.
+     * @param id indicator id
+     * @param output output name
+     * @param index bar index
+     * @param options read options as JSON, or {@code null} for none
+     * @return the value as JSON; unknown {@code value}, {@code sourceIndex} and {@code sourceTime} are {@code
+     *     JSONObject.NULL}
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public JSONObject indicatorValueAt(String id,String output,int index,JSONObject options) throws JSONException {return (JSONObject)command("indicatorValueAt",id,output,index,options==null?new JSONObject():options);}
+    /**
+     * Adds a drawing from core options. Advanced API that may change within 1.x. Call on the engine's owner thread.
+     * @param options drawing options as JSON
+     * @return the id of the new drawing
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public String addDrawing(JSONObject options) throws JSONException {return (String)command("addDrawing",options);}
-    /** Raw annotation metrics only; no source or indicator calculation and no notification. */
+    /**
+     * Raw annotation metrics only; no source or indicator calculation and no notification.
+     * @param id id of a position drawing
+     * @return the metrics as JSON
+     * @throws JSONException if the core rejects the request
+     */
     public JSONObject positionMetrics(String id) throws JSONException {
         Object result=command("positionMetrics",id);if(!(result instanceof JSONObject))throw new JSONException("Position metrics receipt");return (JSONObject)result;
     }
+    /**
+     * Changes a drawing. Advanced API that may change within 1.x. Call on the engine's owner thread.
+     * @param id drawing id
+     * @param patch drawing fields to change, as JSON
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public void editDrawing(String id,JSONObject patch) throws JSONException {command("editDrawing",id,patch);}
+    /**
+     * Deletes one drawing. Advanced API that may change within 1.x. Call on the engine's owner thread.
+     * @param id drawing id
+     * @return {@code true} if a drawing was removed; {@code false} if no drawing matched
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public boolean deleteDrawing(String id) throws JSONException {return (Boolean)command("deleteDrawing",id);}
-    /** Selects a drawing by id, or clears the selection with {@code null}. Throws {@link BaroChartException}. */
+    /**
+     * Selects a drawing by id, or clears the selection with {@code null}. Throws {@link BaroChartException}.
+     * @param id drawing id, or {@code null} to clear the selection
+     */
     public void selectDrawing(String id){typed(()->command("selectDrawing",id));}
+    /**
+     * Changes the chart theme. Advanced API that may change within 1.x. Call on the engine's owner thread.
+     * @param patch theme fields to change, as JSON
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public void setTheme(JSONObject patch) throws JSONException {command("setTheme",patch);}
+    /**
+     * Sets instrument metadata from JSON. Advanced API that may change within 1.x. Call on the engine's owner thread.
+     * @param symbol the symbol as JSON
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public void setSymbol(JSONObject symbol) throws JSONException {command("setSymbol",symbol);}
+    /**
+     * Configures pointer crosshair snapping. Advanced API that may change within 1.x. Call on the engine's owner
+     * thread.
+     * @param options snap options as JSON, such as {@code mode}
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public void setCrosshairSnap(JSONObject options) throws JSONException {command("setCrosshairSnap",options);}
-    /** Fresh layout may calculate dirty studies; read-only, no change notification. */
+    /**
+     * Fresh layout may calculate dirty studies; read-only, no change notification.
+     * @param width view width
+     * @param height view height
+     * @return the snapshot as JSON, or {@code null} when there is no crosshair
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public JSONObject crosshairSnapshot(double width,double height) throws JSONException {
         Object result=command("crosshairSnapshot",width,height);if(result==JSONObject.NULL)return null;
         if(!(result instanceof JSONObject))throw new JSONException("Crosshair snapshot object receipt");return (JSONObject)result;
     }
+    /**
+     * Configures the drawing magnet. Advanced API that may change within 1.x. Call on the engine's owner thread.
+     * @param options magnet options as JSON, such as {@code mode} and {@code radiusPx}
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public void setDrawingMagnet(JSONObject options) throws JSONException {command("setDrawingMagnet",options);}
+    /**
+     * Selects the active tool by core name. Advanced API that may change within 1.x. Call on the engine's owner
+     * thread.
+     * @param tool tool name, see {@link DrawingTool#wireName()}
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public void setTool(String tool) throws JSONException {command("setTool",tool);}
+    /**
+     * Sets the drawing text the controller uses for text drawings. Advanced API that may change within 1.x. Call on
+     * the engine's owner thread.
+     * @param text the text, at most 2000 characters
+     * @throws JSONException if the arguments cannot be encoded or the core rejects the command
+     */
     public void setText(String text) throws JSONException {command("setText",text);}
     /** Undoes the last drawing change. Throws {@link BaroChartException}. */
     public void undo(){typed(()->command("undo"));}
@@ -357,9 +787,15 @@ public final class BaroChartEngine implements AutoCloseable {
     public void redo(){typed(()->command("redo"));}
     /** Fits all bars into view. Throws {@link BaroChartException}. */
     public void fit(){typed(()->command("fit"));}
-    /** Saves drawings as a portable {@code aster.drawings} document. Throws {@link BaroChartException}. */
+    /**
+     * Saves drawings as a portable {@code aster.drawings} document. Throws {@link BaroChartException}.
+     * @return the {@code aster.drawings} document as text
+     */
     public String saveDrawings(){return typedCall(()->(String)invoke("nativeSave"));}
-    /** Loads an {@code aster.drawings} document. Throws {@link BaroChartException}. */
+    /**
+     * Loads an {@code aster.drawings} document. Throws {@link BaroChartException}.
+     * @param text an {@code aster.drawings} document
+     */
     public void loadDrawings(String text){typed(()->command("loadDrawings",text));}
     @Override public void close(){
         if(Thread.currentThread()!=owner)throw new IllegalStateException("Close on owning thread");if(closing)return;closing=true;
@@ -371,26 +807,72 @@ public final class BaroChartEngine implements AutoCloseable {
 
     /** Optional isolated calculation. Synchronous API behavior is unchanged. */
     public interface AsyncListener {
+        /**
+         * Reports progress; the default implementation ignores it. Called on the main thread.
+         * @param progress the current progress
+         */
         default void onProgress(AsyncProgress progress) {}
+        /**
+         * Receives the final result. Called once on the main thread.
+         * @param result the outcome of the calculation
+         */
         void onComplete(AsyncResult result);
     }
+    /** Limits for an isolated calculation. */
     public static final class AsyncOptions {
+        /** Timeout for the whole calculation in milliseconds. */
         public final long timeoutMillis;
+        /** Maximum number of bars processed per calculation step. */
         public final int maxBarsPerStep;
+        /** Creates options with a 30,000 ms timeout and 4,096 bars per step. */
         public AsyncOptions(){this(30000,4096);}
+        /**
+         * Creates options.
+         * @param timeoutMillis timeout in milliseconds, 1 to 600000
+         * @param maxBarsPerStep bars processed per step, 1 to 16384
+         * @throws IllegalArgumentException if a value is out of range
+         */
         public AsyncOptions(long timeoutMillis,int maxBarsPerStep){if(timeoutMillis<1||timeoutMillis>600000||maxBarsPerStep<1||maxBarsPerStep>16384)throw new IllegalArgumentException("Async timeout/step limits");this.timeoutMillis=timeoutMillis;this.maxBarsPerStep=maxBarsPerStep;}
     }
+    /** Progress of an isolated calculation. */
     public static final class AsyncProgress {
-        public final String phase;public final long done,total;
+        /** Name of the current phase. */ public final String phase;/** Units of work done so far and the total number expected. */ public final long done,total;
         private AsyncProgress(String phase,long done,long total){this.phase=phase;this.done=done;this.total=total;}
     }
+    /** Final result of an isolated calculation. */
     public static final class AsyncResult {
-        public final String status;public final Throwable error;public final JSONObject metrics;
+        /** Outcome such as {@code success}, {@code cancelled}, {@code timedOut}, {@code stale}, {@code failed}, {@code closed} or {@code superseded}. */ public final String status;/** The failure, or {@code null}. */ public final Throwable error;/** Timing and size metrics of the calculation. */ public final JSONObject metrics;
         private AsyncResult(String status,Throwable error,JSONObject metrics){this.status=status;this.error=error;this.metrics=metrics;}
+        /**
+         * Tells whether the calculation succeeded.
+         * @return true when {@link #status} is {@code success}
+         */
         public boolean succeeded(){return status.equals("success");}
+        /**
+         * Converts the result to JSON with {@code status}, {@code metrics} and, on failure, {@code error}.
+         * @return the result as JSON
+         * @throws JSONException if the result cannot be encoded
+         */
         public JSONObject toJSON() throws JSONException {JSONObject value=new JSONObject().put("status",status).put("metrics",metrics);if(error!=null)value.put("error",error.toString());return value;}
     }
+    /**
+     * Applies one data event (JSON) through the isolated async path with default options. Advanced API that may
+     * change within 1.x. The engine must be owned by the main thread.
+     * @param event the event as JSON
+     * @param listener receives progress and the final result on the main thread
+     * @return a handle that can cancel the job
+     * @throws JSONException if the request cannot be encoded
+     */
     public AsyncJob applyDataEventAsync(JSONObject event,AsyncListener listener) throws JSONException {return applyDataEventAsync(event,new AsyncOptions(),listener);}
+    /**
+     * Applies one data event (JSON) through the isolated async path. Advanced API that may change within 1.x. The
+     * engine must be owned by the main thread.
+     * @param event the event as JSON
+     * @param options timeout and step limits
+     * @param listener receives progress and the final result on the main thread
+     * @return a handle that can cancel the job
+     * @throws JSONException if the request cannot be encoded
+     */
     public AsyncJob applyDataEventAsync(JSONObject event,AsyncOptions options,AsyncListener listener) throws JSONException {
         checkAsyncOwner();
         if(event==null||options==null||listener==null)throw new IllegalArgumentException("Async event, options and listener required");
@@ -398,10 +880,48 @@ public final class BaroChartEngine implements AutoCloseable {
         String eventJSON=event.toString();if(eventJSON.length()>8*1024*1024)throw new IllegalArgumentException("Async event size limit");
         return beginAsync("correction",eventJSON,null,options,listener);
     }
+    /**
+     * Prepares bars from an immutable column snapshot on an isolated worker, with default options. Advanced API that
+     * may change within 1.x. The engine must be owned by the main thread.
+     * @param columns the bar columns
+     * @param visibleBars number of bars to make visible
+     * @param listener receives progress and the final result on the main thread
+     * @return a handle that can cancel the job
+     * @throws JSONException if the request cannot be encoded
+     */
     public AsyncJob prepareColumnsAsync(BaroChartColumns columns,int visibleBars,AsyncListener listener) throws JSONException {return prepareColumnsAsync(columns,visibleBars,new AsyncOptions(),listener);}
+    /**
+     * Prepares bars from an immutable column snapshot on an isolated worker. Advanced API that may change within 1.x.
+     * The engine must be owned by the main thread.
+     * @param columns the bar columns
+     * @param visibleBars number of bars to make visible
+     * @param options timeout and step limits
+     * @param listener receives progress and the final result on the main thread
+     * @return a handle that can cancel the job
+     * @throws JSONException if the request cannot be encoded
+     */
     public AsyncJob prepareColumnsAsync(BaroChartColumns columns,int visibleBars,AsyncOptions options,AsyncListener listener) throws JSONException {checkAsyncOwner();if(columns==null)throw new IllegalArgumentException("Owned columns required");visibleBars(visibleBars);return beginAsync("columns",new JSONObject().put("kind","columns").put("length",columns.length()).put("visibleBars",visibleBars).toString(),columns,options,listener);}
+    /**
+     * Prepares generated demonstration bars on an isolated worker, with default options. Advanced API that may change
+     * within 1.x. The engine must be owned by the main thread.
+     * @param count number of bars to generate
+     * @param seed generator seed
+     * @param visibleBars number of bars to make visible
+     * @param listener receives progress and the final result on the main thread
+     * @return a handle that can cancel the job
+     * @throws JSONException if the request cannot be encoded
+     */
     public AsyncJob prepareSeededAsync(int count,int seed,int visibleBars,AsyncListener listener) throws JSONException {return prepareSeededAsync(count,seed,visibleBars,new AsyncOptions(),listener);}
-    /** Seed int represents unsigned32 bits; generation is demo data, not a feed. */
+    /**
+     * Seed int represents unsigned32 bits; generation is demo data, not a feed.
+     * @param count number of bars to generate
+     * @param seed generator seed, treated as unsigned 32 bits
+     * @param visibleBars number of bars to make visible
+     * @param options timeout and step limits
+     * @param listener receives progress and the final result on the main thread
+     * @return a handle that can cancel the job
+     * @throws JSONException if the request cannot be encoded
+     */
     public AsyncJob prepareSeededAsync(int count,int seed,int visibleBars,AsyncOptions options,AsyncListener listener) throws JSONException {checkAsyncOwner();if(count<0||count>BaroChartColumns.MAX_BARS)throw new IllegalArgumentException("Synthetic bar count limit");visibleBars(visibleBars);return beginAsync("seeded",new JSONObject().put("kind","seeded").put("count",count).put("seed",Integer.toUnsignedLong(seed)).put("visibleBars",visibleBars).toString(),null,options,listener);}
     private void visibleBars(int visibleBars){if(visibleBars<1||visibleBars>BaroChartColumns.MAX_BARS)throw new IllegalArgumentException("Visible bar limit");}
     private void checkAsyncOwner(){check();if(Looper.myLooper()!=Looper.getMainLooper())throw new IllegalStateException("Async calculation requires a main/UI owner engine");}
@@ -412,9 +932,32 @@ public final class BaroChartEngine implements AutoCloseable {
         AsyncJob job=new AsyncJob(kind,request,columns,options,listener,preceding);activeJob=job;job.start();return job;
     }
     /** Workspace-only cancellation handle. Success replaces the internal runtime. */
-    public static final class WorkspaceJob {private final WorkspaceRestoreJob job;private WorkspaceJob(WorkspaceRestoreJob job){this.job=job;}public void cancel(){job.cancel();}public boolean cleanupPending(){return job.pendingOwnerCleanup();}public String pendingFailure(){return job.pendingOwnerFailure();}}
+    public static final class WorkspaceJob {private final WorkspaceRestoreJob job;private WorkspaceJob(WorkspaceRestoreJob job){this.job=job;}/** Requests cancellation of the restore. */ public void cancel(){job.cancel();}/**
+     * Tells whether owner-thread cleanup is still pending.
+     * @return true while cleanup is pending
+     */ public boolean cleanupPending(){return job.pendingOwnerCleanup();}/**
+     * Returns the status that left cleanup pending.
+     * @return the status, or {@code null} when no cleanup is pending
+     */ public String pendingFailure(){return job.pendingOwnerFailure();}}
+    /**
+     * Restores a workspace document without blocking, with default options. Advanced API that may change within 1.x.
+     * The engine must be owned by the main thread.
+     * @param document a workspace document as text
+     * @param binding the dataset binding as JSON
+     * @param listener receives progress and the final result on the main thread
+     * @return a handle that can cancel the restore
+     * @throws JSONException if the request cannot be encoded
+     */
     public WorkspaceJob restoreWorkspaceAsync(String document,JSONObject binding,AsyncListener listener)throws JSONException {return restoreWorkspaceAsync(document,binding,new AsyncOptions(),listener);}
-    /** Owned document + explicit dataset binding; one active job, no implicit supersession. */
+    /**
+     * Owned document + explicit dataset binding; one active job, no implicit supersession.
+     * @param document a workspace document as text
+     * @param binding the dataset binding as JSON
+     * @param options timeout and step limits
+     * @param listener receives progress and the final result on the main thread
+     * @return a handle that can cancel the restore
+     * @throws JSONException if the request cannot be encoded
+     */
     public WorkspaceJob restoreWorkspaceAsync(String document,JSONObject binding,AsyncOptions options,AsyncListener listener)throws JSONException {
         checkAsyncOwner();if(activeJob!=null||activeWorkspace!=null||activeParams!=null)throw new IllegalStateException("Async restore busy");if(document==null||document.length()>2097152||binding==null||options==null||listener==null)throw new IllegalArgumentException("Workspace document/binding/options/listener required");
         final long sourceHandle=handle,sourceRevision=revision;final String bindingJSON=binding.toString();checkAsyncOwner();if(handle!=sourceHandle||revision!=sourceRevision||activeJob!=null||activeWorkspace!=null||activeParams!=null)throw new IllegalStateException("Workspace source stale during arguments");
@@ -456,14 +999,41 @@ public final class BaroChartEngine implements AutoCloseable {
     public static final class ParamsJob {
         private final ParamsUpdateJob job;
         private ParamsJob(ParamsUpdateJob job){this.job=job;}
+        /** Requests cancellation of the parameter update. */
         public void cancel(){job.cancel();}
+        /**
+         * Tells whether cleanup is still pending.
+         * @return true when owner-thread cleanup is pending
+         */
         public boolean cleanupPending(){return job.pendingOwnerCleanup();}
+        /**
+         * Reports whether the update was committed.
+         * @return the commit outcome, such as {@code committed}, {@code unchanged}, {@code notCommitted} or {@code
+         *     unknown}
+         */
         public String commitOutcome(){return job.commitOutcome();}
         /** Retry only on the original owner thread; never retries an uncertain free. */
         public void retryCleanup(){job.resumeOwnerCleanup();}
     }
+    /**
+     * Replaces indicator parameters through the isolated async path, with default options. Advanced API that may
+     * change within 1.x. The engine must be owned by the main thread.
+     * @param id indicator id
+     * @param params parameters as JSON
+     * @param listener receives progress and the final result on the main thread
+     * @return a handle that can cancel or inspect the update
+     * @throws JSONException if the request cannot be encoded
+     */
     public ParamsJob setIndicatorParamsAsync(String id,JSONObject params,AsyncListener listener)throws JSONException{return setIndicatorParamsAsync(id,params,new AsyncOptions(),listener);}
-    /** Original runtime/store retained; linked portable indicator definitions only. */
+    /**
+     * Original runtime/store retained; linked portable indicator definitions only.
+     * @param id indicator id
+     * @param params parameters as JSON
+     * @param options timeout and step limits
+     * @param listener receives progress and the final result on the main thread
+     * @return a handle that can cancel or inspect the update
+     * @throws JSONException if the request cannot be encoded
+     */
     public ParamsJob setIndicatorParamsAsync(String id,JSONObject params,AsyncOptions options,AsyncListener listener)throws JSONException{
         checkAsyncOwner();if(activeJob!=null||activeWorkspace!=null||activeParams!=null)throw new IllegalStateException("Async params busy");
         if(id==null||id.length()>128||params==null||options==null||listener==null)throw new IllegalArgumentException("Params arguments required");
@@ -548,6 +1118,7 @@ public final class BaroChartEngine implements AutoCloseable {
         private volatile long createNanos=0,computeNanos=0,lastProgressNanos=0,inputWriteNanos=0,inputWriteMaxNanos=0;private volatile String lastProgressPhase="";
         private AsyncJob(String kind,String eventJSON,BaroChartColumns inputColumns,AsyncOptions options,AsyncListener listener,Thread preceding){this.kind=kind;this.eventJSON=eventJSON;this.inputColumns=inputColumns;inputOwnedBytes=inputColumns==null?0:inputColumns.ownedBytes();inputCopyMillis=inputColumns==null?0:inputColumns.copyMillis();this.options=options;this.listener=listener;this.preceding=preceding;deadline=started+options.timeoutMillis*1000000;}
         private Thread blockingWorker(){return worker!=null&&worker.isAlive()?worker:preceding!=null&&preceding.isAlive()?preceding:null;}
+        /** Requests cancellation; it has no effect once the result is committed. */
         public void cancel(){synchronized(this){if(committed||stopped!=null)return;stopped="cancelled";}handler.post(()->{if(!terminal){releaseOnOwner();transfers.offer(new Transfer());}});}
         private synchronized void stopOnce(String reason){if(!committed&&stopped==null)stopped=reason;}
         private void stopOnOwner(String reason){stopOnce(reason);releaseOnOwner();transfers.offer(new Transfer());}
@@ -660,6 +1231,14 @@ public final class BaroChartEngine implements AutoCloseable {
             TIMEZONES.put(key,zone);if(TIMEZONES.size()>32)TIMEZONES.remove(TIMEZONES.keySet().iterator().next());return zone;
         }
     }
+    /**
+     * Formats a time as year, month, day, hour, minute and second parts in a time zone, for the core's time zone
+     * formatting.
+     * @param time UTC epoch milliseconds
+     * @param timezone IANA time zone name
+     * @return the parts as a JSON array in text form
+     * @throws JSONException if the parts cannot be encoded
+     */
     public static String zonedParts(long time,String timezone) throws JSONException {
         ZonedDateTime z=Instant.ofEpochMilli(time).atZone(timezone(timezone));
         String[] names={"year","month","day","hour","minute","second"};int[] values={z.getYear(),z.getMonthValue(),z.getDayOfMonth(),z.getHour(),z.getMinute(),z.getSecond()};JSONArray parts=new JSONArray();
@@ -681,61 +1260,133 @@ public final class BaroChartEngine implements AutoCloseable {
      * Creates an engine with an explicit initial layout and no bars, owned by the calling thread.
      * Prefer this over {@code new BaroChartEngine(context, count)}, which builds a labeled demonstration chart.
      * Engines attached to a view must be created on the main thread.
+     * @param context used to read the bundled core asset
+     * @param options the initial layout
+     * @return a new engine with no bars
      */
     @androidx.annotation.NonNull public static BaroChartEngine create(@androidx.annotation.NonNull Context context,@androidx.annotation.NonNull EngineOptions options){
         return typedCall(()->new BaroChartEngine(context,0,LowLevelJson.engineOptions(options)));
     }
-    /** Replaces every bar of the primary series. */
+    /**
+     * Replaces every bar of the primary series.
+     * @param bars the complete new list of bars
+     */
     public void setBars(@androidx.annotation.NonNull java.util.List<Bar> bars){typed(()->setData(LowLevelJson.bars(bars)));}
-    /** Applies a streaming or correction event. Invalid events throw {@code INVALID_ARGUMENT} and leave data unchanged. */
+    /**
+     * Applies a streaming or correction event. Invalid events throw {@code INVALID_ARGUMENT} and leave data unchanged.
+     * @param event the event to apply
+     */
     public void apply(@androidx.annotation.NonNull DataEvent event){typed(()->applyDataEvent(LowLevelJson.event(event)));}
-    /** Adds a series. */
+    /**
+     * Adds a series.
+     * @param series the series to add
+     */
     public void addSeries(@androidx.annotation.NonNull Series series){typed(()->addSeries(LowLevelJson.series(series)));}
-    /** Updates the series with {@code series.id}. Every field except id and type is applied, including the panel. */
+    /**
+     * Updates the series with {@code series.id}. Every field except id and type is applied, including the panel.
+     * @param series the series with the new field values
+     */
     public void updateSeries(@androidx.annotation.NonNull Series series){typed(()->{JSONObject patch=LowLevelJson.series(series);patch.remove("id");patch.remove("type");setSeries(series.id,patch);});}
-    /** Adds an indicator under {@code id}. Bind it to a series with {@code Series.builder(...).indicator(id)}. */
+    /**
+     * Adds an indicator under {@code id}. Bind it to a series with {@code Series.builder(...).indicator(id)}.
+     * @param indicator the indicator definition
+     * @param id id for the indicator
+     */
     public void addIndicator(@androidx.annotation.NonNull Indicator indicator,@androidx.annotation.NonNull String id){typed(()->addIndicator(id,indicator.kind.wireName(),LowLevelJson.params(indicator.params)));}
-    /** Replaces indicator parameters synchronously. */
+    /**
+     * Replaces indicator parameters synchronously.
+     * @param id indicator id
+     * @param params new parameter values by core parameter name
+     */
     public void setIndicatorParams(@androidx.annotation.NonNull String id,@androidx.annotation.NonNull java.util.Map<String,ParamValue> params){typed(()->setIndicatorParams(id,LowLevelJson.params(params)));}
-    /** Reads one indicator output at a bar index; {@code output} {@code null} means the first output. */
+    /**
+     * Reads one indicator output at a bar index; {@code output} {@code null} means the first output.
+     * @param id indicator id
+     * @param output output name, or {@code null} for the first output
+     * @param index bar index
+     * @return the indicator value
+     */
     @androidx.annotation.NonNull public IndicatorValue indicatorValue(@androidx.annotation.NonNull String id,@androidx.annotation.Nullable String output,int index){
         return typedCall(()->{JSONObject raw=indicatorValueAt(id,output,index);return new IndicatorValue(optDouble(raw,"value"),raw.isNull("sourceIndex")?null:raw.getInt("sourceIndex"),optDouble(raw,"sourceTime"));});
     }
-    /** Selects the active drawing tool for touch input. */
+    /**
+     * Selects the active drawing tool for touch input.
+     * @param tool the drawing tool
+     */
     public void setTool(@androidx.annotation.NonNull DrawingTool tool){typed(()->setTool(tool.wireName()));}
-    /** Adds a drawing and returns its id. {@link DrawingTool#SELECT} is not a drawing and throws {@code INVALID_ARGUMENT}. */
+    /**
+     * Adds a drawing and returns its id. {@link DrawingTool#SELECT} is not a drawing and throws {@code INVALID_ARGUMENT}.
+     * @param drawing the drawing to add
+     * @return the id of the new drawing
+     */
     @androidx.annotation.NonNull public String addDrawing(@androidx.annotation.NonNull Drawing drawing){
         if(drawing.tool==DrawingTool.SELECT)throw new BaroChartException(BaroChartException.Code.INVALID_ARGUMENT,"The select tool cannot create a drawing.","Use a drawing tool such as TRENDLINE or HORIZONTAL.",null);
         return typedCall(()->addDrawing(LowLevelJson.drawing(drawing)));
     }
-    /** Changes an existing drawing's anchors, style, text, panel, lock and visibility. The tool cannot change. */
+    /**
+     * Changes an existing drawing's anchors, style, text, panel, lock and visibility. The tool cannot change.
+     * @param id id of the drawing to change
+     * @param drawing the new field values
+     */
     public void updateDrawing(@androidx.annotation.NonNull String id,@androidx.annotation.NonNull Drawing drawing){typed(()->{JSONObject patch=LowLevelJson.drawing(drawing);patch.remove("id");patch.remove("type");editDrawing(id,patch);});}
-    /** Deletes drawings as one undo step and returns how many were removed. Missing or locked ids throw. */
+    /**
+     * Deletes drawings as one undo step and returns how many were removed. Missing or locked ids throw.
+     * @param ids ids of the drawings to delete
+     * @return the number of deleted drawings
+     */
     public int deleteDrawings(@androidx.annotation.NonNull java.util.List<String> ids){return typedCall(()->deleteDrawings(new JSONArray(ids)).getInt("changed"));}
-    /** Applies a complete theme. */
+    /**
+     * Applies a complete theme.
+     * @param theme the theme
+     */
     public void setTheme(@androidx.annotation.NonNull Theme theme){typed(()->setTheme(LowLevelJson.theme(theme)));}
-    /** Sets instrument metadata used for price and time formatting. */
+    /**
+     * Sets instrument metadata used for price and time formatting.
+     * @param symbol the instrument metadata
+     */
     public void setSymbol(@androidx.annotation.NonNull Symbol symbol){typed(()->setSymbol(LowLevelJson.symbol(symbol)));}
-    /** Current visible range in bar-index coordinates. */
+    /**
+     * Current visible range in bar-index coordinates.
+     * @return the visible range
+     */
     @androidx.annotation.NonNull public VisibleRange visibleRange(){return typedCall(()->{JSONObject view=((JSONObject)command("inspect")).getJSONObject("view");return new VisibleRange(view.getDouble("from"),view.getDouble("to"));});}
-    /** Sets the visible range in bar-index coordinates; {@code to} must be greater than {@code from}. */
+    /**
+     * Sets the visible range in bar-index coordinates; {@code to} must be greater than {@code from}.
+     * @param range the new range
+     */
     public void setVisibleRange(@androidx.annotation.NonNull VisibleRange range){typed(()->command("setVisibleRange",range.from,range.to));}
-    /** Saves chart settings, indicators, series and drawings as a portable {@code aster.workspace} document. */
+    /**
+     * Saves chart settings, indicators, series and drawings as a portable {@code aster.workspace} document.
+     * @param binding the dataset the workspace belongs to
+     * @return the workspace document as text
+     */
     @androidx.annotation.NonNull public String saveWorkspace(@androidx.annotation.NonNull DatasetBinding binding){return typedCall(()->saveWorkspace(LowLevelJson.binding(binding)));}
     /**
      * Restores a saved workspace onto this engine's current bars without blocking the main thread.
      * The engine must be main-thread owned and hold the same bars the document was saved with.
      * The callback runs once on the main thread with {@code null} on success. Cancelling reports {@code CANCELLED}.
+     * @param document a workspace document from {@link #saveWorkspace(DatasetBinding)}
+     * @param binding the dataset the document must belong to
+     * @param callback receives the result once
+     * @return a handle that can cancel the restore
      */
     @androidx.annotation.NonNull public RestoreHandle restoreWorkspace(@androidx.annotation.NonNull String document,@androidx.annotation.NonNull DatasetBinding binding,@androidx.annotation.NonNull RestoreCallback callback){
         WorkspaceJob job=typedCall(()->restoreWorkspaceAsync(document,LowLevelJson.binding(binding),result->callback.onComplete(restoreFailure(result))));
         return new RestoreHandle(job);
     }
-    /** Values under the crosshair for a view of the given size, or {@code null} when there is no crosshair. */
+    /**
+     * Values under the crosshair for a view of the given size, or {@code null} when there is no crosshair.
+     * @param width view width
+     * @param height view height
+     * @return the crosshair values, or {@code null} when there is no crosshair
+     */
     @androidx.annotation.Nullable public CrosshairValues crosshair(double width,double height){
         return typedCall(()->{Object raw=command("crosshairValues",width,height);return raw instanceof JSONObject?crosshairValues((JSONObject)raw):null;});
     }
-    /** Whether {@link #close()} has completed. A closed engine rejects every call with {@code ENGINE_CLOSED}. */
+    /**
+     * Whether {@link #close()} has completed. A closed engine rejects every call with {@code ENGINE_CLOSED}.
+     * @return true when the engine is closed
+     */
     public boolean isClosed(){return handle==0;}
 
     /** 비동기 결과를 콜백용 예외로 바꾼다(성공이면 null) */
