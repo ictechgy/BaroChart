@@ -1857,7 +1857,7 @@ public final class BaroChartEngine {
     public func addSeries(_ options: [String: Any]) throws {try command("addSeries", [options])}
     /// Applies a patch dictionary to the series with `id`. Low-level API.
     public func setSeries(_ id: String, _ patch: [String: Any]) throws {try command("setSeries", [id, patch])}
-    /// Removes the series with `id`. Throws only ``BaroChartError``.
+    /// Removes the series with `id`. Removing a missing id does nothing. Throws only ``BaroChartError``.
     public func removeSeries(_ id: String) throws {try BaroChartError.mapping {try command("removeSeries", [id])}}
     /// Sets the values of a general series. `nil` entries are sent to the core as null. Low-level API.
     public func setSeriesValues(_ id: String, _ values: [Double?]) throws {try command("setSeriesValues", [id, values.map { $0.map { $0 as Any } ?? NSNull() }])}

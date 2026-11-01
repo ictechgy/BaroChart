@@ -75,6 +75,8 @@ extension BaroChartError {
         case is BaroChartWorkspaceError: return (.cleanupPending, "A previous workspace restore still owns runtime cleanup.")
         case is BaroChartParamsError: return (.cleanupPending, "A previous indicator parameter job still owns runtime cleanup.")
         case is CancellationError: return (.cancelled, "The task was cancelled.")
+        // JSONEncoder는 NaN·무한대 같은 유한하지 않은 값을 인코딩하지 못한다. 데이터 문제이므로 잘못된 인수다(Android JSONException과 같은 코드)
+        case let encoding as EncodingError: return (.invalidArgument, "Every bar field must be a finite number (\(encoding.localizedDescription)).")
         default: return (.unavailable, String(describing: error))
         }
     }
@@ -96,6 +98,14 @@ extension BaroChartError {
         if text.hasPrefix("RangeError: ") {
             let message = String(text.dropFirst(12))
             let isBudget = message.range(of: #": limit \d+$|budget|exceeds"#, options: [.regularExpression, .caseInsensitive]) != nil
+            return (isBudget ? .budgetExceeded : .invalidArgument, message)
+        }
+        // JSON 문서 파싱 실패(loadDrawings 등)는 호출자가 넘긴 문서가 잘못된 것이다
+        if text.hasPrefix("SyntaxError: ") { return (.invalidArgument, String(text.dropFirst(13))) }
+        // 일괄 이벤트(applyDataEvents)는 코어 IngestionError로 실패한다. 예산 문구만 자원 한도, 나머지는 잘못된 입력이다
+        if text.hasPrefix("IngestionError: ") {
+            let message = String(text.dropFirst(16))
+            let isBudget = message.range(of: "budget|limit|full", options: [.regularExpression, .caseInsensitive]) != nil
             return (isBudget ? .budgetExceeded : .invalidArgument, message)
         }
         let message = text.hasPrefix("Error: ") ? String(text.dropFirst(7)) : text
