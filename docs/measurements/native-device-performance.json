@@ -1,0 +1,84 @@
+{
+  "schema": "barochart.native-device-performance",
+  "version": 1,
+  "budget": {
+    "startupP50Ms": 500,
+    "panP95Ms": 16.7,
+    "sizePerAbiBytes": 3145728
+  },
+  "status": "Physical-device runs pending: platforms is empty until scripts/measure-native-device.mjs runs on a connected iPhone and Android phone.",
+  "method": "startup = engine create + setBars(10,000) + first frame render, 12 runs minus 2 warm-up; pan10k = 120 frames shifting a 200-bar window over 10,000 bars, render time per frame on the CPU (not display FPS)",
+  "platforms": {},
+  "referenceRuns": {
+    "note": "Simulator/emulator on an Apple Silicon Mac. Not device numbers; recorded only to check the harness works.",
+    "iosSimulator": {
+      "date": "2026-11-01",
+      "host": "iOS 27.0 Simulator, scale 3",
+      "startup": {
+        "p50Ms": 91.41,
+        "p95Ms": 104.21
+      },
+      "pan10k": {
+        "p50Ms": 5.41,
+        "p95Ms": 7.78,
+        "footprintMB": 336.6
+      }
+    },
+    "androidEmulator": {
+      "date": "2026-11-01",
+      "host": "API 36 arm64 emulator (sdk_gphone16k_arm64), density 2.625",
+      "startup": {
+        "p50Ms": 97.75,
+        "p95Ms": 107.55
+      },
+      "pan10k": {
+        "p50Ms": 1.49,
+        "p95Ms": 1.96,
+        "pssMB": 67
+      }
+    }
+  },
+  "sizes": {
+    "android": {
+      "date": "2026-11-01",
+      "sizeOnly": true,
+      "size": {
+        "entries": {
+          "classes.jar": {
+            "uncompressed": 147558,
+            "compressed": 138092
+          },
+          "assets/aster-core.js": {
+            "uncompressed": 588726,
+            "compressed": 152510
+          },
+          "jni/arm64-v8a/libbarochart.so": {
+            "uncompressed": 1058512,
+            "compressed": 488584
+          },
+          "jni/x86_64/libbarochart.so": {
+            "uncompressed": 1117992,
+            "compressed": 519988
+          }
+        },
+        "perAbiBytes": {
+          "arm64-v8a": 1794796,
+          "x86_64": 1854276
+        },
+        "note": "release AAR: native library for the ABI + core asset + classes.jar, uncompressed (APK compression and R8 shrink further)"
+      },
+      "budgetMisses": []
+    },
+    "ios": {
+      "date": "2026-11-01",
+      "sizeOnly": true,
+      "size": {
+        "sdkCodeBytes": 424810,
+        "sdkResourceBundleBytes": 590027,
+        "totalBytes": 1014837,
+        "note": "arm64 release link map (BaroChart target objects) + BaroChart_BaroChart.bundle; uncompressed"
+      },
+      "budgetMisses": []
+    }
+  }
+}
