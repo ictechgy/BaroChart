@@ -15,6 +15,20 @@ export const JAVA_HOST_PRODUCTION_SOURCES = Object.freeze([
     'native/android/java/kr/coden/barochart/NativeJobBudget.java',
     'native/android/java/kr/coden/barochart/ParamsUpdateJob.java',
 ]);
+/**
+ * 엔진이 참조하는 타입 API 파일(값 타입·BaroChartException 등)과 androidx.annotation 컴파일 스텁.
+ * 호스트 JVM 검사는 Android UI 타입(View·Bitmap 풀)을 스텁하지 않으므로 그 둘은 뺀다.
+ * @param {string} root 저장소 루트
+ * @param {string[]} already 이미 목록에 있는 소스(중복 클래스 방지)
+ * @returns {Promise<string[]>} 절대 경로 목록
+ */
+export async function javaTypedApiSources(root, already) {
+    const dir = join(root, 'native/android/java/kr/coden/barochart');
+    const skip = new Set(['BaroChartView.java', 'BaroChartBitmapCachePool.java', ...already.map(path => path.split('/').at(-1))]);
+    const typed = (await readdir(dir)).filter(name => name.endsWith('.java') && !skip.has(name)).sort().map(name => join(dir, name));
+    const stubs = join(root, 'native/android/annotation-stubs/androidx/annotation');
+    return [...typed, join(stubs, 'NonNull.java'), join(stubs, 'Nullable.java')];
+}
 export const JAVA_HOST_BOUNDARY = Object.freeze({
     evidence: 'Java typecheck against independent compile-only signatures',
     javaSourceLevel: 8,
@@ -64,7 +78,7 @@ export async function checkJavaHost({java = process.env.ASTER_JAVA ?? 'java'} = 
     try {
         const classes = join(temporary, 'classes'), empty = join(temporary, 'empty');
         await mkdir(classes); await mkdir(empty);
-        const sources = [...JAVA_HOST_PRODUCTION_SOURCES.map(path => join(root, path)),
+        const sources = [...JAVA_HOST_PRODUCTION_SOURCES.map(path => join(root, path)), ...await javaTypedApiSources(root, JAVA_HOST_PRODUCTION_SOURCES),
             ...await filesIn(join(root, 'test/java-host-stubs'), '.java'),
             ...await filesIn(join(root, 'test/java-host-consumers'), '.java')];
         const before = await sourceHashes(sources);

@@ -49,4 +49,12 @@ public class JSONObject {
         for(Map.Entry<String,Object> entry:values.entrySet()){if(!first)result.append(',');first=false;result.append(encode(entry.getKey())).append(':').append(encode(entry.getValue()));}
         return result.append('}').toString();
     }
+    // 타입 API(BaroChartEngine 타입 메서드·LowLevelJson)가 쓰는 Android org.json 시그니처(테스트용 최소 구현)
+    public double getDouble(String name) throws JSONException {Object value=get(name);if(!(value instanceof Number))throw new JSONException("Fixture number required");return ((Number)value).doubleValue();}
+    public Object remove(String name){return values.remove(name);}
+    public JSONObject putOpt(String name,Object value) throws JSONException {return name==null||value==null?this:put(name,value);}
+    public String optString(String name){Object value=values.get(name);return value instanceof String?(String)value:"";}
+    public JSONObject optJSONObject(String name){Object value=values.get(name);return value instanceof JSONObject?(JSONObject)value:null;}
+    public JSONArray optJSONArray(String name){Object value=values.get(name);return value instanceof JSONArray?(JSONArray)value:null;}
+    public boolean isNull(String name){Object value=values.get(name);return value==null||value==NULL;}
 }
