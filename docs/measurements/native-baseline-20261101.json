@@ -1,0 +1,193 @@
+{
+  "schema": "barochart.native-baseline",
+  "version": 1,
+  "date": "2026-11-01",
+  "sourceBase": "1460646f0e593c99cee2f9e6c12438f35c9be46e",
+  "toolchain": "docs/NATIVE-TOOLCHAIN.md",
+  "scope": "Existing macOS/iOS-simulator/Android-emulator runners re-executed before the BaroChart rename. Simulator/emulator only: no physical device, no display FPS claim.",
+  "macos": [
+    {
+      "command": "node scripts/build-native.mjs",
+      "result": "pass"
+    },
+    {
+      "command": "npm run test:native",
+      "result": "pass"
+    },
+    {
+      "command": "npm run test:api:native",
+      "result": "pass"
+    },
+    {
+      "command": "npm run test:native:async",
+      "result": "pass"
+    },
+    {
+      "command": "npm run test:native:prepare",
+      "result": "pass"
+    },
+    {
+      "command": "npm run test:native:frames",
+      "result": "pass"
+    },
+    {
+      "command": "npm run test:axes:native",
+      "result": "pass"
+    },
+    {
+      "command": "npm run test:native:publication",
+      "result": "pass"
+    },
+    {
+      "command": "npm run test:native:studies",
+      "result": "pass"
+    },
+    {
+      "command": "npm run test:native:soak",
+      "result": "pass"
+    },
+    {
+      "command": "swift run --package-path examples/swift-consumer AsterSDKProbe",
+      "result": "pass",
+      "passed": 21,
+      "note": "10 new checks execute compactData, translateDrawings, deleteDrawings, setIndicatorParamsAsync and restoreWorkspaceAsync on JavaScriptCore for the first time"
+    }
+  ],
+  "iosSimulator": {
+    "runtime": "iOS 27.0 (24A434)",
+    "runs": [
+      {
+        "command": "node scripts/build-ios.mjs && node scripts/test-ios.mjs",
+        "result": "pass",
+        "nativeChecks": 10,
+        "note": "includes the new VoiceOver escape check"
+      },
+      {
+        "command": "npm run test:ios:async",
+        "result": "pass",
+        "passed": 129
+      },
+      {
+        "command": "npm run test:ios:prepare",
+        "result": "pass",
+        "passed": 287
+      },
+      {
+        "command": "npm run test:axes:ios",
+        "result": "pass"
+      },
+      {
+        "command": "npm run build:ios:ingestion && npm run test:ios:ingestion -- --pilot",
+        "result": "pass",
+        "note": "first pilot failed once (see findings); passed on rerun"
+      },
+      {
+        "command": "npm run build:ios:mobile-ux && npm run test:ios:mobile-ux",
+        "result": "pass"
+      },
+      {
+        "command": "npm run build:apple:transactions && npm run test:apple:transactions",
+        "result": "pass"
+      },
+      {
+        "command": "node scripts/test-swift-consumer.mjs --mode all",
+        "result": "pass",
+        "macChecks": 22,
+        "iosChecks": 15
+      },
+      {
+        "command": "npm run test:sdk:closed",
+        "result": "pass",
+        "passed": 9
+      },
+      {
+        "command": "npm run test:native:cache:recovery",
+        "result": "pass",
+        "passed": 9
+      }
+    ]
+  },
+  "androidEmulator": {
+    "avd": "aster-validation (android-36 google_apis_ps16k arm64-v8a)",
+    "serial": "emulator-5580",
+    "adbServerPort": 5038,
+    "runs": [
+      {
+        "command": "node scripts/build-android-library.mjs",
+        "result": "pass",
+        "note": "AAR audit passes; Java now compiled with -Xlint:all,-options -Werror"
+      },
+      {
+        "command": "node scripts/build-android.mjs && node scripts/test-android.mjs",
+        "result": "pass",
+        "nativeChecks": 13,
+        "recentAPIChecks": 10,
+        "note": "recent-API checks execute the five recent Java APIs on JNI/QuickJS for the first time"
+      },
+      {
+        "command": "npm run test:android:async",
+        "result": "pass",
+        "passed": 53
+      },
+      {
+        "command": "npm run test:android:prepare",
+        "result": "pass",
+        "passed": 202
+      },
+      {
+        "command": "node scripts/build-android-hover.mjs --current-core && npm run test:android:hover",
+        "result": "pass"
+      },
+      {
+        "command": "npm run test:android:retention",
+        "result": "pass"
+      },
+      {
+        "command": "ASTER_INGESTION_CORE_SHA=<current core> npm run build:android:ingestion && npm run test:android:ingestion",
+        "result": "pass",
+        "checks": 101
+      },
+      {
+        "command": "npm run build:android:mobile-ux && npm run test:android:mobile-ux",
+        "result": "pass",
+        "checks": 363
+      },
+      {
+        "command": "npm run test:sdk:kotlin (debug)",
+        "result": "pass",
+        "passed": 1056
+      },
+      {
+        "command": "node scripts/test-kotlin-consumer.mjs --variant release (R8)",
+        "result": "pass",
+        "passed": 1056
+      },
+      {
+        "command": "node scripts/test-kotlin-ingestion-consumer.mjs",
+        "result": "pass"
+      }
+    ]
+  },
+  "findings": [
+    {
+      "id": "ios-voiceover-escape",
+      "severity": "P2",
+      "summary": "BaroChart UIKit view ignored the VoiceOver escape gesture (accessibilityPerformEscape returned false), leaving an active drawing gesture and pointer. The cycle-12 ingestion pilot exposed it intermittently when its drawing check overlapped an XCUI drag.",
+      "fix": "accessibilityPerformEscape now performs the existing 'Cancel interaction' action; examples/ios/App.swift checks it (RED: escaped=false pointers=1 gesture=create, GREEN after fix)."
+    },
+    {
+      "id": "android-deprecation-warnings",
+      "severity": "P3",
+      "summary": "AAR Java compile carried two hidden deprecation warnings (ComponentCallbacks.onLowMemory, TRIM_MEMORY_RUNNING_LOW).",
+      "fix": "Method-level suppression with the minSdk 26 reason; AAR build now uses -Xlint:all,-options with -Werror so new lint warnings fail the build."
+    }
+  ],
+  "environmentRequirements": [
+    "Kotlin consumer runners build offline from ~/.gradle/caches/modules-2, so the cache needs one online build of examples/kotlin-* first.",
+    "Hover/mobile-UX runners only accept serial emulator-5580 with a private adb server on port 5038; the ingestion runner also requires AVD name aster-validation.",
+    "build:android:ingestion pins a historical core SHA; validating the current bundle requires ASTER_INGESTION_CORE_SHA set to its SHA-256.",
+    "test:ios:ingestion defaults to a 900 s run that needs --quiet-go; --pilot runs the 60 s functional mode.",
+    "test-ios-ingestion does not remove an existing pilot.xcresult; a rerun needs it removed first."
+  ],
+  "retainedFailures": []
+}

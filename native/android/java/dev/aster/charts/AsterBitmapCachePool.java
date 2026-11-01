@@ -31,7 +31,9 @@ final class AsterBitmapCachePool implements ComponentCallbacks2 {
     void setBudget(long bytes){owner();if(bytes<0||bytes>256L*1024*1024)throw new IllegalArgumentException("Bitmap budget0..256MiB");budget=bytes;generation++;prune();while(used>budget){Entry victim=null;for(Entry entry:entries)if(entry.bytes>0&&(victim==null||entry.touched<victim.touched))victim=entry;if(victim==null)break;AsterChartView view=victim.view.get();if(view==null){prune();continue;}evictions++;view.evictBitmapCache();}}
     JSONObject metrics() throws JSONException {owner();prune();return new JSONObject().put("budgetBytes",budget).put("ownedBitmapBytes",used).put("liveEntries",entries.size()).put("evictions",evictions).put("denials",denials).put("memoryTrims",trims).put("generation",generation).put("ownershipGeneration",ownershipGeneration).put("scope","CPU Bitmap allocationByteCount owned by live caches; not RSS/PSS or RenderThread/GPU retained copies");}
     private void trim(){owner();trims++;generation++;for(Entry entry:new ArrayList<>(entries)){AsterChartView view=entry.view.get();if(view!=null)view.evictBitmapCache();}prune();}
-    @Override public void onLowMemory(){trim();}
-    @Override public void onTrimMemory(int level){if(level>=TRIM_MEMORY_RUNNING_LOW)trim();}
+    // ComponentCallbacks가 onLowMemory 구현을 강제하고, API 26~33 기기는 아직 이 콜백과
+    // TRIM_MEMORY_RUNNING_LOW를 전달한다(minSdk 26). 그래서 메서드 단위로만 deprecation 경고를 억제한다.
+    @SuppressWarnings("deprecation") @Override public void onLowMemory(){trim();}
+    @SuppressWarnings("deprecation") @Override public void onTrimMemory(int level){if(level>=TRIM_MEMORY_RUNNING_LOW)trim();}
     @Override public void onConfigurationChanged(Configuration configuration){}
 }

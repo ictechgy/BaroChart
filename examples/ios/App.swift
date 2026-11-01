@@ -185,6 +185,11 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
             let saved = try engine.saveDrawings();try require(saved.contains("channel"),"channel anchors")
             try engine.call("nativeKey",["z",true,false]);try require(engine.saveDrawings().contains("\"drawings\":[]"),"undo")
             try engine.call("nativeKey",["z",true,true]);try require(engine.saveDrawings()==saved,"redo exact restoration")
+            // VoiceOver 표준 취소 제스처(accessibilityPerformEscape)가 진행 중인 드로잉 입력을 취소해야 한다
+            let committed = try engine.saveDrawings();try engine.call("nativeTool",["trendline"])
+            try engine.call("nativePointer",["down",2,130,160]);try engine.call("nativePointer",["move",2,200,190])
+            let escaped = chart.accessibilityPerformEscape(),afterEscape = try engine.command("inspect").toDictionary() ?? [:]
+            try require(escaped && afterEscape["pointers"] as? Int == 0 && afterEscape["gesture"] is NSNull && (try engine.saveDrawings()) == committed,"VoiceOver escape cancels an active drawing gesture (escaped=\(escaped) pointers=\(String(describing:afterEscape["pointers"])) gesture=\(String(describing:afterEscape["gesture"])))")
             let added = ["dema","tema","hma","keltner","supertrend","ichimoku","trix","ppo","stochRSI","adl","chaikin","forceIndex","volumeOscillator","vortex","pivots","parabolicSAR"]
             for name in added {try engine.call("nativeIndicator",["test-"+name,name,[:],"price"])}
             let scene = try engine.scene(width:chart.bounds.width,height:chart.bounds.height);try require(scene.stats["storedBars"]==10000,"scene data")
