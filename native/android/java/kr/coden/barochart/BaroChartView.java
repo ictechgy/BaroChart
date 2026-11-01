@@ -29,6 +29,7 @@ public final class BaroChartView extends View {
     public static final int ACTION_ZOOM_IN=0x41535401,ACTION_ZOOM_OUT=0x41535402,ACTION_CLEAR_CROSSHAIR=0x41535403,ACTION_CANCEL_INTERACTION=0x41535404;
     private String lastError=null;
     private OnChartErrorListener errorListener;
+    private Runnable interactionListener;
     public long renderedRevision=0;
     private final Runnable onChange=()->{if(systemFontScaleEnabled&&!applyingFont&&inputDepth==0)try{applySystemFontScale();}catch(Exception error){report(error);}invalidate();};
     private final Runnable onClose=()->{engineClosed=true;resetTouch();releaseFontOwner();baseFont=lastAppliedFont=null;evictBitmapCache();drawProbe=null;invalidate();};
@@ -47,7 +48,7 @@ public final class BaroChartView extends View {
     public BaroChartView(Context context,BaroChartEngine engine){super(context);this.engine=engine;density=getResources().getDisplayMetrics().density;touchSlop=ViewConfiguration.get(context).getScaledTouchSlop();baseBitmapPaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.SRC));setFocusable(true);setClickable(true);setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_YES);setContentDescription("Financial chart");}
     private static int color(String s){if(s.matches("#[0-9a-fA-F]{8}"))s="#"+s.substring(7,9)+s.substring(1,7);return Color.parseColor(s);}
     /** 내부 입력 경로(터치·키·hover·크기 변경) 전용: 실패를 던지지 않고 리스너로 보고해 입력 처리 중 앱이 죽지 않게 한다 */
-    private void dispatchInput(String name,Object... args){inputDepth++;try{engine.invoke(name,args);}catch(Exception e){report(e);}finally{inputDepth--;invalidate();}}
+    private void dispatchInput(String name,Object... args){inputDepth++;boolean applied=false;try{engine.invoke(name,args);applied=true;}catch(Exception e){report(e);}finally{inputDepth--;invalidate();}if(applied&&interactionListener!=null&&!"nativeResize".equals(name))interactionListener.run();}
     /** Invokes a core input command. Throws {@link BaroChartException} instead of recording a silent failure. */
     public void fire(String name,Object... args){inputDepth++;try{engine.invoke(name,args);}catch(Exception e){throw BaroChartException.wrap(e);}finally{inputDepth--;invalidate();}}
     public void setCrosshairSnap(JSONObject options){try{engine.setCrosshairSnap(options);lastError=null;}catch(Exception e){throw BaroChartException.wrap(e);}}
@@ -215,6 +216,8 @@ public final class BaroChartView extends View {
     public String getLastError(){return lastError;}
     /** Sets the main-thread listener for failures that cannot be thrown; {@code null} removes it. */
     public void setOnChartErrorListener(OnChartErrorListener listener){errorListener=listener;}
+    /** Sets a main-thread callback run after touch, key or hover input changes the chart; {@code null} removes it. */
+    public void setOnInteractionListener(Runnable listener){interactionListener=listener;}
     /** 던질 수 없는 경로의 오류를 lastError에 남기고 리스너로 알린다 */
     private void report(Throwable error){BaroChartException typed=BaroChartException.wrap(error);lastError=typed.toString();if(errorListener!=null)errorListener.onChartError(typed);}
 }

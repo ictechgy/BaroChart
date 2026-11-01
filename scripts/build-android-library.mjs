@@ -93,7 +93,7 @@ export async function buildLibrary(output,core,version){
     output=resolve(output);await mkdir(output,{recursive:true});
     const environment=await gradleEnvironment(output);
     gradleRun(environment,join(projectRoot,'native/android/library'),output,['assembleRelease'],{asterCoreFile:resolve(core),asterVersion:version,asterBuildDir:join(output,'library')});
-    const aar=join(output,'aster-charts.aar');await copyFile(join(output,'library/outputs/aar/aster-android-release.aar'),aar);
+    const aar=join(output,'aster-charts.aar');await copyFile(join(output,'library/outputs/aar/barochart-android-release.aar'),aar);
     const audit=auditAar(aar,core,environment.javaHome);
     if(audit.sdkVersion!==version)throw new Error('AAR version resource does not match selected build version');
     const sources={};for(const name of await readdir(join(projectRoot,'native/android/java/kr/coden/barochart')))if(name.endsWith('.java'))sources[name]=sha(await readFile(join(projectRoot,'native/android/java/kr/coden/barochart',name)));

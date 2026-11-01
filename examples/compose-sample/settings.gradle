@@ -1,0 +1,17 @@
+pluginManagement {
+    repositories { google(); mavenCentral(); gradlePluginPortal() }
+    plugins {
+        id 'com.android.application' version '8.13.2'
+        id 'org.jetbrains.kotlin.android' version '2.4.10'
+        id 'org.jetbrains.kotlin.plugin.compose' version '2.4.10'
+    }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories { google(); mavenCentral() }
+}
+rootProject.name = 'barochart-compose-sample'
+include ':app'
+// 저장소의 SDK 빌드를 컴포지트로 포함해 kr.coden:barochart-* 의존성을 소스로 대체한다.
+// 배포 리허설(scripts/rehearse-native-distribution.mjs)은 이 줄 대신 로컬 Maven을 쓴다.
+if (!providers.gradleProperty('barochartUseMaven').isPresent()) includeBuild('../../native/android/library')

@@ -1,9 +1,17 @@
 pluginManagement {
     repositories { google(); mavenCentral(); gradlePluginPortal() }
-    plugins { id 'com.android.library' version '8.13.2' }
+    plugins {
+        id 'com.android.library' version '8.13.2'
+        id 'org.jetbrains.kotlin.android' version '2.4.10'
+        id 'org.jetbrains.kotlin.plugin.compose' version '2.4.10'
+    }
 }
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories { google(); mavenCentral() }
 }
-rootProject.name = 'aster-android'
+// 루트 프로젝트가 SDK AAR(kr.coden:barochart-android)이다.
+rootProject.name = 'barochart-android'
+// Jetpack Compose 래퍼는 Kotlin·Compose 의존성을 코어 AAR에 넣지 않도록 별도 모듈·아티팩트로 둔다.
+include ':barochart-compose'
+project(':barochart-compose').projectDir = file('../compose')

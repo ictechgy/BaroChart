@@ -1,0 +1,4 @@
+// 모듈 설정은 app/build.gradle에 있다.
+if (providers.gradleProperty('sampleBuildRoot').isPresent()) {
+    layout.buildDirectory = file(providers.gradleProperty('sampleBuildRoot').get() + '/root')
+}
