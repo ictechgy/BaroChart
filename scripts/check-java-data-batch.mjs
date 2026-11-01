@@ -5,14 +5,14 @@ import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
-import {JAVA_HOST_PRODUCTION_SOURCES,javaHostCompilerArguments} from './check-java-host.mjs';
+import {JAVA_HOST_PRODUCTION_SOURCES,javaHostCompilerArguments,javaTypedApiSources} from './check-java-host.mjs';
 const root=fileURLToPath(new URL('../',import.meta.url));
 async function files(path){const result=[];for(const e of await readdir(path,{withFileTypes:true})){const p=join(path,e.name);if(e.isDirectory())result.push(...await files(p));else if(e.name.endsWith('.java'))result.push(p);}return result.sort();}
 export async function checkJavaDataBatch({java=process.env.ASTER_JAVA??'java'}={}){
  const temporary=await mkdtemp(join(tmpdir(),'barochart-data-batch-'));
  try{
   const classes=join(temporary,'classes'),empty=join(temporary,'empty'),trace=join(temporary,'init.log');await mkdir(classes);await mkdir(empty);
-  const sources=[...JAVA_HOST_PRODUCTION_SOURCES.map(p=>join(root,p)),...await files(join(root,'test/java-host-stubs')),...await files(join(root,'test/java-data-batch'))];
+  const sources=[...JAVA_HOST_PRODUCTION_SOURCES.map(p=>join(root,p)),...await javaTypedApiSources(root,JAVA_HOST_PRODUCTION_SOURCES),...await files(join(root,'test/java-host-stubs')),...await files(join(root,'test/java-data-batch'))];
   const hashes=async()=>Object.fromEntries(await Promise.all(sources.map(async p=>[p.slice(root.length),createHash('sha256').update(await readFile(p)).digest('hex')])));const before=await hashes();
   const run=args=>{const r=spawnSync(java,args,{encoding:'utf8',timeout:60000,maxBuffer:4*1024*1024});if(r.error||r.status!==0||r.stderr)throw new Error(`Java data batch check failed: ${r.error??r.status}\n${r.stdout}${r.stderr}`);return r.stdout;};
   run(javaHostCompilerArguments(classes,empty,sources));

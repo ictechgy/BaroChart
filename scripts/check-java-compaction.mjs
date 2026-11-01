@@ -6,6 +6,7 @@ import {mkdir, mkdtemp, readFile, readdir, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {dirname, join, relative, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {javaTypedApiSources} from './check-java-host.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const harnessClass = 'kr.coden.barochart.CompactionReceiptTest';
@@ -121,7 +122,7 @@ export async function checkJavaCompaction({java = process.env.ASTER_JAVA ?? 'jav
         const classes = join(temporary, 'classes'), empty = join(temporary, 'empty');
         const tracePath = join(temporary, 'class-initialization.log');
         await mkdir(classes); await mkdir(empty);
-        const sources = [...JAVA_COMPACTION_PRODUCTION_SOURCES.map(path => join(root, path)),
+        const sources = [...JAVA_COMPACTION_PRODUCTION_SOURCES.map(path => join(root, path)), ...await javaTypedApiSources(root, JAVA_COMPACTION_PRODUCTION_SOURCES),
             ...await filesIn(join(root, 'test/java-host-stubs'), '.java'), join(root, JAVA_COMPACTION_HARNESS)];
         const runnerPath = fileURLToPath(import.meta.url);
         const before = await sourceHashes([...sources, runnerPath]);

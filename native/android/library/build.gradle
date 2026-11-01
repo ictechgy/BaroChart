@@ -39,8 +39,10 @@ tasks.register('prepareAsterAssets', Sync) {
 tasks.named('preBuild').configure { dependsOn 'prepareAsterAssets' }
 tasks.withType(JavaCompile).configureEach { options.compilerArgs.addAll(['-Werror', '-Xlint:all,-options']) }
 
-// 계측 테스트 전용 의존성. SDK AAR 런타임 의존성은 0을 유지한다.
+// SDK AAR 런타임 의존성은 0을 유지한다(compileOnly·androidTest만).
 dependencies {
+    // Kotlin 소비자가 플랫폼 타입(!) 없이 쓰도록 nullability를 표기한다. 컴파일 전용이라 AAR 런타임 의존성은 없다.
+    compileOnly 'androidx.annotation:annotation:1.9.1'
     androidTestImplementation 'androidx.test:runner:1.6.2'
     androidTestImplementation 'androidx.test.ext:junit:1.2.1'
 }

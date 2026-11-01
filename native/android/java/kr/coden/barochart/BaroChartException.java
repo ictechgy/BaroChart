@@ -80,6 +80,7 @@ public final class BaroChartException extends RuntimeException {
     private static Code classifyHostMessage(String message) {
         if (message.equals("Engine closed") || message.equals("Chart engine closed") || message.equals("Engine closing")) return Code.ENGINE_CLOSED;
         if (message.contains("owning thread") || message.contains("main thread") || message.contains("main/UI owner")) return Code.WRONG_THREAD;
+        if (message.toLowerCase(java.util.Locale.ROOT).contains("cancel")) return Code.CANCELLED;
         if (message.contains("cleanup")) return Code.CLEANUP_PENDING;
         if (message.contains("budget")) return Code.BUDGET_EXCEEDED;
         return Code.UNAVAILABLE;

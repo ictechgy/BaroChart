@@ -13,7 +13,7 @@ for(const name of ['classes','dex','assets','lib/arm64-v8a'])await mkdir(join(ou
 run('python3',['-c','import zipfile,pathlib,sys\no=pathlib.Path(sys.argv[1])\nwith zipfile.ZipFile(sys.argv[2]) as z:\n for name in ["assets/aster-core.js","lib/arm64-v8a/libbarochart.so"]:\n  (o/name).write_bytes(z.read(name))',out,frozen]);
 const native=(await readdir(join(root,'native/android/java/kr/coden/barochart'))).filter(name=>name.endsWith('.java')).map(name=>name==='BaroChartEngine.java'?engine:join(root,'native/android/java/kr/coden/barochart',name));
 const fixtures=(await readdir(join(root,'examples/android'))).filter(name=>name.endsWith('.java')).map(name=>join(root,'examples/android',name));
-run(join(jdk,'bin/javac'),['--release','8','-cp',android,'-d',join(out,'classes'),...native,...fixtures]);
+run(join(jdk,'bin/javac'),['--release','8','-cp',android,'-sourcepath','native/android/annotation-stubs','-d',join(out,'classes'),...native,...fixtures]);
 const classes=(await readdir(join(out,'classes/kr/coden/barochart'))).map(name=>join(out,'classes/kr/coden/barochart',name));
 run(join(jdk,'bin/java'),['-cp',join(build,'lib/d8.jar'),'com.android.tools.r8.D8','--lib',android,'--min-api','26','--output',join(out,'dex'),...classes]);
 run(join(build,'aapt2'),['link','--manifest',join(root,'examples/android/AndroidManifest.xml'),'-I',android,'-A',join(out,'assets'),'--min-sdk-version','26','--target-sdk-version','36','-o',join(out,'unsigned.apk')]);

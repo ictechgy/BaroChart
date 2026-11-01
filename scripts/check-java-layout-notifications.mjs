@@ -6,6 +6,7 @@ import {mkdir, mkdtemp, readFile, readdir, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {dirname, join, relative, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {javaTypedApiSources} from './check-java-host.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const harnessClass = 'kr.coden.barochart.LayoutReceiptTest';
@@ -115,7 +116,7 @@ export async function checkJavaLayoutNotifications({java = process.env.ASTER_JAV
         const hostStubs = (await filesIn(join(root, 'test/java-host-stubs'), '.java'))
             .filter(path => !path.endsWith('/org/json/JSONObject.java'));
         const fixture = join(root, JAVA_LAYOUT_JSON_FIXTURE);
-        const sources = [...JAVA_LAYOUT_PRODUCTION_SOURCES.map(path => join(root, path)),
+        const sources = [...JAVA_LAYOUT_PRODUCTION_SOURCES.map(path => join(root, path)), ...await javaTypedApiSources(root, JAVA_LAYOUT_PRODUCTION_SOURCES),
             ...hostStubs, fixture, join(root, JAVA_LAYOUT_HARNESS)];
         const runnerPath = fileURLToPath(import.meta.url);
         const before = await sourceHashes([...sources, runnerPath]);

@@ -25,4 +25,12 @@ public class JSONObject {
     public JSONObject put(String name, long value) throws JSONException { throw new UnsupportedOperationException("Compile-only org.json stub"); }
     public JSONObject put(String name, double value) throws JSONException { throw new UnsupportedOperationException("Compile-only org.json stub"); }
     @Override public String toString() { throw new UnsupportedOperationException("Compile-only org.json stub"); }
+    // 타입 API(BaroChartEngine 타입 메서드·LowLevelJson)가 쓰는 Android org.json 시그니처
+    public double getDouble(String name) throws JSONException { throw new UnsupportedOperationException("Compile-only org.json stub"); }
+    public Object remove(String name) { throw new UnsupportedOperationException("Compile-only org.json stub"); }
+    public JSONObject putOpt(String name, Object value) throws JSONException { throw new UnsupportedOperationException("Compile-only org.json stub"); }
+    public String optString(String name) { throw new UnsupportedOperationException("Compile-only org.json stub"); }
+    public JSONObject optJSONObject(String name) { throw new UnsupportedOperationException("Compile-only org.json stub"); }
+    public JSONArray optJSONArray(String name) { throw new UnsupportedOperationException("Compile-only org.json stub"); }
+    public boolean isNull(String name) { throw new UnsupportedOperationException("Compile-only org.json stub"); }
 }

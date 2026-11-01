@@ -42,8 +42,8 @@ const identity={coreSHA256:sha(bundle),baseCoreSHA256:sha(base),jniSHA256:await 
 const sourceRoles={activity:'ScenePressureActivity.java',feed:'ScenePressureFeed.java',probe:'ScenePressureProbe.java'};if(pressure)identity.sourceRoles=sourceRoles;
 await writeFile(join(out,'assets/'+(pressure?'pressure-identity.json':'packet-identity.json')),JSON.stringify(identity)+'\n');
 // Existing API36 Pool deprecations remain isolated; no new warning suppression.
-run(join(jdk,'bin/javac'),['--release','8','-Werror','-Xlint:all,-options,-deprecation','-cp',android,'-d',join(out,'classes'),...production]);
-run(join(jdk,'bin/javac'),['--release','8','-Werror','-Xlint:all,-options','-cp',android+':'+join(out,'classes'),'-d',join(out,'classes'),...java.filter(file=>!production.includes(file))]);
+run(join(jdk,'bin/javac'),['--release','8','-Werror','-Xlint:all,-options,-deprecation','-cp',android,'-sourcepath','native/android/annotation-stubs','-d',join(out,'classes'),...production]);
+run(join(jdk,'bin/javac'),['--release','8','-Werror','-Xlint:all,-options','-cp',android+':'+join(out,'classes'),'-sourcepath','native/android/annotation-stubs','-d',join(out,'classes'),...java.filter(file=>!production.includes(file))]);
 const classes=(await readdir(join(out,'classes/kr/coden/barochart'))).filter(file=>file.endsWith('.class')).map(file=>join(out,'classes/kr/coden/barochart',file));
 run(join(jdk,'bin/java'),['-cp',join(tools,'lib/d8.jar'),'com.android.tools.r8.D8','--lib',android,'--min-api','26','--output',join(out,'dex'),...classes]);
 const pkg=pressure?'kr.coden.barochart.packet.pressure':'kr.coden.barochart.packet',activity=pressure?'ScenePressureActivity':'PacketActivity',instrumentation=pressure?'ScenePressureInstrumentation':'PacketInstrumentation';

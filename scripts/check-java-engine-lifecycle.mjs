@@ -6,6 +6,7 @@ import {mkdir,mkdtemp,readFile,readdir,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {dirname,extname,join,relative,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {javaTypedApiSources} from './check-java-host.mjs';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const harnessClass='kr.coden.barochart.EngineLifecycleHarness';
@@ -45,7 +46,7 @@ export async function checkJavaEngineLifecycle({java=process.env.ASTER_JAVA??'ja
         const javaFixtures=await filesIn(fixtureRoot,'.java');
         const nativeFixture=join(fixtureRoot,'native/aster_lifecycle_stub.c');
         const runnerPath=fileURLToPath(import.meta.url);
-        const sources=[...JAVA_ENGINE_LIFECYCLE_PRODUCTION_SOURCES.map(path=>join(root,path)),...javaFixtures];
+        const sources=[...JAVA_ENGINE_LIFECYCLE_PRODUCTION_SOURCES.map(path=>join(root,path)),...await javaTypedApiSources(root,JAVA_ENGINE_LIFECYCLE_PRODUCTION_SOURCES),...javaFixtures];
         const inputs=[...sources,nativeFixture,runnerPath];const before=await hashes(inputs);
         const javaVersion=run(java,['-version'],'Java version',15000);const compiler=run(java,['-m','jdk.compiler/com.sun.tools.javac.Main','-version'],'Java compiler version',15000);
         const home=process.env.ASTER_JAVA_HOME??await javaHome(java);const include=join(home,'include');const platform=process.platform==='darwin'?'darwin':'linux';

@@ -302,10 +302,12 @@ public final class BaroChartEngine implements AutoCloseable {
     public void addSeries(JSONObject options) throws JSONException {command("addSeries",options);}
     public void setSeries(String id,JSONObject patch) throws JSONException {command("setSeries",id,patch);}
     public void setSeriesValues(String id,JSONArray values) throws JSONException {command("setSeriesValues",id,values);}
-    public void removeSeries(String id) throws JSONException {command("removeSeries",id);}
+    /** Removes a series. Throws {@link BaroChartException}. */
+    public void removeSeries(String id){typed(()->command("removeSeries",id));}
     public JSONObject addIndicator(String id,String name,JSONObject params) throws JSONException {return (JSONObject)command("addIndicator",id,name,params);}
     public JSONObject setIndicatorParams(String id,JSONObject params) throws JSONException {return (JSONObject)command("setIndicatorParams",id,params);}
-    public void removeIndicator(String id) throws JSONException {command("removeIndicator",id);}
+    /** Removes an indicator. Throws {@link BaroChartException}. */
+    public void removeIndicator(String id){typed(()->command("removeIndicator",id));}
     public void registerIndicatorSource(String name,String source) throws JSONException {invoke("nativeRegisterIndicatorSource",name,source);notifyChanges();}
     /** Registers application-linked exports; no source evaluation or URL loading. */
     public JSONArray registerIndicatorModule(String id,int version) throws JSONException {return (JSONArray)command("registerIndicatorModule",id,version);}
@@ -336,7 +338,8 @@ public final class BaroChartEngine implements AutoCloseable {
     }
     public void editDrawing(String id,JSONObject patch) throws JSONException {command("editDrawing",id,patch);}
     public boolean deleteDrawing(String id) throws JSONException {return (Boolean)command("deleteDrawing",id);}
-    public void selectDrawing(String id) throws JSONException {command("selectDrawing",id);}
+    /** Selects a drawing by id, or clears the selection with {@code null}. Throws {@link BaroChartException}. */
+    public void selectDrawing(String id){typed(()->command("selectDrawing",id));}
     public void setTheme(JSONObject patch) throws JSONException {command("setTheme",patch);}
     public void setSymbol(JSONObject symbol) throws JSONException {command("setSymbol",symbol);}
     public void setCrosshairSnap(JSONObject options) throws JSONException {command("setCrosshairSnap",options);}
@@ -348,11 +351,16 @@ public final class BaroChartEngine implements AutoCloseable {
     public void setDrawingMagnet(JSONObject options) throws JSONException {command("setDrawingMagnet",options);}
     public void setTool(String tool) throws JSONException {command("setTool",tool);}
     public void setText(String text) throws JSONException {command("setText",text);}
-    public void undo() throws JSONException {command("undo");}
-    public void redo() throws JSONException {command("redo");}
-    public void fit() throws JSONException {command("fit");}
-    public String saveDrawings() throws JSONException {return (String)invoke("nativeSave");}
-    public void loadDrawings(String text) throws JSONException {command("loadDrawings",text);}
+    /** Undoes the last drawing change. Throws {@link BaroChartException}. */
+    public void undo(){typed(()->command("undo"));}
+    /** Redoes the last undone drawing change. Throws {@link BaroChartException}. */
+    public void redo(){typed(()->command("redo"));}
+    /** Fits all bars into view. Throws {@link BaroChartException}. */
+    public void fit(){typed(()->command("fit"));}
+    /** Saves drawings as a portable {@code aster.drawings} document. Throws {@link BaroChartException}. */
+    public String saveDrawings(){return typedCall(()->(String)invoke("nativeSave"));}
+    /** Loads an {@code aster.drawings} document. Throws {@link BaroChartException}. */
+    public void loadDrawings(String text){typed(()->command("loadDrawings",text));}
     @Override public void close(){
         if(Thread.currentThread()!=owner)throw new IllegalStateException("Close on owning thread");if(closing)return;closing=true;
         Error cleanupFailure=null;
@@ -656,5 +664,94 @@ public final class BaroChartEngine implements AutoCloseable {
         ZonedDateTime z=Instant.ofEpochMilli(time).atZone(timezone(timezone));
         String[] names={"year","month","day","hour","minute","second"};int[] values={z.getYear(),z.getMonthValue(),z.getDayOfMonth(),z.getHour(),z.getMinute(),z.getSecond()};JSONArray parts=new JSONArray();
         for(int i=0;i<names.length;i++)parts.put(new JSONObject().put("type",names[i]).put("value",String.format(Locale.ROOT,i==0?"%04d":"%02d",values[i])));return parts.toString();
+    }
+    // ---------------------------------------------------------------------------------------
+    // 타입 API: 모든 실패는 BaroChartException 하나로 던진다. 저수준 JSON API를 호출해 동작을 공유한다.
+    // ---------------------------------------------------------------------------------------
+
+    /** 예외를 던질 수 있는 타입 API 본문 */
+    private interface TypedAction { void run() throws Exception; }
+    /** 값을 돌려주는 타입 API 본문 */
+    private interface TypedCall<T> { T run() throws Exception; }
+    /** 본문의 모든 예외를 BaroChartException으로 바꿔 던진다 */
+    private static void typed(TypedAction body){try{body.run();}catch(Exception error){throw BaroChartException.wrap(error);}}
+    private static <T> T typedCall(TypedCall<T> body){try{return body.run();}catch(Exception error){throw BaroChartException.wrap(error);}}
+
+    /**
+     * Creates an engine with an explicit initial layout and no bars, owned by the calling thread.
+     * Prefer this over {@code new BaroChartEngine(context, count)}, which builds a labeled demonstration chart.
+     * Engines attached to a view must be created on the main thread.
+     */
+    @androidx.annotation.NonNull public static BaroChartEngine create(@androidx.annotation.NonNull Context context,@androidx.annotation.NonNull EngineOptions options){
+        return typedCall(()->new BaroChartEngine(context,0,LowLevelJson.engineOptions(options)));
+    }
+    /** Replaces every bar of the primary series. */
+    public void setBars(@androidx.annotation.NonNull java.util.List<Bar> bars){typed(()->setData(LowLevelJson.bars(bars)));}
+    /** Applies a streaming or correction event. Invalid events throw {@code INVALID_ARGUMENT} and leave data unchanged. */
+    public void apply(@androidx.annotation.NonNull DataEvent event){typed(()->applyDataEvent(LowLevelJson.event(event)));}
+    /** Adds a series. */
+    public void addSeries(@androidx.annotation.NonNull Series series){typed(()->addSeries(LowLevelJson.series(series)));}
+    /** Updates the series with {@code series.id}. Every field except id and type is applied, including the panel. */
+    public void updateSeries(@androidx.annotation.NonNull Series series){typed(()->{JSONObject patch=LowLevelJson.series(series);patch.remove("id");patch.remove("type");setSeries(series.id,patch);});}
+    /** Adds an indicator under {@code id}. Bind it to a series with {@code Series.builder(...).indicator(id)}. */
+    public void addIndicator(@androidx.annotation.NonNull Indicator indicator,@androidx.annotation.NonNull String id){typed(()->addIndicator(id,indicator.kind.wireName(),LowLevelJson.params(indicator.params)));}
+    /** Replaces indicator parameters synchronously. */
+    public void setIndicatorParams(@androidx.annotation.NonNull String id,@androidx.annotation.NonNull java.util.Map<String,ParamValue> params){typed(()->setIndicatorParams(id,LowLevelJson.params(params)));}
+    /** Reads one indicator output at a bar index; {@code output} {@code null} means the first output. */
+    @androidx.annotation.NonNull public IndicatorValue indicatorValue(@androidx.annotation.NonNull String id,@androidx.annotation.Nullable String output,int index){
+        return typedCall(()->{JSONObject raw=indicatorValueAt(id,output,index);return new IndicatorValue(optDouble(raw,"value"),raw.isNull("sourceIndex")?null:raw.getInt("sourceIndex"),optDouble(raw,"sourceTime"));});
+    }
+    /** Selects the active drawing tool for touch input. */
+    public void setTool(@androidx.annotation.NonNull DrawingTool tool){typed(()->setTool(tool.wireName()));}
+    /** Adds a drawing and returns its id. {@link DrawingTool#SELECT} is not a drawing and throws {@code INVALID_ARGUMENT}. */
+    @androidx.annotation.NonNull public String addDrawing(@androidx.annotation.NonNull Drawing drawing){
+        if(drawing.tool==DrawingTool.SELECT)throw new BaroChartException(BaroChartException.Code.INVALID_ARGUMENT,"The select tool cannot create a drawing.","Use a drawing tool such as TRENDLINE or HORIZONTAL.",null);
+        return typedCall(()->addDrawing(LowLevelJson.drawing(drawing)));
+    }
+    /** Changes an existing drawing's anchors, style, text, panel, lock and visibility. The tool cannot change. */
+    public void updateDrawing(@androidx.annotation.NonNull String id,@androidx.annotation.NonNull Drawing drawing){typed(()->{JSONObject patch=LowLevelJson.drawing(drawing);patch.remove("id");patch.remove("type");editDrawing(id,patch);});}
+    /** Deletes drawings as one undo step and returns how many were removed. Missing or locked ids throw. */
+    public int deleteDrawings(@androidx.annotation.NonNull java.util.List<String> ids){return typedCall(()->deleteDrawings(new JSONArray(ids)).getInt("changed"));}
+    /** Applies a complete theme. */
+    public void setTheme(@androidx.annotation.NonNull Theme theme){typed(()->setTheme(LowLevelJson.theme(theme)));}
+    /** Sets instrument metadata used for price and time formatting. */
+    public void setSymbol(@androidx.annotation.NonNull Symbol symbol){typed(()->setSymbol(LowLevelJson.symbol(symbol)));}
+    /** Current visible range in bar-index coordinates. */
+    @androidx.annotation.NonNull public VisibleRange visibleRange(){return typedCall(()->{JSONObject view=((JSONObject)command("inspect")).getJSONObject("view");return new VisibleRange(view.getDouble("from"),view.getDouble("to"));});}
+    /** Sets the visible range in bar-index coordinates; {@code to} must be greater than {@code from}. */
+    public void setVisibleRange(@androidx.annotation.NonNull VisibleRange range){typed(()->command("setVisibleRange",range.from,range.to));}
+    /** Saves chart settings, indicators, series and drawings as a portable {@code aster.workspace} document. */
+    @androidx.annotation.NonNull public String saveWorkspace(@androidx.annotation.NonNull DatasetBinding binding){return typedCall(()->saveWorkspace(LowLevelJson.binding(binding)));}
+    /**
+     * Restores a saved workspace onto this engine's current bars without blocking the main thread.
+     * The engine must be main-thread owned and hold the same bars the document was saved with.
+     * The callback runs once on the main thread with {@code null} on success. Cancelling reports {@code CANCELLED}.
+     */
+    @androidx.annotation.NonNull public RestoreHandle restoreWorkspace(@androidx.annotation.NonNull String document,@androidx.annotation.NonNull DatasetBinding binding,@androidx.annotation.NonNull RestoreCallback callback){
+        WorkspaceJob job=typedCall(()->restoreWorkspaceAsync(document,LowLevelJson.binding(binding),result->callback.onComplete(restoreFailure(result))));
+        return new RestoreHandle(job);
+    }
+    /** Values under the crosshair for a view of the given size, or {@code null} when there is no crosshair. */
+    @androidx.annotation.Nullable public CrosshairValues crosshair(double width,double height){
+        return typedCall(()->{Object raw=command("crosshairValues",width,height);return raw instanceof JSONObject?crosshairValues((JSONObject)raw):null;});
+    }
+    /** Whether {@link #close()} has completed. A closed engine rejects every call with {@code ENGINE_CLOSED}. */
+    public boolean isClosed(){return handle==0;}
+
+    /** 비동기 결과를 콜백용 예외로 바꾼다(성공이면 null) */
+    private static BaroChartException restoreFailure(AsyncResult result){
+        if(result.succeeded())return null;
+        // 취소되면 내부 정지 예외도 함께 오므로 상태를 먼저 본다
+        if("cancelled".equals(result.status))return new BaroChartException(BaroChartException.Code.CANCELLED,"Workspace restore was cancelled.",null,result.error);
+        if(result.error!=null)return BaroChartException.wrap(result.error);
+        return new BaroChartException(BaroChartException.Code.UNAVAILABLE,"Workspace restore finished with status "+result.status+".",null,null);
+    }
+    private static Double optDouble(JSONObject raw,String key) throws JSONException {return raw.isNull(key)?null:raw.getDouble(key);}
+    private static CrosshairValues crosshairValues(JSONObject raw) throws JSONException {
+        JSONObject primary=raw.optJSONObject("primary"),bar=primary==null?null:primary.optJSONObject("bar");
+        Bar value=bar==null?null:new Bar(bar.getDouble("time"),bar.getDouble("open"),bar.getDouble("high"),bar.getDouble("low"),bar.getDouble("close"),bar.getDouble("volume"));
+        java.util.List<CrosshairValues.SeriesValue> series=new java.util.ArrayList<>();JSONArray rows=raw.optJSONArray("series");
+        for(int i=0;rows!=null&&i<rows.length();i++){JSONObject row=rows.getJSONObject(i);series.add(new CrosshairValues.SeriesValue(row.optString("id"),row.optString("label"),row.optString("panel"),optDouble(row,"value")));}
+        return new CrosshairValues(raw.getInt("index"),raw.getDouble("time"),value,series);
     }
 }
