@@ -15,8 +15,8 @@ try{
  id=run(['create',`Aster-axes-${Date.now()}`,process.env.ASTER_IOS_DEVICE??'com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro',runtime]);
  if(!/^[A-F0-9-]{36}$/i.test(id))throw new Error('Invalid new device ID');
  run(['boot',id]);run(['bootstatus',id,'-b']);run(['install',id,'artifacts/AsterValidation.app']);
- run(['launch',id,'dev.aster.charts.validation','--axes-test']);
- const documents=join(run(['get_app_container',id,'dev.aster.charts.validation','data']),'Documents');
+ run(['launch',id,'kr.coden.barochart.validation','--axes-test']);
+ const documents=join(run(['get_app_container',id,'kr.coden.barochart.validation','data']),'Documents');
  let report;
  for(let i=0;i<120;i++){
   try{report=JSON.parse(await readFile(join(documents,'ios-axes-validation.json'),'utf8'));}catch{}
@@ -32,7 +32,7 @@ try{
  console.log(JSON.stringify({nativeChecks:report.passed,uiChecks:report.uiPassed,sharedChecks:report.shared.passed,runtime,nativeUITouchInjected:report.nativeUITouchInjected,asyncContextHandoff:report.asyncContextHandoff}));
 }finally{
  if(id&&/^[A-F0-9-]{36}$/i.test(id)){
-  run(['terminate',id,'dev.aster.charts.validation'],{allowFailure:true});
+  run(['terminate',id,'kr.coden.barochart.validation'],{allowFailure:true});
   run(['shutdown',id],{allowFailure:true});run(['delete',id],{allowFailure:true});
  }
 }

@@ -2,8 +2,8 @@ import UIKit
 import JavaScriptCore
 
 private final class WeakChartReference {
-    weak var value:AsterChartView?
-    init(_ value:AsterChartView){self.value=value}
+    weak var value:BaroChartUIView?
+    init(_ value:BaroChartUIView){self.value=value}
 }
 final class MobileUXWindow:UIWindow {
     var afterTouchEvent:((Int,[ObjectIdentifier?])->Void)?
@@ -24,13 +24,13 @@ final class MobileUXScene:UIResponder,UIWindowSceneDelegate {
     func sceneDidDisconnect(_ scene:UIScene){controller?.finish()}
 }
 final class MobileUXController:UIViewController {
-    var engine:AsterEngine!,chart:AsterChartView!,chartHost=UIViewController(),status=UILabel(),report:[String:Any]=[:],checks:[String]=[],failures:[String]=[],lifecycle:[String]=[],interruptOnNextInput:String?,interruptions:[[String:Any]]=[],pendingBatchRecord=false,batchEvents:[[String:Any]]=[],buttons:[String:UIButton]=[:],lastAction="startup",didRunActiveLaunchCase=false
+    var engine:BaroChartEngine!,chart:BaroChartUIView!,chartHost=UIViewController(),status=UILabel(),report:[String:Any]=[:],checks:[String]=[],failures:[String]=[],lifecycle:[String]=[],interruptOnNextInput:String?,interruptions:[[String:Any]]=[],pendingBatchRecord=false,batchEvents:[[String:Any]]=[],buttons:[String:UIButton]=[:],lastAction="startup",didRunActiveLaunchCase=false
     let time=1700000000000.0
     var documents:URL{FileManager.default.urls(for:.documentDirectory,in:.userDomainMask)[0]}
     override func viewDidLoad(){super.viewDidLoad();view.backgroundColor = .black
         if let data=try? Data(contentsOf:documents.appendingPathComponent("ios-mobile-batch.json")),let previous=try? JSONSerialization.jsonObject(with:data) as? [String:Any],let events=previous["batchTouchEvents"] as? [[String:Any]]{batchEvents=events}
-        do{engine=try AsterEngine(bundleURL:Bundle.main.url(forResource:"aster-core",withExtension:"js")!,count:0);try reset()}catch{failures.append(String(describing:error));report["startupError"]=String(describing:error);write();return}
-        addChild(chartHost);chartHost.didMove(toParent:self);chart=AsterChartView(engine:engine);chart.accessibilityIdentifier="aster-chart";chart.translatesAutoresizingMaskIntoConstraints=false;chartHost.view.addSubview(chart)
+        do{engine=try BaroChartEngine(bundleURL:Bundle.main.url(forResource:"aster-core",withExtension:"js")!,count:0);try reset()}catch{failures.append(String(describing:error));report["startupError"]=String(describing:error);write();return}
+        addChild(chartHost);chartHost.didMove(toParent:self);chart=BaroChartUIView(engine:engine);chart.accessibilityIdentifier="aster-chart";chart.translatesAutoresizingMaskIntoConstraints=false;chartHost.view.addSubview(chart)
         NSLayoutConstraint.activate([chart.leadingAnchor.constraint(equalTo:chartHost.view.leadingAnchor),chart.trailingAnchor.constraint(equalTo:chartHost.view.trailingAnchor),chart.topAnchor.constraint(equalTo:chartHost.view.topAnchor),chart.bottomAnchor.constraint(equalTo:chartHost.view.bottomAnchor)])
         chart.onInteraction = {[weak self] in self?.interaction()}
         let rows=[[("Reset","reset"),("Draw","draw"),("Select","select"),("Pending","pending")],[("Enable","enable-touch"),("Disable","disable-touch"),("Trait","trait-touch"),("Font","font-touch")],[("Resize","resize-touch"),("Checks","checks"),("Large","large"),("Finish","finish")]]
@@ -42,7 +42,7 @@ final class MobileUXController:UIViewController {
         DispatchQueue.main.async{[weak self] in if ProcessInfo.processInfo.arguments.contains("--reentry"){self?.perform("reentry")}else if let batch=ProcessInfo.processInfo.arguments.first(where:{$0.hasPrefix("--batch-")}){self?.perform(String(batch.dropFirst(2)))}else{self?.publish()}}
     }
     func runActiveLaunchCase(){guard !didRunActiveLaunchCase,ProcessInfo.processInfo.arguments.contains("--cancel-semantics") else{return};didRunActiveLaunchCase=true;perform("cancel-semantics")}
-    func probe(_ source:String)throws->JSValue {guard let value=engine.context.evaluateScript(source) else{throw AsterError.invalidScene};if let exception=engine.context.exception{engine.context.exception=nil;throw AsterError.javaScript(exception.toString() ?? "Probe")};return value}
+    func probe(_ source:String)throws->JSValue {guard let value=engine.context.evaluateScript(source) else{throw BaroChartLowLevelError.invalidScene};if let exception=engine.context.exception{engine.context.exception=nil;throw BaroChartLowLevelError.javaScript(exception.toString() ?? "Probe")};return value}
     func state()throws->[String:Any]{try engine.command("inspect").toDictionary() as? [String:Any] ?? [:]}
     func observerCount()->Int {Mirror(reflecting:engine!).children.first{$0.label=="observers"}.map{Mirror(reflecting:$0.value).children.count} ?? -1}
     func reset()throws {
@@ -99,7 +99,7 @@ final class MobileUXController:UIViewController {
     func checkAccessibleEscape()throws {
         try reset();let p=try point(time:time+112*60000,price:100);_=try engine.call("nativeResize",[chart.bounds.width,chart.bounds.height]);_=try engine.call("nativePointer",["down",77,p[0],p[1]]);_=try engine.call("nativePointer",["move",77,p[0],p[1]])
         let before=try state(),hadCrosshair=try probe("nativeModel.crosshair!==null").toBool()
-        guard let action=chart.accessibilityCustomActions?.first(where:{$0.name=="Cancel interaction"}),let handler=action.actionHandler else{throw AsterError.invalidScene};let accepted=handler(action)
+        guard let action=chart.accessibilityCustomActions?.first(where:{$0.name=="Cancel interaction"}),let handler=action.actionHandler else{throw BaroChartLowLevelError.invalidScene};let accepted=handler(action)
         let after=try state(),crosshairCleared=try probe("nativeModel.crosshair===null").toBool()
         require(before["selected"] as? String=="line"&&hadCrosshair,"Accessible Escape fixture begins with selected drawing and crosshair")
         require(UIApplication.shared.applicationState == .active&&accepted,"Accessible Escape is accepted by an active UIKit view")
@@ -107,7 +107,7 @@ final class MobileUXController:UIViewController {
         report["accessibleEscape"]=["selectedBefore":before["selected"]!,"selectedAfter":after["selected"]!,"crosshairBefore":hadCrosshair,"crosshairCleared":crosshairCleared,"pointersAfter":after["pointers"]!,"accepted":accepted,"appActive":UIApplication.shared.applicationState == .active,"boundary":"Programmatic UIKit custom action handler on pending controller edit"]
     }
     func checkReentrantDisposal()throws {
-        let borrowed=try AsterEngine(bundleURL:Bundle.main.url(forResource:"aster-core",withExtension:"js")!,count:24),target=AsterChartView(engine:borrowed,frame:chartHost.view.bounds),weakTarget=WeakChartReference(target)
+        let borrowed=try BaroChartEngine(bundleURL:Bundle.main.url(forResource:"aster-core",withExtension:"js")!,count:24),target=BaroChartUIView(engine:borrowed,frame:chartHost.view.bounds),weakTarget=WeakChartReference(target)
         chartHost.view.addSubview(target);target.adjustsFontForContentSizeCategory=true;target.traitOverrides.preferredContentSizeCategory = .accessibilityExtraExtraExtraLarge;target.layoutIfNeeded()
         let beforeFont=try borrowed.call("nativeThemeFont").toString()!;var callbacks=0,observerCalls=0
         target.onInteraction={callbacks+=1;if callbacks<2{weakTarget.value?.dispose()}}
@@ -128,7 +128,7 @@ final class MobileUXController:UIViewController {
         require(observerCount()==0,"Dispose removes engine subscriptions while view remains retained")
         _=try engine.scene(width:402,height:600);require(true,"Disposed view keeps borrowed engine usable")
         previous.removeFromSuperview();chart=nil
-        chart=AsterChartView(engine:engine,frame:chartHost.view.bounds);chart.accessibilityIdentifier="aster-chart";chartHost.view.addSubview(chart);chart.onInteraction = {[weak self] in self?.interaction()};require(observerCount()==1,"Replacement view owns one subscription")
+        chart=BaroChartUIView(engine:engine,frame:chartHost.view.bounds);chart.accessibilityIdentifier="aster-chart";chartHost.view.addSubview(chart);chart.onInteraction = {[weak self] in self?.interaction()};require(observerCount()==1,"Replacement view owns one subscription")
         return weakReference
     }
     #endif
@@ -158,8 +158,8 @@ final class MobileUXController:UIViewController {
         chartHost.view.addSubview(chart);chart.frame=chartHost.view.bounds;chart.translatesAutoresizingMaskIntoConstraints=true;require(observerCount()==1,"Reattach restores exactly one subscription")
         chart.layoutIfNeeded();_=try engine.command("setTheme",[["font":"12px monospace"]]);try pending();chart.setNeedsLayout();chart.layoutIfNeeded();require(try state()["pointers"] as? Int==1,"Same bounds layout preserves active controller input")
         let previousBounds=chart.bounds;chart.bounds.size.width-=10;chart.setNeedsLayout();chart.layoutIfNeeded();require(try state()["pointers"] as? Int==0,"Bounds change cancels controller before resize");chart.bounds=previousBounds;chart.setNeedsLayout();chart.layoutIfNeeded()
-        weak var weakView:AsterChartView?
-        autoreleasepool{let transient=AsterChartView(engine:engine,frame:chartHost.view.bounds);weakView=transient}
+        weak var weakView:BaroChartUIView?
+        autoreleasepool{let transient=BaroChartUIView(engine:engine,frame:chartHost.view.bounds);weakView=transient}
         require(weakView==nil&&observerCount()==1,"Unattached view deallocates without retained subscriptions")
         #if ASTER_MOBILE_UX_CURRENT
             let weakDisposed=try autoreleasepool{try replaceDisposedChart()},aliveInsideAction=weakDisposed.value != nil

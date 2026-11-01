@@ -9,15 +9,15 @@ import {dirname, join, relative, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const harnessClass = 'dev.aster.charts.DrawingTranslationReceiptTest';
+const harnessClass = 'kr.coden.barochart.DrawingTranslationReceiptTest';
 export const JAVA_DRAWING_TRANSLATION_PRODUCTION_SOURCES = Object.freeze([
-    'native/android/java/dev/aster/charts/AsterEngine.java',
-    'native/android/java/dev/aster/charts/AsterColumns.java',
-    'native/android/java/dev/aster/charts/WorkspaceRestoreJob.java',
-    'native/android/java/dev/aster/charts/NativeJobBudget.java',
-    'native/android/java/dev/aster/charts/ParamsUpdateJob.java',
+    'native/android/java/kr/coden/barochart/BaroChartEngine.java',
+    'native/android/java/kr/coden/barochart/BaroChartColumns.java',
+    'native/android/java/kr/coden/barochart/WorkspaceRestoreJob.java',
+    'native/android/java/kr/coden/barochart/NativeJobBudget.java',
+    'native/android/java/kr/coden/barochart/ParamsUpdateJob.java',
 ]);
-export const JAVA_DRAWING_TRANSLATION_HARNESS = 'test/java-drawing-translation-receipt/dev/aster/charts/DrawingTranslationReceiptTest.java';
+export const JAVA_DRAWING_TRANSLATION_HARNESS = 'test/java-drawing-translation-receipt/kr/coden/barochart/DrawingTranslationReceiptTest.java';
 export const JAVA_DRAWING_TRANSLATION_EXPECTED = Object.freeze({scenarios: 65, checks: 103});
 export const JAVA_DRAWING_TRANSLATION_SCENARIOS = Object.freeze([
     'integer-zero', 'long-zero', 'double-zero', 'double-negative-zero',
@@ -41,7 +41,7 @@ export const JAVA_DRAWING_TRANSLATION_SCENARIOS = Object.freeze([
 export const JAVA_DRAWING_TRANSLATION_BOUNDARY = Object.freeze({
     evidence: 'Production nested receipt decoder executed; full Engine typechecked against test-only Android/org.json signatures; JSONObject initializes only its opaque NULL placeholder',
     productionDecoderRuntimeTested: true,
-    productionDecoderMethodExecuted: 'AsterEngine.DrawingTranslationReceipt.changed',
+    productionDecoderMethodExecuted: 'BaroChartEngine.DrawingTranslationReceipt.changed',
     javaSourceLevel: 8,
     javaBytecodeTarget: 8,
     javaSE8ApiCompatibilityVerified: false,
@@ -105,8 +105,8 @@ export function verifyJavaDrawingTranslationOutput(stdout, stderr) {
 
 export function verifyJavaDrawingTranslationInitialization(trace) {
     const initialized = [...trace.matchAll(/\bInitializing '([^']+)'/g)].map(match => match[1]);
-    const production = initialized.filter(name => name.startsWith('dev/aster/charts/'));
-    const decoder = 'dev/aster/charts/AsterEngine$DrawingTranslationReceipt';
+    const production = initialized.filter(name => name.startsWith('kr/coden/barochart/'));
+    const decoder = 'kr/coden/barochart/BaroChartEngine$DrawingTranslationReceipt';
     if (!production.includes(decoder)) throw new Error('Class initialization trace did not observe the production nested decoder');
     for (const name of production) if (name !== decoder && name !== harnessClass.replaceAll('.', '/'))
         throw new Error(`Unexpected production host/helper class initialized: ${name}`);
@@ -137,8 +137,8 @@ export async function checkJavaDrawingTranslation({java = process.env.ASTER_JAVA
             const bytes = await readFile(path);
             if (bytes.readUInt32BE(0) !== 0xcafebabe || bytes.readUInt16BE(6) !== 52) throw new Error(`Expected Java 8 bytecode: ${path}`);
         }
-        for (const name of ['AsterEngine', 'AsterEngine$DrawingTranslationReceipt', 'AsterColumns', 'WorkspaceRestoreJob', 'DrawingTranslationReceiptTest'])
-            await readFile(join(classes, 'dev/aster/charts', `${name}.class`));
+        for (const name of ['BaroChartEngine', 'BaroChartEngine$DrawingTranslationReceipt', 'BaroChartColumns', 'WorkspaceRestoreJob', 'DrawingTranslationReceiptTest'])
+            await readFile(join(classes, 'kr/coden/barochart', `${name}.class`));
         // Empty native-library lookup + class-init tracing guard against accidentally running Engine.
         const runtime = runJava(java, ['-ea', `-Djava.library.path=${empty}`,
             `-Xlog:class+init=info:file=${tracePath}`, '-cp', classes, harnessClass], 15000);

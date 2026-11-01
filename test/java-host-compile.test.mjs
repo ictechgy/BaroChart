@@ -11,16 +11,16 @@ test('Java host check keeps its non-Android compile-only evidence boundary expli
         assert.equal(JAVA_HOST_BOUNDARY[name], false, name);
     }
     assert.deepEqual(JAVA_HOST_PRODUCTION_SOURCES, [
-        'native/android/java/dev/aster/charts/AsterEngine.java',
-        'native/android/java/dev/aster/charts/AsterColumns.java',
-        'native/android/java/dev/aster/charts/WorkspaceRestoreJob.java',
-        'native/android/java/dev/aster/charts/NativeJobBudget.java',
-        'native/android/java/dev/aster/charts/ParamsUpdateJob.java',
+        'native/android/java/kr/coden/barochart/BaroChartEngine.java',
+        'native/android/java/kr/coden/barochart/BaroChartColumns.java',
+        'native/android/java/kr/coden/barochart/WorkspaceRestoreJob.java',
+        'native/android/java/kr/coden/barochart/NativeJobBudget.java',
+        'native/android/java/kr/coden/barochart/ParamsUpdateJob.java',
     ]);
 });
 
 test('Java host command uses explicit source inputs and temporary-only output', () => {
-    const inputs = ['/repo/native/AsterEngine.java', '/repo/test/JSONObject.java'];
+    const inputs = ['/repo/native/BaroChartEngine.java', '/repo/test/JSONObject.java'];
     assert.deepEqual(javaHostCompilerArguments('/tmp/classes', '/tmp/empty', inputs), [
         '-m', 'jdk.compiler/com.sun.tools.javac.Main', '-source', '8', '-target', '8',
         '-Xlint:all,-options', '-Werror', '-proc:none', '-implicit:none', '-encoding', 'UTF-8',

@@ -12,9 +12,9 @@ test('Java workspace ownership evidence is scoped to the production helper with 
         'androidRuntimeExecuted', 'jniExecuted', 'nativeAllocatorExecuted', 'jsonRuntimeExecuted',
         'performanceMeasured', 'unavailableOwnerCleanupSupported']) assert.equal(JAVA_WORKSPACE_JOB_BOUNDARY[key], false, key);
     assert.deepEqual(JAVA_WORKSPACE_JOB_SOURCES, [
-        'native/android/java/dev/aster/charts/WorkspaceRestoreJob.java',
-    'native/android/java/dev/aster/charts/NativeJobBudget.java',
-        'test/java-workspace-job/dev/aster/charts/WorkspaceRestoreJobHarness.java',
+        'native/android/java/kr/coden/barochart/WorkspaceRestoreJob.java',
+    'native/android/java/kr/coden/barochart/NativeJobBudget.java',
+        'test/java-workspace-job/kr/coden/barochart/WorkspaceRestoreJobHarness.java',
     ]);
 });
 
@@ -43,7 +43,7 @@ test('Java workspace owner-unavailable result explicitly refuses a false termina
 });
 
 test('Java workspace harness has no Android, JSON or JNI runtime fixture imports', async () => {
-    const source = await readFile(new URL('./java-workspace-job/dev/aster/charts/WorkspaceRestoreJobHarness.java', import.meta.url), 'utf8');
+    const source = await readFile(new URL('./java-workspace-job/kr/coden/barochart/WorkspaceRestoreJobHarness.java', import.meta.url), 'utf8');
     assert.doesNotMatch(source, /^import\s+(?:android\.|org\.json\.)/m);
     assert.doesNotMatch(source, /System\.loadLibrary|native\s+\w+\s*\(/);
     assert.match(source, /implements WorkspaceRestoreJob\.Host/);
@@ -54,7 +54,7 @@ test('Java workspace harness has no Android, JSON or JNI runtime fixture imports
 
 
 test('Android adapter initial enqueue delegates to the executable production ownership helper', async () => {
-    const source = await readFile(new URL('../native/android/java/dev/aster/charts/AsterEngine.java', import.meta.url), 'utf8');
+    const source = await readFile(new URL('../native/android/java/kr/coden/barochart/BaroChartEngine.java', import.meta.url), 'utf8');
     assert.match(source, /activeWorkspace\s*=\s*result\s*;\s*state\.enqueueInitial\(\)\s*;\s*return result/);
     assert.equal(JAVA_WORKSPACE_JOB_BOUNDARY.adapterInitialEnqueueMethodExecuted, 'WorkspaceRestoreJob.enqueueInitial');
     assert.equal(JAVA_WORKSPACE_JOB_BOUNDARY.androidEngineHostExecuted, false);

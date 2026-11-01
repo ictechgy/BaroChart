@@ -27,14 +27,14 @@ node/summarize.mjs
 각 SDK root에 아래 파일이 있어야 합니다.
 
 ```
-native/AsterNative.swift
-native/AsterColumns.swift
-native/AsterFrameRenderer.swift
+native/BaroChartEngine.swift
+native/BaroChartColumns.swift
+native/BaroChartFrameRenderer.swift
 native/Resources/aster-core.js
 src/core/*.mjs
 ```
 
-baseline20720b9b7c8bfb91e209cf9b32b9ed2aa6a3d24e15fb23880822419b753b3a53은479b870/보존0.2.9에 해당합니다. candidate 준비 시 현재 final bundle SHA를 명시합니다. SHA가 다르면 진행하지 않습니다. root의`native/AsterUIKit.swift`는 macOS offscreen compile에 사용하지 않습니다.
+baseline20720b9b7c8bfb91e209cf9b32b9ed2aa6a3d24e15fb23880822419b753b3a53은479b870/보존0.2.9에 해당합니다. candidate 준비 시 현재 final bundle SHA를 명시합니다. SHA가 다르면 진행하지 않습니다. root의`native/BaroChartUIView.swift`는 macOS offscreen compile에 사용하지 않습니다.
 
 ## prepare (측정하지 않음)
 

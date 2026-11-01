@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 
-const swift=readFileSync(new URL('../native/AsterNative.swift',import.meta.url),'utf8');
+const swift=readFileSync(new URL('../native/BaroChartEngine.swift',import.meta.url),'utf8');
 
 function method(source,marker){
  const start=source.indexOf(marker);assert.ok(start>=0,marker);
@@ -19,7 +19,7 @@ for(const [name,marker,object,message] of [
  const body=method(swift,marker),guardText=`JSONSerialization.isValidJSONObject(${object})`;
  const guardAt=body.indexOf(guardText),serializeAt=body.indexOf('JSONSerialization.data(withJSONObject:');
  assert.ok(guardAt>=0,guardText);assert.ok(serializeAt>guardAt,`${name} guard must precede serialization`);
- assert.match(body,new RegExp(`AsterAsyncError\\.invalidProtocol\\("${message}"\\)`));
+ assert.match(body,new RegExp(`BaroChartAsyncError\\.invalidProtocol\\("${message}"\\)`));
 });
 
 test('Swift JSON input probe covers all public async APIs and required invalid cases',()=>{

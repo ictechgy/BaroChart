@@ -1,4 +1,4 @@
-package dev.aster.charts;
+package kr.coden.barochart;
 
 import android.content.Context;
 import android.os.Handler;
@@ -22,8 +22,8 @@ final class RecentAPIVerification {
     private final JSONArray checks = new JSONArray();
     private final JSONArray failures = new JSONArray();
     private final Handler main = new Handler(Looper.getMainLooper());
-    private AsterEngine engine;
-    private AsterEngine target;
+    private BaroChartEngine engine;
+    private BaroChartEngine target;
     private Done done;
 
     /**
@@ -34,7 +34,7 @@ final class RecentAPIVerification {
     void run(Context context, Done callback) {
         done = callback;
         try {
-            engine = new AsterEngine(context, 0);
+            engine = new BaroChartEngine(context, 0);
             engine.setData(bars(64, 0));
             engine.addIndicator("recent-ema", "ema", new JSONObject().put("period", 3));
             compaction();
@@ -90,7 +90,7 @@ final class RecentAPIVerification {
     /** 비동기 작업공간 복원: 저장 → 새 엔진 복원 성공 */
     private void workspaceAsync(Context context) throws Exception {
         String document = engine.saveWorkspace(BINDING);
-        target = new AsterEngine(context, 0);
+        target = new BaroChartEngine(context, 0);
         target.setData(bars(64, 24));
         target.restoreWorkspaceAsync(document, BINDING, result -> step(() -> {
             require(result.succeeded() && target.saveWorkspace(BINDING).equals(document), "restoreWorkspaceAsync reproduces the saved document");
@@ -144,11 +144,11 @@ final class RecentAPIVerification {
     /** 람다에서 checked 예외를 허용하는 단계 */
     private interface ThrowingStep { void run() throws Exception; }
 
-    private static int storedBars(AsterEngine value) throws JSONException {
+    private static int storedBars(BaroChartEngine value) throws JSONException {
         return ((JSONObject) value.command("inspect")).getInt("storedBars");
     }
 
-    private static long lastTime(AsterEngine value) throws JSONException {
+    private static long lastTime(BaroChartEngine value) throws JSONException {
         return ((JSONObject) value.command("inspect")).getJSONObject("lastBar").getLong("time");
     }
 

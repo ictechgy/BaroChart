@@ -1,6 +1,6 @@
 # 독립 SwiftPM ingestion 소비자
 
-`import AsterNative`로 SDK product와 기본 `Bundle.module` 자원을 소비한다. SDK 소스를 앱 target에 넣거나 private JS context를 읽지 않는다. 10개 named ingestion 메서드, 입력 소유권, pending 저장·복원, 커서·취소 원장, typed error, 격리된 JSC async handoff를 작은8bar fixture로 검증한다. UI나 성능 측정은 하지 않는다.
+`import BaroChart`로 SDK product와 기본 `Bundle.module` 자원을 소비한다. SDK 소스를 앱 target에 넣거나 private JS context를 읽지 않는다. 10개 named ingestion 메서드, 입력 소유권, pending 저장·복원, 커서·취소 원장, typed error, 격리된 JSC async handoff를 작은8bar fixture로 검증한다. UI나 성능 측정은 하지 않는다.
 
 저장소 루트에서 새 임시 작업 공간을 사용한다.
 

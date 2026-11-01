@@ -1,4 +1,4 @@
-package dev.aster.charts;
+package kr.coden.barochart;
 import android.graphics.*;
 import org.json.*;
 
@@ -7,24 +7,24 @@ final class APIVerification {
     private final JSONArray checks=new JSONArray();
     private void check(boolean value,String reason){if(!value)throw new AssertionError(reason);checks.put(reason);}
     private JSONObject row(long time,double close) throws JSONException {return new JSONObject().put("time",time).put("open",1.2e-12).put("high",2e-12).put("low",1e-12).put("close",close).put("volume",7);}
-    private JSONObject inspect(AsterEngine e) throws JSONException {return (JSONObject)e.command("inspect");}
+    private JSONObject inspect(BaroChartEngine e) throws JSONException {return (JSONObject)e.command("inspect");}
     private JSONObject comparisonAxis(JSONObject scene)throws JSONException {JSONArray axes=scene.getJSONObject("layout").getJSONArray("panels").getJSONObject(0).getJSONArray("axes");for(int i=0;i<axes.length();i++)if("comparison-B".equals(axes.getJSONObject(i).optString("axisId")))return axes.getJSONObject(i);throw new AssertionError("Missing comparison axis layout");}
     static String comparisonLabel(JSONObject packet)throws JSONException {
         JSONObject reading=packet.optJSONObject("reading");if(reading==null)return packet.getString("text");JSONObject bar=reading.getJSONObject("primary").getJSONObject("bar");String b="removed";JSONArray series=reading.getJSONArray("series");for(int i=0;i<series.length();i++){JSONObject s=series.getJSONObject(i);if("comparison-B-line".equals(s.getString("id")))b=s.isNull("value")?"gap":String.format(java.util.Locale.ROOT,"%.3f",s.getDouble("value"));}
         return String.format(java.util.Locale.ROOT,"A OHLCV · O %.2f H %.2f L %.2f C %.2f V %.0f / SYNTH:B %s / UTC %d",bar.getDouble("open"),bar.getDouble("high"),bar.getDouble("low"),bar.getDouble("close"),bar.getDouble("volume"),b,reading.getLong("time"));
     }
-    private double[] comparisonPoint(AsterEngine e,double width,double height,int index,double price)throws JSONException {
+    private double[] comparisonPoint(BaroChartEngine e,double width,double height,int index,double price)throws JSONException {
         JSONObject scene=e.scene(width,height),p=scene.getJSONObject("layout").getJSONArray("panels").getJSONObject(0),a=comparisonAxis(scene),view=inspect(e).getJSONObject("view");double min=a.getDouble("min"),max=a.getDouble("max"),v=price;
         if("log".equals(a.getString("scale"))){min=Math.log(min);max=Math.log(max);v=Math.log(v);}double fraction=(v-min)/(max-min);if(!a.getBoolean("inverted"))fraction=1-fraction;
         return new double[]{p.getDouble("left")+(index-view.getDouble("from"))/(view.getDouble("to")-view.getDouble("from"))*(p.getDouble("right")-p.getDouble("left")),a.getDouble("top")+fraction*(a.getDouble("bottom")-a.getDouble("top"))};
     }
-    private JSONObject comparisonMove(AsterEngine e,AsterChartView view,int index)throws JSONException {
+    private JSONObject comparisonMove(BaroChartEngine e,BaroChartView view,int index)throws JSONException {
         float density=view.getResources().getDisplayMetrics().density;double width=view.getWidth()/density,height=view.getHeight()/density;double[] p=comparisonPoint(e,width,height,index,2100);long time=android.os.SystemClock.uptimeMillis();
         for(int action:new int[]{android.view.MotionEvent.ACTION_DOWN,android.view.MotionEvent.ACTION_MOVE,android.view.MotionEvent.ACTION_UP}){android.view.MotionEvent event=android.view.MotionEvent.obtain(time,time,action,(float)p[0]*density,(float)p[1]*density,0);view.dispatchTouchEvent(event);event.recycle();}
         return (JSONObject)e.invoke("nativeComparisonReadout",width,height);
     }
     /** Axis ABI plus synthetic MotionEvent routing through the actual Android View. */
-    JSONObject runAxes(AsterEngine e,AsterChartView view)throws Exception {
+    JSONObject runAxes(BaroChartEngine e,BaroChartView view)throws Exception {
         JSONObject shared=(JSONObject)e.invoke("nativeAxesSelfTest");check(shared.getJSONArray("checks").length()>0&&shared.getInt("passed")==shared.getJSONArray("checks").length(),"Shared independent-axis numerical checks");
         JSONObject setup=(JSONObject)e.invoke("nativeComparisonDemo");check(setup.getInt("bars")==24&&setup.getInt("matches")==12&&setup.getInt("gaps")==12,"Exact UTC join counts");view.setTool("select");
         float density=view.getResources().getDisplayMetrics().density;double width=view.getWidth()/density,height=view.getHeight()/density;JSONObject scene=e.scene(width,height),p=scene.getJSONObject("layout").getJSONArray("panels").getJSONObject(0),axis=comparisonAxis(scene);
@@ -41,7 +41,7 @@ final class APIVerification {
         Bitmap bitmap=Bitmap.createBitmap(view.getWidth(),view.getHeight(),Bitmap.Config.ARGB_8888);view.draw(new Canvas(bitmap));int foreground=0;for(int y=0;y<bitmap.getHeight();y+=7)for(int x=0;x<bitmap.getWidth();x+=7)if(bitmap.getPixel(x,y)!=Color.rgb(12,19,32))foreground++;bitmap.recycle();check(view.lastError==null&&foreground>100,"Android independent axes raster");
         return new JSONObject().put("passed",checks.length()).put("checks",checks).put("shared",shared).put("matchedReadout",matched).put("gapReadout",gap).put("syntheticMotionEvents",true).put("externalSeriesIsOHLCV",false).put("physicalDevice",false);
     }
-    JSONObject run(AsterEngine e,AsterChartView view) throws Exception {
+    JSONObject run(BaroChartEngine e,BaroChartView view) throws Exception {
         int[] notified={0};Runnable observer=()->notified[0]++;e.addChangeListener(observer);
         try {
             e.invoke("nativeInit",0);long t=1700000000123L;
@@ -73,7 +73,7 @@ final class APIVerification {
             return new JSONObject().put("passed",checks.length()).put("checks",checks).put("mutationNotifications",notified[0]).put("fontSmallInk",small).put("fontLargeInk",large).put("observerFailureIsolated",true).put("hardening",hardening).put("canvasStateRestored",true);
         } finally {e.removeChangeListener(observer);}
     }
-    private int textInk(AsterChartView view,String font) throws JSONException {
+    private int textInk(BaroChartView view,String font) throws JSONException {
         Bitmap bitmap=Bitmap.createBitmap(240,100,Bitmap.Config.ARGB_8888);
         JSONObject command=new JSONObject().put("op","text").put("x",10).put("y",80).put("text","MMMM").put("color","#ffffff").put("font",font);
         view.render(new Canvas(bitmap),new JSONObject().put("background","#000000").put("commands",new JSONArray().put(command)));

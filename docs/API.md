@@ -187,15 +187,15 @@ GPU 프레임은 최대 200,000 instance와 최대 16 MiB의 packed 화면 버�
 ## Native 통합
 
 ```swift
-import AsterNative // Package.swift를 local package로 추가
-let engine = try AsterEngine() // 기본 빈 데이터, bundled core
-try engine.setData([AsterBar(time:1700000000000,open:100,high:102,low:99,close:101,volume:300)])
+import BaroChart // Package.swift를 local package로 추가
+let engine = try BaroChartEngine() // 기본 빈 데이터, bundled core
+try engine.setData([BaroChartBar(time:1700000000000,open:100,high:102,low:99,close:101,volume:300)])
 // iOS:
-let chart = AsterChartView(engine: engine)
+let chart = BaroChartUIView(engine: engine)
 chart.setTool("trendline")
 // macOS/사용자 renderer:
 let scene = try engine.scene(width:1200,height:700)
-AsterCoreGraphicsRenderer.render(scene, in: cgContext) // top-left, Y down
+BaroChartCoreGraphicsRenderer.render(scene, in: cgContext) // top-left, Y down
 ```
 
 Native scene은 JSON bridge이며 zero-copy가 아닙니다. Swift `call`과 Android `invoke`의 패널/시리즈/지표/스타일 facade 및 실제 실행 범위는 [NATIVE.md](NATIVE.md)를 참고하세요. 0.2.1의 `registerIndicatorSource`는 앱이 신뢰하는 JS factory를 JSCore/QuickJS에 등록합니다. JS 코어 자체의 register/snapshot/restore API는 동일합니다. UIKit/Android runtime을 실행 검증했지만 물리 기기와 완전한 픽셀·플랫폼 style 동등성은 검증하지 않았습니다. [공통 API 및 남은 격차](API-PARITY.md)를 참고하세요.

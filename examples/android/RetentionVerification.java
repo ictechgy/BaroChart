@@ -1,4 +1,4 @@
-package dev.aster.charts;
+package kr.coden.barochart;
 
 import android.app.Activity;
 import android.content.Context;
@@ -17,10 +17,10 @@ final class RetentionVerification {
     private static RetentionVerification active;
     private final Handler handler=new Handler(Looper.getMainLooper());
     private final List<Record> records=new ArrayList<>();
-    private final List<AsterEngine.AsyncJob> retainedJobs=new ArrayList<>();
+    private final List<BaroChartEngine.AsyncJob> retainedJobs=new ArrayList<>();
     private final JSONArray checks=new JSONArray(),failures=new JSONArray();
     private Context application;
-    private AsterEngine source;
+    private BaroChartEngine source;
     private WeakReference<Activity> originalActivity;
     private WeakReference<Object> errorCallback,errorCapture,errorThrowable;
     private int step=0,batchRemaining=0,gcAttempts=0,attachments=0;
@@ -37,25 +37,25 @@ final class RetentionVerification {
     private static final class Record {
         final String name,expected;
         final Map<String,WeakReference<Object>> probes=new LinkedHashMap<>();
-        AsterEngine.AsyncJob job;
+        BaroChartEngine.AsyncJob job;
         int terminals=0,progressAfterTerminal=0;
         boolean cancellationRequested=false;
         JSONObject result,terminalFields;
         Record(String name,String expected){this.name=name;this.expected=expected;}
         void probe(String name,Object value){if(value!=null)probes.put(name,new WeakReference<>(value));}
     }
-    private static final class CapturedListener implements AsterEngine.AsyncListener {
+    private static final class CapturedListener implements BaroChartEngine.AsyncListener {
         final RetentionVerification verification;
         final Record record;
         final Object capturedOwner;
         final boolean cancelDuringCopy,throwOnComplete;
         CapturedListener(RetentionVerification verification,Record record,Object capturedOwner,boolean cancelDuringCopy,boolean throwOnComplete){this.verification=verification;this.record=record;this.capturedOwner=capturedOwner;this.cancelDuringCopy=cancelDuringCopy;this.throwOnComplete=throwOnComplete;}
-        @Override public void onProgress(AsterEngine.AsyncProgress progress){
+        @Override public void onProgress(BaroChartEngine.AsyncProgress progress){
             verification.check(Looper.myLooper()==Looper.getMainLooper(),record.name+": progress on owner");
             if(record.terminals!=0)record.progressAfterTerminal++;
             if(cancelDuringCopy&&progress.phase.equals("copy-input")&&!record.cancellationRequested){record.cancellationRequested=true;new Thread(record.job::cancel,"Aster retention cancellation").start();}
         }
-        @Override public void onComplete(AsterEngine.AsyncResult result){
+        @Override public void onComplete(BaroChartEngine.AsyncResult result){
             verification.completed(record,result);
             if(throwOnComplete)throw new IllegalStateException("Expected retention fixture callback failure");
         }
@@ -69,14 +69,14 @@ final class RetentionVerification {
         final Object capture;
         CapturedException(Object capture){super("Expected retained observer error fixture");this.capture=capture;}
     }
-    private Record begin(String name,String expected,boolean columns,boolean invalid,boolean cancelDuring,boolean callbackThrows,boolean activityCapture,AsterEngine.AsyncOptions options)throws Exception {
+    private Record begin(String name,String expected,boolean columns,boolean invalid,boolean cancelDuring,boolean callbackThrows,boolean activityCapture,BaroChartEngine.AsyncOptions options)throws Exception {
         Record record=new Record(name,expected);records.add(record);
         Object capture=activityCapture?originalActivity.get():new byte[65536];
         CapturedListener listener=new CapturedListener(this,record,capture,cancelDuring,callbackThrows);
         record.probe("listener",listener);record.probe("capturedOwner",capture);
         if(columns){
             int count=cancelDuring?65536:512;double[][] raw=PrepareVerification.fixture(count);if(invalid)raw[2][256]=-1;
-            AsterColumns owned=AsterColumns.copyOf(raw[0],raw[1],raw[2],raw[3],raw[4],raw[5]);record.probe("inputColumns",owned);
+            BaroChartColumns owned=BaroChartColumns.copyOf(raw[0],raw[1],raw[2],raw[3],raw[4],raw[5]);record.probe("inputColumns",owned);
             record.job=source.prepareColumnsAsync(owned,128,options,listener);
         }else {
             JSONObject event=(JSONObject)source.invoke("nativeBenchmarkEvent",256);
@@ -90,9 +90,9 @@ final class RetentionVerification {
         return record;
     }
     private void next(){if(finished)return;try {
-        if(source==null)source=new AsterEngine(application,512);
+        if(source==null)source=new BaroChartEngine(application,512);
         batchRemaining=1;
-        AsterEngine.AsyncOptions normal=new AsterEngine.AsyncOptions(30000,64);
+        BaroChartEngine.AsyncOptions normal=new BaroChartEngine.AsyncOptions(30000,64);
         switch(step++){
             case 0:begin("correction-success","success",false,false,false,false,true,normal);break;
             case 1:begin("columns-success","success",true,false,false,false,false,normal);break;
@@ -100,7 +100,7 @@ final class RetentionVerification {
             case 3:begin("worker-failure","failed",true,true,false,false,false,normal);break;
             case 4:begin("cancel-before-capture","cancelled",false,false,false,false,false,normal).job.cancel();break;
             case 5:begin("cancel-during-copy","cancelled",true,false,true,false,false,normal);break;
-            case 6:begin("timeout","timedOut",true,false,false,false,false,new AsterEngine.AsyncOptions(1,1));break;
+            case 6:begin("timeout","timedOut",true,false,false,false,false,new BaroChartEngine.AsyncOptions(1,1));break;
             case 7:batchRemaining=2;begin("superseded","superseded",false,false,false,false,false,normal);begin("replacement-success","success",false,false,false,false,false,normal);break;
             case 8:begin("throwing-completion","success",false,false,false,true,false,normal);break;
             case 9:
@@ -112,7 +112,7 @@ final class RetentionVerification {
             default:finishJobs();
         }
     }catch(Throwable error){fail(error);}}
-    private void completed(Record record,AsterEngine.AsyncResult result){if(finished)return;try {
+    private void completed(Record record,BaroChartEngine.AsyncResult result){if(finished)return;try {
         record.terminals++;
         check(Looper.myLooper()==Looper.getMainLooper(),record.name+": completion on owner");
         check(result.status.equals(record.expected),record.name+": expected "+record.expected+", received "+result.status);
@@ -134,7 +134,7 @@ final class RetentionVerification {
         check(((Set<?>)field(source,"observers")).isEmpty(),"close clears observers");
         check(((Number)field(source,"handle")).longValue()==0,"retained closed owner has no native handle");
         // A live temporary inspector measures process handles independently of GC.
-        AsterEngine inspector=new AsterEngine(application,0);try{handleLedger=inspector.runtimeMetrics();check(handleLedger.getLong("processLiveNativeHandles")==1,"all source and isolated native handles freed; temporary inspector alone remains");}finally{inspector.close();}
+        BaroChartEngine inspector=new BaroChartEngine(application,0);try{handleLedger=inspector.runtimeMetrics();check(handleLedger.getLong("processLiveNativeHandles")==1,"all source and isolated native handles freed; temporary inspector alone remains");}finally{inspector.close();}
         check(retainedJobs.size()==11,"all eleven terminal job handles remain strongly retained");
         Activity activity=originalActivity.get();if(activity==null)throw new AssertionError("Original activity unavailable before recreation");activity.recreate();
         handler.postDelayed(()->{if(!recreated&&!finished)fail(new AssertionError("Activity recreation did not attach replacement"));},10000);

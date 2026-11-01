@@ -6,8 +6,8 @@ import {readFileSync} from 'node:fs';
 const read = path => readFileSync(new URL(path, import.meta.url), 'utf8')
     .replace(/"(?:\\.|[^"\\])*"|\/\/[^\n]*|\/\*[\s\S]*?\*\//g,
         token => token.startsWith('/') ? token.replace(/[^\n]/g, ' ') : token);
-const swift = read('../native/AsterNative.swift');
-const java = read('../native/android/java/dev/aster/charts/AsterEngine.java');
+const swift = read('../native/BaroChartEngine.swift');
+const java = read('../native/android/java/kr/coden/barochart/BaroChartEngine.java');
 const flat = source => source.replace(/\s+/g, '');
 
 // Match the requested declaration's balanced body, ignoring quoted braces and comments.
@@ -57,7 +57,7 @@ test('Swift static: thin drawing translation facade forwards raw deltas and IDs 
         'tryingestionCommand("translateDrawings",[ids,["deltaTimeMs":deltaTimeMs,"deltaPrice":deltaPrice]])');
     const forwarding = body(swift, /private func ingestionCommand\(/);
     order(forwarding, 'try command(operation,arguments)', '.toDictionary()',
-        'else{throw AsterError.invalidScene}', 'return result');
+        'else{throw BaroChartLowLevelError.invalidScene}', 'return result');
 });
 
 test('Swift static: drawing translation retains owner/closed checks and the existing async policy', () => {
@@ -73,9 +73,9 @@ test('Swift static: drawing translation retains owner/closed checks and the exis
 
 test('Swift static: changed is strictly numeric, finite and integral within 0 through 128', () => {
     order(swReceipt, 'result.isObject', 'let changed=result.forProperty("changed")',
-        'changed.isNumber', 'throw AsterError.invalidScene', 'changed.toDouble()',
+        'changed.isNumber', 'throw BaroChartLowLevelError.invalidScene', 'changed.toDouble()',
         'count.isFinite', 'count.rounded(.towardZero)==count', 'count>=0', 'count<=128',
-        'throw AsterError.invalidScene', 'if count>0 {notifyChanges()}');
+        'throw BaroChartLowLevelError.invalidScene', 'if count>0 {notifyChanges()}');
     assert.deepEqual([...swReceipt.matchAll(/forProperty\("([^"]+)"\)/g)].map(match => match[1]), ['changed']);
     assert.doesNotMatch(swReceipt, /removed|toString|toBool|\?\?/);
 });

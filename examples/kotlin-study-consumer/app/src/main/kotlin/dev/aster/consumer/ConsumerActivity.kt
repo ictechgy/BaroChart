@@ -7,9 +7,9 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import dev.aster.charts.AsterChartView
-import dev.aster.charts.AsterColumns
-import dev.aster.charts.AsterEngine
+import kr.coden.barochart.BaroChartView
+import kr.coden.barochart.BaroChartColumns
+import kr.coden.barochart.BaroChartEngine
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.abs
@@ -34,8 +34,8 @@ private object ConsumerRun {
 
 /** Independent app package. Imports only the AAR's public Java API. */
 class ConsumerActivity : Activity() {
-    private lateinit var engine: AsterEngine
-    private lateinit var chart: AsterChartView
+    private lateinit var engine: BaroChartEngine
+    private lateinit var chart: BaroChartView
     private val handler = Handler(Looper.getMainLooper())
     private val generation = ++ConsumerRun.generations
     private var savedDrawings = ""
@@ -44,8 +44,8 @@ class ConsumerActivity : Activity() {
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
         try {
-            engine = AsterEngine(this, 0)
-            chart = AsterChartView(this, engine)
+            engine = BaroChartEngine(this, 0)
+            chart = BaroChartView(this, engine)
             setContentView(chart)
             ConsumerRun.lifecycle.put("create:$generation")
             if (intent.getBooleanExtra("sdk-self-test", false)) {
@@ -105,7 +105,7 @@ class ConsumerActivity : Activity() {
     }
     private fun prepareBaseline() {
         try {
-            check(getString(dev.aster.charts.R.string.aster_sdk_version).isNotBlank(), "public AAR version resource resolves")
+            check(getString(kr.coden.barochart.R.string.barochart_sdk_version).isNotBlank(), "public AAR version resource resolves")
             check(assets.open("licenses/QUICKJS-LICENSE.txt").bufferedReader().use { it.readText() }.contains("Permission is hereby granted"), "packaged QuickJS license accessible")
             check(assets.open("licenses/LICENSE.txt").bufferedReader().use { it.readText() }.contains("Apache License"), "Apache-2.0 product license accessible")
             complete("resources")
@@ -134,8 +134,8 @@ class ConsumerActivity : Activity() {
             complete("drawing-history")
             raw[4].indices.forEach { raw[4][it] += 0.3 }
             expectedClose = raw[4].clone()
-            val owned = AsterColumns.copyOf(raw[0], raw[1], raw[2], raw[3], raw[4], raw[5])
-            val job = engine.prepareColumnsAsync(owned, 128, AsterEngine.AsyncOptions(30000, 64), listener("prepare") { result ->
+            val owned = BaroChartColumns.copyOf(raw[0], raw[1], raw[2], raw[3], raw[4], raw[5])
+            val job = engine.prepareColumnsAsync(owned, 128, BaroChartEngine.AsyncOptions(30000, 64), listener("prepare") { result ->
                 check(result.succeeded(), "owned-column prepare succeeds via AAR")
                 check(result.metrics.getLong("immutableInputBytes") == 512L * 6 * 8, "public async result preserves owned-input metrics")
                 check(state().getJSONObject("lastBar").getDouble("close") == expectedClose[511], "caller mutation does not affect owned prepare")
@@ -148,11 +148,11 @@ class ConsumerActivity : Activity() {
             raw[4][511] = 900.0
         } catch (error: Throwable) { fail(error) }
     }
-    private fun listener(name: String, done: (AsterEngine.AsyncResult) -> Unit): AsterEngine.AsyncListener {
+    private fun listener(name: String, done: (BaroChartEngine.AsyncResult) -> Unit): BaroChartEngine.AsyncListener {
         val evidence = JSONObject().put("id", name).put("terminalCount", 0).put("progressCallbacks", 0)
             .put("ownerValid", true).put("orderValid", true)
         ConsumerRun.jobContracts.put(evidence)
-        return object : AsterEngine.AsyncListener {
+        return object : BaroChartEngine.AsyncListener {
             private var delivered = false
             private fun callbackOrder(): Boolean {
                 val owner = Looper.myLooper() == Looper.getMainLooper()
@@ -161,14 +161,14 @@ class ConsumerActivity : Activity() {
                 evidence.put("orderValid", evidence.getBoolean("orderValid") && ordered)
                 return owner && ordered
             }
-            override fun onProgress(progress: AsterEngine.AsyncProgress) {
+            override fun onProgress(progress: BaroChartEngine.AsyncProgress) {
                 try {
                     if (!callbackOrder()) throw AssertionError("$name progress on owner before terminal")
                     ConsumerRun.progressCount++
                     evidence.put("progressCallbacks", evidence.getInt("progressCallbacks") + 1)
                 } catch (error: Throwable) { fail(error) }
             }
-            override fun onComplete(result: AsterEngine.AsyncResult) {
+            override fun onComplete(result: BaroChartEngine.AsyncResult) {
                 try {
                     evidence.put("terminalCount", evidence.getInt("terminalCount") + 1).put("status", result.status)
                     check(callbackOrder(), "$name exactly one owner terminal")
@@ -261,7 +261,7 @@ class ConsumerActivity : Activity() {
                 .put("checks", ConsumerRun.checks).put("jobs", ConsumerRun.jobs).put("lifecycle", ConsumerRun.lifecycle).put("consumerContract", contract())
                 .put("activityGenerations", ConsumerRun.generations).put("terminals", ConsumerRun.terminalCount).put("progressCallbacks", ConsumerRun.progressCount)
                 .put("nativeHandleLedgerBeforeReplacementClose", metrics).put("api", Build.VERSION.SDK_INT).put("package", packageName)
-                .put("sdkVersion", getString(dev.aster.charts.R.string.aster_sdk_version)).put("physicalDevice", false)
+                .put("sdkVersion", getString(kr.coden.barochart.R.string.barochart_sdk_version)).put("physicalDevice", false)
                 .put("scope", "Independent Kotlin app consumes local AAR public API; baseline512 OHLCV/SMA/drawing/async/lifecycle checks separately counted; added typed module/save/load/as-of/read-only/error-atomicity and3 isolated module jobs; offscreen Canvas foreground pixels. No display FPS, input latency or universal memory/GC claim."))
         } catch (error: Throwable) { fail(error) }
     }

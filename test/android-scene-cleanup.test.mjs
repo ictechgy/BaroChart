@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {confirmOwnedPackageAbsent} from '../scripts/android-scene-cleanup.mjs';
 
-const pkg='dev.aster.charts.packet.pressure';
+const pkg='kr.coden.barochart.packet.pressure';
 const response=stdout=>({status:0,error:null,signal:null,stdout,stderr:''});
 test('successful inventory confirms no owned app process',()=>{
  const result=confirmOwnedPackageAbsent(response('  PID NAME\n1 init\n125 dev.aster.other\n'),pkg);

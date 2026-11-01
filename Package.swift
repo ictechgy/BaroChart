@@ -1,9 +1,9 @@
 // swift-tools-version: 6.0
 import PackageDescription
 let package = Package(
-    name: "AsterNative",
+    name: "BaroChart",
     platforms: [.macOS(.v13), .iOS(.v17)],
-    products: [.library(name: "AsterNative", targets: ["AsterNative"])],
-    targets: [.target(name: "AsterNative", path: "native", exclude: ["android"], sources: ["AsterNative.swift", "AsterColumns.swift", "AsterFrameRenderer.swift", "AsterUIKit.swift"], resources: [.copy("Resources/aster-core.js")])],
+    products: [.library(name: "BaroChart", targets: ["BaroChart"])],
+    targets: [.target(name: "BaroChart", path: "native", exclude: ["android"], sources: ["BaroChartEngine.swift", "BaroChartColumns.swift", "BaroChartFrameRenderer.swift", "BaroChartUIView.swift"], resources: [.copy("Resources/aster-core.js"), .copy("Resources/PrivacyInfo.xcprivacy")])],
     swiftLanguageModes: [.v5]
 )

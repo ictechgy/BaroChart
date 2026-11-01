@@ -1,4 +1,4 @@
-package dev.aster.charts;
+package kr.coden.barochart;
 
 import android.app.Instrumentation;
 import android.content.Intent;
@@ -13,7 +13,7 @@ import java.util.concurrent.*;
 final class MobileUXProfile {
     static final class Sample {
         final long eventTime;long injected,capture,dispatchNanos;int action,source,tool;
-        AsterChartView.DrawTiming draw;String error;final CountDownLatch done=new CountDownLatch(1);
+        BaroChartView.DrawTiming draw;String error;final CountDownLatch done=new CountDownLatch(1);
         Sample(long time){eventTime=time;}
         JSONObject json()throws JSONException {return new JSONObject().put("action",action).put("source",source).put("tool",tool).put("injectToCaptureMs",(capture-injected)/1e6).put("captureToSubmitMs",(draw.submitNanos-capture)/1e6).put("injectToSubmitMs",(draw.submitNanos-injected)/1e6).put("genericMotionDispatchMs",dispatchNanos/1e6).put("onDrawMs",(draw.submitNanos-draw.startNanos)/1e6).put("sceneJNIMs",draw.scene.jniNanos/1e6).put("envelopeParseMs",draw.scene.envelopeParseNanos/1e6).put("bodyParseMs",draw.scene.bodyParseNanos/1e6).put("canvasMs",draw.canvasNanos/1e6).put("accessibilityMs",draw.accessibilityNanos/1e6).put("baseRasterMs",draw.baseRasterNanos/1e6).put("drawingRasterMs",draw.drawingRasterNanos/1e6).put("bitmapCopyMs",draw.bitmapCopyNanos/1e6).put("hoverMs",draw.hoverNanos/1e6).put("jsonChars",draw.scene.jsonChars).put("cacheUsed",draw.cacheUsed).put("baseChanged",draw.baseChanged);}
     }
@@ -37,6 +37,6 @@ final class MobileUXProfile {
             }}finally{main(ins,()->{active.getWindow().removeOnFrameMetricsAvailableListener(listener);active.chart.setDrawProbe(null);active.chart.setOnHoverListener(null);});frames.quitSafely();frames.join(3000);if(frames.isAlive())throw new AssertionError("Frame metrics thread did not stop");}
             main(ins,active::finish);ins.waitForIdleSync();a=null;
         }}finally{if(a!=null){MobileUXActivity active=a;main(ins,active::finish);ins.waitForIdleSync();}}
-        return new JSONObject().put("passed",true).put("cases",cases).put("inputPath","UiAutomation actual system mouse input -> default AsterChartView.onHoverEvent -> onDraw CPU Canvas submit").put("scope","15warm/60default samples, one input in flight; FrameMetrics/16ms handler heartbeat only measured interval incl final gap; JNI scene serialize+separate JSON parse; genericMotionDispatch includes pointer bridge/hierarchy, not exclusive JNI. Emulator only, no physical display FPS claim.").put("physicalDevice",false).put("api",Build.VERSION.SDK_INT);
+        return new JSONObject().put("passed",true).put("cases",cases).put("inputPath","UiAutomation actual system mouse input -> default BaroChartView.onHoverEvent -> onDraw CPU Canvas submit").put("scope","15warm/60default samples, one input in flight; FrameMetrics/16ms handler heartbeat only measured interval incl final gap; JNI scene serialize+separate JSON parse; genericMotionDispatch includes pointer bridge/hierarchy, not exclusive JNI. Emulator only, no physical display FPS claim.").put("physicalDevice",false).put("api",Build.VERSION.SDK_INT);
     }
 }

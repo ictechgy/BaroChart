@@ -1,20 +1,22 @@
 plugins { id 'com.android.library' }
 
-def sdkVersion = providers.gradleProperty('asterVersion').orElse('0.2.10').get()
+// 버전 단일 원천은 저장소 루트 package.json이다(웹·iOS·Android 공유)
+def sharedVersion = new groovy.json.JsonSlurper().parse(file('../../../package.json')).version
+def sdkVersion = providers.gradleProperty('asterVersion').orElse(sharedVersion).get()
 def selectedCore = file(providers.gradleProperty('asterCoreFile').orElse('../../Resources/aster-core.js').get())
 def generatedAssets = layout.buildDirectory.dir('generated/asterAssets')
 if (providers.gradleProperty('asterBuildDir').isPresent()) layout.buildDirectory = file(providers.gradleProperty('asterBuildDir').get())
 
 android {
-    namespace 'dev.aster.charts'
+    namespace 'kr.coden.barochart'
     compileSdk 36
     buildToolsVersion '36.0.0'
     ndkVersion '29.0.14033849'
     defaultConfig {
         minSdk 26
-        ndk { abiFilters 'arm64-v8a' }
+        ndk { abiFilters 'arm64-v8a', 'x86_64' }
         consumerProguardFiles 'consumer-rules.pro'
-        resValue 'string', 'aster_sdk_version', sdkVersion
+        resValue 'string', 'barochart_sdk_version', sdkVersion
         externalNativeBuild { cmake { arguments '-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON' } }
     }
     sourceSets.main {

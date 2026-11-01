@@ -8,9 +8,15 @@ test('BaroChart local package and example agree without npm publication',async()
  for(const name of ['LICENSE','NOTICE','THIRD_PARTY_NOTICES.md'])assert(pkg.files.includes(name));
  assert.match(await text('LICENSE'),/Apache License[\s\S]*Version 2\.0, January 2004/);assert.match(await text('NOTICE'),/BaroChart/);
 });
-test('legacy API and portable identifiers remain compatible',async()=>{
+test('native public names are BaroChart while portable identifiers stay compatible',async()=>{
+ // 웹 React 호환 export는 네이티브 이름 변경 범위 밖이라 유지한다
  assert.match(await text('src/react/index.mjs'),/export.*AsterChart/);
- assert.match(await text('Package.swift'),/AsterNative/);
- assert.match(await text('native/android/java/dev/aster/charts/AsterEngine.java'),/package dev\.aster\.charts/);
+ assert.match(await text('Package.swift'),/name: "BaroChart"/);
+ assert.match(await text('native/android/java/kr/coden/barochart/BaroChartEngine.java'),/package kr\.coden\.barochart/);
  assert.match(await text('src/core/workspace.mjs'),/aster\.workspace/);
+ const {readdir}=await import('node:fs/promises');
+ for(const name of (await readdir(new URL('native/',root))).filter(n=>n.endsWith('.swift')))
+  assert.doesNotMatch(await text('native/'+name),/public (final )?(class|struct|enum|protocol) Aster/,name+' still declares a public Aster type');
+ for(const name of (await readdir(new URL('native/android/java/kr/coden/barochart/',root))).filter(n=>n.endsWith('.java')))
+  assert.doesNotMatch(await text('native/android/java/kr/coden/barochart/'+name),/public (final )?(class|interface|enum) Aster/,name+' still declares a public Aster type');
 });

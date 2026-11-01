@@ -10,14 +10,14 @@ import {JAVA_COMPACTION_BOUNDARY, JAVA_COMPACTION_EXPECTED, JAVA_COMPACTION_HARN
 const validOutput = JAVA_COMPACTION_SCENARIOS.map(name => `PASS ${name}`).join('\n')
     + '\nRESULT scenarios=58 checks=92 scope=nested-receipt-decoder\n';
 const initializationTrace = [
-    "[0.031s][info][class,init] 100 Initializing 'dev/aster/charts/CompactionReceiptTest' (0x00000000)",
-    "[0.032s][info][class,init] 101 Initializing 'dev/aster/charts/AsterEngine$CompactionReceipt'(no method) (0x00000000)",
+    "[0.031s][info][class,init] 100 Initializing 'kr/coden/barochart/CompactionReceiptTest' (0x00000000)",
+    "[0.032s][info][class,init] 101 Initializing 'kr/coden/barochart/BaroChartEngine$CompactionReceipt'(no method) (0x00000000)",
     "[0.033s][info][class,init] 102 Initializing 'org/json/JSONException'(no method) (0x00000000)",
 ].join('\n');
 
 test('Java compaction evidence distinguishes the actual decoder from compile-only host signatures', () => {
     assert.equal(JAVA_COMPACTION_BOUNDARY.productionDecoderRuntimeTested, true);
-    assert.equal(JAVA_COMPACTION_BOUNDARY.productionDecoderMethodExecuted, 'AsterEngine.CompactionReceipt.changed');
+    assert.equal(JAVA_COMPACTION_BOUNDARY.productionDecoderMethodExecuted, 'BaroChartEngine.CompactionReceipt.changed');
     assert.equal(JAVA_COMPACTION_BOUNDARY.javaSourceLevel, 8);
     assert.equal(JAVA_COMPACTION_BOUNDARY.javaBytecodeTarget, 8);
     assert.equal(JAVA_COMPACTION_BOUNDARY.jsonExceptionSignatureExecuted, true);
@@ -26,17 +26,17 @@ test('Java compaction evidence distinguishes the actual decoder from compile-onl
         'ownerThreadBehaviorTested', 'observerNotificationsRuntimeTested', 'nativeCompactionExecuted',
         'performanceMeasured']) assert.equal(JAVA_COMPACTION_BOUNDARY[key], false, key);
     assert.deepEqual(JAVA_COMPACTION_PRODUCTION_SOURCES, [
-        'native/android/java/dev/aster/charts/AsterEngine.java',
-        'native/android/java/dev/aster/charts/AsterColumns.java',
-        'native/android/java/dev/aster/charts/WorkspaceRestoreJob.java',
-        'native/android/java/dev/aster/charts/NativeJobBudget.java',
-        'native/android/java/dev/aster/charts/ParamsUpdateJob.java',
+        'native/android/java/kr/coden/barochart/BaroChartEngine.java',
+        'native/android/java/kr/coden/barochart/BaroChartColumns.java',
+        'native/android/java/kr/coden/barochart/WorkspaceRestoreJob.java',
+        'native/android/java/kr/coden/barochart/NativeJobBudget.java',
+        'native/android/java/kr/coden/barochart/ParamsUpdateJob.java',
     ]);
-    assert.equal(JAVA_COMPACTION_HARNESS, 'test/java-compaction-receipt/dev/aster/charts/CompactionReceiptTest.java');
+    assert.equal(JAVA_COMPACTION_HARNESS, 'test/java-compaction-receipt/kr/coden/barochart/CompactionReceiptTest.java');
 });
 
 test('Java compaction compiler uses warnings-as-errors and explicit isolated Java 8 inputs', () => {
-    const sources = ['/repo/native/AsterEngine.java', '/repo/test/CompactionReceiptTest.java'];
+    const sources = ['/repo/native/BaroChartEngine.java', '/repo/test/CompactionReceiptTest.java'];
     assert.deepEqual(javaCompactionCompilerArguments('/tmp/classes', '/tmp/empty', sources), [
         '-m', 'jdk.compiler/com.sun.tools.javac.Main', '-source', '8', '-target', '8',
         '-Xlint:all,-options', '-Werror', '-proc:none', '-implicit:none', '-encoding', 'UTF-8',
@@ -67,20 +67,20 @@ test('Java compaction result rejects incomplete, duplicate, unexpected or diagno
 
 test('Java compaction class-init trace verifies that only the nested decoder and exception signature execute', () => {
     assert.deepEqual(verifyJavaCompactionInitialization(initializationTrace), {
-        initializedProductionClasses: ['dev/aster/charts/AsterEngine$CompactionReceipt'],
+        initializedProductionClasses: ['kr/coden/barochart/BaroChartEngine$CompactionReceipt'],
         initializedAndroidClasses: [], initializedJsonClasses: ['org/json/JSONException'],
     });
     // Verifying or loading the outer class is not the same as initializing it.
     assert.deepEqual(verifyJavaCompactionInitialization(initializationTrace
-        + '\n[info][class,init] Start class verification for: dev.aster.charts.AsterEngine'),
+        + '\n[info][class,init] Start class verification for: kr.coden.barochart.BaroChartEngine'),
     verifyJavaCompactionInitialization(initializationTrace));
 });
 
 test('Java compaction initialization guard fails closed for outer Engine, helpers, Android or JSON runtime', () => {
     assert.throws(() => verifyJavaCompactionInitialization(''), /did not observe/);
     assert.throws(() => verifyJavaCompactionInitialization(initializationTrace.replace('org/json/JSONException', 'unrelated/Exception')), /checked exception signature/);
-    for (const forbidden of ['dev/aster/charts/AsterEngine', 'dev/aster/charts/AsterEngine$ScenePacket',
-        'dev/aster/charts/AsterColumns', 'dev/aster/charts/WorkspaceRestoreJob', 'android/os/Looper',
+    for (const forbidden of ['kr/coden/barochart/BaroChartEngine', 'kr/coden/barochart/BaroChartEngine$ScenePacket',
+        'kr/coden/barochart/BaroChartColumns', 'kr/coden/barochart/WorkspaceRestoreJob', 'android/os/Looper',
         'android/os/Handler', 'org/json/JSONObject', 'org/json/JSONArray', 'org/json/JSONTokener']) {
         assert.throws(() => verifyJavaCompactionInitialization(initializationTrace
             + `\n[info][class,init] 103 Initializing '${forbidden}' (0x00000000)`), Error, forbidden);
@@ -101,8 +101,8 @@ test('Java compaction harness covers boxed counts and malformed values without t
     }
     assert.match(source, /checks\+\+;\s*if \(!condition\) throw new AssertionError/);
     assert.deepEqual([...source.matchAll(/^import ([^;]+);$/gm)].map(match => match[1]), ['org.json.JSONException']);
-    assert.deepEqual([...source.matchAll(/\bAsterEngine\.(\w+)/g)].map(match => match[1]), ['CompactionReceipt', 'CompactionReceipt']);
-    assert.doesNotMatch(source, /new\s+(?:AsterEngine|JSONObject|JSONArray|Thread)\b|Class\.forName|System\.loadLibrary/);
+    assert.deepEqual([...source.matchAll(/\bBaroChartEngine\.(\w+)/g)].map(match => match[1]), ['CompactionReceipt', 'CompactionReceipt']);
+    assert.doesNotMatch(source, /new\s+(?:BaroChartEngine|JSONObject|JSONArray|Thread)\b|Class\.forName|System\.loadLibrary/);
     assert.doesNotMatch(source, /\b(?:Handler|Looper|Executor|JSONObject|JSONArray|JSONTokener)\b/);
 });
 

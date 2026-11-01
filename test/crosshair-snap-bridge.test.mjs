@@ -36,9 +36,9 @@ for(const [name,from,to,label]of [
  assert.equal(canonical.split(from).length,2,'unique mutation site');const r=run(canonical.replace(from,to));let failure;assert.throws(()=>verify(r),error=>{failure=error;return error instanceof assert.AssertionError&&error.message.includes(label);});t.diagnostic(failure.stack);
 });
 test('native facade config/query and read-only notification exclusion are symmetrical (source only)',async()=>{
- const swift=await read('../native/AsterNative.swift'),java=await read('../native/android/java/dev/aster/charts/AsterEngine.java'),ui=await read('../native/AsterUIKit.swift'),view=await read('../native/android/java/dev/aster/charts/AsterChartView.java');
+ const swift=await read('../native/BaroChartEngine.swift'),java=await read('../native/android/java/kr/coden/barochart/BaroChartEngine.java'),ui=await read('../native/BaroChartUIView.swift'),view=await read('../native/android/java/kr/coden/barochart/BaroChartView.java');
  assert.match(swift,/public func setCrosshairSnap\(_ options: \[String: Any\]\) throws \{ try command\("setCrosshairSnap", \[options\]\) \}/);
- assert.match(swift,/public func crosshairSnapshot[\s\S]*?command\("crosshairSnapshot", \[width, height\]\)[\s\S]*?if value.isNull \{return nil\}[\s\S]*?throw AsterError.invalidScene/);
+ assert.match(swift,/public func crosshairSnapshot[\s\S]*?command\("crosshairSnapshot", \[width, height\]\)[\s\S]*?if value.isNull \{return nil\}[\s\S]*?throw BaroChartLowLevelError.invalidScene/);
  assert.match(swift,/else if !\[[^\]]*"crosshairSnapshot"[^\]]*\].contains\(operation\)/);
  assert.match(java,/public void setCrosshairSnap\(JSONObject options\) throws JSONException \{command\("setCrosshairSnap",options\);\}/);
  assert.match(java,/public JSONObject crosshairSnapshot[\s\S]*?command\("crosshairSnapshot",width,height\);if\(result==JSONObject.NULL\)return null;[\s\S]*?instanceof JSONObject/);

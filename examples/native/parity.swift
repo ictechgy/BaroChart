@@ -3,14 +3,14 @@ import CoreGraphics
 
 /// Host-level regression checks: real Swift values cross JSCore, rather than
 /// calling only a JavaScript self-test. The same helper runs on macOS and iOS.
-func verifyCommonAPI(_ engine: AsterEngine) throws -> [String: Any] {
+func verifyCommonAPI(_ engine: BaroChartEngine) throws -> [String: Any] {
     var checks: [String] = [], notified = 0
-    func check(_ value: Bool, _ name: String) throws {if !value {throw AsterError.javaScript(name)};checks.append(name)}
+    func check(_ value: Bool, _ name: String) throws {if !value {throw BaroChartLowLevelError.javaScript(name)};checks.append(name)}
     let token = try engine.observeChanges {notified += 1}; defer {try? engine.removeObserver(token)}
     try engine.call("nativeInit", [0])
     let t = 1700000000123.0
     func row(_ time: Double, _ close: Double = 1.345678901234e-12) -> [String: Any] {return ["time":time,"open":1.2e-12,"high":2e-12,"low":1e-12,"close":close,"volume":7]}
-    try engine.setData([AsterBar(time:t,open:1.2e-12,high:2e-12,low:1e-12,close:1.345678901234e-12,volume:7)])
+    try engine.setData([BaroChartBar(time:t,open:1.2e-12,high:2e-12,low:1e-12,close:1.345678901234e-12,volume:7)])
     try check(engine.command("inspect").forProperty("lastBar").forProperty("close").toDouble() == 1.345678901234e-12,"Swift external OHLCV Float64 injection")
     try engine.applyDataEvent(["kind":"append","bar":row(t+60000)])
     try engine.applyDataEvent(["kind":"update","bar":row(t+60000,1.8e-12)])
@@ -42,28 +42,28 @@ func verifyCommonAPI(_ engine: AsterEngine) throws -> [String: Any] {
     try check(rejected && before == notified,"Failed mutations and reads do not notify native view")
     var wrongThread = false
     let finished = DispatchSemaphore(value:0)
-    Thread {do {try engine.command("inspect")} catch AsterError.wrongThread {wrongThread=true} catch {};finished.signal()}.start()
+    Thread {do {try engine.command("inspect")} catch BaroChartLowLevelError.wrongThread {wrongThread=true} catch {};finished.signal()}.start()
     finished.wait()
     try check(wrongThread,"Swift engine owner-thread guard")
     // Typed column input also crosses the public facade.
     try engine.setColumns(["time":[t],"open":[1.2e-12],"high":[2e-12],"low":[1e-12],"close":[1.345678901234e-12],"volume":[7]])
     try check(engine.command("inspect").forProperty("storedBars").toInt32() == 1 && notified > 20,"Column input and mutation observers")
     var afterFailure=0
-    let failing=try engine.observeChanges {throw AsterError.javaScript("observer failure")},following=try engine.observeChanges {afterFailure += 1}
+    let failing=try engine.observeChanges {throw BaroChartLowLevelError.javaScript("observer failure")},following=try engine.observeChanges {afterFailure += 1}
     try engine.setTheme(["background":"#123"])
-    guard afterFailure==1 && engine.observerErrors.count==1 else {throw AsterError.javaScript("Observer failure interrupted delivery")}
+    guard afterFailure==1 && engine.observerErrors.count==1 else {throw BaroChartLowLevelError.javaScript("Observer failure interrupted delivery")}
     try engine.removeObserver(failing);try engine.removeObserver(following)
     let hardening=try engine.call("nativeHardeningSelfTest").toDictionary() ?? [:]
-    guard hardening["passed"] as? Int == 8 else {throw AsterError.javaScript("Native hardening checks failed")}
+    guard hardening["passed"] as? Int == 8 else {throw BaroChartLowLevelError.javaScript("Native hardening checks failed")}
     try engine.call("nativeInit",[10000])
     return ["passed":checks.count,"checks":checks,"mutationNotifications":notified,"observerFailureIsolated":true,"hardening":hardening]
 }
 
 func nativeTextInk(_ font: String) throws -> Int {
     let json: [String: Any] = ["width":240,"height":100,"background":"#000000","stats":[:],"commands":[["op":"text","x":10,"y":80,"text":"MMMM","color":"#ffffff","font":font]]]
-    let scene = try JSONDecoder().decode(AsterScene.self,from:JSONSerialization.data(withJSONObject:json))
+    let scene = try JSONDecoder().decode(BaroChartScene.self,from:JSONSerialization.data(withJSONObject:json))
     let context = CGContext(data:nil,width:240,height:100,bitsPerComponent:8,bytesPerRow:0,space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue)!
-    context.translateBy(x:0,y:100);context.scaleBy(x:1,y:-1);AsterCoreGraphicsRenderer.render(scene,in:context)
+    context.translateBy(x:0,y:100);context.scaleBy(x:1,y:-1);BaroChartCoreGraphicsRenderer.render(scene,in:context)
     let bytes=context.data!.assumingMemoryBound(to:UInt8.self)
     var ink=0;for y in 0..<100 {for x in 0..<240 {let offset=y*context.bytesPerRow+x*4;if UInt16(bytes[offset])+UInt16(bytes[offset+1])+UInt16(bytes[offset+2]) > 100 {ink += 1}}};return ink
 }

@@ -32,9 +32,9 @@ const inspect=spawnSync('python3',['-c',String.raw`
 import zipfile,json,sys,hashlib
 with zipfile.ZipFile(sys.argv[1]) as z:
  names=z.namelist()
- for name in ['classes.dex','assets/aster-core.js','lib/arm64-v8a/libaster.so','assets/licenses/QUICKJS-LICENSE.txt','assets/licenses/LICENSE.txt','assets/licenses/NOTICE.txt']:
+ for name in ['classes.dex','assets/aster-core.js','lib/arm64-v8a/libbarochart.so','assets/licenses/QUICKJS-LICENSE.txt','assets/licenses/LICENSE.txt','assets/licenses/NOTICE.txt']:
   if name not in names:raise ValueError('Missing consumer APK component:'+name)
- print(json.dumps({'coreSHA256':hashlib.sha256(z.read('assets/aster-core.js')).hexdigest(),'jniSHA256':hashlib.sha256(z.read('lib/arm64-v8a/libaster.so')).hexdigest(),'apkEntries':len(names)}))
+ print(json.dumps({'coreSHA256':hashlib.sha256(z.read('assets/aster-core.js')).hexdigest(),'jniSHA256':hashlib.sha256(z.read('lib/arm64-v8a/libbarochart.so')).hexdigest(),'apkEntries':len(names)}))
 `,resolve(apk)],{encoding:'utf8'});
 if(inspect.status!==0)throw new Error(inspect.stderr);
 const archive=JSON.parse(inspect.stdout);if(archive.coreSHA256!==sha(await readFile(core)))throw new Error('Consumer APK bundled core does not match selected frozen core');

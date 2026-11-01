@@ -1,7 +1,7 @@
 # 순서가 있는 배치와 선택형 수집 세션
 
 `ChartAPI`를 Canvas/WebGL 차트의 `chart.api`, 직접 만든 core 모델, Swift
-`AsterEngine`, Android `AsterEngine`에서 같은 명령 이름으로 사용합니다.
+`BaroChartEngine`, Android `BaroChartEngine`에서 같은 명령 이름으로 사용합니다.
 네트워크 연결과 공급자 구독, 실행 주기, 재시도는 호스트가 소유합니다.
 
 ```js

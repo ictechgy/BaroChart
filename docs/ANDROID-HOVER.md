@@ -1,6 +1,6 @@
 # Android hover와 렌더 캐시
 
-Android는 `AsterChartView`의 실제 `View`/Canvas/Skia와 QuickJS JNI를 사용합니다. WebView 경로와 별개입니다.0.2.7은 공유 `nativeRenderFrameJSON` 계약으로 base·drawing 장면이 바뀔 때만 전달하고, View가 물리 픽셀 크기의 bitmap에 두 층을 보관합니다. hover는 매번 별도 Canvas 명령으로 제출합니다. 빈 drawing 층에는 bitmap을 만들지 않습니다.
+Android는 `BaroChartView`의 실제 `View`/Canvas/Skia와 QuickJS JNI를 사용합니다. WebView 경로와 별개입니다.0.2.7은 공유 `nativeRenderFrameJSON` 계약으로 base·drawing 장면이 바뀔 때만 전달하고, View가 물리 픽셀 크기의 bitmap에 두 층을 보관합니다. hover는 매번 별도 Canvas 명령으로 제출합니다. 빈 drawing 층에는 bitmap을 만들지 않습니다.
 
 ## API와 수명
 
@@ -8,9 +8,9 @@ Android는 `AsterChartView`의 실제 `View`/Canvas/Skia와 QuickJS JNI를 사�
 // View/공유 pool API는 Android main thread에서 호출합니다.
 chart.setRenderCacheEnabled(false); // 직접 scene/Canvas 경로
 chart.setRenderCacheEnabled(true);  // 기본값
-AsterChartView.setSharedCacheBudgetBytes(64L * 1024 * 1024); // 기본64MiB
+BaroChartView.setSharedCacheBudgetBytes(64L * 1024 * 1024); // 기본64MiB
 JSONObject local = chart.renderCacheMetrics();
-JSONObject pool = AsterChartView.sharedCacheMetrics();
+JSONObject pool = BaroChartView.sharedCacheMetrics();
 ```
 
 공유 예산은0..256MiB이며0은 직접 렌더링을 선택합니다. 예산은 살아 있는 캐시가 소유한 `Bitmap.getAllocationByteCount()`를 셉니다. QuickJS 장면 캐시·원본 데이터·Java 객체·RenderThread/GPU의 보관 사본·전체 RSS/PSS를 제한하는 예산은 아닙니다. 예를 들어1080×2400 ARGB8888 base는10,368,000bytes이며 drawing 층이 있으면 같은 크기가 하나 더 필요합니다.

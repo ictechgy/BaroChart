@@ -54,9 +54,9 @@ private final class CorrectionBenchmark {
     let url:URL,count:Int,status:((String)->Void)?,completion:(Result<[String:Any],Error>)->Void
     let names=["sma","ema","bollinger","macd","donchian","stochastic","rsi","atr"]
     let matrix=[("first","sync"),("first","async"),("middle","sync"),("middle","async"),("tail","sync"),("tail","async")]
-    var offset=0,rows:[[String:Any]]=[],reference:[String:String]=[:],engine:AsterEngine?,job:AsterAsyncJob?,sampler:CorrectionRSSSampler?,heartbeat:CorrectionHeartbeat?
+    var offset=0,rows:[[String:Any]]=[],reference:[String:String]=[:],engine:BaroChartEngine?,job:BaroChartAsyncJob?,sampler:CorrectionRSSSampler?,heartbeat:CorrectionHeartbeat?
     init(_ url:URL,_ count:Int,_ status:((String)->Void)?,_ completion:@escaping(Result<[String:Any],Error>)->Void) {self.url=url;self.count=count;self.status=status;self.completion=completion}
-    func run() {guard Thread.isMainThread,count>=512,count<=4194304 else{completion(.failure(AsterAsyncError.invalidProtocol("Benchmark main owner/count")));return};next()}
+    func run() {guard Thread.isMainThread,count>=512,count<=4194304 else{completion(.failure(BaroChartAsyncError.invalidProtocol("Benchmark main owner/count")));return};next()}
     func failure(_ error:Error) {job?.cancel();if let heartbeat=heartbeat {_=heartbeat.stop()};if let sampler=sampler {_=sampler.stop()};heartbeat=nil;sampler=nil;job=nil;engine=nil;completion(.failure(error))}
     func next() {
         if offset==matrix.count {
@@ -66,11 +66,11 @@ private final class CorrectionBenchmark {
         status?("\(position) \(mode): setup")
         do {
             let setup=correctionClock()
-            let current=try AsterEngine(bundleURL:url,count:count,options:["panels":[["id":"price","weight":3]],"series":[["id":"price","type":"candles","panel":"price"]]])
+            let current=try BaroChartEngine(bundleURL:url,count:count,options:["panels":[["id":"price","weight":3]],"series":[["id":"price","type":"candles","panel":"price"]]])
             for name in names {_=try current.call("nativeIndicator",[name,name,[:],"price"])}
             _=try current.scene(width:1200,height:700)
             let setupMs=(correctionClock()-setup)*1000
-            guard let event=try current.call("nativeBenchmarkEvent",[index]).toDictionary() as? [String:Any] else{throw AsterError.invalidScene}
+            guard let event=try current.call("nativeBenchmarkEvent",[index]).toDictionary() as? [String:Any] else{throw BaroChartLowLevelError.invalidScene}
             engine=current
             let memory=CorrectionRSSSampler(),pulse=CorrectionHeartbeat();sampler=memory;heartbeat=pulse;memory.start();pulse.start()
             // Allow pre-operation heartbeats without including this delay in wall
@@ -84,14 +84,14 @@ private final class CorrectionBenchmark {
                         collect(current,position,mode,index,event,setupMs,start,readyMs,nil)
                     } else {
                         job=try current.applyDataEventAsync(event,timeout:120,progress:{ [weak self] value in self?.status?("\(position) async: \(value.phase) \(value.done)/\(value.total)") }) { [self] result in
-                            do {guard Thread.isMainThread else{throw AsterError.wrongThread};let metrics=try result.get(),readyStart=correctionClock();_=try current.scene(width:1200,height:700);let readyMs=(correctionClock()-readyStart)*1000;collect(current,position,mode,index,event,setupMs,start,readyMs,metrics)} catch{failure(error)}
+                            do {guard Thread.isMainThread else{throw BaroChartLowLevelError.wrongThread};let metrics=try result.get(),readyStart=correctionClock();_=try current.scene(width:1200,height:700);let readyMs=(correctionClock()-readyStart)*1000;collect(current,position,mode,index,event,setupMs,start,readyMs,metrics)} catch{failure(error)}
                         }
                     }
                 } catch{failure(error)}
             }
         } catch{failure(error)}
     }
-    func collect(_ current:AsterEngine,_ position:String,_ mode:String,_ index:Int,_ event:[String:Any],_ setupMs:Double,_ start:Double,_ readyMs:Double,_ metrics:AsterAsyncMetrics?) {
+    func collect(_ current:BaroChartEngine,_ position:String,_ mode:String,_ index:Int,_ event:[String:Any],_ setupMs:Double,_ start:Double,_ readyMs:Double,_ metrics:BaroChartAsyncMetrics?) {
         let wallMs=(correctionClock()-start)*1000
         var row:[String:Any]=["position":position,"mode":mode,"index":index,"setupMsExcluded":setupMs,"correctionToReadySceneMs":wallMs,"readySceneJSONDecodeMs":readyMs,"event":event,"samples":1]
         if let heartbeat=heartbeat {row.merge(heartbeat.stop()){_,new in new}};if let sampler=sampler {row.merge(sampler.stop()){_,new in new}};heartbeat=nil;sampler=nil
@@ -100,9 +100,9 @@ private final class CorrectionBenchmark {
             row["async"]=["wallToCallbackMs":metrics.totalMs,"beginMs":metrics.beginMs,"workerInitMs":metrics.workerInitMs,"captureMs":metrics.captureMs,"targetCopyAndCheckpointImportMs":metrics.targetCopyMs,"queueWaitMs":metrics.queueWaitMs,"calculateAndIndicesMs":metrics.computeMs,"ownerUIStateMs":metrics.uiStateMs,"ownerFinishMs":metrics.finishMs,"ownerCommitAndCleanupMs":metrics.commitMs,"unattributedWallMs":max(0,metrics.totalMs-attributed),"copiedBytes":metrics.copiedBytes,"checkpointJSONBytes":metrics.checkpointJSONBytes,"maximumChunkBytes":metrics.maximumChunkBytes,"boundarySampledPeakResidentBytes":metrics.peakResidentBytes,"boundaryBaselineResidentBytes":metrics.baselineResidentBytes,"progressCallbackErrors":metrics.progressCallbackErrors]
         }
         do {
-            guard let text=try current.call("nativeBenchmarkDigest").toString(),let bytes=text.data(using:.utf8),let digest=try JSONSerialization.jsonObject(with:bytes) as? [String:Any],digest["outputs"] as? Int==15,digest["length"] as? Int==count,let corrected=try current.call("nativeBenchmarkEvent",[index]).forProperty("bar").toDictionary() else{throw AsterError.invalidScene}
+            guard let text=try current.call("nativeBenchmarkDigest").toString(),let bytes=text.data(using:.utf8),let digest=try JSONSerialization.jsonObject(with:bytes) as? [String:Any],digest["outputs"] as? Int==15,digest["length"] as? Int==count,let corrected=try current.call("nativeBenchmarkEvent",[index]).forProperty("bar").toDictionary() else{throw BaroChartLowLevelError.invalidScene}
             let canonical=try correctionCanonical(["digest":digest,"correctedBar":corrected])
-            if let reference=reference[position] {guard canonical==reference else{throw AsterError.javaScript("Correction digest/layout/raw-bar mismatch at \(position)")};row["digestMatchesSync"]=true} else {reference[position]=canonical}
+            if let reference=reference[position] {guard canonical==reference else{throw BaroChartLowLevelError.javaScript("Correction digest/layout/raw-bar mismatch at \(position)")};row["digestMatchesSync"]=true} else {reference[position]=canonical}
             row["digest"]=digest;row["correctedBar"]=corrected;rows.append(row)
             job=nil;engine=nil;offset += 1
             DispatchQueue.main.asyncAfter(deadline:.now()+0.1) {self.next()}

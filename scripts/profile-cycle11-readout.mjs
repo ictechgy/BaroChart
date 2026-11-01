@@ -10,9 +10,9 @@ const SHA_BASELINE='4d601b4a413887ade500a3e9c5606c295aadd29291fe1670f853e4ed348e
 const ROOT=resolve(import.meta.dirname,'..');
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const option=(name,fallback)=>{const key='--'+name,inline=process.argv.find(s=>s.startsWith(key+'=')),i=process.argv.indexOf(key);return inline?inline.slice(key.length+1):i<0?fallback:process.argv[i+1];};
-const SDK=['native/AsterNative.swift','native/AsterColumns.swift','native/AsterFrameRenderer.swift'];
+const SDK=['native/BaroChartEngine.swift','native/BaroChartColumns.swift','native/BaroChartFrameRenderer.swift'];
 const RESOURCE='native/Resources/aster-core.js';
-const PROVENANCE=[...SDK,RESOURCE,'native/AsterUIKit.swift','examples/native/bridge.mjs'];
+const PROVENANCE=[...SDK,RESOURCE,'native/BaroChartUIView.swift','examples/native/bridge.mjs'];
 async function hashes(root){return Object.fromEntries(await Promise.all(PROVENANCE.map(async p=>[p,sha(await readFile(join(root,p)))])));}
 function stats(a){const s=[...a].sort((a,b)=>a-b);return {samples:s.length,p50:s[Math.floor(s.length*.5)],p95:s[Math.min(s.length-1,Math.floor(s.length*.95))],max:s.at(-1)};}
 

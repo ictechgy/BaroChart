@@ -1,4 +1,4 @@
-package dev.aster.charts;
+package kr.coden.barochart;
 import android.os.*;import android.view.*;import org.json.*;import java.util.*;import java.io.*;
 
 /** Test-only activity input capture + existing production View draw endpoint. */
@@ -19,17 +19,17 @@ final class ScenePressureProbe {
         double quantile(double fraction){long target=(long)Math.ceil(count*fraction),n=0;for(int i=0;i<buckets.length;i++){n+=buckets[i];if(n>=target)return i/4d;}return max;}
         JSONObject json()throws JSONException{return new JSONObject().put("count",count).put("meanMs",count==0?JSONObject.NULL:total/count).put("p50LowerBinMs",count==0?JSONObject.NULL:quantile(.5)).put("p95LowerBinMs",count==0?JSONObject.NULL:quantile(.95)).put("maxMs",max).put("quantileMethod","all samples in0.25ms bins, overflowbin>=256ms; max exact");}
     }
-    ScenePressureProbe(){for(String name:new String[]{"transport","metadataParseNanos","numericValidationNanos","numericBytes","commandCount","stringCount"})try{java.lang.reflect.Field field=AsterEngine.SceneTiming.class.getDeclaredField(name);field.setAccessible(true);packetFields.put(name,field);}catch(NoSuchFieldException absent){/* Frozen legacy SDK has no typed counters. */}try{preparationField=AsterChartView.DrawTiming.class.getDeclaredField("packetPreparationNanos");preparationField.setAccessible(true);}catch(NoSuchFieldException absent){/* Frozen legacy SDK. */}}
-    private long number(AsterEngine.SceneTiming scene,String name){java.lang.reflect.Field field=packetFields.get(name);if(field==null)return 0;try{return ((Number)field.get(scene)).longValue();}catch(IllegalAccessException error){throw new AssertionError(error);}}
-    private String transport(AsterEngine.SceneTiming scene){java.lang.reflect.Field field=packetFields.get("transport");if(field==null)return "json";try{return (String)field.get(scene);}catch(IllegalAccessException error){throw new AssertionError(error);}}
-    private long preparation(AsterChartView.DrawTiming timing){if(preparationField==null)return 0;try{return preparationField.getLong(timing);}catch(IllegalAccessException error){throw new AssertionError(error);}}
+    ScenePressureProbe(){for(String name:new String[]{"transport","metadataParseNanos","numericValidationNanos","numericBytes","commandCount","stringCount"})try{java.lang.reflect.Field field=BaroChartEngine.SceneTiming.class.getDeclaredField(name);field.setAccessible(true);packetFields.put(name,field);}catch(NoSuchFieldException absent){/* Frozen legacy SDK has no typed counters. */}try{preparationField=BaroChartView.DrawTiming.class.getDeclaredField("packetPreparationNanos");preparationField.setAccessible(true);}catch(NoSuchFieldException absent){/* Frozen legacy SDK. */}}
+    private long number(BaroChartEngine.SceneTiming scene,String name){java.lang.reflect.Field field=packetFields.get(name);if(field==null)return 0;try{return ((Number)field.get(scene)).longValue();}catch(IllegalAccessException error){throw new AssertionError(error);}}
+    private String transport(BaroChartEngine.SceneTiming scene){java.lang.reflect.Field field=packetFields.get("transport");if(field==null)return "json";try{return (String)field.get(scene);}catch(IllegalAccessException error){throw new AssertionError(error);}}
+    private long preparation(BaroChartView.DrawTiming timing){if(preparationField==null)return 0;try{return preparationField.getLong(timing);}catch(IllegalAccessException error){throw new AssertionError(error);}}
     JSONObject capture(MotionEvent event)throws JSONException {
         if(!measuring||!event.isFromSource(InputDevice.SOURCE_TOUCHSCREEN))return null;
         long nano=System.nanoTime(),uptime=SystemClock.uptimeMillis();JSONObject row=new JSONObject().put("ordinal",++inputCount).put("action",event.getActionMasked()).put("source",event.getSource()).put("tool",event.getToolType(0)).put("deviceEventUptimeMs",event.getEventTime()).put("captureUptimeMs",uptime).put("captureNanos",nano).put("x",event.getRawX()).put("y",event.getRawY());
         if(pending.size()==512){pending.removeFirst();sampleDrops++;}pending.addLast(row);return row;
     }
     void dispatch(JSONObject row,long began)throws JSONException {if(row!=null)row.put("dispatchCpuMs",(System.nanoTime()-began)/1e6);}
-    void submitted(AsterChartView.DrawTiming timing,long revision)throws JSONException {
+    void submitted(BaroChartView.DrawTiming timing,long revision)throws JSONException {
         if(!measuring)return;drawCount++;draw.add((timing.submitNanos-timing.startNanos)/1e6);sceneJNI.add(timing.scene.jniNanos/1e6);envelopeParse.add(timing.scene.envelopeParseNanos/1e6);bodyParse.add(timing.scene.bodyParseNanos/1e6);canvas.add(timing.canvasNanos/1e6);accessibility.add(timing.accessibilityNanos/1e6);bitmap.add(timing.bitmapCopyNanos/1e6);
         String route=transport(timing.scene);if(route.equals("f64"))typedDraws++;else jsonDraws++;metadataParse.add(number(timing.scene,"metadataParseNanos")/1e6);numericValidation.add(number(timing.scene,"numericValidationNanos")/1e6);paintPreparation.add(preparation(timing)/1e6);packetNumericBytes+=number(timing.scene,"numericBytes");packetMetadataChars+=timing.scene.jsonChars;packetCommands+=number(timing.scene,"commandCount");packetStrings+=number(timing.scene,"stringCount");
         while(!pending.isEmpty()){

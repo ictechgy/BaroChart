@@ -5,7 +5,7 @@ let sdk = ProcessInfo.processInfo.environment["ASTER_NATIVE_PACKAGE_PATH"] ?? ".
 let package = Package(
     name: "AsterSDKConsumer",
     platforms: [.macOS(.v13)],
-    dependencies: [.package(name: "AsterNative", path: sdk)],
-    targets: [.executableTarget(name: "AsterSDKProbe", dependencies: [.product(name: "AsterNative", package: "AsterNative")])],
+    dependencies: [.package(name: "BaroChart", path: sdk)],
+    targets: [.executableTarget(name: "AsterSDKProbe", dependencies: [.product(name: "BaroChart", package: "BaroChart")])],
     swiftLanguageModes: [.v5]
 )

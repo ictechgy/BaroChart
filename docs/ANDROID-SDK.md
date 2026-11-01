@@ -21,7 +21,7 @@ for this newly added facade are stated there, separately from older results belo
 
 0.2.12의 공개 Java facade는 `applyDataEvents(JSONArray)`와 configure/enqueue/
 drain/pause/resume/cancel/stats/save/load 수집 메서드를 제공합니다.
-`AsterEngine.IngestionException.code`로 명시적 큐 오류를 구분합니다. 같은
+`BaroChartEngine.IngestionException.code`로 명시적 큐 오류를 구분합니다. 같은
 JSON 계약·owner-thread·호스트 실행 주기·순번·예산은
 [INGESTION.md](INGESTION.md)를 따릅니다. JNI engine close의 기존 소유권을
 유지하며 네트워크 공급자·스케줄러는 앱이 소유합니다.
@@ -46,7 +46,7 @@ ASTER_ANDROID_SERIAL=emulator-5580 ASTER_ANDROID_ADB_PORT=5038 \
 최종 AAR SHA256은 `321f5f3b7aa79cc0269d19638ebe76d9896dbe03bf17b3ee2953dd42806b8505`, core resource SHA256은 `065ff6c12093e23a5cc5de0a01a4a7ff814ba6488934a8eea853cc0271b727e0`입니다. API36 arm64 실제 emulator의 debug·R8 release는 각각 **1776 assertions = 기존1083 + 새 study693**를 통과했습니다. 각 variant에서 기존 async3회와 module async3회, Activity2세대의 실제 HOME/복귀/recreate를 확인했습니다. 693은 고유 UX 시나리오 수가 아닙니다. 패키지 감사는14/14입니다. API26/다른ABI/물리기기와 실제 presentation FPS는 미검증입니다.
 
 `native/android/library`는 Android Gradle library 모듈입니다. production Java
-sourceSet에서 `AsterEngine`, `AsterColumns`, `AsterChartView`와 내부 bitmap pool을
+sourceSet에서 `BaroChartEngine`, `BaroChartColumns`, `BaroChartView`와 내부 bitmap pool을
 컴파일하고, CMake/NDK로 기존 JNI·QuickJS 소스를 빌드합니다. 엔진 ABI나 async
 worker 수명 코드를 이 패키징 작업에서 변경하지 않습니다.
 
@@ -54,11 +54,11 @@ AAR에는 다음 요소가 함께 들어갑니다.
 
 | 요소 | AAR 경로/계약 |
 |---|---|
-| 공개 Java 클래스와 async 타입 | `classes.jar`, `dev.aster.charts` |
+| 공개 Java 클래스와 async 타입 | `classes.jar`, `kr.coden.barochart` |
 | 코어 자산 | `assets/aster-core.js` |
-| JNI | `jni/arm64-v8a/libaster.so`, ELF64/16KiB load alignment |
+| JNI | `jni/arm64-v8a/libbarochart.so`, ELF64/16KiB load alignment |
 | 최소 SDK | `AndroidManifest.xml`, minSDK26 |
-| 공개 버전 리소스 | `R.string.aster_sdk_version`, `R.txt`/`public.txt` |
+| 공개 버전 리소스 | `R.string.barochart_sdk_version`, `R.txt`/`public.txt` |
 | 소비 앱 R8 규칙 | `proguard.txt`, Engine/Columns native 이름과 `zonedParts` 보존 |
 | QuickJS MIT 라이선스 | `assets/licenses/QUICKJS-LICENSE.txt` |
 | 제품 라이선스 | `assets/licenses/LICENSE.txt`, Apache-2.0 |
@@ -118,11 +118,11 @@ dependencies {
 Kotlin 코드에서 공개 Java API를 직접 import합니다.
 
 ```kotlin
-import dev.aster.charts.AsterEngine
-import dev.aster.charts.AsterChartView
+import kr.coden.barochart.BaroChartEngine
+import kr.coden.barochart.BaroChartView
 
-val engine = AsterEngine(context, 0)
-val view = AsterChartView(context, engine)
+val engine = BaroChartEngine(context, 0)
+val view = BaroChartView(context, engine)
 // 외부 OHLCV를 engine.setColumns(JSONObject) 또는 setData(JSONArray)로 전달합니다.
 // Activity/View 소유 scope가 끝날 때 creating thread에서 engine.close()를 호출합니다.
 ```
@@ -191,7 +191,7 @@ API26 런타임·다른 ABI·물리 기기·Play 배포/서명은 이 경로에�
 기준20720 core를 사용한 별도 release AAR 빌드와 debug·R8 축소 소비 APK
 빌드와 Gradle project dependency 빌드는 실제 offline Gradle로 통과했습니다.
 project dependency는 이 기준 자산의 컴파일 검증이며, 아래 최종 런타임 결과는
-독립 앱의 로컬 AAR 소비 경로입니다. JNI `AsterColumns.writeSlice` 이름 보존
+독립 앱의 로컬 AAR 소비 경로입니다. JNI `BaroChartColumns.writeSlice` 이름 보존
 규칙 감사와 새 View fontScale 공개 API 소비는 기존 AAR에서 각각 red를 확인한
 뒤 최종 AAR에서 green을 확인했습니다.
 
@@ -237,7 +237,7 @@ recreate 이후 새 engine만 JNI handle1개로 관찰한 다음 그 engine도 �
 
 ## Workspace restore source slice (cloud checkpoint)
 
-`AsterEngine.restoreWorkspaceAsync(document, binding, options, listener)` now has
+`BaroChartEngine.restoreWorkspaceAsync(document, binding, options, listener)` now has
 Java source implementation, with an overload using default AsyncOptions. It
 returns WorkspaceJob (`cancel`, `cleanupPending`, `pendingFailure`). See
 [JAVA-WORKSPACE-RESTORE.md](JAVA-WORKSPACE-RESTORE.md) for ownership, registration,

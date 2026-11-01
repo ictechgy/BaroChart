@@ -205,7 +205,7 @@ toolbar.setOptions({labels: {select: '이동', fit: '전체 보기'}});
 | Apple 네이티브 | JavaScriptCore/CoreGraphics·SwiftPM | [Swift SDK](docs/SWIFT-SDK.md). 최근 호스트 변경은 실제 SDK·기기 검증 필요 |
 | Android 네이티브 | QuickJS/JNI/Canvas·library/AAR 경로 | [Android SDK](docs/ANDROID-SDK.md). 최근 호스트 변경은 실제 SDK·기기 검증 필요 |
 
-네이티브 경로는 WebView가 아닙니다. React Native/Flutter 어댑터는 없습니다. `AsterChart`, `AsterNative`, `AsterEngine`, `dev.aster.charts`, `aster.*` 식별자는 호환성을 위해 유지하며 저장 스키마 이름을 바꾸면 안 됩니다.
+네이티브 경로는 WebView가 아닙니다. React Native/Flutter 어댑터는 없습니다. `AsterChart`, `BaroChart`, `BaroChartEngine`, `kr.coden.barochart`, `aster.*` 식별자는 호환성을 위해 유지하며 저장 스키마 이름을 바꾸면 안 됩니다.
 
 Node 계약 테스트, strict TypeScript, 오프라인 패키지 소비자 검사는 자동 검사이며 브라우저·기기 인증은 아닙니다. Float64는 임의 정밀도 십진수가 아니며 workspace 복원에는 맞는 호스트 데이터가 필요하고 Worker에도 복사·할당 비용이 있습니다. [전체 검증 이력·한계](docs/PUBLIC-VALIDATION.md) · [상태·소유권 로드맵](docs/MARKET-ROADMAP.md).
 

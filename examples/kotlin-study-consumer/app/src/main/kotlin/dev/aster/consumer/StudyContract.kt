@@ -2,8 +2,8 @@ package dev.aster.consumer
 
 import android.content.Context
 import android.os.Looper
-import dev.aster.charts.AsterColumns
-import dev.aster.charts.AsterEngine
+import kr.coden.barochart.BaroChartColumns
+import kr.coden.barochart.BaroChartEngine
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.sign
@@ -23,7 +23,7 @@ internal object StudyContract {
     var terminals = 0
     var progress = 0
     private const val name = "aster.volume-direction@1/pressure"
-    private var source: AsterEngine? = null
+    private var source: BaroChartEngine? = null
 
     private fun check(value: Boolean, reason: String) {
         if (!value) throw AssertionError(reason)
@@ -40,8 +40,8 @@ internal object StudyContract {
         closes.forEachIndexed { i, close -> put(JSONObject().put("time", 1700000000000L + i * 60000L)
             .put("open", close).put("high", close + 1).put("low", close - 1).put("close", close).put("volume", intArrayOf(5, 7, 8, 9)[i])) }
     }
-    private fun state(engine: AsterEngine): JSONObject = engine.command("inspect") as JSONObject
-    private fun vector(engine: AsterEngine, id: String, output: String, expected: DoubleArray, label: String) {
+    private fun state(engine: BaroChartEngine): JSONObject = engine.command("inspect") as JSONObject
+    private fun vector(engine: BaroChartEngine, id: String, output: String, expected: DoubleArray, label: String) {
         val actual = engine.command("indicatorValues", id, output) as JSONArray
         check(actual.length() == expected.size, "$label vector length")
         expected.indices.forEach { check(actual.getDouble(it) == expected[it], "$label[$it] independent value") }
@@ -54,7 +54,7 @@ internal object StudyContract {
         val cumulative = DoubleArray(closes.size) { i -> total += signed[i]; total }
         return signed to cumulative
     }
-    private fun query(engine: AsterEngine, id: String, output: String, index: Int, horizon: Int, shift: Int,
+    private fun query(engine: BaroChartEngine, id: String, output: String, index: Int, horizon: Int, shift: Int,
                       expected: DoubleArray, plot: Boolean, label: String) {
         val options = JSONObject().put("mode", if (plot) "plot" else "raw").put("asOfIndex", horizon)
         val result: JSONObject = engine.indicatorValueAt(id, output, index, options)
@@ -85,7 +85,7 @@ internal object StudyContract {
         }
         return doc
     }
-    private fun atomicReject(target: AsterEngine, document: String, reason: String, notifications: () -> Int, noEvaluation: Boolean = false) {
+    private fun atomicReject(target: BaroChartEngine, document: String, reason: String, notifications: () -> Int, noEvaluation: Boolean = false) {
         val beforeState = state(target).toString(); val beforeStudies = target.saveStudies()
         val revision = target.revision(); val beforeNotifications = notifications()
         val error = rejected(reason) { target.loadStudies(document) }
@@ -94,9 +94,9 @@ internal object StudyContract {
         check(target.revision() == revision && notifications() == beforeNotifications, "$reason does not publish revision or observers")
     }
     fun run(context: Context, done: () -> Unit, failure: (Throwable) -> Unit) {
-        var target: AsterEngine? = null
+        var target: BaroChartEngine? = null
         try {
-            val engine = AsterEngine(context, 0, JSONObject().put("series", JSONArray())); source = engine
+            val engine = BaroChartEngine(context, 0, JSONObject().put("series", JSONArray())); source = engine
             var notifications = 0
             engine.addChangeListener(Runnable { notifications++ })
             val original = doubleArrayOf(10.0, 11.0, 11.0, 9.0)
@@ -146,7 +146,7 @@ internal object StudyContract {
                 }
             }
             complete("unsupported-module-version")
-            val receiver = AsterEngine(context, 0, JSONObject().put("series", JSONArray())); target = receiver
+            val receiver = BaroChartEngine(context, 0, JSONObject().put("series", JSONArray())); target = receiver
             var targetNotifications = 0; receiver.addChangeListener(Runnable { targetNotifications++ })
             val replacement = doubleArrayOf(20.0, 19.0, 22.0, 18.0); receiver.setData(data(replacement))
             receiver.addIndicator("existing", "sma", JSONObject().put("period", 2))
@@ -181,8 +181,8 @@ internal object StudyContract {
             val columns = Array(6) { slot -> DoubleArray(4) { index ->
                 when (slot) { 0 -> 1700000000000.0 + index * 60000.0; 1 -> replacement[index]; 2 -> replacement[index] + 1; 3 -> replacement[index] - 1; 4 -> replacement[index]; else -> intArrayOf(5, 7, 8, 9)[index].toDouble() }
             } }
-            val owned = AsterColumns.copyOf(columns[0], columns[1], columns[2], columns[3], columns[4], columns[5])
-            engine.prepareColumnsAsync(owned, 128, AsterEngine.AsyncOptions(30000, 64), listener("module-prepare", failure) { result ->
+            val owned = BaroChartColumns.copyOf(columns[0], columns[1], columns[2], columns[3], columns[4], columns[5])
+            engine.prepareColumnsAsync(owned, 128, BaroChartEngine.AsyncOptions(30000, 64), listener("module-prepare", failure) { result ->
                 check(result.succeeded() && result.metrics.getLong("immutableInputBytes") == 192L, "AAR linked-module owned prepare succeeds and reports immutable bytes")
                 vector(engine, "pressure", "cumulative", doubleArrayOf(0.0, -7.0, 1.0, -8.0), "prepared module cumulative")
                 check(state(engine).getJSONObject("lastBar").getDouble("close") == 18.0, "owned module prepare ignores post-submit caller array mutation")
@@ -205,11 +205,11 @@ internal object StudyContract {
             }); columns[4][3] = 900.0
         } catch (error: Throwable) { target?.close(); close(); failure(error) }
     }
-    private fun listener(label: String, failure: (Throwable) -> Unit, done: (AsterEngine.AsyncResult) -> Unit): AsterEngine.AsyncListener {
+    private fun listener(label: String, failure: (Throwable) -> Unit, done: (BaroChartEngine.AsyncResult) -> Unit): BaroChartEngine.AsyncListener {
         val evidence = JSONObject().put("id", label).put("terminalCount", 0).put("progressCallbacks", 0)
             .put("ownerValid", true).put("orderValid", true)
         jobContracts.put(evidence)
-        return object : AsterEngine.AsyncListener {
+        return object : BaroChartEngine.AsyncListener {
             private var delivered = false
             private fun callbackOrder(): Boolean {
                 val owner = Looper.myLooper() == Looper.getMainLooper()
@@ -218,7 +218,7 @@ internal object StudyContract {
                 evidence.put("orderValid", evidence.getBoolean("orderValid") && ordered)
                 return owner && ordered
             }
-            override fun onProgress(update: AsterEngine.AsyncProgress) {
+            override fun onProgress(update: BaroChartEngine.AsyncProgress) {
                 try {
                     if (!callbackOrder()) throw AssertionError("$label owner progress before terminal")
                     progress++
@@ -228,7 +228,7 @@ internal object StudyContract {
                     if (Looper.myLooper() == Looper.getMainLooper()) close()
                 }
             }
-            override fun onComplete(result: AsterEngine.AsyncResult) {
+            override fun onComplete(result: BaroChartEngine.AsyncResult) {
                 try {
                     evidence.put("terminalCount", evidence.getInt("terminalCount") + 1).put("status", result.status)
                     check(callbackOrder(), "$label exactly one owner terminal")

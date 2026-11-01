@@ -1,6 +1,6 @@
 {
   "name": "barochart",
-  "version": "0.2.13",
+  "version": "0.3.0-dev",
   "type": "module",
   "description": "BaroChart: Float64 financial chart engine for web and native hosts",
   "exports": {

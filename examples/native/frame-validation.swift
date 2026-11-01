@@ -2,14 +2,14 @@ import Foundation
 import CoreGraphics
 func verifyNativeFrames(_ bundle:URL,_ output:URL)throws {
     var checks:[String]=[]
-    func check(_ value:Bool,_ label:String)throws{if !value{throw AsterError.javaScript(label)};checks.append(label)}
+    func check(_ value:Bool,_ label:String)throws{if !value{throw BaroChartLowLevelError.javaScript(label)};checks.append(label)}
     func bitmap(_ w:Int,_ h:Int,_ scale:Double)->CGContext {let c=CGContext(data:nil,width:w,height:h,bitsPerComponent:8,bytesPerRow:0,space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue)!;c.translateBy(x:0,y:Double(h));c.scaleBy(x:scale,y:-scale);return c}
-    let engine=try AsterEngine(bundleURL:bundle,count:4096),budget=AsterNativeCacheBudget(maxBytes:33554432),a=AsterFrameRenderer(engine:engine,budget:budget),b=AsterFrameRenderer(engine:engine,budget:budget)
+    let engine=try BaroChartEngine(bundleURL:bundle,count:4096),budget=BaroChartNativeCacheBudget(maxBytes:33554432),a=BaroChartFrameRenderer(engine:engine,budget:budget),b=BaroChartFrameRenderer(engine:engine,budget:budget)
     var width=800,height=500,scale=1.0
-    func compare(_ cache:AsterFrameRenderer,_ label:String)throws {
+    func compare(_ cache:BaroChartFrameRenderer,_ label:String)throws {
         let w=Int(Double(width)*scale),h=Int(Double(height)*scale),actual=bitmap(w,h,scale),reference=bitmap(w,h,scale)
         _=try cache.render(width:Double(width),height:Double(height),scale:scale,in:actual)
-        AsterCoreGraphicsRenderer.render(try engine.scene(width:Double(width),height:Double(height)),in:reference)
+        BaroChartCoreGraphicsRenderer.render(try engine.scene(width:Double(width),height:Double(height)),in:reference)
         let x=actual.data!.assumingMemoryBound(to:UInt8.self),y=reference.data!.assumingMemoryBound(to:UInt8.self),bytes=actual.bytesPerRow*h
         var diff=0;for i in 0..<bytes {if x[i] != y[i]{diff+=1}}
         try check(diff==0,"Exact native cached/full pixels: "+label)
@@ -27,7 +27,7 @@ func verifyNativeFrames(_ bundle:URL,_ output:URL)throws {
     width=700;height=400;scale=2;try compare(a,"DPI+resize");try check(a.cachedBytes==((Int(Double(width)*scale)*4+63)/64)*64*Int(Double(height)*scale)*2,"native capacity reports two bitmaps")
     budget.setLimit(0);try check(a.cachedBytes==0 && b.cachedBytes==0 && budget.usedBytes==0,"pressure releases all cached owners");try compare(a,"pressure fallback")
     budget.setLimit(33554432);try compare(a,"explicit budget recovery")
-    do {_=try a.render(width:1e300,height:500,in:bitmap(100,100,1));throw AsterError.javaScript("oversize accepted")}catch AsterError.invalidScene {checks.append("huge finite width rejected before Int conversion")}
+    do {_=try a.render(width:1e300,height:500,in:bitmap(100,100,1));throw BaroChartLowLevelError.javaScript("oversize accepted")}catch BaroChartLowLevelError.invalidScene {checks.append("huge finite width rejected before Int conversion")}
     a.release();b.release();try check(budget.usedBytes==0 && a.cachedBytes==0 && b.cachedBytes==0,"retained renderers release bitmap capacity")
     try check(try engine.call("nativeReleaseFrameCaches").toBool(),"native frame cache clear")
     _=try engine.call("nativeInit",[1000,["panels":[["id":"price"]],"series":[]]])
@@ -35,7 +35,7 @@ func verifyNativeFrames(_ bundle:URL,_ output:URL)throws {
     width=300;height=400;scale=1;try compare(a,"periodic NaN dense LOD")
     let gapScene=try engine.scene(width:300,height:400),finitePoints=gapScene.commands.filter{$0.color=="#ef38b1"}.reduce(0){$0+($1.points?.count ?? 0)/2+($1.coords?.count ?? 0)/4}
     try check(finitePoints==667,"native JSC preserves all667 finite samples without gaps")
-    try compare(a,"before close");try compare(b,"other retained renderer before close");try engine.close();try check(budget.usedBytes==0 && a.cachedBytes==0 && b.cachedBytes==0,"close releases retained renderer capacity");do {_=try a.render(width:300,height:400,in:bitmap(300,400,1));throw AsterError.javaScript("closed frame accepted")}catch AsterAsyncError.engineClosed{try check(budget.usedBytes==0,"closed renderer rejects before allocating")}
+    try compare(a,"before close");try compare(b,"other retained renderer before close");try engine.close();try check(budget.usedBytes==0 && a.cachedBytes==0 && b.cachedBytes==0,"close releases retained renderer capacity");do {_=try a.render(width:300,height:400,in:bitmap(300,400,1));throw BaroChartLowLevelError.javaScript("closed frame accepted")}catch BaroChartAsyncError.engineClosed{try check(budget.usedBytes==0,"closed renderer rejects before allocating")}
     let report:[String:Any]=["passed":checks.count,"checks":checks,"host":"macOS JSC/CoreGraphics; cached versus full RGBA bitmap, DPR1/2; no display FPS","physicalDevice":false]
     try JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]).write(to:output);print("Native frame checks: \(checks.count)")
 }

@@ -15,7 +15,7 @@ private func residentBytes() -> UInt64 {
 private func distribution(_ values: [Double]) -> [String: Double] {
     let a = values.sorted();return ["samples":Double(a.count),"p50":a[a.count/2],"p95":a[min(a.count-1,Int(Double(a.count)*0.95))],"max":a.last!]
 }
-private func ledger(_ engine: AsterEngine,_ field: String) -> Int? {
+private func ledger(_ engine: BaroChartEngine,_ field: String) -> Int? {
     guard let value = Mirror(reflecting: engine).children.first(where: {$0.label == field})?.value else {return nil}
     let mirror = Mirror(reflecting: value);return mirror.displayStyle == .dictionary ? mirror.children.count : nil
 }
@@ -49,51 +49,51 @@ globalThis.__cycle11ReadoutDispose=function(){nativeInput.cancel();nativeModel.d
         for lines in [1,32] {for range in ["recent200","full100k"] {
             if failure != nil {break}
             var raw: [[String: Double]] = [],valueHashes: [String] = []
-            weak var weakEngine: AsterEngine?
+            weak var weakEngine: BaroChartEngine?
             do {
                 let result = try autoreleasepool {() throws -> [String: Any] in
                     let memoryBefore = residentBytes()
-                    let engine = try AsterEngine(bundleURL:bundle,count:100000,options:["panels":[["id":"price","weight":3,"label":"price"]],"series":[["id":"p","type":"candles","panel":"price"]],"visibleBars":200,"theme":["font":"12px monospace"]])
+                    let engine = try BaroChartEngine(bundleURL:bundle,count:100000,options:["panels":[["id":"price","weight":3,"label":"price"]],"series":[["id":"p","type":"candles","panel":"price"]],"visibleBars":200,"theme":["font":"12px monospace"]])
                     weakEngine = engine
                     engine.context.evaluateScript(proofSource)
-                    if let exception = engine.context.exception {throw AsterError.javaScript(exception.toString() ?? "Proof installation")}
+                    if let exception = engine.context.exception {throw BaroChartLowLevelError.javaScript(exception.toString() ?? "Proof installation")}
                     engine.context.evaluateScript("for(let i=0;i<\(lines);i++)nativeModel.addSeries({id:'l'+i,type:'line',panel:'price',values:Float64Array.from(nativeModel.store.columns.close.subarray(0,100000),v=>v+i*.1)});"+(range == "full100k" ? "nativeModel.fit();" : ""))
-                    if let exception = engine.context.exception {throw AsterError.javaScript(exception.toString() ?? "Fixture installation")}
+                    if let exception = engine.context.exception {throw BaroChartLowLevelError.javaScript(exception.toString() ?? "Fixture installation")}
                     _ = try engine.observeChanges {}
                     let token = "cycle11-readout",memoryReady = residentBytes()
                     var memoryAfterWarmup: UInt64 = 0,lastValueBytes = 0,measuredBaseRedraws = 0
                     defer {try? engine.close()}
                     for i in 0..<75 {try autoreleasepool {
                         _ = try engine.call("nativePointer",["move",99,80+(i*37)%1020,60+(i*29)%580])
-                        guard let frameText = try engine.call("nativeRenderFrameJSON",[token,1200,700,i == 0]).toString(),let data = frameText.data(using:.utf8),let frame = try JSONSerialization.jsonObject(with:data) as? [String:Any] else {throw AsterError.invalidScene}
+                        guard let frameText = try engine.call("nativeRenderFrameJSON",[token,1200,700,i == 0]).toString(),let data = frameText.data(using:.utf8),let frame = try JSONSerialization.jsonObject(with:data) as? [String:Any] else {throw BaroChartLowLevelError.invalidScene}
                         if i >= 15,frame["base"] != nil,!(frame["base"] is NSNull) {measuredBaseRedraws += 1}
                         let began = cycle11ReadoutClock(),value: String,afterJS: Double,afterBridge: Double,finished: Double
                         if mode == "legacy" {
                             let snapshot = try engine.call("nativeAccessibility",[true]);afterJS = cycle11ReadoutClock()
-                            guard let summary = snapshot.toDictionary() else {throw AsterError.invalidScene};afterBridge = cycle11ReadoutClock()
+                            guard let summary = snapshot.toDictionary() else {throw BaroChartLowLevelError.invalidScene};afterBridge = cycle11ReadoutClock()
                             value = originalUIKitValue(summary);finished = cycle11ReadoutClock()
                         } else {
                             let text = try engine.call("nativeAccessibilityText",[true,"uikit"]);afterJS = cycle11ReadoutClock()
-                            guard text.isString,let converted = text.toString() else {throw AsterError.invalidScene}
+                            guard text.isString,let converted = text.toString() else {throw BaroChartLowLevelError.invalidScene}
                             value = converted;afterBridge = cycle11ReadoutClock();finished = afterBridge
                         }
                         // Correctness outside the timer: source API stays rich and the
                         // candidate text must exactly equal old Foundation assembly.
-                        guard let rich = try engine.call("nativeAccessibility",[true]).toDictionary() else {throw AsterError.invalidScene}
+                        guard let rich = try engine.call("nativeAccessibility",[true]).toDictionary() else {throw BaroChartLowLevelError.invalidScene}
                         try require(value == originalUIKitValue(rich),"Every-hover exact UIKit value")
                         let valueHash = digest(value);valueHashes.append(valueHash);lastValueBytes = value.utf8.count
                         if i == 14 {memoryAfterWarmup = residentBytes()}
                         if i >= 15 {raw.append(["jsUs":(afterJS-began)*1e6,"hostConsumptionUs":(afterBridge-afterJS)*1e6,"hostAssemblyUs":(finished-afterBridge)*1e6,"totalUs":(finished-began)*1e6,"valueUTF8Bytes":Double(lastValueBytes)])}
                     }}
                     let memoryAfterMeasured = residentBytes()
-                    guard let proof = try engine.call("__cycle11ReadoutProof").toDictionary() else {throw AsterError.invalidScene}
+                    guard let proof = try engine.call("__cycle11ReadoutProof").toDictionary() else {throw BaroChartLowLevelError.invalidScene}
                     let coreLedger = try engine.call("__cycle11ReadoutDispose").toInt32()
                     try require(coreLedger == 0,"Explicit model dispose listener ledger")
                     try engine.close()
                     let observers = ledger(engine,"observers"),handles = ledger(engine,"frameCleanup")
                     try require(observers == 0 && handles == 0,"Closed host owner ledgers")
                     var rejectsClosed = false
-                    do {_ = try engine.call("nativeAccessibility",[true])} catch AsterAsyncError.engineClosed {rejectsClosed = true}
+                    do {_ = try engine.call("nativeAccessibility",[true])} catch BaroChartAsyncError.engineClosed {rejectsClosed = true}
                     try require(rejectsClosed,"Closed engine call rejects")
                     try require(measuredBaseRedraws == 0,"Every measured hover has prepared cached base")
                     let stats = Dictionary(uniqueKeysWithValues:["jsUs","hostConsumptionUs","hostAssemblyUs","totalUs"].map {key in (key,distribution(raw.map {$0[key]!}))})

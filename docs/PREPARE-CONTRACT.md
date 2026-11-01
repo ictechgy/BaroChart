@@ -4,7 +4,7 @@
 
 ## 입력과 상태
 
-production 입력은 immutable-owned AsterColumns(6 Double arrays)입니다. Swift는 value/COW snapshot; Android copyOf는 private 배열로 복사하며 복사 비용은 별도 측정하고 calling thread 계약을 명시합니다. 입력 배열을 JSON 숫자 배열로 전송하지 않습니다. demo/benchmark seeded 준비는 별도 convenience이고 실제 시장 feed가 아닙니다. borrowed general-series values와 custom factory의 native async 이전은 이번 API에서 지원하지 않습니다. 기존 sync 등록은 유지하고 새 임의 source-string eval 전송을 추가하지 않습니다.
+production 입력은 immutable-owned BaroChartColumns(6 Double arrays)입니다. Swift는 value/COW snapshot; Android copyOf는 private 배열로 복사하며 복사 비용은 별도 측정하고 calling thread 계약을 명시합니다. 입력 배열을 JSON 숫자 배열로 전송하지 않습니다. demo/benchmark seeded 준비는 별도 convenience이고 실제 시장 feed가 아닙니다. borrowed general-series values와 custom factory의 native async 이전은 이번 API에서 지원하지 않습니다. 기존 sync 등록은 유지하고 새 임의 source-string eval 전송을 추가하지 않습니다.
 
 engine별 max1 active async 작업을 기존 정책(Apple busy / Android supersede)으로 유지합니다. source model/store identity·data version·factory/시리즈 binding이 변경되면 stale입니다. 초기 준비는 source 출력/checkpoint를 빌리지 않으므로 의미를 바꾸지 않는 cached 지표 조회는 허용합니다. correction snapshot의 computed revision 고정은 유지합니다. latest UI theme/panels/styles/symbol/drawing history/selection/tool/size를 merge합니다. 활성 gesture 또는 unsupported formatter callback은 성공 context를 설치하지 않습니다. source follow=true이면 새 데이터 마지막 visibleBars(기본200), follow=false면 source의 현재 view를 보존합니다.
 

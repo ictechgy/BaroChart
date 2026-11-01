@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-const swift=readFileSync(new URL('../native/AsterNative.swift',import.meta.url),'utf8'),java=readFileSync(new URL('../native/android/java/dev/aster/charts/AsterEngine.java',import.meta.url),'utf8');
+const swift=readFileSync(new URL('../native/BaroChartEngine.swift',import.meta.url),'utf8'),java=readFileSync(new URL('../native/android/java/kr/coden/barochart/BaroChartEngine.java',import.meta.url),'utf8');
 
 test('Swift validates layout no-op receipts before observer notification',()=>{
  const order=swift.split('} else if operation == "setPanelOrder" {')[1]?.split('} else if operation == "setIndicatorPlacement" {')[0];

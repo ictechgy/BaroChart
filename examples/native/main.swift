@@ -6,18 +6,18 @@ let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
 let prepareMode=CommandLine.arguments.contains("--prepare-demo")
 let comparisonMode = !prepareMode && !["--study-test","--closed-observer-test","--study-ui-test","--publication-test","--self-test","--api-test","--ui-test","--frame-test","--async-test","--async-bench","--prepare-test","--prepare-bench","--soak-test","--snapshot","--bench"].contains(where:CommandLine.arguments.contains)
 let emptyStartup=comparisonMode || ["--study-test","--closed-observer-test","--study-ui-test","--publication-test","--axes-test","--frame-test","--async-test","--async-bench","--prepare-test","--prepare-bench","--soak-test","--prepare-demo"].contains(where:CommandLine.arguments.contains)
-let engine = try AsterEngine(bundleURL:root.appendingPathComponent("artifacts/aster-core.js"), count: emptyStartup ? 0 : 100000,options:prepareMode ? ["panels":[["id":"price","weight":3]],"series":[["id":"price","type":"candles","panel":"price"]]] : nil)
+let engine = try BaroChartEngine(bundleURL:root.appendingPathComponent("artifacts/aster-core.js"), count: emptyStartup ? 0 : 100000,options:prepareMode ? ["panels":[["id":"price","weight":3]],"series":[["id":"price","type":"candles","panel":"price"]]] : nil)
 if prepareMode {for name in ["sma","ema","bollinger","macd","donchian","stochastic","rsi","atr"]{_=try engine.call("nativeIndicator",[name,name,[:],"price"])}}
 func nativeArgument(_ flag:String,_ fallback:Int)->Int {let args=CommandLine.arguments;guard let i=args.firstIndex(of:flag),i+1<args.count,let value=Int(args[i+1]) else{return fallback};return value}
 func nativeFire(_ name: String, _ args: [Any]) {do {_ = try engine.call(name,args)} catch {print(error)}}
-func bitmap(_ scene: AsterScene) -> CGContext {
+func bitmap(_ scene: BaroChartScene) -> CGContext {
     let ctx = CGContext(data:nil,width:Int(scene.width),height:Int(scene.height),bitsPerComponent:8,bytesPerRow:0,space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue)!
     ctx.translateBy(x:0,y:scene.height);ctx.scaleBy(x:1,y:-1);return ctx
 }
 func snapshot(_ file: String) throws {
-    let scene = try engine.scene(width:1200,height:700),ctx=bitmap(scene);AsterCoreGraphicsRenderer.render(scene,in:ctx)
+    let scene = try engine.scene(width:1200,height:700),ctx=bitmap(scene);BaroChartCoreGraphicsRenderer.render(scene,in:ctx)
     let destination = CGImageDestinationCreateWithURL(root.appendingPathComponent(file) as CFURL,UTType.png.identifier as CFString,1,nil)!
-    CGImageDestinationAddImage(destination,ctx.makeImage()!,nil);if !CGImageDestinationFinalize(destination) {throw AsterError.invalidScene};print("Native PNG: \(file)")
+    CGImageDestinationAddImage(destination,ctx.makeImage()!,nil);if !CGImageDestinationFinalize(destination) {throw BaroChartLowLevelError.invalidScene};print("Native PNG: \(file)")
 }
 func percentiles(_ values: [Double]) -> [String: Double] {let a=values.sorted();return ["p50":a[Int(Double(a.count-1)*0.5)],"p95":a[Int(Double(a.count-1)*0.95)],"p99":a[Int(Double(a.count-1)*0.99)]]}
 if CommandLine.arguments.contains("--study-test") || CommandLine.arguments.contains("--closed-observer-test") {
@@ -30,7 +30,7 @@ if CommandLine.arguments.contains("--study-test") || CommandLine.arguments.conta
     var report=try verifyNativeAxes(engine),finished=false,failure:Error?
     let job=try verifyNativeAxesHandoff(engine,width:800,height:500){result in do{report=nativeAxesCombinedReport(report,try result.get())}catch{failure=error};finished=true},deadline=ProcessInfo.processInfo.systemUptime+8
     while !finished&&ProcessInfo.processInfo.systemUptime<deadline{autoreleasepool{_=RunLoop.main.run(mode:.default,before:Date(timeIntervalSinceNow:0.01))}}
-    if let error=failure{throw error};if !finished{job.cancel();throw AsterError.javaScript("Native axes handoff timed out")}
+    if let error=failure{throw error};if !finished{job.cancel();throw BaroChartLowLevelError.javaScript("Native axes handoff timed out")}
     let data=try JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]);try data.write(to:root.appendingPathComponent("benchmarks/results/native-axes-validation.json"));print(String(data:data,encoding:.utf8)!)
 } else if CommandLine.arguments.contains("--publication-test") {
     let report = try engine.call("nativePublicationOrderSelfTest").toDictionary()!
@@ -53,12 +53,12 @@ if CommandLine.arguments.contains("--study-test") || CommandLine.arguments.conta
     if let failure=failure{print("Native prepare FAILED: \(failure)");exit(1)};if !completed{print("Native prepare timed out");exit(1)}
 } else if CommandLine.arguments.contains("--soak-test") {
     final class SoakChart:NSView {
-        var source:AsterEngine?,observer:UUID?
+        var source:BaroChartEngine?,observer:UUID?
         override var isFlipped:Bool{true}
-        init(_ engine:AsterEngine,_ frame:NSRect){source=engine;super.init(frame:frame);observer=try? engine.observeChanges{[weak self] in self?.needsDisplay=true}}
+        init(_ engine:BaroChartEngine,_ frame:NSRect){source=engine;super.init(frame:frame);observer=try? engine.observeChanges{[weak self] in self?.needsDisplay=true}}
         required init?(coder:NSCoder){return nil}
         func detach(){if let source=source,let observer=observer{try? source.removeObserver(observer)};observer=nil;source=nil;removeFromSuperview()}
-        override func draw(_ rect:NSRect){guard let source=source,let context=NSGraphicsContext.current?.cgContext else{return};do{let scene=try source.scene(width:max(100,bounds.width),height:max(80,bounds.height));AsterCoreGraphicsRenderer.render(scene,in:context)}catch{print("Soak draw: \(error)")}}
+        override func draw(_ rect:NSRect){guard let source=source,let context=NSGraphicsContext.current?.cgContext else{return};do{let scene=try source.scene(width:max(100,bounds.width),height:max(80,bounds.height));BaroChartCoreGraphicsRenderer.render(scene,in:context)}catch{print("Soak draw: \(error)")}}
     }
     let duration=nativeArgument("--soak-seconds",180),bars=nativeArgument("--soak-bars",20000),charts=nativeArgument("--soak-charts",3),app=NSApplication.shared
     app.setActivationPolicy(.regular)
@@ -68,7 +68,7 @@ if CommandLine.arguments.contains("--study-test") || CommandLine.arguments.conta
     let harness=startNativePrepareSoak(root.appendingPathComponent("artifacts/aster-core.js"),seconds:Double(duration),bars:bars,charts:charts,onEngine:{index,source in
         views.removeValue(forKey:index)?.detach();if let source=source{let view=SoakChart(source,NSRect(x:0,y:CGFloat(index)*310,width:640,height:300));views[index]=view;window.contentView?.addSubview(view)}
     },onResize:{index,width,height in views[index]?.setFrameSize(NSSize(width:width,height:height));views[index]?.needsDisplay=true}){result in
-        do{var report=try result.get();report["host"]="AppKit NSWindow + CoreGraphics + JavaScriptCore";report["nativeWindow"]=true;let data=try JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]);try data.write(to:root.appendingPathComponent("benchmarks/results/native-soak-validation.json"));print(String(data:data,encoding:.utf8)!);if report["failed"] as? Bool==true{failure=AsterError.javaScript("Native soak checks failed; see report")}}catch{failure=error};completed=true
+        do{var report=try result.get();report["host"]="AppKit NSWindow + CoreGraphics + JavaScriptCore";report["nativeWindow"]=true;let data=try JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]);try data.write(to:root.appendingPathComponent("benchmarks/results/native-soak-validation.json"));print(String(data:data,encoding:.utf8)!);if report["failed"] as? Bool==true{failure=BaroChartLowLevelError.javaScript("Native soak checks failed; see report")}}catch{failure=error};completed=true
     }
     while !completed&&ProcessInfo.processInfo.systemUptime<deadline{autoreleasepool{_=RunLoop.main.run(mode:.default,before:Date(timeIntervalSinceNow:0.02));while let event=app.nextEvent(matching:.any,until:.distantPast,inMode:.default,dequeue:true){app.sendEvent(event)};for view in views.values{view.displayIfNeeded()};app.updateWindows()}}
     harness.stop();window.close()
@@ -94,7 +94,7 @@ if CommandLine.arguments.contains("--study-test") || CommandLine.arguments.conta
 } else if CommandLine.arguments.contains("--api-test") {
     var report = try verifyCommonAPI(engine)
     let small = try nativeTextInk("12px monospace"), large = try nativeTextInk("bold 36px monospace")
-    guard large > small*2 else {throw AsterError.javaScript("Font sizing was ignored")}
+    guard large > small*2 else {throw BaroChartLowLevelError.javaScript("Font sizing was ignored")}
     report["passed"] = 13; report["fontSmallInk"] = small; report["fontLargeInk"] = large;report["fontSizing"] = true
     let data=try JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]);try data.write(to:root.appendingPathComponent("benchmarks/results/native-api-tests.json"));print(String(data:data,encoding:.utf8)!)
 } else if CommandLine.arguments.contains("--snapshot") {
@@ -104,14 +104,14 @@ if CommandLine.arguments.contains("--study-test") || CommandLine.arguments.conta
     for n in [10000,100000,1000000] {
         let start=ProcessInfo.processInfo.systemUptime;try engine.call("nativeInit",[n]);let load=(ProcessInfo.processInfo.systemUptime-start)*1000
         var complete:[Double]=[],render:[Double]=[];var stats:[String:Int]=[:]
-        for i in 0..<70 {let begin=ProcessInfo.processInfo.systemUptime;let scene=try engine.scene(width:1200,height:700);let ctx=bitmap(scene);let draw=ProcessInfo.processInfo.systemUptime;AsterCoreGraphicsRenderer.render(scene,in:ctx);_ = ctx.makeImage();let end=ProcessInfo.processInfo.systemUptime;if i>=10 {complete.append((end-begin)*1000);render.append((end-draw)*1000)};stats=scene.stats}
+        for i in 0..<70 {let begin=ProcessInfo.processInfo.systemUptime;let scene=try engine.scene(width:1200,height:700);let ctx=bitmap(scene);let draw=ProcessInfo.processInfo.systemUptime;BaroChartCoreGraphicsRenderer.render(scene,in:ctx);_ = ctx.makeImage();let end=ProcessInfo.processInfo.systemUptime;if i>=10 {complete.append((end-begin)*1000);render.append((end-draw)*1000)};stats=scene.stats}
         result.append(["storedBars":n,"visibleSourceBars":stats["visibleSourceBars"] ?? 0,"loadMs":load,"sceneBridgeBitmapDrawMs":percentiles(complete),"coreGraphicsSubmitAndImageMs":percentiles(render),"samples":60,"width":1200,"height":700,"dpr":1])
     }
     let doc:[String:Any]=["environment":ProcessInfo.processInfo.operatingSystemVersionString,"renderer":"CoreGraphics offscreen; not display FPS","results":result]
     let data=try JSONSerialization.data(withJSONObject:doc,options:[.prettyPrinted,.sortedKeys]);try data.write(to:root.appendingPathComponent("benchmarks/results/native.json"));print(String(data:data,encoding:.utf8)!)
 } else {
     final class ChartView:NSView {
-        private lazy var frameRenderer=AsterFrameRenderer(engine:engine)
+        private lazy var frameRenderer=BaroChartFrameRenderer(engine:engine)
         private var chartTracking:NSTrackingArea?
         var onInteraction:(()->Void)?
         override var isFlipped:Bool {true};override var acceptsFirstResponder:Bool {true}
@@ -129,7 +129,7 @@ if CommandLine.arguments.contains("--study-test") || CommandLine.arguments.conta
         override func viewWillMove(toWindow newWindow:NSWindow?) {if newWindow == nil {frameRenderer.release();nativeFire("nativePointer",["cancel",0,0,0])};super.viewWillMove(toWindow:newWindow)}
     }
     final class DemoDelegate:NSObject,NSApplicationDelegate {
-        var window:NSWindow!;let view=ChartView();var asyncJob:AsterAsyncJob?;let asyncStatus=NSTextField(labelWithString:"Async ready");let tools=["select","trendline","horizontal","fibonacci","rectangle","ellipse","text"]
+        var window:NSWindow!;let view=ChartView();var asyncJob:BaroChartAsyncJob?;let asyncStatus=NSTextField(labelWithString:"Async ready");let tools=["select","trendline","horizontal","fibonacci","rectangle","ellipse","text"]
         let comparisonReadout=NSTextField(wrappingLabelWithString:"Synthetic A/B · exact UTC join, B gaps");var comparisonButtons:[String:NSButton]=[:],comparisonActive=false,savedComparison:String?,analysisCaption:String?;let analysisButton=NSButton(title:"Session VWAP",target:nil,action:nil)
         func applicationDidFinishLaunching(_ notification:Notification) {
             window=NSWindow(contentRect:NSRect(x:0,y:0,width:1200,height:860),styleMask:[.titled,.closable,.resizable,.miniaturizable],backing:.buffered,defer:false);window.title="BaroChart · Native CoreGraphics · Synthetic A/B";window.acceptsMouseMovedEvents=true
@@ -158,13 +158,13 @@ if CommandLine.arguments.contains("--study-test") || CommandLine.arguments.conta
                         let drag = NSEvent.mouseEvent(with: .leftMouseDragged, location: NSPoint(x: 450, y: 450), modifierFlags: [], timestamp: 0.1, windowNumber: self.window.windowNumber, context: nil, eventNumber: 2, clickCount: 1, pressure: 1)!
                         self.view.mouseDown(with: down); self.view.mouseDragged(with: drag); self.view.mouseUp(with: drag)
                         let saved = try engine.saveDrawings()
-                        guard saved.contains("trendline") else { throw AsterError.javaScript("Native mouse gesture failed") }
+                        guard saved.contains("trendline") else { throw BaroChartLowLevelError.javaScript("Native mouse gesture failed") }
                         try engine.call("nativeKey", ["z", true, false])
-                        guard try engine.saveDrawings().contains("\"drawings\":[]") else { throw AsterError.javaScript("Native undo failed") }
+                        guard try engine.saveDrawings().contains("\"drawings\":[]") else { throw BaroChartLowLevelError.javaScript("Native undo failed") }
                         try engine.call("nativeKey", ["z", true, true])
-                        guard try engine.saveDrawings() == saved else { throw AsterError.javaScript("Native redo did not restore the saved geometry") }
+                        guard try engine.saveDrawings() == saved else { throw BaroChartLowLevelError.javaScript("Native redo did not restore the saved geometry") }
                         self.view.needsDisplay = true; self.view.displayIfNeeded()
-                        guard let image = self.view.bitmapImageRepForCachingDisplay(in: self.view.bounds) else { throw AsterError.invalidScene }
+                        guard let image = self.view.bitmapImageRepForCachingDisplay(in: self.view.bounds) else { throw BaroChartLowLevelError.invalidScene }
                         self.view.cacheDisplay(in: self.view.bounds, to: image)
                         try image.representation(using: .png, properties: [:])!.write(to: root.appendingPathComponent("artifacts/native-window-verified.png"))
                         let result = "{\"passed\":4,\"host\":\"AppKit NSWindow\",\"nativeMouseGesture\":true,\"undoRedo\":true,\"viewBitmap\":true}"
@@ -192,10 +192,10 @@ if CommandLine.arguments.contains("--study-test") || CommandLine.arguments.conta
         }
         func verifyStudyWindow(){do{
             analysisButton.performClick(nil)
-            guard analysisCaption != nil else{throw AsterError.javaScript("Session VWAP button did not install the study demo")}
+            guard analysisCaption != nil else{throw BaroChartLowLevelError.javaScript("Session VWAP button did not install the study demo")}
             var report=try verifyNativeAnalysisView(engine,width:view.bounds.width,height:view.bounds.height)
-            view.needsDisplay=true;view.displayIfNeeded();guard let image=view.bitmapImageRepForCachingDisplay(in:view.bounds) else{throw AsterError.invalidScene};view.cacheDisplay(in:view.bounds,to:image)
-            guard let png=image.representation(using:.png,properties:[:]),png.count>10000 else{throw AsterError.invalidScene}
+            view.needsDisplay=true;view.displayIfNeeded();guard let image=view.bitmapImageRepForCachingDisplay(in:view.bounds) else{throw BaroChartLowLevelError.invalidScene};view.cacheDisplay(in:view.bounds,to:image)
+            guard let png=image.representation(using:.png,properties:[:]),png.count>10000 else{throw BaroChartLowLevelError.invalidScene}
             report["host"]="AppKit NSWindow + CoreGraphics + JavaScriptCore";report["uiControlActions"]=true;report["syntheticControllerHover"]=true;report["physicalInput"]=false;report["snapshotBytes"]=png.count
             try png.write(to:root.appendingPathComponent("artifacts/cycle11-native-studies.png"))
             let bytes=try JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]);try bytes.write(to:root.appendingPathComponent("benchmarks/results/cycle11-native-studies-ui.json"));print(String(data:bytes,encoding:.utf8)!);NSApp.terminate(nil)
@@ -205,7 +205,7 @@ if CommandLine.arguments.contains("--study-test") || CommandLine.arguments.conta
             do{
                 if action=="range"||action=="precision"{
                     let axes=try engine.command("inspect").forProperty("axes").toArray() as? [[String:Any]] ?? []
-                    guard let axis=axes.first(where:{$0["id"] as? String=="comparison-B"}) else{throw AsterError.javaScript("Missing comparison axis")}
+                    guard let axis=axes.first(where:{$0["id"] as? String=="comparison-B"}) else{throw BaroChartLowLevelError.javaScript("Missing comparison axis")}
                     var patch:[String:Any]=[:]
                     if action=="range"{patch["range"]=(axis["range"] as? [Any]) == nil ? [2000,2240] as Any : NSNull()}
                     else{patch["precision"]=(axis["precision"] as? Int)==0 ? 3 : 0}
@@ -220,11 +220,11 @@ if CommandLine.arguments.contains("--study-test") || CommandLine.arguments.conta
         }
         func verifyAxesWindow(){do{
             var report=try verifyNativeAxes(engine,width:view.bounds.width,height:view.bounds.height);comparisonActive=true;refreshComparison();var checks:[String]=[]
-            func require(_ value:Bool,_ text:String)throws{guard value else{throw AsterError.javaScript(text)};checks.append(text)}
-            func mouse(_ type:NSEvent.EventType,_ point:[String:Double])throws{let p=view.convert(type == .leftMouseUp ? .zero : NSPoint(x:point["x"]!,y:point["y"]!),to:nil);guard let event=NSEvent.mouseEvent(with:type,location:p,modifierFlags:[],timestamp:ProcessInfo.processInfo.systemUptime,windowNumber:window.windowNumber,context:nil,eventNumber:1,clickCount:1,pressure:1) else{throw AsterError.invalidScene};switch type{case .mouseMoved:view.mouseMoved(with:event);case .leftMouseDown:view.mouseDown(with:event);case .leftMouseDragged:view.mouseDragged(with:event);default:view.mouseUp(with:event)}}
+            func require(_ value:Bool,_ text:String)throws{guard value else{throw BaroChartLowLevelError.javaScript(text)};checks.append(text)}
+            func mouse(_ type:NSEvent.EventType,_ point:[String:Double])throws{let p=view.convert(type == .leftMouseUp ? .zero : NSPoint(x:point["x"]!,y:point["y"]!),to:nil);guard let event=NSEvent.mouseEvent(with:type,location:p,modifierFlags:[],timestamp:ProcessInfo.processInfo.systemUptime,windowNumber:window.windowNumber,context:nil,eventNumber:1,clickCount:1,pressure:1) else{throw BaroChartLowLevelError.invalidScene};switch type{case .mouseMoved:view.mouseMoved(with:event);case .leftMouseDown:view.mouseDown(with:event);case .leftMouseDragged:view.mouseDragged(with:event);default:view.mouseUp(with:event)}}
             try mouse(.mouseMoved,nativeAxisPoint(engine,index:2,width:view.bounds.width,height:view.bounds.height));try require(comparisonReadout.stringValue.contains("C 103.00")&&comparisonReadout.stringValue.contains("SYNTH:B 2020.000"),"AppKit mouse readout separates primary/B")
             try mouse(.mouseMoved,nativeAxisPoint(engine,index:3,width:view.bounds.width,height:view.bounds.height));try require(comparisonReadout.stringValue.contains("C 104.00")&&comparisonReadout.stringValue.contains("SYNTH:B gap"),"AppKit mouse readout shows missing B")
-            guard let exitEvent=NSEvent.enterExitEvent(with:.mouseExited,location:.zero,modifierFlags:[],timestamp:ProcessInfo.processInfo.systemUptime,windowNumber:window.windowNumber,context:nil,eventNumber:2,trackingNumber:0,userData:nil) else{throw AsterError.invalidScene};view.mouseExited(with:exitEvent)
+            guard let exitEvent=NSEvent.enterExitEvent(with:.mouseExited,location:.zero,modifierFlags:[],timestamp:ProcessInfo.processInfo.systemUptime,windowNumber:window.windowNumber,context:nil,eventNumber:2,trackingNumber:0,userData:nil) else{throw BaroChartLowLevelError.invalidScene};view.mouseExited(with:exitEvent)
             try require(try engine.command("crosshairValues",[view.bounds.width,view.bounds.height]).isNull && !comparisonReadout.stringValue.contains("C 104.00"),"AppKit mouse exit clears stale readout")
             nativeFire("nativeTool",["trendline"]);try mouse(.leftMouseDown,nativeAxisPoint(engine,index:2,price:2080,width:view.bounds.width,height:view.bounds.height));try mouse(.leftMouseDragged,nativeAxisPoint(engine,index:6,price:2160,width:view.bounds.width,height:view.bounds.height));try mouse(.leftMouseUp,[:])
             let doc=try JSONSerialization.jsonObject(with:engine.saveDrawings().data(using:.utf8)!) as! [String:Any],d=(doc["drawings"] as! [[String:Any]])[0],points=d["points"] as! [[String:Double]]
@@ -233,7 +233,7 @@ if CommandLine.arguments.contains("--study-test") || CommandLine.arguments.conta
             comparisonButtons["scale"]!.performClick(nil);comparisonButtons["scale"]!.performClick(nil);comparisonButtons["range"]!.performClick(nil);comparisonButtons["precision"]!.performClick(nil);comparisonButtons["hide-axis"]!.performClick(nil);comparisonButtons["series"]!.performClick(nil);comparisonButtons["series"]!.performClick(nil);comparisonButtons["load"]!.performClick(nil);try require(try engine.saveDrawings()==saved,"AppKit buttons save/remove/reconnect/load preserve binding")
             let axis=(try engine.command("inspect").forProperty("axes").toArray() as! [[String:Any]])[0]
             try require(axis["scale"] as? String=="percent"&&axis["precision"] as? Int==0&&axis["visible"] as? Bool==false&&(axis["range"] as? [Int])==[2000,2240],"AppKit scale/range/precision/visibility controls")
-            view.needsDisplay=true;view.displayIfNeeded();guard let image=view.bitmapImageRepForCachingDisplay(in:view.bounds) else{throw AsterError.invalidScene};view.cacheDisplay(in:view.bounds,to:image);let png=image.representation(using:.png,properties:[:])!;try png.write(to:root.appendingPathComponent("artifacts/native-axes-window.png"));try require(png.count>10000,"AppKit independent axes raster")
+            view.needsDisplay=true;view.displayIfNeeded();guard let image=view.bitmapImageRepForCachingDisplay(in:view.bounds) else{throw BaroChartLowLevelError.invalidScene};view.cacheDisplay(in:view.bounds,to:image);let png=image.representation(using:.png,properties:[:])!;try png.write(to:root.appendingPathComponent("artifacts/native-axes-window.png"));try require(png.count>10000,"AppKit independent axes raster")
             report["uiPassed"]=checks.count;report["uiChecks"]=checks;report["host"]="AppKit NSWindow + CoreGraphics + JavaScriptCore";report["syntheticNSEvents"]=true;report["uiControlActions"]=true
             asyncJob=try verifyNativeAxesHandoff(engine,width:view.bounds.width,height:view.bounds.height){[weak self] result in do{let final=nativeAxesCombinedReport(report,try result.get());self?.asyncJob=nil;self?.refreshComparison();let bytes=try JSONSerialization.data(withJSONObject:final,options:[.prettyPrinted,.sortedKeys]);try bytes.write(to:root.appendingPathComponent("benchmarks/results/native-axes-ui-validation.json"));print(String(data:bytes,encoding:.utf8)!);NSApp.terminate(nil)}catch{print("Native axes UI handoff FAILED: \(error)");exit(1)}}
         }catch{print("Native axes UI FAILED: \(error)");exit(1)}}

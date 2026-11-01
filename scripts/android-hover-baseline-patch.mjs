@@ -24,10 +24,10 @@ export function patchBaselineView(source){
  source=source.replace('    private final Runnable onChange=()->invalidate();',`    private final Runnable onChange=()->invalidate();
     interface DrawProbe {void submitted(DrawTiming timing);}
     static final class DrawTiming {
-        final long startNanos,submitNanos,canvasNanos,accessibilityNanos;final AsterEngine.SceneTiming scene;
+        final long startNanos,submitNanos,canvasNanos,accessibilityNanos;final BaroChartEngine.SceneTiming scene;
         final long baseRasterNanos=0,drawingRasterNanos=0,bitmapCopyNanos=0,hoverNanos=0;
         final boolean cacheUsed=false,baseChanged=false,drawingsChanged=false;
-        DrawTiming(long start,long submit,long canvas,long accessibility,AsterEngine.SceneTiming scene){startNanos=start;submitNanos=submit;canvasNanos=canvas;accessibilityNanos=accessibility;this.scene=scene;}
+        DrawTiming(long start,long submit,long canvas,long accessibility,BaroChartEngine.SceneTiming scene){startNanos=start;submitNanos=submit;canvasNanos=canvas;accessibilityNanos=accessibility;this.scene=scene;}
     }
     private DrawProbe drawProbe;
     void setDrawProbe(DrawProbe probe){drawProbe=probe;}`);

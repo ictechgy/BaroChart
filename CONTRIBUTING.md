@@ -8,6 +8,6 @@ BaroChart is a development-preview financial chart engine, licensed under Apache
 - Run `npm test`, `npm run check`, and the relevant type/package checks. See [public validation](docs/PUBLIC-VALIDATION.md) for unresolved coverage and required platform tooling.
 - Performance claims require the same data, viewport, renderer, device-pixel ratio and hardware, with raw measurements and stated boundaries. Report regressions and total-time/memory tradeoffs. Do not equate CPU submission with display FPS.
 - Keep credentials, local user paths, generated binaries, raw private traces, caches and large archives out of commits. Retain licenses/notices for vendored code. Do not copy restricted third-party implementations.
-- Public API changes need compatibility notes and tests. Existing `Aster*`, `dev.aster.charts` and `aster.*` protocol identifiers are retained compatibility names; do not rename them casually.
+- Public API changes need compatibility notes and tests. Existing `Aster*`, `kr.coden.barochart` and `aster.*` protocol identifiers are retained compatibility names; do not rename them casually.
 
 Issue reports should include a minimal synthetic-data reproduction, platform/runtime versions, expected and actual behavior, and whether the issue uses a browser renderer, core-only API or native host. Do not attach credentials or private market/customer data.

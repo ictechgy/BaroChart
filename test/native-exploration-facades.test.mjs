@@ -2,8 +2,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-const swift=readFileSync(new URL('../native/AsterNative.swift',import.meta.url),'utf8');
-const java=readFileSync(new URL('../native/android/java/dev/aster/charts/AsterEngine.java',import.meta.url),'utf8');
+const swift=readFileSync(new URL('../native/BaroChartEngine.swift',import.meta.url),'utf8');
+const java=readFileSync(new URL('../native/android/java/kr/coden/barochart/BaroChartEngine.java',import.meta.url),'utf8');
 const sw=swift.slice(swift.indexOf('private func dataExploration('),swift.indexOf('public func crosshairValues('));
 const ja=java.slice(java.indexOf('private JSONObject dataExploration('),java.indexOf('public void addPanel('));
 function ordered(text,...parts){let i=0;for(const part of parts){const n=text.indexOf(part,i);assert.ok(n>=0,part);i=n+part.length;}}

@@ -206,7 +206,7 @@ toolbar.setOptions({labels: {select: 'Pan', fit: 'Fit view'}});
 | Apple native | JavaScriptCore/CoreGraphics, SwiftPM | [Swift SDK](docs/SWIFT-SDK.md); recent host changes need actual SDK/device validation |
 | Android native | QuickJS/JNI/Canvas, library/AAR path | [Android SDK](docs/ANDROID-SDK.md); recent host changes need actual SDK/device validation |
 
-Native paths are not WebViews. React Native/Flutter adapters are not supplied. Legacy API/schema names (`AsterChart`, `AsterNative`, `AsterEngine`, `dev.aster.charts`, `aster.*`) remain for compatibility; do not rename serialized schemas.
+Native paths are not WebViews. React Native/Flutter adapters are not supplied. Legacy API/schema names (`AsterChart`, `BaroChart`, `BaroChartEngine`, `kr.coden.barochart`, `aster.*`) remain for compatibility; do not rename serialized schemas.
 
 Node contract tests, strict TypeScript and offline packed-consumer checks are automated checks, not browser/device certification. Float64 is not arbitrary-precision decimal arithmetic; workspaces need matching host-provided data; workers still incur snapshot/allocation costs. [Full validation history and limits](docs/PUBLIC-VALIDATION.md) · [state/ownership roadmap](docs/MARKET-ROADMAP.md).
 

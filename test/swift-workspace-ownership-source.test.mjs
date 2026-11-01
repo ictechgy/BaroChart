@@ -5,7 +5,7 @@ import {readFileSync} from 'node:fs';
 // Static source assertions only. This does not compile or execute Swift, JSC,
 // ARC, DispatchQueue, or creator run loops. Apple SDK/runtime checks remain
 // necessary to establish actual publication, cancellation, and release behavior.
-const raw = readFileSync(new URL('../native/AsterNative.swift', import.meta.url), 'utf8');
+const raw = readFileSync(new URL('../native/BaroChartEngine.swift', import.meta.url), 'utf8');
 const source = raw.replace(/"(?:\\.|[^"\\])*"|\/\/[^\n]*|\/\*[\s\S]*?\*\//g,
   token => token.startsWith('/') ? token.replace(/[^\n]/g, ' ') : token);
 const compact = value => value.replace(/\s+/g, '');
@@ -42,14 +42,14 @@ function ordered(scope, ...parts) {
     after = index + fragment.length;
   }
 }
-const record = block(source, /\bclass\s+AsterWorkspaceSourceRecord\b/);
-const registry = block(source, /\benum\s+AsterWorkspaceRegistry\b/);
-const admission = block(source, /\benum\s+AsterNativeAdmission\b/);
-const job = block(source, /\bclass\s+AsterWorkspaceJob\b/);
-const runtime = block(source, /\bclass\s+AsterWorkspaceRuntime\b/);
-const retirement = block(source, /\bclass\s+AsterRuntimeRetirement\b/);
-const engine = block(source, /\bclass\s+AsterEngine\b/);
-const genericJob = block(source, /\bclass\s+AsterAsyncJob\b/);
+const record = block(source, /\bclass\s+BaroChartWorkspaceSourceRecord\b/);
+const registry = block(source, /\benum\s+BaroChartWorkspaceRegistry\b/);
+const admission = block(source, /\benum\s+BaroChartNativeAdmission\b/);
+const job = block(source, /\bclass\s+BaroChartWorkspaceJob\b/);
+const runtime = block(source, /\bclass\s+BaroChartWorkspaceRuntime\b/);
+const retirement = block(source, /\bclass\s+BaroChartRuntimeRetirement\b/);
+const engine = block(source, /\bclass\s+BaroChartEngine\b/);
+const genericJob = block(source, /\bclass\s+BaroChartAsyncJob\b/);
 const method = (scope, name) => block(scope, new RegExp(`\\bfunc\\s+${name}\\s*(?:<[^>]+>)?\\s*\\(`));
 const staticTest = (name, run) => test(`Swift workspace static source assertion: ${name}`, run);
 
@@ -57,7 +57,7 @@ staticTest('registration and active ownership precede deferred Begin', () => {
   const restore = method(engine, 'restoreWorkspaceAsync');
   ordered(restore, 'try asyncPreflight(timeout)', 'JSONSerialization.data(',
     'try asyncPreflight(timeout)', 'guard contextBacking === source, revision == capturedRevision',
-    'AsterWorkspaceRegistry.reserve(source,contextRuntime)', 'AsterWorkspaceJob(',
+    'BaroChartWorkspaceRegistry.reserve(source,contextRuntime)', 'BaroChartWorkspaceJob(',
     'activeWorkspace = job', 'DispatchQueue.main.async', 'job.start(bundle:bundle)');
   assert.doesNotMatch(restore, /nativeWorkspaceSourceBegin/);
   const start = method(job, 'start');
@@ -69,21 +69,21 @@ staticTest('registration and active ownership precede deferred Begin', () => {
 
 staticTest('two global slots and admitted bytes are independently bounded', () => {
   assert.match(compact(source), /asterWorkspaceMaxBytes=768\*1024\*1024/);
-  assert.match(compact(registry), /staticvarrecords:\[Int:AsterWorkspaceSourceRecord\]=\[:\]/);
+  assert.match(compact(registry), /staticvarrecords:\[Int:BaroChartWorkspaceSourceRecord\]=\[:\]/);
   const reserve = compact(method(registry, 'reserve'));
   assert.match(reserve, /guardrecords\.count<2,next<9007199254740991/);
-  ordered(reserve, 'next += 1', 'AsterWorkspaceSourceRecord(registration:next',
+  ordered(reserve, 'next += 1', 'BaroChartWorkspaceSourceRecord(registration:next',
     'records[record.registration] = record');
   assert.doesNotMatch(reserve, /\bbytes\b|\.admitted|\.admit\(/);
   assert.match(compact(record), /varbytes=0,admitted=false/);
   ordered(method(registry, 'admit'), 'records[record.registration] === record', '!record.admitted',
-    'AsterNativeAdmission.admit(record.admission,cost)', 'record.bytes = cost', 'record.admitted = true');
+    'BaroChartNativeAdmission.admit(record.admission,cost)', 'record.bytes = cost', 'record.admitted = true');
   ordered(method(admission, 'admit'), '!lease.released', '!lease.admitted', 'cost > 0', 'cost <= asterWorkspaceMaxBytes - bytes', 'bytes += cost', 'lease.bytes = cost', 'lease.admitted = true');
   ordered(method(admission, 'reserve'), 'guard slots < 2', 'slots += 1');
   ordered(method(admission, 'release'), 'if lease.released {return}', 'lease.released = true', 'slots -= 1', 'bytes -= lease.bytes');
-  assert.match(method(registry, 'reserve'), /catch\s*\{AsterNativeAdmission\.release\(admission\);throw error\}/);
-  ordered(method(job, 'admit'), 'AsterWorkspaceDescriptor(value,ticket:ticket)',
-    'AsterWorkspaceRegistry.admit(record,plan.bytes)', 'AsterWorkspaceRuntime(', 'runtime.start()');
+  assert.match(method(registry, 'reserve'), /catch\s*\{BaroChartNativeAdmission\.release\(admission\);throw error\}/);
+  ordered(method(job, 'admit'), 'BaroChartWorkspaceDescriptor(value,ticket:ticket)',
+    'BaroChartWorkspaceRegistry.admit(record,plan.bytes)', 'BaroChartWorkspaceRuntime(', 'runtime.start()');
   const status = compact(method(registry, 'status'));
   assert.match(status, /admittedLogicalBytes:\$0\.bytes/);
   assert.match(status, /admitted:\$0\.admitted/);
@@ -93,15 +93,15 @@ staticTest('pending records retain source ownership but no job, engine, Error, o
   const fields = record.slice(0, record.search(/\binit\s*\(/));
   assert.match(compact(fields), /letregistration:Int/);
   assert.match(compact(fields), /varcontext:JSContext\?/);
-  assert.match(compact(fields), /varruntime:AsterContextRuntime\?/);
-  assert.doesNotMatch(fields, /\b(?:AsterWorkspaceJob|AsterEngine|Error|Result|Any|AnyObject|JSValue)\b|->|\b(?:completion|callback|progress)\b/);
+  assert.match(compact(fields), /varruntime:BaroChartContextRuntime\?/);
+  assert.doesNotMatch(fields, /\b(?:BaroChartWorkspaceJob|BaroChartEngine|Error|Result|Any|AnyObject|JSValue)\b|->|\b(?:completion|callback|progress)\b/);
   const fail = method(job, 'fail');
-  ordered(fail, 'try record.abort()', 'AsterWorkspaceRegistry.remove(record)',
+  ordered(fail, 'try record.abort()', 'BaroChartWorkspaceRegistry.remove(record)',
     'self.record = nil', 'descriptor = nil', 'targetRuntime = nil', 'finish(.failure(error),notify:nil)');
   const unconfirmed = block(fail, /\bcatch\s*/);
   ordered(unconfirmed, 'record.pending = true', 'engine?.pendingWorkspaceRegistration = registration',
     'self.record = nil', 'descriptor = nil', 'targetRuntime = nil',
-    'finish(.failure(AsterWorkspaceError.cleanupPending(registration:registration)),notify:nil)');
+    'finish(.failure(BaroChartWorkspaceError.cleanupPending(registration:registration)),notify:nil)');
   assert.doesNotMatch(fail, /record\.\w+\s*=\s*(?:error|failure|self|engine|completion|progress)\b/);
   ordered(method(job, 'finish'), 'document = nil', 'binding = nil', 'descriptor = nil',
     'let callback = completion', 'completion = nil', 'progress = nil', 'callback?(');
@@ -127,10 +127,10 @@ staticTest('confirmed cleanup holds reservations until source retirement is ackn
   ordered(remove, 'precondition(Thread.isMainThread && record.released)',
     'guard records[record.registration] === record',
     '!record.detaching', 'record.detach',
-    'records.removeValue(forKey:record.registration)', 'AsterNativeAdmission.release(record.admission)', 'completion()');
+    'records.removeValue(forKey:record.registration)', 'BaroChartNativeAdmission.release(record.admission)', 'completion()');
   const detached = block(remove, /record\.detach\b\s*/);
   ordered(detached, 'precondition(Thread.isMainThread)', 'guard records[record.registration] === record',
-    'records.removeValue(forKey:record.registration)', 'AsterNativeAdmission.release(record.admission)', 'completion()');
+    'records.removeValue(forKey:record.registration)', 'BaroChartNativeAdmission.release(record.admission)', 'completion()');
   assert.equal((compact(remove).match(/records\.removeValue/g) ?? []).length, 1);
   ordered(method(record, 'detach'), 'precondition(Thread.isMainThread && released && !detaching)',
     'detaching = true', 'context = nil', 'let owner = runtime', 'runtime = nil',
@@ -168,9 +168,9 @@ staticTest('reservations and active ownership clear before observers and complet
   const install = method(job, 'install');
   ordered(install, 'committed = true', 'lock.unlock()', 'targetRuntime = nil',
     'oldContext = nil', 'oldRuntime?.retire()', 'return owner');
-  assert.doesNotMatch(install, /AsterWorkspaceRegistry\.remove|activeWorkspace\s*=|notifyChanges|completion\?\(|progress\?\(/);
+  assert.doesNotMatch(install, /BaroChartWorkspaceRegistry\.remove|activeWorkspace\s*=|notifyChanges|completion\?\(|progress\?\(/);
   const succeed = method(job, 'succeed');
-  const released = block(succeed, /AsterWorkspaceRegistry\.remove\(record\)\s*/);
+  const released = block(succeed, /BaroChartWorkspaceRegistry\.remove\(record\)\s*/);
   ordered(released, 'self.record = nil', 'descriptor = nil', 'finish(.success(metrics),notify:owner)');
   ordered(method(job, 'finish'), 'terminal = true', 'lock.unlock()',
     'engine.activeWorkspace = nil',
@@ -185,7 +185,7 @@ staticTest('worker autorelease pool drains before the main handoff', () => {
   assert.match(compact(pool), /outcome=\.success\(trycompute\(job,plan\)\)/);
   assert.doesNotMatch(pool, /DispatchQueue|job\.install|job\.succeed/);
   ordered(initial, 'initialJob = nil', 'initialPlan = nil', 'autoreleasepool', 'switch outcome!',
-    'let delivery = AsterWorkspaceDelivery(ownedContext)', 'DispatchQueue.main.async', 'try autoreleasepool',
+    'let delivery = BaroChartWorkspaceDelivery(ownedContext)', 'DispatchQueue.main.async', 'try autoreleasepool',
     'try job.install(context,runtime:self,copied:copied)', 'delivery.context = nil', 'job.succeed(owner)');
   assert.match(compact(initial), /catch\{delivery\.context=nil;failAfterCreatorCleanup\(job,error\)\}/);
   assert.match(compact(initial), /case\.failure\(leterror\):failAfterCreatorCleanup\(job,error\)/);
@@ -201,14 +201,14 @@ staticTest('failure waits for creator cleanup before source Abort and completion
   const failure = method(runtime, 'failAfterCreatorCleanup');
   ordered(failure, 'cleanupLock.lock()', 'precondition(afterCreatorCleanup == nil)',
     'afterCreatorCleanup = {job.fail(error)}', 'cleanupLock.unlock()', 'retire()');
-  assert.doesNotMatch(failure, /DispatchQueue|AsterWorkspaceRegistry|\.abort\(/);
+  assert.doesNotMatch(failure, /DispatchQueue|BaroChartWorkspaceRegistry|\.abort\(/);
   const run = method(runtime, 'run');
   ordered(run, 'while !retirement.shouldStop', 'autoreleasepool {ownedContext = nil}',
     'RunLoop.current.remove(', 'port.invalidate()', 'retirement.install(nil)',
     'cleanupLock.lock()', 'let completion = afterCreatorCleanup',
     'afterCreatorCleanup = nil', 'cleanupLock.unlock()', 'DispatchQueue.main.async(execute:completion)');
-  assert.doesNotMatch(run, /job\.fail\(|AsterWorkspaceRegistry|\.abort\(/);
-  ordered(method(job, 'fail'), 'try record.abort()', 'AsterWorkspaceRegistry.remove(record)',
+  assert.doesNotMatch(run, /job\.fail\(|BaroChartWorkspaceRegistry|\.abort\(/);
+  ordered(method(job, 'fail'), 'try record.abort()', 'BaroChartWorkspaceRegistry.remove(record)',
     'finish(.failure(error),notify:nil)');
 });
 
@@ -252,7 +252,7 @@ staticTest('only workspace-installed backing is dropped on close or deinit', () 
   assert.match(compact(context), /get\{guardletcontext=contextBackingelse\{preconditionFailure\(/);
   const close = method(engine, 'close');
   ordered(close, 'guard Thread.current === owner', 'if closing',
-    'AsterWorkspaceRegistry.retry(pending)', 'if closed', 'activeWorkspace?.cancel()',
+    'BaroChartWorkspaceRegistry.retry(pending)', 'if closed', 'activeWorkspace?.cancel()',
     'closed = true', 'if workspaceContextInstalled {contextBacking = nil}',
     'contextRuntime?.retire()', 'contextRuntime = nil');
   const deinit = block(engine, /\bdeinit\s*/);
@@ -268,7 +268,7 @@ staticTest('generic jobs lease source retirement only for workspace-installed co
   const init = block(genericJob, /\binit\s*\(/);
   const conditional = block(init, /if\s+engine\.workspaceContextInstalled\s*,\s*let\s+runtime\s*=\s*engine\.contextRuntime\s*/);
   assert.match(compact(conditional), /ifruntime\.acquireCaptureLease\(\)\{workspaceSourceRuntime=runtime\}/);
-  assert.match(compact(conditional), /else\{stopped=AsterAsyncError\.invalidProtocol\(/);
+  assert.match(compact(conditional), /else\{stopped=BaroChartAsyncError\.invalidProtocol\(/);
   assert.equal((init.match(/acquireCaptureLease\(/g) ?? []).length, 1);
   ordered(method(genericJob, 'finish'), 'source = nil',
     'let leasedRuntime = workspaceSourceRuntime', 'workspaceSourceRuntime = nil',
@@ -282,8 +282,8 @@ staticTest('public entry points preserve main/owner and closed-engine guards', (
   for (const name of ['restoreWorkspaceAsync', 'prepareColumnsAsync', 'prepareSeededAsync']) {
     assert.match(method(engine, name), /try\s+asyncPreflight\(timeout\)/);
   }
-  for (const [name, access] of [['workspaceCleanupStatus', 'AsterWorkspaceRegistry.status()'],
-    ['retryWorkspaceCleanup', 'AsterWorkspaceRegistry.retry()']]) {
+  for (const [name, access] of [['workspaceCleanupStatus', 'BaroChartWorkspaceRegistry.status()'],
+    ['retryWorkspaceCleanup', 'BaroChartWorkspaceRegistry.retry()']]) {
     ordered(method(engine, name), 'guard Thread.isMainThread', access);
   }
   ordered(method(engine, 'applyDataEventAsync'), 'guard Thread.current === owner',
@@ -291,8 +291,8 @@ staticTest('public entry points preserve main/owner and closed-engine guards', (
   ordered(method(engine, 'call'), 'guard Thread.current === owner', 'guard !closed', 'function.call(');
   ordered(method(engine, 'command'), 'guard Thread.current === owner', 'guard !closed', 'try call(');
   ordered(method(engine, 'workspaceAvailability'), 'guard !closing',
-    'AsterWorkspaceRegistry.contains(pending)', 'guard activeWorkspace == nil');
-  assert.match(compact(block(job, /\bvar\s+cleanupPending\s*:\s*Bool/)), /precondition\(Thread\.isMainThread\);returnAsterWorkspaceRegistry\.status\(\)/);
+    'BaroChartWorkspaceRegistry.contains(pending)', 'guard activeWorkspace == nil');
+  assert.match(compact(block(job, /\bvar\s+cleanupPending\s*:\s*Bool/)), /precondition\(Thread\.isMainThread\);returnBaroChartWorkspaceRegistry\.status\(\)/);
   for (const name of ['reserve', 'contains', 'admit', 'remove', 'status', 'retry']) {
     assert.match(compact(method(registry, name)), /^precondition\(Thread\.isMainThread(?:\)|&&)/);
   }

@@ -21,7 +21,7 @@ feature parity or performance superiority.
    isolated runtime from owned host source columns, apply the entire document and
    compute studies. Validate modules/checkpoints/output metadata; check source and
    UI revisions after all callbacks and cleanup; atomically replace the runtime
-   and notify once. The host AsterEngine and view listeners can remain stable, but
+   and notify once. The host BaroChartEngine and view listeners can remain stable, but
    the runtime and internal BarStore identities change. JavaScriptCore JSValue /
    QuickJS context references cannot be shared or migrated silently. This is a
    native context-replacement contract, distinct from web's shared-BarStore return.

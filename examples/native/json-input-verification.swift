@@ -4,11 +4,11 @@ private final class UnsupportedJSONValue {}
 private enum JSONInputProbeError: Error { case accepted(String) }
 
 private func protocolMessage(_ error: Error?) -> String? {
-    guard let error, case let AsterAsyncError.invalidProtocol(message) = error else { return nil }
+    guard let error, case let BaroChartAsyncError.invalidProtocol(message) = error else { return nil }
     return message
 }
 
-private func statusSignature(_ statuses: [AsterWorkspaceCleanupStatus]) -> [[String: Any]] {
+private func statusSignature(_ statuses: [BaroChartWorkspaceCleanupStatus]) -> [[String: Any]] {
     statuses.map {
         ["registration": $0.registration, "admittedLogicalBytes": $0.admittedLogicalBytes,
          "retryFailures": $0.retryFailures, "admitted": $0.admitted,
@@ -16,7 +16,7 @@ private func statusSignature(_ statuses: [AsterWorkspaceCleanupStatus]) -> [[Str
     }
 }
 
-private func paramsSignature(_ statuses: [AsterParamsStatus]) -> [[String: Any]] {
+private func paramsSignature(_ statuses: [BaroChartParamsStatus]) -> [[String: Any]] {
     statuses.map {
         ["registration": $0.registration, "admittedLogicalBytes": $0.admittedLogicalBytes,
          "retryFailures": $0.retryFailures, "outcome": $0.outcome.rawValue,
@@ -26,7 +26,7 @@ private func paramsSignature(_ statuses: [AsterParamsStatus]) -> [[String: Any]]
 
 private func canonicalJSON(_ value: Any) throws -> String {
     let data = try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
-    guard let text = String(data: data, encoding: .utf8) else { throw AsterError.invalidScene }
+    guard let text = String(data: data, encoding: .utf8) else { throw BaroChartLowLevelError.invalidScene }
     return text
 }
 
@@ -34,7 +34,7 @@ private func canonicalJSON(_ value: Any) throws -> String {
 /// cases are run through each public async entry point and must reject before
 /// reservation, callbacks, or owner revision notification.
 func verifyNativeJSONInputs(_ bundleURL: URL) throws -> [String: Any] {
-    let engine = try AsterEngine(bundleURL: bundleURL, count: 0)
+    let engine = try BaroChartEngine(bundleURL: bundleURL, count: 0)
     var checks: [String] = [], failures: [String] = []
     var observerCalls = 0, callbackCalls = 0, progressCalls = 0
     let observer = try engine.observeChanges { observerCalls += 1 }
@@ -58,8 +58,8 @@ func verifyNativeJSONInputs(_ bundleURL: URL) throws -> [String: Any] {
         let beforeObserverCalls = observerCalls
         let beforeCallbackCalls = callbackCalls
         let beforeProgressCalls = progressCalls
-        let beforeWorkspace = try canonicalJSON(statusSignature(AsterEngine.workspaceCleanupStatus()))
-        let beforeParams = try canonicalJSON(paramsSignature(AsterEngine.paramsCleanupStatus()))
+        let beforeWorkspace = try canonicalJSON(statusSignature(BaroChartEngine.workspaceCleanupStatus()))
+        let beforeParams = try canonicalJSON(paramsSignature(BaroChartEngine.paramsCleanupStatus()))
         var thrown: Error?
         do { try operation() } catch { thrown = error }
         require(protocolMessage(thrown) == expected, "\(api) \(name) throws fixed invalidProtocol")
@@ -67,9 +67,9 @@ func verifyNativeJSONInputs(_ bundleURL: URL) throws -> [String: Any] {
         require(observerCalls == beforeObserverCalls, "\(api) \(name) starts no observer callback")
         require(callbackCalls == beforeCallbackCalls, "\(api) \(name) starts no completion callback")
         require(progressCalls == beforeProgressCalls, "\(api) \(name) starts no progress callback")
-        require(try canonicalJSON(statusSignature(AsterEngine.workspaceCleanupStatus())) == beforeWorkspace,
+        require(try canonicalJSON(statusSignature(BaroChartEngine.workspaceCleanupStatus())) == beforeWorkspace,
                 "\(api) \(name) preserves workspace admission state")
-        require(try canonicalJSON(paramsSignature(AsterEngine.paramsCleanupStatus())) == beforeParams,
+        require(try canonicalJSON(paramsSignature(BaroChartEngine.paramsCleanupStatus())) == beforeParams,
                 "\(api) \(name) preserves params admission state")
         _ = payload
     }

@@ -1,4 +1,4 @@
-package dev.aster.charts;
+package kr.coden.barochart;
 
 import android.view.MotionEvent;
 import org.json.*;
@@ -9,19 +9,19 @@ final class PublicInputVerification {
     private final JSONArray checks=new JSONArray(),rows=new JSONArray();
     private boolean passed=true;
     private void check(boolean value,String reason)throws JSONException {checks.put(new JSONObject().put("check",reason).put("passed",value));passed&=value;}
-    private JSONObject inspect(AsterEngine engine)throws JSONException{return (JSONObject)engine.command("inspect");}
-    private double[] point(AsterEngine engine,AsterChartView view)throws JSONException {
+    private JSONObject inspect(BaroChartEngine engine)throws JSONException{return (JSONObject)engine.command("inspect");}
+    private double[] point(BaroChartEngine engine,BaroChartView view)throws JSONException {
         float d=view.getResources().getDisplayMetrics().density;
         JSONObject p=engine.scene(view.getWidth()/d,view.getHeight()/d).getJSONObject("layout").getJSONArray("panels").getJSONObject(0);
         return new double[]{(p.getDouble("left")+p.getDouble("right"))/2,(p.getDouble("top")+p.getDouble("bottom"))/2};
     }
-    private void reset(AsterEngine engine,AsterChartView view)throws JSONException {
+    private void reset(BaroChartEngine engine,BaroChartView view)throws JSONException {
         view.fire("nativePointer","cancel",0,0,0);
         engine.invoke("nativeInit",0,new JSONObject().put("panels",new JSONArray().put(new JSONObject().put("id","price"))).put("series",new JSONArray().put(new JSONObject().put("id","price").put("panel","price").put("type","candles"))));
         JSONArray bars=new JSONArray();for(int i=0;i<5;i++)bars.put(new JSONObject().put("time",1700000000000L+i*60000L).put("open",100+i).put("high",104+i).put("low",96+i).put("close",100+i).put("volume",10));engine.setData(bars);engine.fit();engine.setTool("rectangle");
     }
-    private void synthetic(AsterChartView view,int action,double[] p,long time){float d=view.getResources().getDisplayMetrics().density;MotionEvent event=MotionEvent.obtain(time,time,action,(float)p[0]*d,(float)p[1]*d,0);try{view.dispatchTouchEvent(event);}finally{event.recycle();}}
-    JSONObject run(AsterEngine engine,AsterChartView view,boolean accessibility)throws Exception {
+    private void synthetic(BaroChartView view,int action,double[] p,long time){float d=view.getResources().getDisplayMetrics().density;MotionEvent event=MotionEvent.obtain(time,time,action,(float)p[0]*d,(float)p[1]*d,0);try{view.dispatchTouchEvent(event);}finally{event.recycle();}}
+    JSONObject run(BaroChartEngine engine,BaroChartView view,boolean accessibility)throws Exception {
         int left=view.getLeft(),top=view.getTop(),width=view.getWidth(),height=view.getHeight();
         if(width<360||height<80||!view.isAttachedToWindow())throw new IllegalStateException("Attached wide View required");
         try {

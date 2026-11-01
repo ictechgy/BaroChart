@@ -28,9 +28,9 @@ if(!apk){
 const inspected=spawnSync('python3',['-c',String.raw`
 import zipfile,hashlib,json,sys
 with zipfile.ZipFile(sys.argv[1]) as z:
- for name in ['classes.dex','assets/aster-core.js','lib/arm64-v8a/libaster.so','assets/licenses/QUICKJS-LICENSE.txt','assets/licenses/LICENSE.txt','assets/licenses/NOTICE.txt']:
+ for name in ['classes.dex','assets/aster-core.js','lib/arm64-v8a/libbarochart.so','assets/licenses/QUICKJS-LICENSE.txt','assets/licenses/LICENSE.txt','assets/licenses/NOTICE.txt']:
   if name not in z.namelist():raise ValueError('Missing consumer APK component: '+name)
- print(json.dumps({'coreSHA256':hashlib.sha256(z.read('assets/aster-core.js')).hexdigest(),'jniSHA256':hashlib.sha256(z.read('lib/arm64-v8a/libaster.so')).hexdigest()}))
+ print(json.dumps({'coreSHA256':hashlib.sha256(z.read('assets/aster-core.js')).hexdigest(),'jniSHA256':hashlib.sha256(z.read('lib/arm64-v8a/libbarochart.so')).hexdigest()}))
 `,resolve(apk)],{encoding:'utf8'});
 if(inspected.status!==0)throw new Error(inspected.stderr);
 const archive=JSON.parse(inspected.stdout);if(archive.coreSHA256!==audit.coreSHA256||archive.jniSHA256!==audit.jniSHA256)throw new Error('Consumer APK core/JNI differs from selected frozen AAR');

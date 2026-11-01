@@ -35,13 +35,13 @@ if(!macOnly){try{
  simulatorID=sim(['create',`Aster-transactions-${Date.now()}`,process.env.ASTER_IOS_DEVICE??'com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro',runtime]).stdout;
  assert(/^[A-F0-9-]{36}$/i.test(simulatorID),'Unexpected owned simulator ID');
  await writeFile(join(output,'owned-simulator.json'),JSON.stringify({simulatorID,runtime,createdByThisRun:true},null,2)+'\n');
- sim(['boot',simulatorID]);sim(['bootstatus',simulatorID,'-b']);sim(['install',simulatorID,app]);sim(['launch',simulatorID,'dev.aster.charts.transactions']);
- const documents=join(sim(['get_app_container',simulatorID,'dev.aster.charts.transactions','data']).stdout,'Documents');let report;
+ sim(['boot',simulatorID]);sim(['bootstatus',simulatorID,'-b']);sim(['install',simulatorID,app]);sim(['launch',simulatorID,'kr.coden.barochart.transactions']);
+ const documents=join(sim(['get_app_container',simulatorID,'kr.coden.barochart.transactions','data']).stdout,'Documents');let report;
  for(let i=0;i<120;i++){try{report=JSON.parse(await readFile(join(documents,'ios-transactions.json'),'utf8'));break;}catch{}await new Promise(r=>setTimeout(r,500));}
  assert(report,'UIKit acceptance did not finish');await writeFile(join(output,'ios-transactions.json'),JSON.stringify({...report,runtime,ownedTemporarySimulator:true},null,2)+'\n');verify(report,true);
  await copyFile(join(documents,'ios-transactions.png'),join(output,'ios-transactions.png'));
 }finally{
- if(simulatorID&&/^[A-F0-9-]{36}$/i.test(simulatorID)){for(const args of [['terminate',simulatorID,'dev.aster.charts.transactions'],['shutdown',simulatorID],['delete',simulatorID]]){const result=sim(args,true);cleanup.push({operation:args[0],status:result.status,stderr:result.stderr});}}
+ if(simulatorID&&/^[A-F0-9-]{36}$/i.test(simulatorID)){for(const args of [['terminate',simulatorID,'kr.coden.barochart.transactions'],['shutdown',simulatorID],['delete',simulatorID]]){const result=sim(args,true);cleanup.push({operation:args[0],status:result.status,stderr:result.stderr});}}
  await writeFile(join(output,'simulator-cleanup.json'),JSON.stringify({simulatorID:simulatorID??null,cleanup,ownedOnly:true},null,2)+'\n');
  if(simulatorID)assert(cleanup.find(r=>r.operation==='delete')?.status===0,'Owned simulator deletion failed; see simulator-cleanup.json');
 }}

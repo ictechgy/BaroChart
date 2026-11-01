@@ -1,10 +1,10 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="dev.aster.charts.demo">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="kr.coden.barochart.demo">
   <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="36"/>
   <application android:label="BaroChart Native Validation" android:theme="@android:style/Theme.Material.NoActionBar" android:debuggable="true" android:allowBackup="false" android:extractNativeLibs="true">
-    <activity android:name="dev.aster.charts.HoverActivity" android:exported="true"/>
-    <activity android:name="dev.aster.charts.DemoActivity" android:exported="true">
+    <activity android:name="kr.coden.barochart.HoverActivity" android:exported="true"/>
+    <activity android:name="kr.coden.barochart.DemoActivity" android:exported="true">
       <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
     </activity>
   </application>
-  <instrumentation android:name="dev.aster.charts.HoverInstrumentation" android:targetPackage="dev.aster.charts.demo" android:functionalTest="true"/>
+  <instrumentation android:name="kr.coden.barochart.HoverInstrumentation" android:targetPackage="kr.coden.barochart.demo" android:functionalTest="true"/>
 </manifest>

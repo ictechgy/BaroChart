@@ -3,8 +3,8 @@
 `chart.api.setDrawingMagnet({mode: 'weak', radiusPx: 8})` enables a
 per-controller pointer aid. The same method is available on
 `InteractionController`, `ChartAPI.dispatch('setDrawingMagnet', [options])`,
-Swift `AsterEngine.setDrawingMagnet([String: Any])`, Java
-`AsterEngine.setDrawingMagnet(JSONObject)`, and the UIKit/Android view facades.
+Swift `BaroChartEngine.setDrawingMagnet([String: Any])`, Java
+`BaroChartEngine.setDrawingMagnet(JSONObject)`, and the UIKit/Android view facades.
 The web demo has an Off / Weak / Strong selector and retains its selected mode
 when rebuilding the model or switching renderers.
 
