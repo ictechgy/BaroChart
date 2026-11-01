@@ -8,9 +8,12 @@
 
 /* Begin PBXBuildFile section */
 		12C7D1D4FD38F4820CA10421 /* SampleUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C36FCCEDF76676751C0AEF38 /* SampleUITests.swift */; };
+		20A1D540E915F66D2AE93B89 /* DeviceBenchmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F3991F6D75BB6FAFE2D5012 /* DeviceBenchmark.swift */; };
 		37D17182094C92621D4CC98A /* ChartModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5714DC5DE8EA08DA72DBD99 /* ChartModel.swift */; };
 		398FFD6A80AC40A50923B2D0 /* SampleApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACEF118284325BBBFCDB1A90 /* SampleApp.swift */; };
+		5B17C885112C7A0767467AAD /* PerformanceUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01361A03C1724BB08641A8C1 /* PerformanceUITests.swift */; };
 		9B6618B582920DF9C10CC2B9 /* ChartScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BF4B2F7EB756BED818AA447 /* ChartScreen.swift */; };
+		C15DE41192742D7739A21CFE /* AccessibilityUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 127C65D1C03A095F40351B3B /* AccessibilityUITests.swift */; };
 		F5AA4B74352F4812FE761FCE /* BaroChart in Frameworks */ = {isa = PBXBuildFile; productRef = FF1AF09104094FE7F1CDB478 /* BaroChart */; };
 /* End PBXBuildFile section */
 
@@ -25,6 +28,9 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		01361A03C1724BB08641A8C1 /* PerformanceUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceUITests.swift; sourceTree = "<group>"; };
+		127C65D1C03A095F40351B3B /* AccessibilityUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityUITests.swift; sourceTree = "<group>"; };
+		3F3991F6D75BB6FAFE2D5012 /* DeviceBenchmark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceBenchmark.swift; sourceTree = "<group>"; };
 		67F383684798A225722E91C3 /* BaroChart-review-20261023 */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "BaroChart-review-20261023"; path = ../..; sourceTree = SOURCE_ROOT; };
 		6BF4B2F7EB756BED818AA447 /* ChartScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChartScreen.swift; sourceTree = "<group>"; };
 		ACEF118284325BBBFCDB1A90 /* SampleApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SampleApp.swift; sourceTree = "<group>"; };
@@ -49,6 +55,8 @@
 		5D29EF0391C8F093D4B4EF29 /* UITests */ = {
 			isa = PBXGroup;
 			children = (
+				127C65D1C03A095F40351B3B /* AccessibilityUITests.swift */,
+				01361A03C1724BB08641A8C1 /* PerformanceUITests.swift */,
 				C36FCCEDF76676751C0AEF38 /* SampleUITests.swift */,
 			);
 			path = UITests;
@@ -59,6 +67,7 @@
 			children = (
 				F5714DC5DE8EA08DA72DBD99 /* ChartModel.swift */,
 				6BF4B2F7EB756BED818AA447 /* ChartScreen.swift */,
+				3F3991F6D75BB6FAFE2D5012 /* DeviceBenchmark.swift */,
 				ACEF118284325BBBFCDB1A90 /* SampleApp.swift */,
 			);
 			path = Sources;
@@ -173,6 +182,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C15DE41192742D7739A21CFE /* AccessibilityUITests.swift in Sources */,
+				5B17C885112C7A0767467AAD /* PerformanceUITests.swift in Sources */,
 				12C7D1D4FD38F4820CA10421 /* SampleUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -183,6 +194,7 @@
 			files = (
 				37D17182094C92621D4CC98A /* ChartModel.swift in Sources */,
 				9B6618B582920DF9C10CC2B9 /* ChartScreen.swift in Sources */,
+				20A1D540E915F66D2AE93B89 /* DeviceBenchmark.swift in Sources */,
 				398FFD6A80AC40A50923B2D0 /* SampleApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

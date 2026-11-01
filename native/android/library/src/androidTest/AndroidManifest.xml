@@ -1,0 +1,6 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 뷰를 실제 창에 붙이는 계측 테스트 전용 액티비티(테스트 APK에만 들어간다) -->
+    <application>
+        <activity android:name="kr.coden.barochart.TestHostActivity" android:exported="false" />
+    </application>
+</manifest>

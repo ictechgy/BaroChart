@@ -14,33 +14,47 @@ import UIKit
 /// ```
 @MainActor
 public struct BaroChartView: UIViewRepresentable {
+    /// The engine to show. The app owns it; the view never closes it.
     public let engine: BaroChartEngine
+    /// Called after touch or accessibility input changes the chart.
     public var onInteraction: (() -> Void)?
+    /// Called for failures that cannot be thrown, such as drawing a closed engine.
     public var onError: ((BaroChartError) -> Void)?
+    /// Called once for each new underlying ``BaroChartUIView`` (also after the engine changes) to set view options,
+    /// such as `adjustsFontForContentSizeCategory` for Dynamic Type or `layerCachingEnabled`.
+    public var configure: ((BaroChartUIView) -> Void)?
 
     /// - Parameters:
     ///   - engine: An engine owned by the app on the main thread.
     ///   - onInteraction: Called after touch or accessibility input changes the chart.
     ///   - onError: Called for failures that cannot be thrown, such as drawing a closed engine.
-    public init(engine: BaroChartEngine, onInteraction: (() -> Void)? = nil, onError: ((BaroChartError) -> Void)? = nil) {
+    ///   - configure: Sets view options on each new underlying ``BaroChartUIView``.
+    public init(engine: BaroChartEngine, onInteraction: (() -> Void)? = nil, onError: ((BaroChartError) -> Void)? = nil,
+                configure: ((BaroChartUIView) -> Void)? = nil) {
         self.engine = engine
         self.onInteraction = onInteraction
         self.onError = onError
+        self.configure = configure
     }
 
+    /// Creates the underlying ``BaroChartContainerView`` for `engine`.
     public func makeUIView(context: Context) -> BaroChartContainerView {
         let container = BaroChartContainerView(engine: engine)
         container.chartView.onInteraction = onInteraction
         container.chartView.onError = onError
+        configure?(container.chartView)
         return container
     }
 
+    /// Applies the current callbacks and replaces the chart view if `engine` changed.
     public func updateUIView(_ container: BaroChartContainerView, context: Context) {
-        if container.chartView.engine !== engine { container.replaceEngine(engine) }
+        // 새 차트 뷰에만 설정을 적용한다: SwiftUI 갱신마다 다시 부르면 앱이 바꾼 뷰 상태를 덮어쓴다
+        if container.chartView.engine !== engine { container.replaceEngine(engine); configure?(container.chartView) }
         container.chartView.onInteraction = onInteraction
         container.chartView.onError = onError
     }
 
+    /// Disposes the underlying chart view. The engine stays open and can be shown again.
     public static func dismantleUIView(_ container: BaroChartContainerView, coordinator: ()) {
         container.chartView.dispose()
     }

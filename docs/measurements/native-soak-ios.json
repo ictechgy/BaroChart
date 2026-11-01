@@ -1,0 +1,256 @@
+{
+  "schema": "barochart.native-soak",
+  "version": 1,
+  "platform": "ios",
+  "minutes": 30,
+  "started": "2026-11-01T14:30:35.088Z",
+  "finished": "2026-11-01T15:01:37.362Z",
+  "host": "iOS Simulator (XCTest), phys_footprint",
+  "testStatus": 65,
+  "passed": false,
+  "reports": {
+    "ios-create-dispose": {
+      "baselineFootprint": 30864418.666666668,
+      "cycles": 500,
+      "passed": true,
+      "projectedGrowthPercent": 3.811974156599142,
+      "rule": "least-squares footprint slope over samples every 25 cycles after warm-up, projected over the measured cycles, <= 5% of baseline",
+      "samples": [
+        {
+          "cycle": 50,
+          "footprint": 30378360
+        },
+        {
+          "cycle": 75,
+          "footprint": 30361976
+        },
+        {
+          "cycle": 100,
+          "footprint": 31852920
+        },
+        {
+          "cycle": 125,
+          "footprint": 31361400
+        },
+        {
+          "cycle": 150,
+          "footprint": 31263096
+        },
+        {
+          "cycle": 175,
+          "footprint": 29575544
+        },
+        {
+          "cycle": 200,
+          "footprint": 29575544
+        },
+        {
+          "cycle": 225,
+          "footprint": 28608888
+        },
+        {
+          "cycle": 250,
+          "footprint": 26347896
+        },
+        {
+          "cycle": 275,
+          "footprint": 27363704
+        },
+        {
+          "cycle": 300,
+          "footprint": 26364280
+        },
+        {
+          "cycle": 325,
+          "footprint": 26855800
+        },
+        {
+          "cycle": 350,
+          "footprint": 27593080
+        },
+        {
+          "cycle": 375,
+          "footprint": 31623544
+        },
+        {
+          "cycle": 400,
+          "footprint": 31000952
+        },
+        {
+          "cycle": 425,
+          "footprint": 31787384
+        },
+        {
+          "cycle": 450,
+          "footprint": 32426360
+        },
+        {
+          "cycle": 475,
+          "footprint": 32655736
+        },
+        {
+          "cycle": 500,
+          "footprint": 32033144
+        }
+      ],
+      "slopeBytesPerCycle": 2614.5414736842104,
+      "warmupCycles": 50
+    },
+    "ios-streaming-soak": {
+      "failures": 0,
+      "minutes": 30,
+      "passed": false,
+      "rule": "after 5 min warm-up, footprint growth <= 5% per 10-min window",
+      "samples": [
+        {
+          "footprint": 66111888,
+          "seconds": 0.022485971450805664
+        },
+        {
+          "footprint": 55970216,
+          "seconds": 60.110183000564575
+        },
+        {
+          "footprint": 57379240,
+          "seconds": 120.13332796096802
+        },
+        {
+          "footprint": 57887144,
+          "seconds": 180.222393989563
+        },
+        {
+          "footprint": 55789992,
+          "seconds": 240.2732959985733
+        },
+        {
+          "footprint": 55151016,
+          "seconds": 300.31356704235077
+        },
+        {
+          "footprint": 55495128,
+          "seconds": 360.3973979949951
+        },
+        {
+          "footprint": 55560664,
+          "seconds": 420.44315695762634
+        },
+        {
+          "footprint": 55429592,
+          "seconds": 480.45114600658417
+        },
+        {
+          "footprint": 55380440,
+          "seconds": 540.4602490663528
+        },
+        {
+          "footprint": 55396824,
+          "seconds": 600.5085220336914
+        },
+        {
+          "footprint": 55396824,
+          "seconds": 660.5880039930344
+        },
+        {
+          "footprint": 57706968,
+          "seconds": 720.6767050027847
+        },
+        {
+          "footprint": 62048728,
+          "seconds": 780.7970579862595
+        },
+        {
+          "footprint": 62638552,
+          "seconds": 840.8340400457382
+        },
+        {
+          "footprint": 61606360,
+          "seconds": 900.9456640481949
+        },
+        {
+          "footprint": 62704088,
+          "seconds": 960.9960739612579
+        },
+        {
+          "footprint": 59165144,
+          "seconds": 1021.0817420482635
+        },
+        {
+          "footprint": 60869080,
+          "seconds": 1081.1137570142746
+        },
+        {
+          "footprint": 59689432,
+          "seconds": 1141.195780992508
+        },
+        {
+          "footprint": 58886616,
+          "seconds": 1201.2275570631027
+        },
+        {
+          "footprint": 59689432,
+          "seconds": 1261.3298070430756
+        },
+        {
+          "footprint": 59673048,
+          "seconds": 1321.3690639734268
+        },
+        {
+          "footprint": 59607512,
+          "seconds": 1381.4407340288162
+        },
+        {
+          "footprint": 59623896,
+          "seconds": 1441.492346048355
+        },
+        {
+          "footprint": 58771928,
+          "seconds": 1501.5625829696655
+        },
+        {
+          "footprint": 58903000,
+          "seconds": 1561.5812810659409
+        },
+        {
+          "footprint": 60525016,
+          "seconds": 1621.6253160238266
+        },
+        {
+          "footprint": 58886616,
+          "seconds": 1681.6870770454407
+        },
+        {
+          "footprint": 61491672,
+          "seconds": 1741.760223031044
+        }
+      ],
+      "ticks": 14910,
+      "windows": [
+        {
+          "fromSeconds": 300.31356704235077,
+          "growthPercent": 11.704850550713337,
+          "toSeconds": 900.9456640481949
+        },
+        {
+          "fromSeconds": 900.9456640481949,
+          "growthPercent": -4.600875623880392,
+          "toSeconds": 1501.5625829696655
+        }
+      ]
+    }
+  },
+  "limits": [
+    "Simulator/emulator memory, not physical-device memory",
+    "Data is bounded with compactData(keepLastBars: 10000) every 60 s so growth reflects retention, not the dataset"
+  ],
+  "annotation": {
+    "author": "executor note added after the run; measured values above are unchanged",
+    "verdict": "G5 not met on iOS streaming: the 5-15 min window grew 11.7% (rule: <= 5% per 10-min window). Crashes 0. The 15-25 min window was -4.6% and the last 15 min stayed between 56 and 59 MB.",
+    "pattern": "Three 30-minute iOS runs show the same shape: one step of about 6 MB between 10 and 13 minutes, then flat or falling. Android runs of the same workload are flat (+0.30%, +0.03%).",
+    "evidence": [
+      "15,000-tick accelerated run with the same workload stays flat (65-72 MB with drawing, 32-43 MB without), so the step is not per-operation growth",
+      "background-owner streaming without an autorelease pool is flat over 120,000 updates after warm-up (EngineMemoryTests)",
+      "create/dispose 500 cycles passes (projected +3.8%)"
+    ],
+    "openQuestion": "Whether to accept a 15-minute warm-up for JavaScriptCore on iOS is the repository owner's decision; the rule was not changed after seeing the data."
+  }
+}

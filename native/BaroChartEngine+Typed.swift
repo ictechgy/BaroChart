@@ -27,14 +27,9 @@ extension BaroChartEngine {
         try BaroChartError.mapping { try addSeries(series.lowLevel) }
     }
 
-    /// Updates the series with `series.id`. Every field except `id` and `type` is applied, including `panel`.
-    public func updateSeries(_ series: BaroChartSeries) throws {
-        try BaroChartError.mapping {
-            var patch = series.lowLevel
-            patch["id"] = nil
-            patch["type"] = nil
-            try setSeries(series.id, patch)
-        }
+    /// Changes only the fields set in `patch` on the series `id`. The series type cannot change; `nil` fields keep their value.
+    public func updateSeries(id: String, _ patch: BaroChartSeriesPatch) throws {
+        try BaroChartError.mapping { try setSeries(id, patch.lowLevel) }
     }
 
     /// Adds an indicator under `id`. Bind it to a line/area/histogram series with `BaroChartSeries(indicator:)`.
@@ -68,14 +63,9 @@ extension BaroChartEngine {
         }
     }
 
-    /// Changes an existing drawing's anchors, style, text, panel, lock and visibility. The tool cannot change.
-    public func updateDrawing(id: String, _ drawing: BaroChartDrawing) throws {
-        try BaroChartError.mapping {
-            var patch = drawing.lowLevel
-            patch["id"] = nil
-            patch["type"] = nil
-            try editDrawing(id, patch)
-        }
+    /// Changes only the fields set in `patch` on the drawing `id`. The tool cannot change; `nil` fields keep their value.
+    public func updateDrawing(id: String, _ patch: BaroChartDrawingPatch) throws {
+        try BaroChartError.mapping { try editDrawing(id, patch.lowLevel) }
     }
 
     /// Deletes drawings as one undo step and returns how many were removed. Missing or locked ids throw.

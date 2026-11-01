@@ -99,5 +99,25 @@ final class SwiftUIWrapperTests: XCTestCase {
         render(chart)
         XCTAssertEqual(codes.first, .engineClosed, diagnostics(chart))
     }
+
+    /// configure는 새 차트 뷰마다 한 번 불리고(엔진 교체 포함) SwiftUI 갱신만으로는 다시 불리지 않는다
+    func testConfigureRunsOncePerCreatedChartView() throws {
+        let first = try engine(), second = try engine()
+        defer { try? first.close(); try? second.close() }
+        var configured: [ObjectIdentifier] = []
+        let configure: (BaroChartUIView) -> Void = { view in
+            view.adjustsFontForContentSizeCategory = true
+            configured.append(ObjectIdentifier(view))
+        }
+        show(BaroChartView(engine: first, configure: configure))
+        let chart = try XCTUnwrap(container()?.chartView)
+        XCTAssertTrue(chart.adjustsFontForContentSizeCategory)
+        show(BaroChartView(engine: first, onInteraction: {}, configure: configure))
+        XCTAssertEqual(configured, [ObjectIdentifier(chart)])
+        show(BaroChartView(engine: second, configure: configure))
+        let replaced = try XCTUnwrap(container()?.chartView)
+        XCTAssertEqual(configured, [ObjectIdentifier(chart), ObjectIdentifier(replaced)])
+        XCTAssertTrue(replaced.adjustsFontForContentSizeCategory)
+    }
 }
 #endif

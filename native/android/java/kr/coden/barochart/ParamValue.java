@@ -9,14 +9,29 @@ public final class ParamValue {
 
     private ParamValue(Object value) { this.value = value; }
 
-    /** A numeric parameter. Integer periods are numbers too. */
+    /**
+     * A numeric parameter. Integer periods are numbers too.
+     * @param value the number
+     * @return a numeric parameter value
+     */
     @NonNull public static ParamValue number(double value) { return new ParamValue(value); }
-    /** A text parameter such as a source column name. */
+    /**
+     * A text parameter such as a source column name.
+     * @param value the text
+     * @return a text parameter value
+     */
     @NonNull public static ParamValue text(@NonNull String value) { return new ParamValue(Objects.requireNonNull(value, "value")); }
-    /** A boolean parameter. */
+    /**
+     * A boolean parameter.
+     * @param value the flag
+     * @return a boolean parameter value
+     */
     @NonNull public static ParamValue flag(boolean value) { return new ParamValue(value); }
 
-    /** The boxed value passed to the chart core (Double, String or Boolean). */
+    /**
+     * The boxed value passed to the chart core (Double, String or Boolean).
+     * @return the Double, String or Boolean value
+     */
     @NonNull public Object value() { return value; }
 
     @Override public boolean equals(Object other) { return other instanceof ParamValue && value.equals(((ParamValue) other).value); }

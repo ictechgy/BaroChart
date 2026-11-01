@@ -1,0 +1,244 @@
+{
+  "schema": "barochart.native-soak",
+  "version": 1,
+  "platform": "android",
+  "minutes": 30,
+  "started": "2026-11-01T14:30:35.086Z",
+  "finished": "2026-11-01T15:01:13.398Z",
+  "host": "Android emulator emulator-5580 (AndroidX Test), Debug.getPss",
+  "testStatus": 0,
+  "passed": true,
+  "reports": {
+    "android-create-dispose": {
+      "slopePssKiBPerCycle": -2.9964912280701754,
+      "baselinePssKiB": 56644,
+      "projectedGrowthPercent": -2.3805187709758826,
+      "passed": true,
+      "rule": "least-squares PSS slope over samples every 25 cycles after warm-up, projected over the measured cycles, <= 5% of baseline",
+      "cycles": 500,
+      "warmupCycles": 50,
+      "samples": [
+        {
+          "cycle": 50,
+          "pssKiB": 56634
+        },
+        {
+          "cycle": 75,
+          "pssKiB": 56058
+        },
+        {
+          "cycle": 100,
+          "pssKiB": 57240
+        },
+        {
+          "cycle": 125,
+          "pssKiB": 56072
+        },
+        {
+          "cycle": 150,
+          "pssKiB": 56072
+        },
+        {
+          "cycle": 175,
+          "pssKiB": 55982
+        },
+        {
+          "cycle": 200,
+          "pssKiB": 55911
+        },
+        {
+          "cycle": 225,
+          "pssKiB": 56787
+        },
+        {
+          "cycle": 250,
+          "pssKiB": 55649
+        },
+        {
+          "cycle": 275,
+          "pssKiB": 56585
+        },
+        {
+          "cycle": 300,
+          "pssKiB": 55404
+        },
+        {
+          "cycle": 325,
+          "pssKiB": 56506
+        },
+        {
+          "cycle": 350,
+          "pssKiB": 56522
+        },
+        {
+          "cycle": 375,
+          "pssKiB": 56518
+        },
+        {
+          "cycle": 400,
+          "pssKiB": 55355
+        },
+        {
+          "cycle": 425,
+          "pssKiB": 55914
+        },
+        {
+          "cycle": 450,
+          "pssKiB": 55914
+        },
+        {
+          "cycle": 475,
+          "pssKiB": 56451
+        },
+        {
+          "cycle": 500,
+          "pssKiB": 52723
+        }
+      ]
+    },
+    "android-streaming-soak": {
+      "minutes": 30,
+      "ticks": 16765,
+      "samples": [
+        {
+          "seconds": 0.009719,
+          "pssKiB": 71338
+        },
+        {
+          "seconds": 60.068694487,
+          "pssKiB": 62617
+        },
+        {
+          "seconds": 120.08254739,
+          "pssKiB": 59538
+        },
+        {
+          "seconds": 180.102044544,
+          "pssKiB": 58530
+        },
+        {
+          "seconds": 240.203577031,
+          "pssKiB": 58593
+        },
+        {
+          "seconds": 300.280290268,
+          "pssKiB": 58649
+        },
+        {
+          "seconds": 360.373185005,
+          "pssKiB": 58633
+        },
+        {
+          "seconds": 420.422142325,
+          "pssKiB": 58647
+        },
+        {
+          "seconds": 480.436131854,
+          "pssKiB": 58695
+        },
+        {
+          "seconds": 540.534857216,
+          "pssKiB": 58707
+        },
+        {
+          "seconds": 600.564882286,
+          "pssKiB": 58639
+        },
+        {
+          "seconds": 660.567715315,
+          "pssKiB": 58538
+        },
+        {
+          "seconds": 720.595175802,
+          "pssKiB": 58482
+        },
+        {
+          "seconds": 780.624634747,
+          "pssKiB": 59362
+        },
+        {
+          "seconds": 840.630192609,
+          "pssKiB": 59148
+        },
+        {
+          "seconds": 900.686544096,
+          "pssKiB": 58827
+        },
+        {
+          "seconds": 960.745972833,
+          "pssKiB": 58344
+        },
+        {
+          "seconds": 1020.762409737,
+          "pssKiB": 58328
+        },
+        {
+          "seconds": 1080.788636474,
+          "pssKiB": 59496
+        },
+        {
+          "seconds": 1140.893965627,
+          "pssKiB": 59410
+        },
+        {
+          "seconds": 1200.986915073,
+          "pssKiB": 59308
+        },
+        {
+          "seconds": 1261.01593206,
+          "pssKiB": 59062
+        },
+        {
+          "seconds": 1321.11394013,
+          "pssKiB": 59062
+        },
+        {
+          "seconds": 1381.136031867,
+          "pssKiB": 58940
+        },
+        {
+          "seconds": 1441.172522937,
+          "pssKiB": 58908
+        },
+        {
+          "seconds": 1501.253576132,
+          "pssKiB": 58844
+        },
+        {
+          "seconds": 1561.304477869,
+          "pssKiB": 58633
+        },
+        {
+          "seconds": 1621.363211273,
+          "pssKiB": 58505
+        },
+        {
+          "seconds": 1681.440952718,
+          "pssKiB": 58309
+        },
+        {
+          "seconds": 1741.443789747,
+          "pssKiB": 58979
+        }
+      ],
+      "windows": [
+        {
+          "fromSeconds": 300.280290268,
+          "toSeconds": 900.686544096,
+          "growthPercent": 0.3035004859417893
+        },
+        {
+          "fromSeconds": 900.686544096,
+          "toSeconds": 1501.253576132,
+          "growthPercent": 0.028898295000594963
+        }
+      ],
+      "passed": true,
+      "rule": "after 5 min warm-up, PSS growth <= 5% per 10-min window"
+    }
+  },
+  "limits": [
+    "Simulator/emulator memory, not physical-device memory",
+    "Data is bounded with compactData(keepLastBars: 10000) every 60 s so growth reflects retention, not the dataset"
+  ]
+}

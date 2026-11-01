@@ -2,8 +2,22 @@ package kr.coden.barochart;
 
 /** One OHLCV bar. {@code time} is UTC epoch milliseconds. */
 public final class Bar {
+    /**
+     * {@code time} is the bar time in UTC epoch milliseconds. {@code open}, {@code high}, {@code low} and {@code
+     * close} are prices and {@code volume} is the traded volume. All values must be finite; a bar with a non-finite
+     * price is rejected with {@code INVALID_ARGUMENT}.
+     */
     public final double time, open, high, low, close, volume;
 
+    /**
+     * Creates a bar.
+     * @param time bar time, UTC epoch milliseconds
+     * @param open opening price
+     * @param high highest price
+     * @param low lowest price
+     * @param close closing price
+     * @param volume traded volume
+     */
     public Bar(double time, double open, double high, double low, double close, double volume) {
         this.time = time; this.open = open; this.high = high; this.low = low; this.close = close; this.volume = volume;
     }

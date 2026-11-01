@@ -13,6 +13,14 @@ final class TypesParityTests: XCTestCase {
         return try JSONDecoder().decode(Vocabulary.self, from: Data(contentsOf: url))
     }
 
+    /// 패치는 설정한 필드만 보낸다(빈 패치는 아무것도 바꾸지 않는다)
+    func testPatchesSendOnlyGivenFields() {
+        XCTAssertTrue(BaroChartSeriesPatch().lowLevel.isEmpty)
+        XCTAssertEqual(BaroChartSeriesPatch(color: "#fff").lowLevel as? [String: String], ["color": "#fff"])
+        XCTAssertTrue(BaroChartDrawingPatch().lowLevel.isEmpty)
+        XCTAssertEqual(BaroChartDrawingPatch(visible: false).lowLevel as? [String: Bool], ["visible": false])
+    }
+
     func testIndicatorKindsMatchCore() throws {
         XCTAssertEqual(Set(BaroChartIndicatorKind.allCases.map(\.rawValue)), Set(try vocabulary().indicators))
         XCTAssertEqual(BaroChartIndicatorKind.allCases.count, 35)

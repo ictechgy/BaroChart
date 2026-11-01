@@ -2,8 +2,14 @@ package kr.coden.barochart;
 
 /** A drawing anchor in data coordinates: UTC epoch milliseconds and price. */
 public final class ChartPoint {
+    /** {@code time} is UTC epoch milliseconds and {@code price} is the price at that time. */
     public final double time, price;
 
+    /**
+     * Creates an anchor point.
+     * @param time UTC epoch milliseconds
+     * @param price price
+     */
     public ChartPoint(double time, double price) { this.time = time; this.price = price; }
 
     @Override public boolean equals(Object other) {
