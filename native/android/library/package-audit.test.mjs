@@ -10,7 +10,9 @@ const aar=process.env.ASTER_AUDIT_AAR,core=process.env.ASTER_AUDIT_CORE;
 if(!aar||!core)throw new Error('Set ASTER_AUDIT_AAR and ASTER_AUDIT_CORE to the selected built artifact');
 const output=await mkdtemp(join(tmpdir(),'aster-aar-audit-'));
 test('Complete production AAR exports resources, licenses, JNI and public API',()=>assert.equal(auditAar(aar,core).minSDK,26));
-const components=['AndroidManifest.xml','classes.jar','assets/aster-core.js','jni/arm64-v8a/libbarochart.so','proguard.txt','public.txt','res/values/values.xml','assets/licenses/QUICKJS-LICENSE.txt','assets/licenses/LICENSE.txt','assets/licenses/NOTICE.txt'];
+// x86_64는 에뮬레이터·CI 사용자를 위해 arm64-v8a와 함께 싣는다(설계 §5.2)
+test('AAR ships arm64-v8a and x86_64 JNI with 16KiB load alignment',()=>{const audit=auditAar(aar,core);assert.deepEqual(audit.abis,['arm64-v8a','x86_64']);assert.ok(Object.values(audit.jniByAbi).every(jni=>jni.loadAlignment.length&&Math.min(...jni.loadAlignment)>=16384));});
+const components=['AndroidManifest.xml','classes.jar','assets/aster-core.js','jni/arm64-v8a/libbarochart.so','jni/x86_64/libbarochart.so','proguard.txt','public.txt','res/values/values.xml','assets/licenses/QUICKJS-LICENSE.txt','assets/licenses/LICENSE.txt','assets/licenses/NOTICE.txt'];
 for(const [index,missing] of components.entries())test('Reject omitted '+missing,()=>{
     const file=join(output,`missing-${index}.aar`);
     const result=spawnSync('python3',['-c','import zipfile,sys\nwith zipfile.ZipFile(sys.argv[1]) as source,zipfile.ZipFile(sys.argv[2],"w") as target:\n for name in source.namelist():\n  if name!=sys.argv[3]:target.writestr(name,source.read(name))',aar,file,missing],{encoding:'utf8'});

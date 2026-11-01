@@ -70,6 +70,6 @@ test('visible main/analysis demo version badges agree with the package version',
  const {version}=JSON.parse(await read('package.json'));
  for(const path of ['examples/web/index.html','examples/web/analysis.html']) {
   const badges=[...(await read(path)).matchAll(/<span\b[^>]*class="badge"[^>]*>([^<]*)<\/span>/g)];
-  assert.equal(badges.length,1,path);assert.equal(badges[0][1].match(/\d+\.\d+\.\d+/)?.[0],version,path);
+  assert.equal(badges.length,1,path);assert.equal(badges[0][1].match(/\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?/)?.[0],version,path);
  }
 });

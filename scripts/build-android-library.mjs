@@ -40,7 +40,7 @@ export function auditAar(aar,core,jdk=process.env.ASTER_GRADLE_JAVA_HOME??proces
     const inspected=JSON.parse(run('python3',['-c',String.raw`
 import zipfile,io,json,sys,hashlib,struct,xml.etree.ElementTree as ET,tempfile,pathlib
 p=pathlib.Path(sys.argv[1]); core=pathlib.Path(sys.argv[2]); jdk=pathlib.Path(sys.argv[3])
-required=['AndroidManifest.xml','classes.jar','assets/aster-core.js','jni/arm64-v8a/libbarochart.so','proguard.txt','R.txt','public.txt','res/values/values.xml','assets/licenses/QUICKJS-LICENSE.txt','assets/licenses/LICENSE.txt','assets/licenses/NOTICE.txt']
+required=['AndroidManifest.xml','classes.jar','assets/aster-core.js','jni/arm64-v8a/libbarochart.so','jni/x86_64/libbarochart.so','proguard.txt','R.txt','public.txt','res/values/values.xml','assets/licenses/QUICKJS-LICENSE.txt','assets/licenses/LICENSE.txt','assets/licenses/NOTICE.txt']
 with zipfile.ZipFile(p) as z:
  names=z.namelist()
  for name in required:
@@ -60,11 +60,17 @@ with zipfile.ZipFile(p) as z:
  if version is None or not version.text:raise ValueError('SDK version resource value missing')
  rules=z.read('proguard.txt').decode()
  if 'kr.coden.barochart.BaroChartEngine' not in rules or 'kr.coden.barochart.BaroChartColumns' not in rules or 'native <methods>' not in rules or 'zonedParts' not in rules:raise ValueError('JNI consumer rules missing')
- native=z.read('jni/arm64-v8a/libbarochart.so')
- if native[:6]!=b'\x7fELF\x02\x01' or struct.unpack_from('<H',native,18)[0]!=183:raise ValueError('JNI is not arm64 ELF64')
- phoff=struct.unpack_from('<Q',native,32)[0];size,count=struct.unpack_from('<HH',native,54)
- aligns=[struct.unpack_from('<IIQQQQQQ',native,phoff+i*size)[7] for i in range(count) if struct.unpack_from('<I',native,phoff+i*size)[0]==1]
- if not aligns or min(aligns)<16384:raise ValueError('JNI load segments lack16KiB page alignment')
+ abis={'arm64-v8a':183,'x86_64':62};jni={}
+ for abi,machine in abis.items():
+  lib=z.read('jni/'+abi+'/libbarochart.so')
+  if lib[:6]!=b'\x7fELF\x02\x01' or struct.unpack_from('<H',lib,18)[0]!=machine:raise ValueError('JNI is not '+abi+' ELF64')
+  phoff=struct.unpack_from('<Q',lib,32)[0];size,count=struct.unpack_from('<HH',lib,54)
+  la=[struct.unpack_from('<IIQQQQQQ',lib,phoff+i*size)[7] for i in range(count) if struct.unpack_from('<I',lib,phoff+i*size)[0]==1]
+  if not la or min(la)<16384:raise ValueError('JNI load segments lack16KiB page alignment: '+abi)
+  jni[abi]={'sha256':hashlib.sha256(lib).hexdigest(),'loadAlignment':la}
+ extra=sorted({n.split('/')[1] for n in names if n.startswith('jni/') and n.count('/')>=2}-set(abis))
+ if extra:raise ValueError('Unexpected JNI ABI: '+','.join(extra))
+ native=z.read('jni/arm64-v8a/libbarochart.so');aligns=jni['arm64-v8a']['loadAlignment']
  jar=z.read('classes.jar')
  with zipfile.ZipFile(io.BytesIO(jar)) as c:
   classes=c.namelist()
@@ -78,7 +84,7 @@ with zipfile.ZipFile(p) as z:
   api=subprocess.run([str(jdk/'bin/javap'),'-public','-classpath',str(j),'kr.coden.barochart.BaroChartEngine','kr.coden.barochart.BaroChartColumns','kr.coden.barochart.BaroChartView'],capture_output=True,text=True,check=True).stdout
   for contract in ['implements java.lang.AutoCloseable','public kr.coden.barochart.BaroChartEngine(android.content.Context, int)','setColumns(org.json.JSONObject)','addIndicator(','addDrawing(','applyDataEventAsync(','prepareColumnsAsync(','setIndicatorParamsAsync(','public void close()','public static kr.coden.barochart.BaroChartColumns copyOf(','public kr.coden.barochart.BaroChartView(android.content.Context, kr.coden.barochart.BaroChartEngine)','setTool(java.lang.String)','renderCacheMetrics()']:
    if contract not in api:raise ValueError('Missing public API: '+contract)
- print(json.dumps({'entries':names,'classCount':len(classes),'sdkVersion':version.text,'coreSHA256':hashlib.sha256(js).hexdigest(),'jniSHA256':hashlib.sha256(native).hexdigest(),'classesSHA256':hashlib.sha256(jar).hexdigest(),'jniLoadAlignment':aligns,'minSDK':26,'abis':['arm64-v8a'],'publicAPI':api}))
+ print(json.dumps({'entries':names,'classCount':len(classes),'sdkVersion':version.text,'coreSHA256':hashlib.sha256(js).hexdigest(),'jniSHA256':hashlib.sha256(native).hexdigest(),'classesSHA256':hashlib.sha256(jar).hexdigest(),'jniLoadAlignment':aligns,'abis':list(abis),'jniByAbi':jni,'minSDK':26,'publicAPI':api}))
 `,resolve(aar),resolve(core),jdk]));
     return {...inspected,aar:resolve(aar)};
 }
