@@ -34,4 +34,4 @@ tasks.register('prepareAsterAssets', Sync) {
     into generatedAssets
 }
 tasks.named('preBuild').configure { dependsOn 'prepareAsterAssets' }
-tasks.withType(JavaCompile).configureEach { options.compilerArgs.addAll(['-Werror', '-Xlint:-options']) }
+tasks.withType(JavaCompile).configureEach { options.compilerArgs.addAll(['-Werror', '-Xlint:all,-options']) }

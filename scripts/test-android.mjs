@@ -7,3 +7,11 @@ for(let i=0;i<120;i++){try{report=JSON.parse(adb(['exec-out','run-as','dev.aster
 let benchmark;for(let i=0;i<120;i++){try{benchmark=JSON.parse(adb(['exec-out','run-as','dev.aster.charts.demo','cat','files/android-benchmark.json']));break;}catch{}await new Promise(r=>setTimeout(r,500));}if(benchmark?.rows.length!==2)throw new Error('Android benchmark did not finish');
 await writeFile('benchmarks/results/android-tests.json',JSON.stringify({...report,activityRecreatedDuringPendingCallbacks:recreate},null,2));await writeFile('benchmarks/results/android.json',JSON.stringify({...benchmark,api:report.api,method:'Android API36 arm64 emulator; seed42; recent 201 bars; 1200x700/DPR1 software bitmap, QuickJS scene+JSON+org.json parse+Canvas, no display FPS'},null,2));
 const pixels=spawnSync(join(sdk,'platform-tools/adb'),['-s',serial,'exec-out','run-as','dev.aster.charts.demo','cat','files/android-native.png']);if(pixels.status!==0)throw new Error('Android snapshot missing');await writeFile('artifacts/android-native-verified.png',pixels.stdout);console.log(JSON.stringify({nativeChecks:report.passed,coreChecks:report.core.passed,extendedChecks:report.extended.passed,api:report.api}));
+// 최근 공개 Java API(compactData·translateDrawings·deleteDrawings·setIndicatorParamsAsync·restoreWorkspaceAsync)를 실제 JNI에서 실행한다
+const recentFile='files/android-recent-api.json';adb(['shell','am','force-stop','dev.aster.charts.demo']);adb(['shell','run-as','dev.aster.charts.demo','rm','-f',recentFile]);
+adb(['shell','am','start','-n','dev.aster.charts.demo/dev.aster.charts.DemoActivity','--ez','recent-api-test','true']);let recent,recentReadError;
+for(let i=0;i<120&&!recent;i++){try{recent=JSON.parse(adb(['exec-out','run-as','dev.aster.charts.demo','cat',recentFile]));}catch(error){recentReadError=error;await new Promise(r=>setTimeout(r,500));}}
+if(!recent)throw new Error('Recent Java API report missing; check logcat for RecentAPIVerification. Last read error: '+recentReadError?.message);
+await writeFile('benchmarks/results/android-recent-api.json',JSON.stringify(recent,null,2));
+if(recent.failed!==0||recent.passed!==10)throw new Error('Recent Java API verification failed: '+JSON.stringify(recent));
+console.log(JSON.stringify({recentAPIChecks:recent.passed}));
