@@ -49,7 +49,7 @@ export async function checkJavaEngineLifecycle({java=process.env.ASTER_JAVA??'ja
         const inputs=[...sources,nativeFixture,runnerPath];const before=await hashes(inputs);
         const javaVersion=run(java,['-version'],'Java version',15000);const compiler=run(java,['-m','jdk.compiler/com.sun.tools.javac.Main','-version'],'Java compiler version',15000);
         const home=process.env.ASTER_JAVA_HOME??await javaHome(java);const include=join(home,'include');const platform=process.platform==='darwin'?'darwin':'linux';
-        const libraryName=process.platform==='darwin'?'libaster.dylib':'libbarochart.so';
+        const libraryName=process.platform==='darwin'?'libbarochart.dylib':'libbarochart.so';
         const nativeArgs=[process.platform==='darwin'?'-dynamiclib':'-shared','-fPIC','-std=c11','-Wall','-Wextra','-Werror',`-I${include}`,`-I${join(include,platform)}`,nativeFixture,'-o',join(library,libraryName)];
         const nativeCompiler=run(clang,nativeArgs,'Host JNI stub compilation');
         const compilerDiagnostics=run(java,javaEngineLifecycleCompilerArguments(classes,empty,sources),'Java lifecycle compilation');
