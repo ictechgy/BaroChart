@@ -5,6 +5,6 @@ let package = Package(
     platforms: [.macOS(.v13), .iOS(.v17)],
     products: [.library(name: "BaroChart", targets: ["BaroChart"])],
     targets: [.target(name: "BaroChart", path: "native", exclude: ["android"], sources: ["BaroChartEngine.swift", "BaroChartEngine+Typed.swift", "BaroChartError.swift", "BaroChartTypes.swift", "BaroChartColumns.swift", "BaroChartFrameRenderer.swift", "BaroChartUIView.swift", "BaroChartSwiftUI.swift"], resources: [.copy("Resources/aster-core.js"), .copy("Resources/PrivacyInfo.xcprivacy")]),
-        .testTarget(name: "BaroChartTests", dependencies: ["BaroChart"], path: "Tests/BaroChartTests", resources: [.copy("Resources/vocabulary.json")])],
+        .testTarget(name: "BaroChartTests", dependencies: ["BaroChart"], path: "Tests/BaroChartTests", resources: [.copy("Resources/vocabulary.json"), .copy("Resources/aster-workspace-v1.json")])],
     swiftLanguageModes: [.v5]
 )
