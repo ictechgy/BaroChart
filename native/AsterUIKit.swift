@@ -163,6 +163,9 @@ public final class AsterChartView: UIView {
     }
     public override func accessibilityIncrement() {_ = performAccessibleAction("Zoom in")}
     public override func accessibilityDecrement() {_ = performAccessibleAction("Zoom out")}
+    /// VoiceOver standard escape (two-finger scrub) cancels the active input session and selection,
+    /// matching the "Cancel interaction" custom action. Returns false when the view cannot act.
+    public override func accessibilityPerformEscape() -> Bool {performAccessibleAction("Cancel interaction")}
     public override var canBecomeFirstResponder: Bool {!isDisposed && !disposing}
     public override var keyCommands: [UIKeyCommand]? {
         guard !isDisposed,!disposing else {return []}

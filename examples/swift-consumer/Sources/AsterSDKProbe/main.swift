@@ -55,6 +55,7 @@ do {
     try check(notifications>0,"public observer receives data/style mutations")
     try engine.removeObserver(observer);try engine.close();try engine.close()
     do {_ = try engine.scene(width:800,height:500);throw ProbeError.failed("closed engine accepted scene")}catch AsterAsyncError.engineClosed {checks.append("owner close is repeatable and rejects further scene calls")}
+    checks += try runRecentAPIProbe(makeColumns: columns) // 최근 공개 API 실제 실행
     let report:[String:Any]=["passed":checks.count,"checks":checks,"host":"independent local SwiftPM consumer / JavaScriptCore / CoreGraphics","defaultEngineCount":0,"externalBars":512,"librarySourcesInConsumerTarget":false,"appSuppliedBundleURL":false,"sourceCopyDemoImport":false,"physicalPresentationMeasured":false]
     print(String(data:try JSONSerialization.data(withJSONObject:report,options:[.sortedKeys]),encoding:.utf8)!)
 }catch {
