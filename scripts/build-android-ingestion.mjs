@@ -19,7 +19,9 @@ const selectedJNI=await hash(join(out,'lib/arm64-v8a/libbarochart.so'));if(expec
 const sourceFiles=[];for(const dir of [join(root,'native/android/java/kr/coden/barochart'),join(root,'examples/android/cycle12')])for(const name of (await readdir(dir)).filter(n=>n.endsWith('.java')))sourceFiles.push(join(dir,name));
 sourceFiles.push(join(root,'examples/android/IngestionVerification.java'),join(root,'examples/android/TimezoneVerification.java'));
 const hashes={};const snapshots=[];for(const source of sourceFiles){const name=source.split('/').at(-1),dest=join(out,'java',name);await copyFile(source,dest);hashes[name]=await hash(dest);snapshots.push(dest);}
-const production=snapshots.filter(p=>['BaroChartEngine.java','BaroChartColumns.java','BaroChartView.java','BaroChartBitmapCachePool.java','WorkspaceRestoreJob.java','NativeJobBudget.java','ParamsUpdateJob.java','BaroChartException.java','OnChartErrorListener.java'].includes(p.split('/').at(-1)));
+// SDK 폴더의 모든 Java(타입 API 포함)를 1차 컴파일 대상으로 삼는다(이름 고정 목록은 새 파일을 놓침)
+const sdkNames=new Set((await readdir(join(root,'native/android/java/kr/coden/barochart'))).filter(n=>n.endsWith('.java')));
+const production=snapshots.filter(p=>sdkNames.has(p.split('/').at(-1)));
 // Existing low-memory compatibility callbacks are deprecated in API36. Keep
 // their production code unchanged; all other lint warnings remain fatal.
 run(join(jdk,'bin/javac'),['--release','8','-Werror','-Xlint:all,-options,-deprecation','-cp',android,'-sourcepath','native/android/annotation-stubs','-d',join(out,'classes'),...production]);
