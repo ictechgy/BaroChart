@@ -48,12 +48,44 @@ final class LowLevelJson {
         return out;
     }
 
+    /**
+     * 시리즈 패치. 설정한 필드만 키로 넣어 코어가 나머지를 현재 값으로 유지하게 한다(id·type은 바꿀 수 없어 넣지 않는다).
+     * panel을 항상 보내면 색만 바꿔도 시리즈가 price 패널로 옮겨지므로 기본값을 채우지 않는다.
+     */
+    static JSONObject seriesPatch(SeriesPatch p) throws JSONException {
+        JSONObject out = new JSONObject().putOpt("panel", p.panel);
+        if (p.source != null) out.put("source", p.source.wireName());
+        return out.putOpt("indicator", p.indicator).putOpt("output", p.output).putOpt("color", p.color)
+            .putOpt("width", p.width).putOpt("visible", p.visible).putOpt("label", p.label);
+    }
+
     static JSONObject drawing(Drawing d) throws JSONException {
-        JSONArray points = new JSONArray();
-        for (ChartPoint p : d.points) points.put(new JSONObject().put("time", p.time).put("price", p.price));
-        JSONObject out = new JSONObject().put("type", d.tool.wireName()).put("panel", d.panel).put("points", points);
-        if (d.style != null) out.put("style", new JSONObject().putOpt("color", d.style.color).putOpt("fill", d.style.fill).putOpt("width", d.style.width).putOpt("font", d.style.font));
+        JSONObject out = new JSONObject().put("type", d.tool.wireName()).put("panel", d.panel).put("points", points(d.points));
+        if (d.style != null) out.put("style", style(d.style));
         return out.putOpt("id", d.id).putOpt("text", d.text).putOpt("locked", d.locked).putOpt("visible", d.visible);
+    }
+
+    /**
+     * 드로잉 패치. 설정한 필드만 키로 넣는다. 코어 editDrawing은 현재 드로잉에 패치를 병합하므로
+     * 스타일만 바꿀 때 앵커를 다시 보낼 필요가 없고, 도구(type)·id는 바꿀 수 없어 넣지 않는다.
+     */
+    static JSONObject drawingPatch(DrawingPatch p) throws JSONException {
+        JSONObject out = new JSONObject();
+        if (p.points != null) out.put("points", points(p.points));
+        if (p.style != null) out.put("style", style(p.style));
+        return out.putOpt("panel", p.panel).putOpt("text", p.text).putOpt("locked", p.locked).putOpt("visible", p.visible);
+    }
+
+    /** 앵커 목록을 코어의 {time, price} 배열로 바꾼다 */
+    private static JSONArray points(List<ChartPoint> points) throws JSONException {
+        JSONArray out = new JSONArray();
+        for (ChartPoint p : points) out.put(new JSONObject().put("time", p.time).put("price", p.price));
+        return out;
+    }
+
+    /** 드로잉 스타일. null 필드는 넣지 않아 코어 기본값을 쓴다 */
+    private static JSONObject style(DrawingStyle s) throws JSONException {
+        return new JSONObject().putOpt("color", s.color).putOpt("fill", s.fill).putOpt("width", s.width).putOpt("font", s.font);
     }
 
     static JSONObject theme(Theme t) throws JSONException {

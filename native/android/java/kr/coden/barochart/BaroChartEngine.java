@@ -797,8 +797,14 @@ public final class BaroChartEngine implements AutoCloseable {
      * @param text an {@code aster.drawings} document
      */
     public void loadDrawings(String text){typed(()->command("loadDrawings",text));}
+    /**
+     * Closes the engine and frees its native runtime. Views stop drawing it and every later typed call throws {@code
+     * ENGINE_CLOSED}. Calling it again does nothing.
+     * @throws BaroChartException with {@code WRONG_THREAD} when called off the thread that created the engine; the
+     *     engine then stays open
+     */
     @Override public void close(){
-        if(Thread.currentThread()!=owner)throw new IllegalStateException("Close on owning thread");if(closing)return;closing=true;
+        if(Thread.currentThread()!=owner)throw new BaroChartException(BaroChartException.Code.WRONG_THREAD,"Close the engine on the thread that created it.",null,null);if(closing)return;closing=true;
         Error cleanupFailure=null;
         try{if(activeParams!=null)activeParams.job.closeOnOwner();if(activeWorkspace!=null)activeWorkspace.job.closeOnOwner();if(handle!=0){try{if(activeJob!=null)activeJob.stopOnOwner("closed");java.util.ArrayList<Runnable> cleanup=new java.util.ArrayList<>(closeObservers);closeObservers.clear();for(Runnable observer:cleanup)try{observer.run();}catch(RuntimeException observerFailure){recordObserverFailure(observerFailure);}catch(Error error){if(cleanupFailure==null)cleanupFailure=error;}}
             finally{long released=handle;ParamsJob paramsClosing=activeParams;if(paramsClosing!=null)paramsClosing.job.sourceFreeStartedOnOwner();handle=0;try{free(released);if(paramsClosing!=null)paramsClosing.job.sourceFreedOnOwner();}finally{if(activeWorkspace!=null)activeWorkspace.job.closeOnOwner();}}}if(cleanupFailure!=null)throw cleanupFailure;}
@@ -1283,10 +1289,12 @@ public final class BaroChartEngine implements AutoCloseable {
      */
     public void addSeries(@androidx.annotation.NonNull Series series){typed(()->addSeries(LowLevelJson.series(series)));}
     /**
-     * Updates the series with {@code series.id}. Every field except id and type is applied, including the panel.
-     * @param series the series with the new field values
+     * Changes only the fields set on {@code patch}; every unset field, including the panel, keeps its current value.
+     * The series id and type cannot change. A missing id throws {@code JAVASCRIPT}.
+     * @param id id of the series to change
+     * @param patch the fields to change
      */
-    public void updateSeries(@androidx.annotation.NonNull Series series){typed(()->{JSONObject patch=LowLevelJson.series(series);patch.remove("id");patch.remove("type");setSeries(series.id,patch);});}
+    public void updateSeries(@androidx.annotation.NonNull String id,@androidx.annotation.NonNull SeriesPatch patch){typed(()->setSeries(id,LowLevelJson.seriesPatch(patch)));}
     /**
      * Adds an indicator under {@code id}. Bind it to a series with {@code Series.builder(...).indicator(id)}.
      * @param indicator the indicator definition
@@ -1324,11 +1332,13 @@ public final class BaroChartEngine implements AutoCloseable {
         return typedCall(()->addDrawing(LowLevelJson.drawing(drawing)));
     }
     /**
-     * Changes an existing drawing's anchors, style, text, panel, lock and visibility. The tool cannot change.
+     * Changes only the fields set on {@code patch}; unset anchors, panel, style, text, lock and visibility keep their
+     * current values, so a style-only change does not need the anchors again. The tool cannot change. A missing id
+     * throws {@code JAVASCRIPT}; a locked drawing accepts only lock and visibility changes.
      * @param id id of the drawing to change
-     * @param drawing the new field values
+     * @param patch the fields to change
      */
-    public void updateDrawing(@androidx.annotation.NonNull String id,@androidx.annotation.NonNull Drawing drawing){typed(()->{JSONObject patch=LowLevelJson.drawing(drawing);patch.remove("id");patch.remove("type");editDrawing(id,patch);});}
+    public void updateDrawing(@androidx.annotation.NonNull String id,@androidx.annotation.NonNull DrawingPatch patch){typed(()->editDrawing(id,LowLevelJson.drawingPatch(patch)));}
     /**
      * Deletes drawings as one undo step and returns how many were removed. Missing or locked ids throw.
      * @param ids ids of the drawings to delete

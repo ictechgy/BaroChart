@@ -7,7 +7,10 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
-/** A drawing to add or the fields to change. {@code tool} must not be {@link DrawingTool#SELECT}. */
+/**
+ * A drawing to add with {@link BaroChartEngine#addDrawing(Drawing)}. {@code tool} must not be {@link DrawingTool#SELECT}.
+ * To change an existing drawing, use {@link DrawingPatch}.
+ */
 public final class Drawing {
     /**
      * {@code id} is the drawing id; {@code null} lets the core generate one. {@code text} is the drawing text, or
@@ -23,8 +26,7 @@ public final class Drawing {
     /** Style overrides, or {@code null} to keep the core defaults. */
     @Nullable public final DrawingStyle style;
     /**
-     * {@code locked} and {@code visible} flags. {@code null} leaves the core default when adding a drawing and keeps
-     * the current value when updating one.
+     * {@code locked} and {@code visible} flags. {@code null} leaves the core default.
      */
     @Nullable public final Boolean locked, visible;
 

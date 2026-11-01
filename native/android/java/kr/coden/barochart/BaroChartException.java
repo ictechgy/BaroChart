@@ -1,6 +1,7 @@
 package kr.coden.barochart;
 
 import java.util.concurrent.CancellationException;
+import java.util.regex.Pattern;
 import org.json.JSONException;
 
 /**
@@ -76,13 +77,21 @@ public final class BaroChartException extends RuntimeException {
         return new BaroChartException(code, withoutScriptPrefix(raw), null, error);
     }
 
+    /** 코어 IngestionError 메시지 중 자원 한도 초과를 뜻하는 낱말(Swift와 같은 패턴, 대소문자 무시) */
+    private static final Pattern INGESTION_BUDGET = Pattern.compile("(?i)budget|limit|full");
+
     /** 예외 종류와 메시지로 코드를 고른다(Swift BaroChartError.classify와 같은 규칙) */
     private static Code classify(Throwable error, String message) {
         if (error instanceof BaroChartEngine.IngestionException) return message.matches("(?s).*(budget|limit|full).*") ? Code.BUDGET_EXCEEDED : Code.INVALID_ARGUMENT;
         if (error instanceof CancellationException || error instanceof InterruptedException) return Code.CANCELLED;
         if (error instanceof JSONException || error instanceof IllegalArgumentException) return Code.INVALID_ARGUMENT;
-        if (message.startsWith("TypeError: ")) return Code.INVALID_ARGUMENT;
+        // TypeError는 형식 검증, SyntaxError는 loadDrawings 등에 넘긴 깨진 JSON이라 둘 다 잘못된 인수다
+        if (message.startsWith("TypeError: ") || message.startsWith("SyntaxError: ")) return Code.INVALID_ARGUMENT;
         if (message.startsWith("RangeError: ")) return message.matches("(?is).*(: limit \\d+$|budget|exceeds).*") ? Code.BUDGET_EXCEEDED : Code.INVALID_ARGUMENT;
+        // DataEvent.batch의 잘못된 봉은 코어 IngestionError로 온다. 예산 문구만 자원 한도, 나머지는 잘못된 입력이다
+        if (message.startsWith("IngestionError: ")) return INGESTION_BUDGET.matcher(withoutScriptPrefix(message)).find() ? Code.BUDGET_EXCEEDED : Code.INVALID_ARGUMENT;
+        // 코어 모델이 이미 정리된 경우: 앱 입장에서는 닫힌 엔진과 같다
+        if (message.equals("Error: Chart disposed")) return Code.ENGINE_CLOSED;
         if (message.startsWith("Error: ")) return Code.JAVASCRIPT;
         return classifyHostMessage(message);
     }
@@ -99,7 +108,7 @@ public final class BaroChartException extends RuntimeException {
 
     /** "TypeError: x" 같은 JS 예외 접두어를 떼어 원인 문장만 남긴다 */
     private static String withoutScriptPrefix(String message) {
-        for (String prefix : new String[]{"TypeError: ", "RangeError: ", "Error: "}) {
+        for (String prefix : new String[]{"TypeError: ", "RangeError: ", "SyntaxError: ", "IngestionError: ", "Error: "}) {
             if (message.startsWith(prefix)) return message.substring(prefix.length());
         }
         return message;
