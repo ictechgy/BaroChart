@@ -144,8 +144,9 @@ test('Java static: separate existing compaction decoder retains its original ran
 });
 
 test('Java static: existing observer RuntimeException channel stays bounded', () => {
-    const notify = body(java, /private void notifyChanges\(/);
-    assert.match(flat(notify), /catch\(RuntimeExceptionerror\)/);
-    assert.match(flat(notify), /observerErrors.size\(\)<32/);
-    assert.match(notify, /onObserverError/);
+    // 관찰자 실패 기록은 recordObserverFailure 한 곳에 모였다(close 경로도 같은 채널 사용)
+    const notify = body(java, /private void notifyChanges\(/), record = body(java, /private void recordObserverFailure\(/);
+    assert.match(flat(notify), /catch\(RuntimeExceptionerror\)\{recordObserverFailure\(error\);\}/);
+    assert.match(flat(record), /observerErrors.size\(\)<32/);
+    assert.match(record, /onObserverError/);
 });

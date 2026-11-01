@@ -90,7 +90,9 @@ final class WorkspaceRestoreJob {
     private void report(String phase,long done,long total){synchronized(this){if(terminal||stopped!=null)return;latestProgress=new Progress(phase,done,total,false);if(progressQueued)return;progressQueued=true;}if(!postOwner(this::deliverProgress)){synchronized(this){progressQueued=false;latestProgress=null;}}}
     private void deliverProgress(){Progress value;synchronized(this){progressQueued=false;value=latestProgress;latestProgress=null;if(terminal||stopped!=null)return;}if(value!=null)progress(value.phase,value.done,value.total);}
     private void progress(String phase,long done,long total){try{host.onProgress(phase,done,total);}catch(Throwable error){callbackError(error);}}
-    private void callbackError(Throwable error){if(callbackErrors<32)callbackErrors++;try{Host currentHost=host;if(currentHost!=null)currentHost.onCallbackError(error);}catch(Throwable ignored){/* Terminal ownership must not be changed by diagnostics. */}}
+    /** 진단 훅(onCallbackError) 자체가 실패한 횟수. 종료 소유권을 바꾸지 않도록 기록만 한다 */
+    private int diagnosticHookFailures;
+    private void callbackError(Throwable error){if(callbackErrors<32)callbackErrors++;try{Host currentHost=host;if(currentHost!=null)currentHost.onCallbackError(error);}catch(Throwable hookFailure){diagnosticHookFailures++;}}
     private void complete(){if(terminal)return;host.requireOwner();if(ownerCleanupPending&&!sourceReleased||!releaseSource()){deferOwnerCleanup();return;}synchronized(this){if(terminal)return;terminal=true;ownerCleanupPending=false;latestProgress=null;progressQueued=false;}releaseReservation();String status=committed?"success":stopped==null?"failed":stopped;Throwable error=committed?null:failure;descriptor=null;document=null;binding=null;worker=null;try{host.onComplete(status,error,new Metrics(System.nanoTime()-started,copiedBytes,logicalBytes,callbackErrors));}catch(Throwable callback){callbackError(callback);}finally{host=null;}}
     private static final class Stop extends IllegalStateException {private static final long serialVersionUID=1L;final String status;Stop(String status){super("Workspace "+status);this.status=status;}}
 }

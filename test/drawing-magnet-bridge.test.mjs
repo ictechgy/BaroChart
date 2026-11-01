@@ -47,7 +47,7 @@ test('Swift/UIKit and Java/Android facades forward options to the same command v
  // 앱이 부르는 뷰 setter는 오류를 삼키지 않고 BaroChartError로 던진다(설계 §5.3)
  assert.match(ui,/public func setDrawingMagnet\(_ options: \[String: Any\]\) throws \{try performViewCommand \{try engine\.setDrawingMagnet\(options\)\}\}/);
  assert.match(ui,/private func performViewCommand[\s\S]*?guard !isDisposed,!disposing else \{return\}[\s\S]*?try BaroChartError\.mapping\(body\)[\s\S]*?setNeedsDisplay\(\)/);
- assert.match(view,/public void setDrawingMagnet\(JSONObject options\)\{try\{engine.setDrawingMagnet\(options\);lastError=null;\}catch\(Exception e\)\{lastError=e.toString\(\);\}\}/);
+ assert.match(view,/public void setDrawingMagnet\(JSONObject options\)\{try\{engine.setDrawingMagnet\(options\);lastError=null;\}catch\(Exception e\)\{throw BaroChartException.wrap\(e\);\}\}/);
 });
 test('demo selector defaults Off and reapplies explicit mode on both rebuild paths (source only)',async()=>{
  const html=await read('../examples/web/index.html'),demo=await read('../examples/web/demo.mjs');
