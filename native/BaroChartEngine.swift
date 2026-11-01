@@ -12,7 +12,7 @@ public struct BaroChartIngestionError: Error, CustomStringConvertible {
     public init(code: String, message: String) {self.code=code;self.message=message}
     public var description: String {"IngestionError[\(code)]: \(message)"}
 }
-public struct BaroChartBar: Codable {
+public struct BaroChartBar: Codable, Equatable, Sendable {
     public let time, open, high, low, close, volume: Double
     public init(time: Double, open: Double, high: Double, low: Double, close: Double, volume: Double) {
         self.time = time; self.open = open; self.high = high; self.low = low; self.close = close; self.volume = volume
