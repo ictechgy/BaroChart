@@ -1579,23 +1579,22 @@ public final class BaroChartEngine {
     /// 엔진 정리 본체(저수준 오류를 던진다)
     private func closeOnOwner() throws {
         guard Thread.current === owner else {throw BaroChartLowLevelError.wrongThread}
-        // 정리 중 JSC가 만든 autorelease 임시 JSValue가 닫힌 엔진의 컨텍스트를 붙잡지 않도록 이 안에서 비운다
-        try autoreleasepool {try releaseOwnedResources()}
-    }
-    /// close()의 실제 정리 단계(소유 스레드 확인 뒤 autoreleasepool 안에서 실행)
-    private func releaseOwnedResources() throws {
-        if closing {return};closing = true;defer {closing = false}
-        if Thread.isMainThread, let pending = pendingWorkspaceRegistration {BaroChartWorkspaceRegistry.retry(pending)}
-        if Thread.isMainThread, let pending = pendingParamsRegistration {_ = BaroChartParamsRegistry.retry(pending)}
-        if closed {return}
-        activeWorkspace?.cancel();activeParams?.cancel()
-        let cleanups = Array(frameCleanup.values);frameCleanup.removeAll();for cleanup in cleanups {cleanup()}
-        if context.objectForKeyedSubscript("nativeReleaseFrameCaches")?.isUndefined == false {_ = try call("nativeReleaseFrameCaches")}
-        if context.objectForKeyedSubscript("nativeReleaseDataIngestion")?.isUndefined == false {_ = try call("nativeReleaseDataIngestion")}
-        closed = true;activeAsync?.stop(BaroChartAsyncError.engineClosed)
-        if workspaceContextInstalled {contextBacking = nil}
-        activeAsync?.runtime?.retire();contextRuntime?.retire();contextRuntime = nil
-        observers.removeAll();onObserverError = nil;observerErrors.removeAll();pendingNotifications = 0
+        // 정리 중 JSC가 만든 autorelease 임시 JSValue가 닫힌 엔진의 컨텍스트를 붙잡지 않도록 이 풀 안에서 정리한다.
+        // 클로저의 return은 정리 단계만 끝낸다(이전의 함수 return과 같은 의미).
+        try autoreleasepool {
+            if closing {return};closing = true;defer {closing = false}
+            if Thread.isMainThread, let pending = pendingWorkspaceRegistration {BaroChartWorkspaceRegistry.retry(pending)}
+            if Thread.isMainThread, let pending = pendingParamsRegistration {_ = BaroChartParamsRegistry.retry(pending)}
+            if closed {return}
+            activeWorkspace?.cancel();activeParams?.cancel()
+            let cleanups = Array(frameCleanup.values);frameCleanup.removeAll();for cleanup in cleanups {cleanup()}
+            if context.objectForKeyedSubscript("nativeReleaseFrameCaches")?.isUndefined == false {_ = try call("nativeReleaseFrameCaches")}
+            if context.objectForKeyedSubscript("nativeReleaseDataIngestion")?.isUndefined == false {_ = try call("nativeReleaseDataIngestion")}
+            closed = true;activeAsync?.stop(BaroChartAsyncError.engineClosed)
+            if workspaceContextInstalled {contextBacking = nil}
+            activeAsync?.runtime?.retire();contextRuntime?.retire();contextRuntime = nil
+            observers.removeAll();onObserverError = nil;observerErrors.removeAll();pendingNotifications = 0
+        }
     }
     deinit {
         activeWorkspace?.cancel();activeParams?.cancel();activeAsync?.stop(BaroChartAsyncError.sourceDeallocated)
