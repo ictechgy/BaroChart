@@ -123,7 +123,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14033849" "cmake;3.22.1" > /dev/null
+          # yes를 파이프로 넘기면 sdkmanager가 끝난 뒤 yes가 SIGPIPE로 실패해 pipefail이 단계를 실패시킨다
+          "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14033849" "cmake;3.22.1" < <(yes) > /dev/null
 
       - name: Build SDK and Compose AARs
         run: gradle --console=plain -p native/android/library assembleRelease :barochart-compose:assembleRelease
@@ -169,7 +170,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14033849" "cmake;3.22.1" > /dev/null
+          # yes를 파이프로 넘기면 sdkmanager가 끝난 뒤 yes가 SIGPIPE로 실패해 pipefail이 단계를 실패시킨다
+          "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14033849" "cmake;3.22.1" < <(yes) > /dev/null
 
       - name: Run typed engine tests on an x86_64 emulator
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
