@@ -44,8 +44,8 @@ async function buildJavadoc(){
  const javadoc=join(process.env.ASTER_GRADLE_JAVA_HOME??'/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home','bin/javadoc');
  const target=join(out,'javadoc');
  await rm(target,{recursive:true,force:true});
- // missing 그룹은 제외한다: 공개 타입·메서드는 문서화했지만 enum 상수·자명한 접근자까지 강제하면 잡음만 늘어난다
- const output=run(javadoc,['-quiet','-Xdoclint:all,-missing','-public','-encoding','UTF-8','-d',target,
+ // missing 그룹까지 포함한다: 공개 API의 모든 선언에 문서 주석이 있어야 한다(-Xmaxwarns로 100개 상한 없이 전부 센다)
+ const output=run(javadoc,['-quiet','-Xmaxwarns','10000','-Xdoclint:all','-public','-encoding','UTF-8','-d',target,
   '-classpath',join(sdk,'platforms/android-36/android.jar'),'-sourcepath',join(root,'native/android/annotation-stubs'),
   '-windowtitle','BaroChart for Android','-doctitle','BaroChart for Android API',...sources]);
  return {html:'artifacts/docs/javadoc/index.html',warnings:warningLines(output)};
