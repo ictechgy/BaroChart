@@ -198,6 +198,59 @@ public struct BaroChartDrawing: Equatable, Sendable {
     }
 }
 
+/// Fields to change on an existing series. Only non-`nil` fields change; the series type cannot change.
+///
+/// A patch cannot reset a field to the core default: `nil` always means "keep the current value".
+public struct BaroChartSeriesPatch: Equatable, Sendable {
+    /// New panel id, or `nil` to keep the current panel.
+    public var panel: String?
+    /// New primary-series column, or `nil` to keep the current source.
+    public var source: BaroChartPriceSource?
+    /// New indicator id to plot, or `nil` to keep the current binding.
+    public var indicator: String?
+    /// New indicator output name, or `nil` to keep the current output.
+    public var output: String?
+    /// New CSS hex color, or `nil` to keep the current color.
+    public var color: String?
+    /// New line width in logical pixels, or `nil` to keep the current width.
+    public var width: Double?
+    /// New visibility, or `nil` to keep the current visibility.
+    public var visible: Bool?
+    /// New readout label, or `nil` to keep the current label.
+    public var label: String?
+
+    /// Creates a patch. Every field defaults to `nil` (unchanged).
+    public init(panel: String? = nil, source: BaroChartPriceSource? = nil, indicator: String? = nil, output: String? = nil,
+                color: String? = nil, width: Double? = nil, visible: Bool? = nil, label: String? = nil) {
+        self.panel = panel; self.source = source; self.indicator = indicator; self.output = output
+        self.color = color; self.width = width; self.visible = visible; self.label = label
+    }
+}
+
+/// Fields to change on an existing drawing. Only non-`nil` fields change; the tool cannot change.
+///
+/// A patch cannot reset a field to the core default: `nil` always means "keep the current value".
+public struct BaroChartDrawingPatch: Equatable, Sendable {
+    /// New anchors in data coordinates, or `nil` to keep the current anchors.
+    public var points: [BaroChartPoint]?
+    /// New panel id, or `nil` to keep the current panel.
+    public var panel: String?
+    /// New portable style, or `nil` to keep the current style.
+    public var style: BaroChartDrawingStyle?
+    /// New label text, or `nil` to keep the current text.
+    public var text: String?
+    /// New lock state, or `nil` to keep the current state.
+    public var locked: Bool?
+    /// New visibility, or `nil` to keep the current visibility.
+    public var visible: Bool?
+
+    /// Creates a patch. Every field defaults to `nil` (unchanged).
+    public init(points: [BaroChartPoint]? = nil, panel: String? = nil, style: BaroChartDrawingStyle? = nil,
+                text: String? = nil, locked: Bool? = nil, visible: Bool? = nil) {
+        self.points = points; self.panel = panel; self.style = style; self.text = text; self.locked = locked; self.visible = visible
+    }
+}
+
 /// Chart colors and font. Use `.dark` or `.light` and adjust fields as needed.
 public struct BaroChartTheme: Equatable, Sendable {
     /// Colors as CSS hex strings: `background`, `grid` lines, axis and label `text`, `up` and `down` candle colors, and the `crosshair`.
@@ -354,6 +407,26 @@ extension BaroChartDrawing {
         var out: [String: Any] = ["type": tool.rawValue, "panel": panel, "points": points.map { ["time": $0.time, "price": $0.price] }]
         put(&out, "id", id); put(&out, "style", style?.lowLevel); put(&out, "text", text)
         put(&out, "locked", locked); put(&out, "visible", visible)
+        return out
+    }
+}
+
+extension BaroChartSeriesPatch {
+    /// 설정한 필드만 담은 코어 setSeries 패치(nil은 보내지 않아 기존 값 유지)
+    var lowLevel: [String: Any] {
+        var out: [String: Any] = [:]
+        put(&out, "panel", panel); put(&out, "source", source?.rawValue); put(&out, "indicator", indicator); put(&out, "output", output)
+        put(&out, "color", color); put(&out, "width", width); put(&out, "visible", visible); put(&out, "label", label)
+        return out
+    }
+}
+
+extension BaroChartDrawingPatch {
+    /// 설정한 필드만 담은 코어 editDrawing 패치(nil은 보내지 않아 기존 값 유지)
+    var lowLevel: [String: Any] {
+        var out: [String: Any] = [:]
+        put(&out, "points", points?.map { ["time": $0.time, "price": $0.price] }); put(&out, "panel", panel)
+        put(&out, "style", style?.lowLevel); put(&out, "text", text); put(&out, "locked", locked); put(&out, "visible", visible)
         return out
     }
 }
