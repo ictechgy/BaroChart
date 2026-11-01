@@ -6,9 +6,84 @@
     "panP95Ms": 16.7,
     "sizePerAbiBytes": 3145728
   },
-  "status": "Physical-device runs pending: platforms is empty until scripts/measure-native-device.mjs runs on a connected iPhone and Android phone.",
+  "status": "Measured on one physical device per platform (2026-11-01): iPhone XR (A12, iOS 18.7.10) and Samsung SM-S947N (Android API 37). All provisional budgets met. One device each; older or low-end devices are not covered.",
   "method": "startup = engine create + setBars(10,000) + first frame render, 12 runs minus 2 warm-up; pan10k = 120 frames shifting a 200-bar window over 10,000 bars, render time per frame on the CPU (not display FPS)",
-  "platforms": {},
+  "platforms": {
+    "android": {
+      "date": "2026-11-01",
+      "device": "samsung SM-S947N",
+      "api": 37,
+      "abi": "arm64-v8a",
+      "density": 2.625,
+      "method": "BaroChartView.draw into a bitmap on the device CPU; not display FPS",
+      "startup": {
+        "p50Ms": 198.521953,
+        "p95Ms": 207.79711,
+        "maxMs": 207.79711,
+        "runs": 10
+      },
+      "pan10k": {
+        "p50Ms": 3.436211,
+        "p95Ms": 3.808125,
+        "maxMs": 3.898242,
+        "runs": 120,
+        "pssMB": 61.78515625
+      },
+      "size": {
+        "entries": {
+          "classes.jar": {
+            "uncompressed": 147558,
+            "compressed": 138092
+          },
+          "assets/aster-core.js": {
+            "uncompressed": 588726,
+            "compressed": 152510
+          },
+          "jni/arm64-v8a/libbarochart.so": {
+            "uncompressed": 1058512,
+            "compressed": 488584
+          },
+          "jni/x86_64/libbarochart.so": {
+            "uncompressed": 1117992,
+            "compressed": 519988
+          }
+        },
+        "perAbiBytes": {
+          "arm64-v8a": 1794796,
+          "x86_64": 1854276
+        },
+        "note": "release AAR: native library for the ABI + core asset + classes.jar, uncompressed (APK compression and R8 shrink further)"
+      },
+      "budgetMisses": []
+    },
+    "ios": {
+      "date": "2026-11-01",
+      "device": "iPhone11,8",
+      "method": "offscreen BaroChartUIView layer render on the device CPU; not display FPS",
+      "os": "18.7.10",
+      "pan10k": {
+        "footprintMB": 84.42315673828125,
+        "maxMs": 7.848791,
+        "p50Ms": 5.396375,
+        "p95Ms": 6.524542,
+        "runs": 120
+      },
+      "scale": 2,
+      "startup": {
+        "maxMs": 158.422208,
+        "p50Ms": 155.169458,
+        "p95Ms": 158.422208,
+        "runs": 10
+      },
+      "size": {
+        "sdkCodeBytes": 424858,
+        "sdkResourceBundleBytes": 590027,
+        "totalBytes": 1014885,
+        "note": "arm64 release link map (BaroChart target objects) + BaroChart_BaroChart.bundle; uncompressed"
+      },
+      "budgetMisses": []
+    }
+  },
   "referenceRuns": {
     "note": "Simulator/emulator on an Apple Silicon Mac. Not device numbers; recorded only to check the harness works.",
     "iosSimulator": {
