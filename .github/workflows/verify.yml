@@ -72,3 +72,113 @@ jobs:
             exit 1
           fi
           CHROME_BIN="${chrome_bin}" npm run test:indicator-layout:browser
+
+  ios-build:
+    # 네이티브 SDK(Swift): 경고 0 빌드, macOS JavaScriptCore 테스트, iOS 시뮬레이터 빌드
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Show toolchain
+        run: xcodebuild -version && swift --version
+
+      - name: Swift build with warnings as errors
+        run: swift build -Xswiftc -warnings-as-errors
+
+      - name: Swift tests on macOS JavaScriptCore
+        run: swift test
+
+      - name: iOS simulator build with warnings as errors
+        run: xcodebuild -scheme BaroChart -destination 'generic/platform=iOS Simulator' -derivedDataPath "${RUNNER_TEMP}/dd" build OTHER_SWIFT_FLAGS=-warnings-as-errors
+
+  android-build:
+    # 네이티브 SDK(Android): 두 ABI AAR, Compose 모듈, 16 KiB 정렬, R8 소비자 앱 빌드
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        # Official release: https://github.com/actions/setup-java/releases/tag/v6.1.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.14.5
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        # Official release: https://github.com/gradle/actions/releases/tag/v6.4.1
+        with:
+          gradle-version: '8.14.5'
+
+      - name: Install pinned Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          # yes를 파이프로 넘기면 sdkmanager가 끝난 뒤 yes가 SIGPIPE로 실패해 pipefail이 단계를 실패시킨다
+          "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14033849" "cmake;3.22.1" < <(yes) > /dev/null
+
+      - name: Build SDK and Compose AARs
+        run: gradle --console=plain -p native/android/library assembleRelease :barochart-compose:assembleRelease
+
+      - name: Check 16 KiB load alignment of both ABIs
+        shell: bash
+        run: |
+          set -euo pipefail
+          unzip -q -o native/android/library/build/outputs/aar/barochart-android-release.aar 'jni/*' -d "${RUNNER_TEMP}/aar"
+          node scripts/check-elf-alignment.mjs "${RUNNER_TEMP}/aar/jni/arm64-v8a/libbarochart.so" "${RUNNER_TEMP}/aar/jni/x86_64/libbarochart.so"
+
+      - name: Build Compose sample release with R8
+        run: gradle --console=plain -p examples/compose-sample :app:assembleRelease
+
+  android-x86-smoke:
+    # 이 저장소의 로컬 검증 Mac은 arm64라 x86_64 .so는 여기서만 실제로 실행된다
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.14.5
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          gradle-version: '8.14.5'
+
+      - name: Enable KVM for the emulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install pinned Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          # yes를 파이프로 넘기면 sdkmanager가 끝난 뒤 yes가 SIGPIPE로 실패해 pipefail이 단계를 실패시킨다
+          "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14033849" "cmake;3.22.1" < <(yes) > /dev/null
+
+      - name: Run typed engine tests on an x86_64 emulator
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        # Official release: https://github.com/ReactiveCircus/android-emulator-runner/releases/tag/v2.38.0
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: gradle --console=plain -p native/android/library :connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=kr.coden.barochart.TypedEngineTest

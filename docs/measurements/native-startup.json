@@ -1,0 +1,60 @@
+{
+  "schema": "barochart.native-startup",
+  "version": 1,
+  "date": "2026-11-01",
+  "question": "Should the native SDK ship a whitespace/syntax-minified aster-core.js? (design \u00a75.7)",
+  "rule": "Adopt if raw size drops at least 30% or engine-creation-to-first-scene p50 drops at least 10%.",
+  "minifier": "esbuild 0.28.2 --minify-whitespace --minify-syntax (identifiers kept for bridge function names)",
+  "size": {
+    "originalBytes": 588726,
+    "minifiedBytes": 543068,
+    "rawReductionPercent": 7.8,
+    "originalGzipBytes": 152152,
+    "minifiedGzipBytes": 133592,
+    "gzipReductionPercent": 12.2
+  },
+  "startup": {
+    "host": "macOS 26.7.2 arm64, JavaScriptCore, release Swift build",
+    "workload": "BaroChartEngine(bundleURL:count:2000) + scene(1200x700), 30 runs after 3 warm-ups",
+    "runs": [
+      {
+        "original": {
+          "p50Ms": 16.233,
+          "p95Ms": 16.77
+        },
+        "minified": {
+          "p50Ms": 15.83,
+          "p95Ms": 17.035
+        }
+      },
+      {
+        "original": {
+          "p50Ms": 16.22,
+          "p95Ms": 16.506
+        },
+        "minified": {
+          "p50Ms": 15.968,
+          "p95Ms": 16.44
+        }
+      },
+      {
+        "original": {
+          "p50Ms": 16.339,
+          "p95Ms": 16.869
+        },
+        "minified": {
+          "p50Ms": 16.022,
+          "p95Ms": 16.58
+        }
+      }
+    ],
+    "p50ReductionPercent": "1.6-2.5"
+  },
+  "decision": "not adopted",
+  "reason": "The source bundle is already dense, so minification removes only 7.8% of bytes and about 2% of startup time on JavaScriptCore; both are far below the adoption rule. Shipping the readable bundle keeps JS stack traces and audits simple.",
+  "limits": [
+    "QuickJS/Android startup was not measured for the minified bundle; the 7.8% size reduction bounds its parse benefit similarly.",
+    "Physical-device startup is measured separately (Task 18)."
+  ],
+  "reproduce": "node scripts/measure-native-startup.mjs <minified bundle path>"
+}

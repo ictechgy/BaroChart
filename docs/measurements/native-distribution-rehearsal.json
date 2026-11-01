@@ -1,0 +1,27 @@
+{
+  "schema": "barochart.native-distribution-rehearsal",
+  "version": 1,
+  "date": "2026-11-01",
+  "sdkVersion": "0.3.0-dev",
+  "android": {
+    "corePom": "ok",
+    "composePom": "ok",
+    "coreAarBytes": 1307131,
+    "composeAarBytes": 5923
+  },
+  "androidConsumer": {
+    "apkBytes": 3689365,
+    "source": "local Maven only (no composite build)"
+  },
+  "iosConsumer": {
+    "tag": "0.3.0-dev.rehearsal",
+    "checkoutKiB": 19372,
+    "gitHistoryKiB": 4740,
+    "source": "git URL + exact tag (no local path)"
+  },
+  "notPerformed": [
+    "Maven Central upload or signing",
+    "public git tag push",
+    "physical device install"
+  ]
+}

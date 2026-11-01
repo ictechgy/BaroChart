@@ -1,4 +1,8 @@
-plugins { id 'com.android.library' }
+plugins {
+    id 'com.android.library'
+    id 'maven-publish'
+    id 'signing'
+}
 
 // 버전 단일 원천은 저장소 루트 package.json이다(웹·iOS·Android 공유)
 def sharedVersion = new groovy.json.JsonSlurper().parse(file('../../../package.json')).version
@@ -48,4 +52,63 @@ dependencies {
     compileOnly 'androidx.annotation:annotation:1.9.1'
     androidTestImplementation 'androidx.test:runner:1.6.2'
     androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+}
+
+// Maven 게시: 로컬 리허설은 -PbarochartLocalRepo=<경로>로 file 저장소에 올린다.
+// Central 업로드·서명은 저장소 주인이 승인한 뒤 signing.* 속성을 주입해 실행한다(키는 저장소에 두지 않는다).
+android {
+    publishing {
+        singleVariant('release') {
+            withSourcesJar()
+            withJavadocJar()
+        }
+    }
+}
+
+afterEvaluate {
+    publishing {
+        publications {
+            release(MavenPublication) {
+                from components.release
+                groupId = 'kr.coden'
+                artifactId = 'barochart-android'
+                version = project.version
+                pom {
+                    name = 'barochart-android'
+                    description = 'BaroChart financial chart engine for Android: QuickJS core, Canvas view and typed API.'
+                    url = 'https://github.com/ictechgy/BaroChart'
+                    licenses {
+                        license {
+                            name = 'Apache License, Version 2.0'
+                            url = 'https://www.apache.org/licenses/LICENSE-2.0.txt'
+                        }
+                    }
+                    developers {
+                        developer {
+                            id = 'ictechgy'
+                            name = 'BaroChart contributors'
+                            url = 'https://github.com/ictechgy'
+                        }
+                    }
+                    scm {
+                        url = 'https://github.com/ictechgy/BaroChart'
+                        connection = 'scm:git:https://github.com/ictechgy/BaroChart.git'
+                        developerConnection = 'scm:git:ssh://git@github.com/ictechgy/BaroChart.git'
+                    }
+                }
+            }
+        }
+        repositories {
+            if (providers.gradleProperty('barochartLocalRepo').isPresent()) {
+                maven {
+                    name = 'local'
+                    url = uri(providers.gradleProperty('barochartLocalRepo').get())
+                }
+            }
+        }
+    }
+    // signing.keyId가 주입될 때만 서명한다(로컬 리허설·CI 빌드는 서명하지 않음)
+    if (project.hasProperty('signing.keyId')) {
+        signing { sign publishing.publications.release }
+    }
 }

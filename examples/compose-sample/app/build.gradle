@@ -4,7 +4,8 @@ plugins {
     id 'org.jetbrains.kotlin.plugin.compose'
 }
 
-def sdkVersion = new groovy.json.JsonSlurper().parse(file('../../../package.json')).version
+// 저장소 안에서는 package.json 버전, 저장소 밖 리허설에서는 -PbarochartVersion을 쓴다
+def sdkVersion = providers.gradleProperty('barochartVersion').orElse(providers.provider { new groovy.json.JsonSlurper().parse(file('../../../package.json')).version }).get()
 if (providers.gradleProperty('sampleBuildRoot').isPresent()) layout.buildDirectory = file(providers.gradleProperty('sampleBuildRoot').get() + '/app')
 
 android {
