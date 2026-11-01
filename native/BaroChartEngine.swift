@@ -1413,8 +1413,8 @@ public final class BaroChartEngine {
         guard let context = JSContext() else { throw BaroChartLowLevelError.unavailableContext }
         self.contextBacking = context
         self.bundleSource = try String(contentsOf: bundleURL, encoding: .utf8)
-        context.evaluateScript(bundleSource)
-        try checkException()
+        // 스크립트 평가가 만드는 autorelease 임시 JSValue가 컨텍스트를 붙잡지 않도록 바로 비운다(call과 같은 이유)
+        try autoreleasepool {context.evaluateScript(bundleSource);try checkException()}
         _ = try call("nativeInit", [count, options as Any? ?? NSNull()])
     }
     private func checkException() throws {
@@ -1424,9 +1424,13 @@ public final class BaroChartEngine {
     @discardableResult public func call(_ name: String, _ arguments: [Any] = []) throws -> JSValue {
         guard Thread.current === owner else {throw BaroChartLowLevelError.wrongThread}
         guard !closed else {throw BaroChartAsyncError.engineClosed}
-        guard let function = context.objectForKeyedSubscript(name), !function.isUndefined,
-              let value = function.call(withArguments: arguments) else { throw BaroChartLowLevelError.javaScript("Missing function: \(name)") }
-        try checkException(); return value
+        // JSC가 호출마다 만드는 autorelease 임시 JSValue는 JSContext를 강하게 붙잡는다.
+        // 호출자의 풀이 늦게 비워지면(백그라운드 소유 스레드, 한 런루프 턴 안의 반복) 닫힌 엔진의 컨텍스트가 쌓이므로 호출 단위로 비운다.
+        return try autoreleasepool {
+            guard let function = context.objectForKeyedSubscript(name), !function.isUndefined,
+                  let value = function.call(withArguments: arguments) else { throw BaroChartLowLevelError.javaScript("Missing function: \(name)") }
+            try checkException(); return value
+        }
     }
     private func workspaceAvailability() throws {
         guard !closing else {throw BaroChartAsyncError.engineClosed}
@@ -1575,6 +1579,11 @@ public final class BaroChartEngine {
     /// 엔진 정리 본체(저수준 오류를 던진다)
     private func closeOnOwner() throws {
         guard Thread.current === owner else {throw BaroChartLowLevelError.wrongThread}
+        // 정리 중 JSC가 만든 autorelease 임시 JSValue가 닫힌 엔진의 컨텍스트를 붙잡지 않도록 이 안에서 비운다
+        try autoreleasepool {try releaseOwnedResources()}
+    }
+    /// close()의 실제 정리 단계(소유 스레드 확인 뒤 autoreleasepool 안에서 실행)
+    private func releaseOwnedResources() throws {
         if closing {return};closing = true;defer {closing = false}
         if Thread.isMainThread, let pending = pendingWorkspaceRegistration {BaroChartWorkspaceRegistry.retry(pending)}
         if Thread.isMainThread, let pending = pendingParamsRegistration {_ = BaroChartParamsRegistry.retry(pending)}

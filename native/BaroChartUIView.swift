@@ -220,6 +220,11 @@ public final class BaroChartUIView: UIView {
     /// Draws the engine's current scene, through the cached frame renderer when ``layerCachingEnabled`` is on. Failures are reported through ``onError`` and ``lastError``.
     public override func draw(_ rect: CGRect) {
         guard !isDisposed,!disposing,!suspended,let context = UIGraphicsGetCurrentContext() else {return}
+        // 장면을 읽으며 생기는 autorelease 임시 JSValue가 엔진 컨텍스트를 붙잡지 않도록 프레임마다 비운다
+        autoreleasepool {drawFrame(in: context)}
+    }
+    /// 한 프레임을 그린다. 실패는 뷰 밖으로 던지지 않고 오류 콜백으로 보고한다
+    private func drawFrame(in context: CGContext) {
         do {
             if layerCachingEnabled {
                 if frameRenderer == nil {frameRenderer = BaroChartFrameRenderer(engine: engine)}
