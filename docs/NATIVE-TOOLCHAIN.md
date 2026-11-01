@@ -18,7 +18,7 @@ not minimum requirements for SDK consumers.
 | JDK for Gradle | OpenJDK 17.0.20 (`/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home`) |
 | JDK for Java runners | OpenJDK 21.0.12 (`ASTER_JAVA`) |
 | Android SDK | platforms 34–36, build-tools 36.0.0, NDK 29.0.14033849, CMake 3.22.1 |
-| Android emulator | 36.1.9.0, AVD `barochart-api36` (`system-images;android-36;google_apis_ps16k;arm64-v8a`, Pixel 8) |
+| Android emulator | 36.1.9.0, AVD `aster-validation` (`system-images;android-36;google_apis_ps16k;arm64-v8a`, Pixel 8), console port 5580 |
 
 ## Environment conventions
 
@@ -27,7 +27,8 @@ not minimum requirements for SDK consumers.
 | `TSC_PATH` | `artifacts/toolchain/typescript-5.9.3/node_modules/typescript/lib/tsc.js` |
 | `ASTER_GRADLE` | the Gradle 8.14.5 path above (scripts also discover it automatically) |
 | `ASTER_GRADLE_JAVA_HOME` | the JDK 17 home above |
-| `ASTER_ANDROID_SERIAL` | `emulator-5554` for the dedicated AVD |
+| `ASTER_ANDROID_SERIAL` | `emulator-5580` (`emulator -avd aster-validation -port 5580`) |
+| `ANDROID_ADB_SERVER_PORT`, `ASTER_ADB_PORT`, `ASTER_ANDROID_ADB_PORT` | `5038`, a private adb server separate from the default 5037 |
 | `ASTER_JAVA` | `/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home/bin/java` |
 
 ## Bootstrap notes
@@ -38,6 +39,8 @@ not minimum requirements for SDK consumers.
 - `scripts/build-android-library.mjs` copies `~/.gradle/caches/modules-2` into
   an isolated Gradle home, so the cache had to be populated once by an online
   `assembleRelease` of `native/android/library` first.
-- The dedicated AVD keeps other projects' emulators untouched. The host is
+- The dedicated AVD keeps other projects' emulators untouched. Hover, mobile-UX and
+  ingestion runners accept only `emulator-5580` on adb server 5038, and the ingestion
+  runner also checks the AVD name `aster-validation`. The host is
   arm64, so x86_64 Android binaries are executed only in CI (KVM), not locally.
 - Free space on the data volume was 84 GiB when the work started.
