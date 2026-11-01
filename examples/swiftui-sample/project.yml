@@ -1,0 +1,46 @@
+# BaroChart SwiftUI 샘플 앱. `xcodegen generate`로 BaroChartSample.xcodeproj를 다시 만든다.
+name: BaroChartSample
+options:
+  bundleIdPrefix: kr.coden.barochart
+  deploymentTarget:
+    iOS: "17.0"
+packages:
+  BaroChart:
+    path: ../..
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+targets:
+  BaroChartSample:
+    type: application
+    platform: iOS
+    sources: [Sources]
+    dependencies:
+      - package: BaroChart
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: kr.coden.barochart.sample
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_CFBundleDisplayName: BaroChart
+        MARKETING_VERSION: "0.3.0"
+        CURRENT_PROJECT_VERSION: "1"
+  BaroChartSampleUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    dependencies:
+      - target: BaroChartSample
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: kr.coden.barochart.sample.uitests
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  BaroChartSample:
+    build:
+      targets:
+        BaroChartSample: all
+        BaroChartSampleUITests: [test]
+    test:
+      targets: [BaroChartSampleUITests]
