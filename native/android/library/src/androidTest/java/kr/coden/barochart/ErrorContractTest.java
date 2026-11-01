@@ -93,4 +93,40 @@ public class ErrorContractTest {
             assertNotNull(view.getLastError());
         });
     }
+    @Test
+    public void touchFailureReachesListenerWithoutCrashing() {
+        onMain(() -> {
+            BaroChartEngine engine = new BaroChartEngine(context, 0);
+            BaroChartView view = new BaroChartView(context, engine);
+            view.layout(0, 0, 320, 240);
+            List<BaroChartException> received = new ArrayList<>();
+            view.setOnChartErrorListener(received::add);
+            engine.close();
+            long now = android.os.SystemClock.uptimeMillis();
+            android.view.MotionEvent down = android.view.MotionEvent.obtain(now, now, android.view.MotionEvent.ACTION_DOWN, 100, 100, 0);
+            try { view.onTouchEvent(down); } finally { down.recycle(); }
+            assertTrue("touch failure must be reported, not thrown", received.size() >= 1);
+            assertEquals(BaroChartException.Code.ENGINE_CLOSED, received.get(0).getCode());
+        });
+    }
+    @Test
+    public void touchInputNotifiesInteractionListener() {
+        onMain(() -> {
+            BaroChartEngine engine = BaroChartEngine.create(context, EngineOptions.defaults());
+            try {
+                java.util.List<Bar> bars = new ArrayList<>();
+                for (int i = 0; i < 30; i++) bars.add(new Bar(1_700_000_000_000.0 + i * 60_000.0, 100, 102, 99, 101, 10));
+                engine.setBars(bars);
+                BaroChartView view = new BaroChartView(context, engine);
+                view.layout(0, 0, 320, 240);
+                int[] calls = {0};
+                view.setOnInteractionListener(() -> calls[0]++);
+                long now = android.os.SystemClock.uptimeMillis();
+                android.view.MotionEvent down = android.view.MotionEvent.obtain(now, now, android.view.MotionEvent.ACTION_DOWN, 100, 100, 0);
+                try { view.onTouchEvent(down); } finally { down.recycle(); }
+                assertTrue("touch input must notify the interaction listener", calls[0] >= 1);
+                view.setOnInteractionListener(null);
+            } finally { engine.close(); }
+        });
+    }
 }

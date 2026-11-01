@@ -29,3 +29,7 @@ benchmarks/results/
 .env
 .env.*
 !.env.example
+native/android/compose/build/
+examples/compose-sample/build/
+examples/compose-sample/app/build/
+*.hprof
