@@ -44,7 +44,9 @@ test('Swift/UIKit and Java/Android facades forward options to the same command v
  const swift=await read('../native/BaroChartEngine.swift'),ui=await read('../native/BaroChartUIView.swift'),java=await read('../native/android/java/kr/coden/barochart/BaroChartEngine.java'),view=await read('../native/android/java/kr/coden/barochart/BaroChartView.java');
  assert.match(swift,/public func setDrawingMagnet\(_ options: \[String: Any\]\) throws \{ try command\("setDrawingMagnet", \[options\]\) \}/);
  assert.match(java,/public void setDrawingMagnet\(JSONObject options\) throws JSONException \{command\("setDrawingMagnet",options\);\}/);
- assert.match(ui,/public func setDrawingMagnet[^\n]+guard !isDisposed,!disposing[^\n]+try engine.setDrawingMagnet\(options\);setNeedsDisplay\(\)[^\n]+lastError = String\(describing: error\)/);
+ // 앱이 부르는 뷰 setter는 오류를 삼키지 않고 BaroChartError로 던진다(설계 §5.3)
+ assert.match(ui,/public func setDrawingMagnet\(_ options: \[String: Any\]\) throws \{try performViewCommand \{try engine\.setDrawingMagnet\(options\)\}\}/);
+ assert.match(ui,/private func performViewCommand[\s\S]*?guard !isDisposed,!disposing else \{return\}[\s\S]*?try BaroChartError\.mapping\(body\)[\s\S]*?setNeedsDisplay\(\)/);
  assert.match(view,/public void setDrawingMagnet\(JSONObject options\)\{try\{engine.setDrawingMagnet\(options\);lastError=null;\}catch\(Exception e\)\{lastError=e.toString\(\);\}\}/);
 });
 test('demo selector defaults Off and reapplies explicit mode on both rebuild paths (source only)',async()=>{

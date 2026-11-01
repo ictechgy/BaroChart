@@ -165,7 +165,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     @objc func action(_ sender: UIButton) {
         let name = sender.title(for:.normal) ?? "Select"
         do {if ["Undo","Redo"].contains(name) {try engine.call("nativeKey",["z",true,name=="Redo"]);chart.setNeedsDisplay()}
-            else {chart.setTool(["Select":"select","Line":"trendline","Freehand":"freehand","Channel":"channel","Fib":"fibextension"][name]!)}
+            else {do {try chart.setTool(["Select":"select","Line":"trendline","Freehand":"freehand","Channel":"channel","Fib":"fibextension"][name]!)} catch {NSLog("BaroChart tool selection failed: %@",String(describing:error))}}
         } catch {print(error)}
     }
     func write(_ name:String,_ report:[String:Any]) {do {let data=try JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]);try data.write(to:FileManager.default.urls(for:.documentDirectory,in:.userDomainMask)[0].appendingPathComponent(name))}catch{print(error)}}

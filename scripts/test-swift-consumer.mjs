@@ -7,7 +7,7 @@ import {tmpdir} from 'node:os';
 import {basename,join,resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 
-const sourceRoot=resolve(import.meta.dirname,'..'),sdkFiles=['Package.swift','native/BaroChartEngine.swift','native/BaroChartColumns.swift','native/BaroChartFrameRenderer.swift','native/BaroChartUIView.swift','native/Resources/aster-core.js'];
+const sourceRoot=resolve(import.meta.dirname,'..'),sdkFiles=['Package.swift','native/BaroChartEngine.swift','native/BaroChartError.swift','native/BaroChartColumns.swift','native/BaroChartFrameRenderer.swift','native/BaroChartUIView.swift','native/Resources/aster-core.js'];
 async function fingerprint(root){const result={};for(const file of sdkFiles)result[file]=createHash('sha256').update(await readFile(join(root,file))).digest('hex');return result;}
 async function walk(root){const out=[];for(const entry of await readdir(root,{withFileTypes:true})){const path=join(root,entry.name);if(entry.isDirectory())out.push(...await walk(path));else out.push(path);}return out;}
 export async function testSwiftConsumer({sdk=sourceRoot,output=null,mode='all',baselineCore=false}={}){
