@@ -78,7 +78,7 @@ public final class MobileUXInstrumentation extends Instrumentation {
     private void warmReadoutCache(JSONObject report)throws Exception {
         // A lifecycle/pressure eviction has a500ms retry cooldown. Warm-up is outside tap samples.
         SystemClock.sleep(550);main(()->activity.chart.invalidate());boolean ready=false;final JSONObject[] state=new JSONObject[1];final boolean[] current=new boolean[1];
-        for(int i=0;i<60;i++){waitForIdleSync();main(()->{state[0]=activity.chart.renderCacheMetrics();current[0]=activity.chart.renderedRevision==activity.engine.revision()&&activity.chart.lastError==null;});if(current[0]&&state[0].getLong("ownedBitmapBytes")>0&&state[0].getBoolean("frameCacheCreated")){ready=true;break;}SystemClock.sleep(50);}
+        for(int i=0;i<60;i++){waitForIdleSync();main(()->{state[0]=activity.chart.renderCacheMetrics();current[0]=activity.chart.renderedRevision==activity.engine.revision()&&activity.chart.getLastError()==null;});if(current[0]&&state[0].getLong("ownedBitmapBytes")>0&&state[0].getBoolean("frameCacheCreated")){ready=true;break;}SystemClock.sleep(50);}
         report.put("readoutWarmCache",state[0]);check(ready,"Readout cache is resident and current before measured taps");
     }
     private void runUX(JSONObject report)throws Exception {

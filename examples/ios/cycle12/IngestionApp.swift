@@ -39,8 +39,8 @@ final class Cycle12Controller:UIViewController {
             DispatchQueue.main.asyncAfter(deadline:.now()+warmup){[weak self] in guard let self=self,!self.finished else{return};self.report["measureStartProcess"]=Cycle12ProcessSampler.snapshot();self.probe.begin();self.feeds.forEach{$0.beginHistoryClock(interval:self.seconds==900 ? 300:6)};self.sampler.start();self.status.text="MEASURING";DispatchQueue.main.asyncAfter(deadline:.now()+self.seconds){[weak self] in self?.finish()}}
         }catch{fail(error)}
     }
-    @objc private func line(){chart?.setTool("trendline")}
-    @objc private func chooseSelection(){chart?.setTool("select")}
+    @objc private func line(){do{try chart?.setTool("trendline")}catch{fail(error)}}
+    @objc private func chooseSelection(){do{try chart?.setTool("select")}catch{fail(error)}}
     @objc private func cancelInput(){_=chart?.accessibilityPerformEscape();report["accessibleCancelActions"]=(report["accessibleCancelActions"] as? Int ?? 0)+1}
     @objc private func finish(){guard !finished,armed else{return};finished=true
         do{var rows:[[String:Any]]=[];for feed in feeds{rows.append(try feed.stop())};probe.stop();report["probe"]=probe.report();report["sampler"]=sampler.stop();report["feed"]=rows;report["measurementEndProcess"]=Cycle12ProcessSampler.snapshot();report["requestedSeconds"]=seconds;report["warmupSeconds"]=warmup;report["nativeDrawHookInstrumented"] = Bundle.main.object(forInfoDictionaryKey:"Cycle12Instrumented") as? Bool ?? false

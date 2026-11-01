@@ -34,6 +34,9 @@ public final class BaroChartUIView: UIView {
     public var dynamicTypeTextStyle: UIFont.TextStyle = .caption1 {didSet {synchronizeFont()}}
     /// Owner-thread notification after controller input, for external readouts.
     public var onInteraction: (() -> Void)?
+    /// Main-thread callback for failures that cannot be thrown to the caller, such as drawing,
+    /// touch input, accessibility actions and Dynamic Type updates. `lastError` keeps the latest description.
+    public var onError: ((BaroChartError) -> Void)?
 
     public init(engine: BaroChartEngine, frame: CGRect = .zero) {
         precondition(Thread.isMainThread)
@@ -65,7 +68,7 @@ public final class BaroChartUIView: UIView {
         do {try engine.checkFrameOwner();observer = try engine.observeChanges {[weak self] in
             guard let self = self,!self.isDisposed,!self.suspended,!self.disposing else {return}
             self.synchronizeFont();self.setNeedsDisplay()
-        }} catch {lastError = String(describing: error)}
+        }} catch {report(error)}
     }
     private func unsubscribeEngine() {if let observer = observer {try? engine.removeObserver(observer);self.observer = nil}}
     private func attachResources() {
@@ -122,7 +125,7 @@ public final class BaroChartUIView: UIView {
             applyingFont = true;defer {applyingFont = false}
             let previous = lastAppliedFont;lastAppliedFont = desired
             do {try engine.setTheme(["font": desired])} catch {lastAppliedFont = previous;throw error}
-        } catch {lastError = String(describing: error)}
+        } catch {report(error)}
     }
     private func restoreFont(releaseBase: Bool) {
         guard !applyingFont else {return}
@@ -132,14 +135,14 @@ public final class BaroChartUIView: UIView {
         do {if try engine.call("nativeThemeFont").toString() == owned {
             cancelInteraction(clearCrosshair: false)
             applyingFont = true;defer {applyingFont = false};try engine.setTheme(["font": base])
-        }} catch {lastError = String(describing: error)}
+        }} catch {report(error)}
     }
     private func refreshAccessibility() {
         guard !isDisposed else {return}
         do {
             guard let text = try engine.call("nativeAccessibilityText",[true,"uikit"]).toString() else {throw BaroChartLowLevelError.invalidScene}
             accessibilityValue = text
-        } catch {lastError = String(describing: error)}
+        } catch {report(error)}
     }
     private func installAccessibilityActions() {
         let actions = ["Zoom in","Zoom out","Pan earlier","Pan later","Next drawing","Previous drawing","Undo","Redo","Delete selected drawing","Cancel interaction"]
@@ -159,7 +162,7 @@ public final class BaroChartUIView: UIView {
                 return fire("nativeKey",[key,action == "Undo" || action == "Redo",action == "Redo"])
             }
             setNeedsDisplay();onInteraction?();return true
-        } catch {lastError = String(describing: error);return false}
+        } catch {report(error);return false}
     }
     public override func accessibilityIncrement() {_ = performAccessibleAction("Zoom in")}
     public override func accessibilityDecrement() {_ = performAccessibleAction("Zoom out")}
@@ -178,7 +181,7 @@ public final class BaroChartUIView: UIView {
             if name == "nativePointer" || name == "nativeKey" {_ = try engine.call("nativeResize",[max(100,bounds.width),max(80,bounds.height)])}
             _ = try engine.call(name,arguments);setNeedsDisplay()
             if name == "nativePointer" || name == "nativeKey" || name == "nativeWheel" {onInteraction?()};return true
-        } catch {lastError = String(describing: error);return false}
+        } catch {report(error);return false}
     }
     private func cancelInteraction(clearCrosshair: Bool,deselect: Bool = false) {
         // A callback may cancel while UIKit is dispatching a multi-touch batch.
@@ -191,7 +194,7 @@ public final class BaroChartUIView: UIView {
             if deselect {_ = try engine.call("nativeKey",["Escape",false,false])}
             else {_ = try engine.call("nativePointer",["cancel",0,0,0]);if clearCrosshair {_ = try engine.call("nativeHoverExit")}}
             onInteraction?()
-        } catch {lastError = String(describing: error)}
+        } catch {report(error)}
     }
     public override func layoutSubviews() {
         super.layoutSubviews()
@@ -209,7 +212,7 @@ public final class BaroChartUIView: UIView {
                 _ = try frameRenderer!.render(width: max(100,bounds.width),height: max(80,bounds.height),scale: Double(contentScaleFactor),in: context)
             } else {let scene = try engine.scene(width: max(100,bounds.width),height: max(80,bounds.height));BaroChartCoreGraphicsRenderer.render(scene,in: context)}
             lastError = nil;renderedRevision = engine.revision;refreshAccessibility()
-        } catch {lastError = String(describing: error)}
+        } catch {report(error)}
     }
     public override func touchesBegan(_ touches: Set<UITouch>,with event: UIEvent?) {
         guard !isDisposed,!disposing,!suspended else {return};becomeFirstResponder()
@@ -224,8 +227,23 @@ public final class BaroChartUIView: UIView {
     public override func touchesCancelled(_ touches: Set<UITouch>,with event: UIEvent?) {cancelInteraction(clearCrosshair: false);setNeedsDisplay()}
     public override func willMove(toWindow newWindow: UIWindow?) {if newWindow == nil {cancelInteraction(clearCrosshair: true);detachResources()};super.willMove(toWindow: newWindow)}
     public override func didMoveToWindow() {super.didMoveToWindow();if window != nil {attachResources()}}
-    public func setCrosshairSnap(_ options: [String: Any]) {guard !isDisposed,!disposing else {return};do {try engine.setCrosshairSnap(options);setNeedsDisplay()} catch {lastError = String(describing: error)}}
-    public func setDrawingMagnet(_ options: [String: Any]) {guard !isDisposed,!disposing else {return};do {try engine.setDrawingMagnet(options);setNeedsDisplay()} catch {lastError = String(describing: error)}}
-    public func setTool(_ tool: String) {guard !isDisposed,!disposing else {return};do {try engine.setTool(tool);setNeedsDisplay()} catch {lastError = String(describing: error)}}
+    /// Sets crosshair snapping. Throws `BaroChartError` instead of recording a silent failure.
+    public func setCrosshairSnap(_ options: [String: Any]) throws {try performViewCommand {try engine.setCrosshairSnap(options)}}
+    /// Sets drawing magnet behavior. Throws `BaroChartError` instead of recording a silent failure.
+    public func setDrawingMagnet(_ options: [String: Any]) throws {try performViewCommand {try engine.setDrawingMagnet(options)}}
+    /// Selects a drawing tool by core name. Throws `BaroChartError` for unknown tools or a closed engine.
+    public func setTool(_ tool: String) throws {try performViewCommand {try engine.setTool(tool)}}
+    /// 던질 수 없는 경로의 오류를 lastError에 남기고 onError로 알린다
+    private func report(_ error: any Error) {
+        let typed = BaroChartError.wrap(error)
+        lastError = typed.description
+        onError?(typed)
+    }
+    /// 앱이 부르는 뷰 명령: 폐기된 뷰는 무시하고, 실패는 BaroChartError로 던진다
+    private func performViewCommand(_ body: () throws -> Void) throws {
+        guard !isDisposed,!disposing else {return}
+        try BaroChartError.mapping(body)
+        setNeedsDisplay()
+    }
 }
 #endif

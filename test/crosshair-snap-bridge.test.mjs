@@ -43,7 +43,9 @@ test('native facade config/query and read-only notification exclusion are symmet
  assert.match(java,/public void setCrosshairSnap\(JSONObject options\) throws JSONException \{command\("setCrosshairSnap",options\);\}/);
  assert.match(java,/public JSONObject crosshairSnapshot[\s\S]*?command\("crosshairSnapshot",width,height\);if\(result==JSONObject.NULL\)return null;[\s\S]*?instanceof JSONObject/);
  assert.match(java,/else if\([^\n]+!operation.equals\("crosshairSnapshot"\)[^\n]+notifyChanges\(\)/);
- assert.match(ui,/public func setCrosshairSnap[^\n]+guard !isDisposed,!disposing[^\n]+try engine.setCrosshairSnap\(options\);setNeedsDisplay\(\)/);
+ // 앱이 부르는 뷰 setter는 오류를 삼키지 않고 BaroChartError로 던진다(설계 §5.3)
+ assert.match(ui,/public func setCrosshairSnap\(_ options: \[String: Any\]\) throws \{try performViewCommand \{try engine\.setCrosshairSnap\(options\)\}\}/);
+ assert.match(ui,/private func performViewCommand[\s\S]*?guard !isDisposed,!disposing else \{return\}[\s\S]*?try BaroChartError\.mapping\(body\)[\s\S]*?setNeedsDisplay\(\)/);
  assert.match(view,/public void setCrosshairSnap[^\n]+engine.setCrosshairSnap\(options\)/);
 });
 test('demo separate control defaults free and preserves choice on rebuild/renderer replacement (source only)',async()=>{

@@ -16,6 +16,7 @@ android {
         minSdk 26
         ndk { abiFilters 'arm64-v8a', 'x86_64' }
         consumerProguardFiles 'consumer-rules.pro'
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
         resValue 'string', 'barochart_sdk_version', sdkVersion
         externalNativeBuild { cmake { arguments '-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON' } }
     }
@@ -37,3 +38,9 @@ tasks.register('prepareAsterAssets', Sync) {
 }
 tasks.named('preBuild').configure { dependsOn 'prepareAsterAssets' }
 tasks.withType(JavaCompile).configureEach { options.compilerArgs.addAll(['-Werror', '-Xlint:all,-options']) }
+
+// 계측 테스트 전용 의존성. SDK AAR 런타임 의존성은 0을 유지한다.
+dependencies {
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+}

@@ -107,7 +107,7 @@ final class ParamsUpdateJob {
     private void published(Receipt value){outcome=value.status;committed=true;sourceReleased=true;publicationUnknown=false;stopped=null;failure=null;}
     private void finishOnOwner(){if(terminal)return;host.requireOwner();if(worker!=null&&worker.isAlive()){if(!later(this::finishOnOwner))pending=true;return;}if(targetCleanupUnknown){pending=true;return;}
         try{ownerCheck();host.checkSource(source,ticket,revision);ownerCheck();host.prepare(source,ticket,revision);ownerCheck();
-            synchronized(this){ownerCheck();publishing=true;try{Receipt value=bound(host.publish(source,ticket,revision));if(!value.published())throw new IllegalStateException("Params publish receipt");published(value);}catch(Throwable error){publicationUnknown=true;outcome="unknown";failure=error;try{Receipt value=bound(host.status(source,registration));if(value.published())published(value);else if(!value.status.equals("unknown")){publicationUnknown=false;outcome="notCommitted";fail(error);}}catch(Throwable lookup){/* Keep original failure and reservation until status recovery. */}}finally{publishing=false;}}
+            synchronized(this){ownerCheck();publishing=true;try{Receipt value=bound(host.publish(source,ticket,revision));if(!value.published())throw new IllegalStateException("Params publish receipt");published(value);}catch(Throwable error){publicationUnknown=true;outcome="unknown";failure=error;try{Receipt value=bound(host.status(source,registration));if(value.published())published(value);else if(!value.status.equals("unknown")){publicationUnknown=false;outcome="notCommitted";fail(error);}}catch(Throwable lookup){if(lookup!=error)error.addSuppressed(lookup);}}finally{publishing=false;}}
         }catch(Throwable error){fail(error);}cleanupOnOwner();
     }
     private void cleanupOnOwner(){if(terminal)return;host.requireOwner();if(beginning||publishing||releasing)return;if(worker!=null&&worker.isAlive())return;if(targetCleanupUnknown){pending=true;return;}
@@ -121,6 +121,8 @@ final class ParamsUpdateJob {
     private void clear(){descriptor=null;id=null;params=null;worker=null;progressPhase=null;host=null;}
     private void report(String phase,long done,long total){synchronized(this){if(terminal||stopped!=null)return;progressPhase=phase;progressDone=done;progressTotal=total;if(progressQueued)return;progressQueued=true;}if(!post(this::deliverProgress)){synchronized(this){progressQueued=false;progressPhase=null;}}}
     private void deliverProgress(){String phase;long done,total;synchronized(this){progressQueued=false;phase=progressPhase;done=progressDone;total=progressTotal;progressPhase=null;if(terminal||stopped!=null)return;}if(phase!=null)try{host.onProgress(phase,done,total);}catch(Throwable error){callbackError(error);}}
-    private void callbackError(Throwable error){if(callbackErrors<32)callbackErrors++;try{if(host!=null)host.onCallbackError(error);}catch(Throwable ignored){/* Diagnostics cannot alter publication. */}}
+    /** 진단 훅(onCallbackError) 자체가 실패한 횟수. 게시 결과를 바꾸지 않도록 기록만 한다 */
+    private int diagnosticHookFailures;
+    private void callbackError(Throwable error){if(callbackErrors<32)callbackErrors++;try{if(host!=null)host.onCallbackError(error);}catch(Throwable hookFailure){diagnosticHookFailures++;}}
     private static final class Stop extends IllegalStateException{private static final long serialVersionUID=1L;final String status;Stop(String status){super("Params "+status);this.status=status;}}
 }

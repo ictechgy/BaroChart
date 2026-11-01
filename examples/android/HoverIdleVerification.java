@@ -38,7 +38,7 @@ public final class HoverIdleVerification {
         });settle();main(()->{
             int width=views.get(0).getWidth(),height=views.get(0).getHeight();single=4L*width*height;
             require(width>0&&height>0,"three charts have actual attached viewports");
-            for(BaroChartView view:views){require(view.isAttachedToWindow()&&view.getWidth()==width&&view.getHeight()==height,"three equal attached View sizes");require(view.lastError==null&&view.renderCacheMetrics().getLong("ownedBitmapBytes")==single,"initial cache owns one full base bitmap");}
+            for(BaroChartView view:views){require(view.isAttachedToWindow()&&view.getWidth()==width&&view.getHeight()==height,"three equal attached View sizes");require(view.getLastError()==null&&view.renderCacheMetrics().getLong("ownedBitmapBytes")==single,"initial cache owns one full base bitmap");}
             BaroChartView.setSharedCacheBudgetBytes(3*single);
         });
     }
@@ -65,7 +65,7 @@ public final class HoverIdleVerification {
         for(int i=0;i<3;i++){JSONObject captured=row.getJSONArray("counts").getJSONObject(i);require(captured.getLong("draws")==0&&captured.getLong("baseRebuilds")==0,row.getString("stage")+": View"+i+" has zero idle draw/rebuild");}
         require(row.getLong("evictionDelta")==0,row.getString("stage")+": zero idle evictions");
     }
-    private void cachedAlive(String name) throws Exception {main(()->{for(int i=0;i<views.size();i++)if(!views.get(i).renderCacheMetrics().getBoolean("engineClosed"))require(views.get(i).lastError==null&&views.get(i).renderCacheMetrics().getLong("ownedBitmapBytes")>0,name+": live View"+i+" cache recovers");});}
+    private void cachedAlive(String name) throws Exception {main(()->{for(int i=0;i<views.size();i++)if(!views.get(i).renderCacheMetrics().getBoolean("engineClosed"))require(views.get(i).getLastError()==null&&views.get(i).renderCacheMetrics().getLong("ownedBitmapBytes")>0,name+": live View"+i+" cache recovers");});}
     private void invalidateAlive(){for(BaroChartView view:views)try{if(!view.renderCacheMetrics().getBoolean("engineClosed"))view.invalidate();}catch(JSONException error){throw new RuntimeException(error);}}
     private void run() throws Exception {
         setup();quiet(window("three bitmaps fit",null));
@@ -81,7 +81,7 @@ public final class HoverIdleVerification {
         bounded(window("detach releases ownership",()->layout.removeView(views.get(0))));main(()->require(BaroChartView.sharedCacheMetrics().getLong("generation")==policy[0],"detach release preserves budget/pressure generation"));
         bounded(window("reattach after cooldown",()->layout.addView(views.get(0),new LinearLayout.LayoutParams(-1,0,1))));cachedAlive("reattach");
         bounded(window("engine close releases ownership",()->engines.get(1).close()));main(()->{require(views.get(1).renderCacheMetrics().getBoolean("engineClosed"),"closed View remains marked closed");require(views.get(1).renderCacheMetrics().getLong("ownedBitmapBytes")==0,"engine close releases bitmap");require(BaroChartView.sharedCacheMetrics().getLong("generation")==policy[0],"engine close release preserves budget/pressure generation");});
-        JSONObject denied=window("zero budget failure fallback",()->{BaroChartView.setSharedCacheBudgetBytes(0);invalidateAlive();});bounded(denied);main(()->{for(BaroChartView view:views)if(!view.renderCacheMetrics().getBoolean("engineClosed")){require(view.lastError==null,"budget failure preserves direct rendering");require(view.renderCacheMetrics().getLong("ownedBitmapBytes")==0&&!view.renderCacheMetrics().getBoolean("frameCacheCreated"),"failure releases bitmap and frame token");}});quiet(window("failure settled",null));
+        JSONObject denied=window("zero budget failure fallback",()->{BaroChartView.setSharedCacheBudgetBytes(0);invalidateAlive();});bounded(denied);main(()->{for(BaroChartView view:views)if(!view.renderCacheMetrics().getBoolean("engineClosed")){require(view.getLastError()==null,"budget failure preserves direct rendering");require(view.renderCacheMetrics().getLong("ownedBitmapBytes")==0&&!view.renderCacheMetrics().getBoolean("frameCacheCreated"),"failure releases bitmap and frame token");}});quiet(window("failure settled",null));
         bounded(window("failure recovery after budget expansion",()->{BaroChartView.setSharedCacheBudgetBytes(4*single);invalidateAlive();}));cachedAlive("failure recovery");quiet(window("final recovered settled",null));
     }
     public static JSONObject run(HoverActivity activity,Instrumentation instrumentation) throws Exception {

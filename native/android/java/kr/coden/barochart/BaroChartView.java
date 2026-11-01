@@ -27,9 +27,10 @@ public final class BaroChartView extends View {
     // Weak values avoid a value -> View -> engine path keeping a weak key alive.
     private static final java.util.WeakHashMap<BaroChartEngine,java.lang.ref.WeakReference<BaroChartView>> FONT_OWNERS=new java.util.WeakHashMap<>();
     public static final int ACTION_ZOOM_IN=0x41535401,ACTION_ZOOM_OUT=0x41535402,ACTION_CLEAR_CROSSHAIR=0x41535403,ACTION_CANCEL_INTERACTION=0x41535404;
-    public String lastError=null;
+    private String lastError=null;
+    private OnChartErrorListener errorListener;
     public long renderedRevision=0;
-    private final Runnable onChange=()->{if(systemFontScaleEnabled&&!applyingFont&&inputDepth==0)try{applySystemFontScale();}catch(Exception error){lastError=error.toString();}invalidate();};
+    private final Runnable onChange=()->{if(systemFontScaleEnabled&&!applyingFont&&inputDepth==0)try{applySystemFontScale();}catch(Exception error){report(error);}invalidate();};
     private final Runnable onClose=()->{engineClosed=true;resetTouch();releaseFontOwner();baseFont=lastAppliedFont=null;evictBitmapCache();drawProbe=null;invalidate();};
     interface DrawProbe {void submitted(DrawTiming timing);}
     static final class DrawTiming {
@@ -45,10 +46,12 @@ public final class BaroChartView extends View {
     private static void viewOwner(){if(Looper.myLooper()!=Looper.getMainLooper())throw new IllegalStateException("Chart View requires main thread");}
     public BaroChartView(Context context,BaroChartEngine engine){super(context);this.engine=engine;density=getResources().getDisplayMetrics().density;touchSlop=ViewConfiguration.get(context).getScaledTouchSlop();baseBitmapPaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.SRC));setFocusable(true);setClickable(true);setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_YES);setContentDescription("Financial chart");}
     private static int color(String s){if(s.matches("#[0-9a-fA-F]{8}"))s="#"+s.substring(7,9)+s.substring(1,7);return Color.parseColor(s);}
-    public void fire(String name,Object... args){inputDepth++;try{engine.invoke(name,args);}catch(Exception e){lastError=e.toString();}finally{inputDepth--;}invalidate();}
-    public void setCrosshairSnap(JSONObject options){try{engine.setCrosshairSnap(options);lastError=null;}catch(Exception e){lastError=e.toString();}}
-    public void setDrawingMagnet(JSONObject options){try{engine.setDrawingMagnet(options);lastError=null;}catch(Exception e){lastError=e.toString();}}
-    public void setTool(String tool){try{engine.setTool(tool);lastError=null;}catch(Exception e){lastError=e.toString();}}
+    /** Invokes a core input command. Throws {@link BaroChartException} instead of recording a silent failure. */
+    public void fire(String name,Object... args){inputDepth++;try{engine.invoke(name,args);}catch(Exception e){throw BaroChartException.wrap(e);}finally{inputDepth--;invalidate();}}
+    public void setCrosshairSnap(JSONObject options){try{engine.setCrosshairSnap(options);lastError=null;}catch(Exception e){throw BaroChartException.wrap(e);}}
+    public void setDrawingMagnet(JSONObject options){try{engine.setDrawingMagnet(options);lastError=null;}catch(Exception e){throw BaroChartException.wrap(e);}}
+    /** Selects a drawing tool by core name. Throws {@link BaroChartException} for unknown tools or a closed engine. */
+    public void setTool(String tool){try{engine.setTool(tool);lastError=null;}catch(Exception e){throw BaroChartException.wrap(e);}}
     /** Opt in to system fontScale by updating the engine's logical theme font.
      * One View may own scaling per engine. A caller theme font becomes the new base.
      * Disable/detach restores only a font still equal to this View's last applied value. */
@@ -67,8 +70,8 @@ public final class BaroChartView extends View {
         if(!next.equals(current)){cancelTouch();applyingFont=true;try{engine.setTheme(new JSONObject().put("font",next));}finally{applyingFont=false;}}
         lastAppliedFont=next;
     }
-    private void restoreSystemFont(){if(engineClosed||lastAppliedFont==null||baseFont==null)return;try{if(themeFont().equals(lastAppliedFont)&&!baseFont.equals(lastAppliedFont)){cancelTouch();applyingFont=true;try{engine.setTheme(new JSONObject().put("font",baseFont));}finally{applyingFont=false;}}}catch(Exception error){lastError=error.toString();}}
-    @Override protected void onConfigurationChanged(Configuration config){super.onConfigurationChanged(config);if(systemFontScaleEnabled)try{applySystemFontScale();}catch(Exception error){lastError=error.toString();}invalidate();}
+    private void restoreSystemFont(){if(engineClosed||lastAppliedFont==null||baseFont==null)return;try{if(themeFont().equals(lastAppliedFont)&&!baseFont.equals(lastAppliedFont)){cancelTouch();applyingFont=true;try{engine.setTheme(new JSONObject().put("font",baseFont));}finally{applyingFont=false;}}}catch(Exception error){report(error);}}
+    @Override protected void onConfigurationChanged(Configuration config){super.onConfigurationChanged(config);if(systemFontScaleEnabled)try{applySystemFontScale();}catch(Exception error){report(error);}invalidate();}
     /** Disable for low-memory clients or direct-render diagnostics. */
     public void setRenderCacheEnabled(boolean enabled){viewOwner();if(renderCacheEnabled!=enabled){renderCacheEnabled=enabled;evictBitmapCache();retryAt=0;invalidate();}}
     public boolean isRenderCacheEnabled(){viewOwner();return renderCacheEnabled;}
@@ -78,8 +81,8 @@ public final class BaroChartView extends View {
     public JSONObject renderCacheMetrics() throws JSONException {viewOwner();return new JSONObject().put("ownedBitmapBytes",bitmapBytes()).put("cacheHits",cacheHits).put("baseRebuilds",baseRebuilds).put("drawingRebuilds",drawingRebuilds).put("fallbacks",fallbacks).put("failure",cacheFailure==null?JSONObject.NULL:cacheFailure).put("enabled",renderCacheEnabled).put("engineClosed",engineClosed).put("frameCacheCreated",frameCacheCreated).put("packetAttempts",packetAttempts).put("packetFrames",packetFrames).put("legacyFrames",legacyFrames).put("packetFailures",packetFailures).put("packetReleaseFailures",packetReleaseFailures).put("packetNumericBytes",packetNumericBytes).put("packetMetadataChars",packetMetadataChars).put("packetFailure",packetFailure==null?JSONObject.NULL:packetFailure);}
     private long bitmapBytes(){return (baseBitmap==null?0L:baseBitmap.getAllocationByteCount())+(drawingBitmap==null?0L:drawingBitmap.getAllocationByteCount());}
     // Drop Java ownership instead of recycle(): a hardware display list may still use a bitmap.
-    void evictBitmapCache(){viewOwner();baseBitmap=null;drawingBitmap=null;BaroChartBitmapCachePool.INSTANCE.release(this);if(frameCacheCreated){frameCacheCreated=false;if(!engineClosed)try{engine.releaseFrameCache(frameToken);}catch(Exception ignored){}}retryAt=SystemClock.uptimeMillis()+500;retryPolicyGeneration=BaroChartBitmapCachePool.INSTANCE.generation();invalidate();}
-    @Override protected void onAttachedToWindow(){super.onAttachedToWindow();BaroChartBitmapCachePool.INSTANCE.register(getContext());if(!engineClosed){engine.addChangeListener(onChange);engine.addCloseListener(onClose);if(systemFontScaleEnabled)try{applySystemFontScale();}catch(Exception error){lastError=error.toString();}}}
+    void evictBitmapCache(){viewOwner();baseBitmap=null;drawingBitmap=null;BaroChartBitmapCachePool.INSTANCE.release(this);if(frameCacheCreated){frameCacheCreated=false;if(!engineClosed)try{engine.releaseFrameCache(frameToken);}catch(Exception releaseFailure){report(releaseFailure);}}retryAt=SystemClock.uptimeMillis()+500;retryPolicyGeneration=BaroChartBitmapCachePool.INSTANCE.generation();invalidate();}
+    @Override protected void onAttachedToWindow(){super.onAttachedToWindow();BaroChartBitmapCachePool.INSTANCE.register(getContext());if(!engineClosed){engine.addChangeListener(onChange);engine.addCloseListener(onClose);if(systemFontScaleEnabled)try{applySystemFontScale();}catch(Exception error){report(error);}}}
     @Override protected void onSizeChanged(int w,int h,int ow,int oh){if(w!=ow||h!=oh)cancelTouch(true);if(isAttachedToWindow())evictBitmapCache();retryAt=0;fire("nativeResize",Math.max(100,w/density),Math.max(80,h/density));}
     @Override protected void onDetachedFromWindow(){cancelTouch(true);drawProbe=null;engine.removeChangeListener(onChange);engine.removeCloseListener(onClose);restoreSystemFont();releaseFontOwner();lastAppliedFont=null;evictBitmapCache();super.onDetachedFromWindow();}
     @Override public void onWindowFocusChanged(boolean focused){super.onWindowFocusChanged(focused);if(!focused)cancelTouch(true);}
@@ -91,7 +94,7 @@ public final class BaroChartView extends View {
     private void cancelTouch(boolean force){if((touching||force)&&!engineClosed)fire("nativePointer","cancel",0,0,0);resetTouch();}
     @Override public boolean onTouchEvent(MotionEvent e){if(engineClosed||!isEnabled())return false;int action=e.getActionMasked(),i=e.getActionIndex();
         if(action==MotionEvent.ACTION_DOWN){cancelTouch();requestFocus();touching=true;firstPointer=e.getPointerId(i);downX=e.getX(i);downY=e.getY(i);fire("nativePointer","down",firstPointer+1,downX/density,downY/density,e.getToolType(i)==MotionEvent.TOOL_TYPE_FINGER?24:8);
-            try{Object state=engine.invoke("nativeGestureKind");String gesture=state==JSONObject.NULL?"":(String)state;drawingTouch=gesture.equals("edit")||gesture.equals("create");if(gesture.isEmpty()){cancelTouch();return false;}parentOwnership(drawingTouch);}catch(Exception error){lastError=error.toString();cancelTouch();return false;}
+            try{Object state=engine.invoke("nativeGestureKind");String gesture=state==JSONObject.NULL?"":(String)state;drawingTouch=gesture.equals("edit")||gesture.equals("create");if(gesture.isEmpty()){cancelTouch();return false;}parentOwnership(drawingTouch);}catch(Exception error){report(error);cancelTouch();return false;}
         }else if(action==MotionEvent.ACTION_POINTER_DOWN&&touching){pinchTouch=dragging=true;parentOwnership(true);fire("nativePointer","down",e.getPointerId(i)+1,e.getX(i)/density,e.getY(i)/density,e.getToolType(i)==MotionEvent.TOOL_TYPE_FINGER?24:8);
         }else if(action==MotionEvent.ACTION_MOVE&&touching){int at=e.findPointerIndex(firstPointer);if(!pinchTouch&&!dragging&&at>=0){float dx=Math.abs(e.getX(at)-downX),dy=Math.abs(e.getY(at)-downY);if(Math.hypot(dx,dy)<=touchSlop&&!drawingTouch)return true;
                 if(!drawingTouch&&dy>dx&&getParent()!=null){cancelTouch();return false;}dragging=true;parentOwnership(true);}
@@ -108,7 +111,7 @@ public final class BaroChartView extends View {
         if(action==ACTION_ZOOM_IN||action==ACTION_ZOOM_OUT){cancelTouch();engine.command("zoom",action==ACTION_ZOOM_IN?.8:1.25);invalidate();return true;}
         if(action==ACTION_CLEAR_CROSSHAIR){engine.invoke("nativeHoverExit");invalidate();return true;}
         if(action==ACTION_CANCEL_INTERACTION){engine.invoke("nativePointer","cancel",0,0,0);resetTouch();invalidate();return true;}
-    }catch(Exception error){lastError=error.toString();return false;}return super.performAccessibilityAction(action,args);}
+    }catch(Exception error){report(error);return false;}return super.performAccessibilityAction(action,args);}
     @Override public boolean onKeyDown(int code,KeyEvent event){String key;switch(code){case KeyEvent.KEYCODE_DPAD_LEFT:key="ArrowLeft";break;case KeyEvent.KEYCODE_DPAD_RIGHT:key="ArrowRight";break;case KeyEvent.KEYCODE_DPAD_UP:key="ArrowUp";break;case KeyEvent.KEYCODE_DPAD_DOWN:key="ArrowDown";break;case KeyEvent.KEYCODE_PAGE_UP:key="PageUp";break;case KeyEvent.KEYCODE_PAGE_DOWN:key="PageDown";break;case KeyEvent.KEYCODE_DEL:key="Backspace";break;case KeyEvent.KEYCODE_ESCAPE:key="Escape";break;case KeyEvent.KEYCODE_PLUS:case KeyEvent.KEYCODE_EQUALS:key="+";break;case KeyEvent.KEYCODE_MINUS:key="-";break;case KeyEvent.KEYCODE_Z:if(!event.isCtrlPressed())return super.onKeyDown(code,event);key="z";break;default:return super.onKeyDown(code,event);}fire("nativeKey",key,event.isCtrlPressed(),event.isShiftPressed());return true;}
     private void drawFrame(Canvas canvas) throws JSONException {
         double width=Math.max(100,getWidth()/density),height=Math.max(80,getHeight()/density);long beforeCanvas;
@@ -157,7 +160,7 @@ public final class BaroChartView extends View {
         start=System.nanoTime();canvas.save();try{canvas.scale(density,density);renderPrepared(canvas,prepared,2,false);}finally{canvas.restore();}hoverNanos=System.nanoTime()-start;BaroChartBitmapCachePool.INSTANCE.touch(this);
     }
     @Override protected void onDraw(Canvas canvas){long start=System.nanoTime(),accessibilityNanos=0;super.onDraw(canvas);canvasDuration=baseRasterNanos=drawingRasterNanos=bitmapCopyNanos=hoverNanos=packetPreparationNanos=0;cacheUsed=baseChanged=drawingsChanged=false;
-        try{if(engineClosed)throw new IllegalStateException("Chart engine closed");drawFrame(canvas);lastError=null;renderedRevision=engine.revision();long beforeAccessibility=System.nanoTime();String description=(String)engine.invoke("nativeAccessibilityText",true,"android");if(!description.contentEquals(getContentDescription()))setContentDescription(description);accessibilityNanos=System.nanoTime()-beforeAccessibility;}catch(Exception e){lastError=e.toString();paint.setColor(Color.RED);paint.setTextSize(12);canvas.drawText(lastError,12,30,paint);}
+        try{if(engineClosed)throw new IllegalStateException("Chart engine closed");drawFrame(canvas);lastError=null;renderedRevision=engine.revision();long beforeAccessibility=System.nanoTime();String description=(String)engine.invoke("nativeAccessibilityText",true,"android");if(!description.contentEquals(getContentDescription()))setContentDescription(description);accessibilityNanos=System.nanoTime()-beforeAccessibility;}catch(Exception e){report(e);paint.setColor(Color.RED);paint.setTextSize(12);canvas.drawText(lastError,12,30,paint);}
         if(drawProbe!=null&&!engineClosed)drawProbe.submitted(new DrawTiming(start,System.nanoTime(),canvasDuration,accessibilityNanos,engine.sceneTiming(),baseRasterNanos,drawingRasterNanos,bitmapCopyNanos,hoverNanos,cacheUsed,baseChanged,drawingsChanged,packetPreparationNanos));
     }
     private static final class FontSpec {final Typeface typeface;final float size;FontSpec(Typeface typeface,float size){this.typeface=typeface;this.size=size;}}
@@ -206,4 +209,10 @@ public final class BaroChartView extends View {
         }
     }
     private static final java.util.regex.Pattern FONT=java.util.regex.Pattern.compile("^((?:(?:bold|italic|normal)\\s+)*)([0-9]+(?:\\.[0-9]+)?)px\\s+(.+)$");
+    /** Latest failure description recorded by this view, or {@code null} after a successful draw. */
+    public String getLastError(){return lastError;}
+    /** Sets the main-thread listener for failures that cannot be thrown; {@code null} removes it. */
+    public void setOnChartErrorListener(OnChartErrorListener listener){errorListener=listener;}
+    /** 던질 수 없는 경로의 오류를 lastError에 남기고 리스너로 알린다 */
+    private void report(Throwable error){BaroChartException typed=BaroChartException.wrap(error);lastError=typed.toString();if(errorListener!=null)errorListener.onChartError(typed);}
 }
