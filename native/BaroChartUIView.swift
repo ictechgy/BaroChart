@@ -20,6 +20,9 @@ public final class BaroChartUIView: UIView {
     private var baseFont: String?
     private var lastAppliedFont: String?
     private var lastInputSize: CGSize?
+    /// 엔진마다 Dynamic Type 배율을 적용 중인 뷰와 배율 전 원래 글꼴.
+    /// 같은 엔진을 새 뷰가 이어받으면(SwiftUI는 새 뷰를 만든 뒤 이전 뷰를 정리한다) 원래 글꼴에서 한 번만 키우고, 소유 뷰만 되돌린다.
+    private static var fontScaleRecords: [ObjectIdentifier: FontScaleRecord] = [:]
     private static let fontPattern = try! NSRegularExpression(pattern: "^((?:(?:bold|italic|normal)\\s+)*)([0-9]+(?:\\.[0-9]+)?)px\\s+(.+)$")
 
     /// Whether the view caches the chart in bitmap layers. Changing it clears the cache and redraws. Defaults to `true`.
@@ -120,6 +123,10 @@ public final class BaroChartUIView: UIView {
         guard adjustsFontForContentSizeCategory,!applyingFont,!isDisposed,!disposing,!suspended,window != nil else {return}
         do {
             guard let current = try engine.call("nativeThemeFont").toString() else {throw BaroChartLowLevelError.invalidScene}
+            // 다른 뷰가 이 엔진에 배율을 적용해 둔 그대로라면 그 뷰의 원래 글꼴을 넘겨받는다(배율 위에 다시 배율을 얹지 않도록)
+            if let record = fontScaleRecord, let owner = record.owner, owner !== self, current == record.applied {
+                baseFont = record.base;lastAppliedFont = record.applied
+            }
             if current != lastAppliedFont {baseFont = current}
             guard let base = baseFont else {return}
             let text = base as NSString
@@ -127,18 +134,34 @@ public final class BaroChartUIView: UIView {
             let scaledSize = min(96,max(4,Double(UIFontMetrics(forTextStyle: dynamicTypeTextStyle).scaledValue(for: CGFloat(size),compatibleWith: traitCollection))))
             let scaled = NSMutableString(string: base);scaled.replaceCharacters(in: match.range(at: 2),with: String(format: "%.3f",locale: Locale(identifier: "en_US_POSIX"),scaledSize))
             let desired = abs(scaledSize-size)<0.0005 ? base : scaled as String
-            if desired == current {lastAppliedFont = desired;return}
+            if desired == current {lastAppliedFont = desired;recordFontScale(base: base, applied: desired);return}
             cancelInteraction(clearCrosshair: false)
             guard !isDisposed,!disposing else {return}
             applyingFont = true;defer {applyingFont = false}
             let previous = lastAppliedFont;lastAppliedFont = desired
             do {try engine.setTheme(["font": desired])} catch {lastAppliedFont = previous;throw error}
+            recordFontScale(base: base, applied: desired)
         } catch {report(error)}
+    }
+    /// 이 엔진의 배율 기록(다른 엔진이 같은 식별자를 재사용했거나 엔진이 사라진 기록은 무시)
+    private var fontScaleRecord: FontScaleRecord? {
+        guard let record = Self.fontScaleRecords[ObjectIdentifier(engine)], record.engine === engine else {return nil}
+        return record
+    }
+    /// 이 뷰를 엔진 배율의 소유자로 기록한다(사라진 엔진의 기록은 함께 정리)
+    private func recordFontScale(base: String, applied: String) {
+        Self.fontScaleRecords = Self.fontScaleRecords.filter {$0.value.engine != nil}
+        Self.fontScaleRecords[ObjectIdentifier(engine)] = FontScaleRecord(engine: engine, owner: self, base: base, applied: applied)
     }
     private func restoreFont(releaseBase: Bool) {
         guard !applyingFont else {return}
         let base = baseFont,owned = lastAppliedFont;lastAppliedFont = nil
         if releaseBase {baseFont = nil}
+        // 다른 뷰가 배율을 넘겨받았다면 그 뷰가 원래 글꼴을 갖고 있으므로 되돌리지 않는다
+        if let record = fontScaleRecord {
+            if let owner = record.owner, owner !== self {return}
+            Self.fontScaleRecords[ObjectIdentifier(engine)] = nil
+        }
         guard let base = base,let owned = owned,base != owned else {return}
         do {if try engine.call("nativeThemeFont").toString() == owned {
             cancelInteraction(clearCrosshair: false)
@@ -269,6 +292,17 @@ public final class BaroChartUIView: UIView {
         guard !isDisposed,!disposing else {return}
         try BaroChartError.mapping(body)
         setNeedsDisplay()
+    }
+}
+
+/// 엔진 하나의 Dynamic Type 배율 소유 기록(소유 뷰, 배율 전 원래 글꼴, 소유 뷰가 적용한 글꼴)
+@MainActor private final class FontScaleRecord {
+    weak var engine: BaroChartEngine?
+    weak var owner: BaroChartUIView?
+    let base: String
+    let applied: String
+    init(engine: BaroChartEngine, owner: BaroChartUIView, base: String, applied: String) {
+        self.engine = engine;self.owner = owner;self.base = base;self.applied = applied
     }
 }
 #endif

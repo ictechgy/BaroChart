@@ -22,10 +22,14 @@ final class TypedEngineCoverageTests: XCTestCase {
         return engine
     }
 
-    private func code(_ body: () throws -> Void) -> BaroChartError.Code? {
+    /// 상태를 건드리지 않으므로 다른 스레드 표에서도 부를 수 있게 격리하지 않는다
+    private nonisolated static func code(_ body: () throws -> Void) -> BaroChartError.Code? {
         do { try body() } catch { return (error as? BaroChartError)?.code ?? .unavailable }
         return nil
     }
+
+    private func code(_ body: () throws -> Void) -> BaroChartError.Code? { Self.code(body) }
+
 
     private func inspect(_ engine: BaroChartEngine) throws -> [String: Any] {
         try XCTUnwrap(engine.command("inspect").toDictionary() as? [String: Any])
@@ -215,7 +219,7 @@ final class TypedEngineCoverageTests: XCTestCase {
         let finished = DispatchSemaphore(value: 0)
         // 실제 다른 스레드에서 부른다(DispatchQueue.sync는 호출 스레드에서 실행될 수 있다)
         Thread {
-            for (name, call) in calls { observed.append((name, self.code(call))) }
+            for (name, call) in calls { observed.append((name, Self.code(call))) }
             finished.signal()
         }.start()
         finished.wait()
