@@ -8,7 +8,11 @@ pluginManagement {
 }
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-    repositories { google(); mavenCentral() }
+    repositories {
+        google(); mavenCentral()
+        // 배포 리허설: 로컬 Maven에 게시한 kr.coden:barochart-* 를 쓴다
+        if (providers.gradleProperty('barochartMavenRepo').isPresent()) maven { url = uri(providers.gradleProperty('barochartMavenRepo').get()) }
+    }
 }
 rootProject.name = 'barochart-compose-sample'
 include ':app'
