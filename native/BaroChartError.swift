@@ -59,7 +59,7 @@ extension BaroChartError {
     }
 
     /// body가 던지는 모든 오류를 BaroChartError로 바꿔 다시 던진다(타입 API 공통 진입점)
-    static func mapping<T>(_ body: () throws -> T) throws -> T {
+    @discardableResult static func mapping<T>(_ body: () throws -> T) throws -> T {
         do { return try body() } catch { throw wrap(error) }
     }
 
