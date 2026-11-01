@@ -79,7 +79,7 @@ check('captured Status/Abort remains available after Engine close', () => {
   const recover=method(record,'recover');
   ordered(recover,'if released {return}','if !began','try autoreleasepool','guard let context = context','nativeParamsSourceStatus','if status == "active"','nativeParamsSourceAbort','guard released');
   assert.doesNotMatch(recover,/engine|closed|contextBacking|handle|ticket/);
-  const close=method(engine,'close');assert.match(close,/BaroChartParamsRegistry\.retry\(pending\)/);assert.match(close,/activeParams\?\.cancel\(\)/);
+  const close=method(engine,'closeOnOwner');assert.match(close,/BaroChartParamsRegistry\.retry\(pending\)/);assert.match(close,/activeParams\?\.cancel\(\)/);
   assert.doesNotMatch(close,/record\.released|sourceFreed|indeterminate|ParamsRegistry\.remove/);
 });
 check('terminal receipts bind registration, id, schema, output names and offsets', () => {
@@ -155,7 +155,7 @@ check('checkpoint transport is per bounded record and output validation chunked'
 check('busy and source lifetime include parameters without changing generic raw context close', () => {
   ordered(method(engine,'workspaceAvailability'),'BaroChartParamsRegistry.contains(pending)','guard activeParams == nil');
   assert.match(method(engine,'command'),/activeParams != nil/);assert.match(method(engine,'command'),/pendingParamsRegistration.map/);
-  assert.match(method(engine,'close'),/if workspaceContextInstalled \{contextBacking = nil\}/);
+  assert.match(method(engine,'closeOnOwner'),/if workspaceContextInstalled \{contextBacking = nil\}/);
   assert.match(block(engine,/\bdeinit\b/),/activeParams\?\.cancel\(\)/);
 });
 check('progress has one queued callback and no delivery after publication', () => {

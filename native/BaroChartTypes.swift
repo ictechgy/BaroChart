@@ -5,6 +5,29 @@ import Foundation
 // Each type converts itself to the low-level dictionary the engine bridge already accepts, so
 // the typed API never duplicates chart behavior.
 
+/// A vertical chart panel. `weight` sets its share of the height relative to other panels.
+public struct BaroChartPanel: Equatable, Sendable {
+    public var id: String
+    public var weight: Double
+    public var label: String?
+    public init(id: String, weight: Double = 1, label: String? = nil) { self.id = id; self.weight = weight; self.label = label }
+}
+
+/// Initial chart layout for `BaroChartEngine(options:)`.
+///
+/// The default is one unlabeled `price` panel with a `price` candlestick series and the core dark theme.
+public struct BaroChartEngineOptions: Equatable, Sendable {
+    public var panels: [BaroChartPanel]
+    public var series: [BaroChartSeries]
+    public var theme: BaroChartTheme?
+
+    public init(panels: [BaroChartPanel] = [BaroChartPanel(id: "price", weight: 3)],
+                series: [BaroChartSeries] = [BaroChartSeries(id: "price", type: .candles)],
+                theme: BaroChartTheme? = nil) {
+        self.panels = panels; self.series = series; self.theme = theme
+    }
+}
+
 /// A streaming or correction event applied to the primary OHLCV series.
 public indirect enum BaroChartDataEvent: Equatable, Sendable {
     /// Replaces every bar.
@@ -283,5 +306,21 @@ extension BaroChartSymbol {
 extension BaroChartDatasetBinding {
     var lowLevel: [String: Any] {
         ["key": key, "revision": revision, "adjustmentVersion": adjustmentVersion, "priceUnit": priceUnit, "adjustment": adjustment.rawValue]
+    }
+}
+
+extension BaroChartPanel {
+    var lowLevel: [String: Any] {
+        var out: [String: Any] = ["id": id, "weight": weight]
+        put(&out, "label", label)
+        return out
+    }
+}
+
+extension BaroChartEngineOptions {
+    var lowLevel: [String: Any] {
+        var out: [String: Any] = ["panels": panels.map(\.lowLevel), "series": series.map(\.lowLevel)]
+        put(&out, "theme", theme?.lowLevel)
+        return out
     }
 }
