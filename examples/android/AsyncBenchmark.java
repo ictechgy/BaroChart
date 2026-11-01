@@ -1,4 +1,4 @@
-package dev.aster.charts;
+package kr.coden.barochart;
 
 import android.content.Context;
 import android.os.Debug;
@@ -16,15 +16,15 @@ final class AsyncBenchmark {
     private static final String[] NAMES={"sma","ema","bollinger","macd","donchian","stochastic","rsi","atr"};
     private final Handler handler=new Handler(Looper.getMainLooper());
     private final JSONArray rows=new JSONArray();
-    private Context context;private Consumer<JSONObject> completion;private AsterEngine working;
+    private Context context;private Consumer<JSONObject> completion;private BaroChartEngine working;
     private int count,position;private JSONObject current,syncDigest;private boolean finished=false;
     private Heartbeat activeHeartbeat;private MemorySampler activeMemory;
     void run(Context context,int count,Consumer<JSONObject> completion){this.context=context;this.count=count;this.completion=completion;if(count<512||count>1000000){finish(new IllegalArgumentException("Benchmark bars must be512..1000000"));return;}handler.post(this::nextPosition);}
     void cancel(){if(finished)return;finish(new IllegalStateException("Benchmark activity destroyed"));}
     private JSONObject options() throws JSONException {return new JSONObject().put("panels",new JSONArray().put(new JSONObject().put("id","price").put("weight",1))).put("series",new JSONArray().put(new JSONObject().put("id","price").put("type","candles").put("panel","price")));}
-    private AsterEngine prepare() throws Exception {AsterEngine e=new AsterEngine(context,count,options());try{int outputs=0;for(String name:NAMES)outputs+=((JSONArray)e.invoke("nativeIndicator",name,name,new JSONObject(),"price")).length();if(outputs!=15)throw new AssertionError("Expected15 indicator outputs");e.scene(1200,700);return e;}catch(Throwable error){e.close();throw error;}}
-    private JSONObject event(AsterEngine e,int index) throws JSONException {Object result=e.invoke("nativeBenchmarkEvent",index);return result instanceof String?new JSONObject((String)result):(JSONObject)result;}
-    private JSONObject digest(AsterEngine e) throws JSONException {Object result=e.invoke("nativeBenchmarkDigest");return result instanceof String?new JSONObject((String)result):(JSONObject)result;}
+    private BaroChartEngine prepare() throws Exception {BaroChartEngine e=new BaroChartEngine(context,count,options());try{int outputs=0;for(String name:NAMES)outputs+=((JSONArray)e.invoke("nativeIndicator",name,name,new JSONObject(),"price")).length();if(outputs!=15)throw new AssertionError("Expected15 indicator outputs");e.scene(1200,700);return e;}catch(Throwable error){e.close();throw error;}}
+    private JSONObject event(BaroChartEngine e,int index) throws JSONException {Object result=e.invoke("nativeBenchmarkEvent",index);return result instanceof String?new JSONObject((String)result):(JSONObject)result;}
+    private JSONObject digest(BaroChartEngine e) throws JSONException {Object result=e.invoke("nativeBenchmarkDigest");return result instanceof String?new JSONObject((String)result):(JSONObject)result;}
     private String digestComparable(JSONObject digest) throws JSONException {JSONObject comparable=new JSONObject(digest.toString());AsyncVerification.normalizeGeometryKey(comparable.getJSONObject("layout"),null);return canonical(comparable);}
     private String canonical(Object value) throws JSONException {if(value instanceof JSONObject){JSONObject object=(JSONObject)value;ArrayList<String> keys=new ArrayList<>();Iterator<String> iterator=object.keys();while(iterator.hasNext())keys.add(iterator.next());Collections.sort(keys);StringBuilder text=new StringBuilder("{");for(String key:keys){if(text.length()>1)text.append(',');text.append(JSONObject.quote(key)).append(':').append(canonical(object.get(key)));}return text.append('}').toString();}if(value instanceof JSONArray){JSONArray array=(JSONArray)value;StringBuilder text=new StringBuilder("[");for(int i=0;i<array.length();i++){if(i>0)text.append(',');text.append(canonical(array.get(i)));}return text.append(']').toString();}return value instanceof String?JSONObject.quote((String)value):String.valueOf(value);}
     private int index(){return position==0?0:position==1?count/2:count-1;}
@@ -38,10 +38,10 @@ final class AsyncBenchmark {
         handler.post(this::runAsync);
     }catch(Throwable error){finish(error);}}
     private void runAsync(){if(finished)return;try{
-        long setup=System.nanoTime();working=prepare();current.put("asyncSetupMs",(System.nanoTime()-setup)/1e6);JSONObject change=event(working,index());final AsterEngine source=working;
+        long setup=System.nanoTime();working=prepare();current.put("asyncSetupMs",(System.nanoTime()-setup)/1e6);JSONObject change=event(working,index());final BaroChartEngine source=working;
         Heartbeat heartbeat=new Heartbeat();MemorySampler memory=new MemorySampler();activeHeartbeat=heartbeat;activeMemory=memory;memory.start();heartbeat.start();long started=System.nanoTime();
-        source.applyDataEventAsync(change,new AsterEngine.AsyncOptions(120000,4096),new AsterEngine.AsyncListener(){
-            @Override public void onComplete(AsterEngine.AsyncResult result){try{
+        source.applyDataEventAsync(change,new BaroChartEngine.AsyncOptions(120000,4096),new BaroChartEngine.AsyncListener(){
+            @Override public void onComplete(BaroChartEngine.AsyncResult result){try{
                 if(finished){heartbeat.stop();memory.stop();return;}if(result.succeeded())source.scene(1200,700);double elapsed=(System.nanoTime()-started)/1e6;heartbeat.stop();memory.stop();
                 current.put("async",new JSONObject().put("elapsedApplyAndSceneMs",elapsed).put("ownerHeartbeat",heartbeat.report()).put("memory",memory.report()).put("job",result.toJSON()));
                 if(!result.succeeded())throw new IllegalStateException("Async benchmark failed: "+result.status,result.error);

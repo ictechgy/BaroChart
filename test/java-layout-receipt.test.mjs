@@ -10,8 +10,8 @@ import {JAVA_LAYOUT_BOUNDARY, JAVA_LAYOUT_EXPECTED, JAVA_LAYOUT_HARNESS,
 const validOutput = JAVA_LAYOUT_SCENARIOS.map(name => `PASS ${name}`).join('\n')
     + '\nRESULT scenarios=19 checks=32 scope=layout-notification-receipt-decoder\n';
 const initializationTrace = [
-    "[0.031s][info][class,init] 100 Initializing 'dev/aster/charts/LayoutReceiptTest' (0x00000000)",
-    "[0.032s][info][class,init] 101 Initializing 'dev/aster/charts/AsterEngine$LayoutReceipt'(no method) (0x00000000)",
+    "[0.031s][info][class,init] 100 Initializing 'kr/coden/barochart/LayoutReceiptTest' (0x00000000)",
+    "[0.032s][info][class,init] 101 Initializing 'kr/coden/barochart/BaroChartEngine$LayoutReceipt'(no method) (0x00000000)",
     "[0.033s][info][class,init] 102 Initializing 'org/json/JSONException'(no method) (0x00000000)",
     "[0.034s][info][class,init] 103 Initializing 'org/json/JSONObject' (0x00000000)",
 ].join('\n');
@@ -19,7 +19,7 @@ const initializationTrace = [
 test('Java layout evidence names the nested decoder and excludes Android/JNI claims', () => {
     assert.equal(JAVA_LAYOUT_BOUNDARY.productionDecoderRuntimeTested, true);
     assert.deepEqual(JAVA_LAYOUT_BOUNDARY.productionDecoderMethodsExecuted, [
-        'AsterEngine.LayoutReceipt.panelOrder', 'AsterEngine.LayoutReceipt.indicatorPlacement',
+        'BaroChartEngine.LayoutReceipt.panelOrder', 'BaroChartEngine.LayoutReceipt.indicatorPlacement',
     ]);
     assert.equal(JAVA_LAYOUT_BOUNDARY.javaSourceLevel, 8);
     assert.equal(JAVA_LAYOUT_BOUNDARY.javaBytecodeTarget, 8);
@@ -29,18 +29,18 @@ test('Java layout evidence names the nested decoder and excludes Android/JNI cla
         'performanceMeasured']) assert.equal(JAVA_LAYOUT_BOUNDARY[key], false, key);
     assert.equal(JAVA_LAYOUT_BOUNDARY.jsonFixtureExecuted, true);
     assert.deepEqual(JAVA_LAYOUT_PRODUCTION_SOURCES, [
-        'native/android/java/dev/aster/charts/AsterEngine.java',
-        'native/android/java/dev/aster/charts/AsterColumns.java',
-        'native/android/java/dev/aster/charts/WorkspaceRestoreJob.java',
-        'native/android/java/dev/aster/charts/NativeJobBudget.java',
-        'native/android/java/dev/aster/charts/ParamsUpdateJob.java',
+        'native/android/java/kr/coden/barochart/BaroChartEngine.java',
+        'native/android/java/kr/coden/barochart/BaroChartColumns.java',
+        'native/android/java/kr/coden/barochart/WorkspaceRestoreJob.java',
+        'native/android/java/kr/coden/barochart/NativeJobBudget.java',
+        'native/android/java/kr/coden/barochart/ParamsUpdateJob.java',
     ]);
-    assert.equal(JAVA_LAYOUT_HARNESS, 'test/java-layout-receipt/dev/aster/charts/LayoutReceiptTest.java');
+    assert.equal(JAVA_LAYOUT_HARNESS, 'test/java-layout-receipt/kr/coden/barochart/LayoutReceiptTest.java');
     assert.equal(JAVA_LAYOUT_JSON_FIXTURE, 'test/java-layout-receipt/org/json/JSONObject.java');
 });
 
 test('Java layout compiler uses warnings-as-errors and isolated Java 8 inputs', () => {
-    const sources = ['/repo/native/AsterEngine.java', '/repo/test/LayoutReceiptTest.java'];
+    const sources = ['/repo/native/BaroChartEngine.java', '/repo/test/LayoutReceiptTest.java'];
     assert.deepEqual(javaLayoutCompilerArguments('/tmp/classes', '/tmp/empty', sources), [
         '-m', 'jdk.compiler/com.sun.tools.javac.Main', '-source', '8', '-target', '8',
         '-Xlint:all,-options', '-Werror', '-proc:none', '-implicit:none', '-encoding', 'UTF-8',
@@ -65,15 +65,15 @@ test('Java layout result requires every accepted and rejected receipt scenario',
 
 test('Java layout class-init guard allows only the nested decoder and fixture JSON classes', () => {
     assert.deepEqual(verifyJavaLayoutInitialization(initializationTrace), {
-        initializedProductionClasses: ['dev/aster/charts/AsterEngine$LayoutReceipt'],
+        initializedProductionClasses: ['kr/coden/barochart/BaroChartEngine$LayoutReceipt'],
         initializedAndroidClasses: [], initializedJsonClasses: ['org/json/JSONException', 'org/json/JSONObject'],
     });
     assert.deepEqual(verifyJavaLayoutInitialization(initializationTrace
-        + '\n[info][class,init] Start class verification for: dev.aster.charts.AsterEngine'),
+        + '\n[info][class,init] Start class verification for: kr.coden.barochart.BaroChartEngine'),
     verifyJavaLayoutInitialization(initializationTrace));
     assert.throws(() => verifyJavaLayoutInitialization(''), /did not observe/);
-    for (const forbidden of ['dev/aster/charts/AsterEngine', 'dev/aster/charts/AsterEngine$CompactionReceipt',
-        'dev/aster/charts/AsterColumns', 'android/os/Looper', 'org/json/JSONArray']) {
+    for (const forbidden of ['kr/coden/barochart/BaroChartEngine', 'kr/coden/barochart/BaroChartEngine$CompactionReceipt',
+        'kr/coden/barochart/BaroChartColumns', 'android/os/Looper', 'org/json/JSONArray']) {
         assert.throws(() => verifyJavaLayoutInitialization(initializationTrace
             + `\n[info][class,init] 104 Initializing '${forbidden}' (0x00000000)`), Error, forbidden);
     }
@@ -86,9 +86,9 @@ test('Java layout harness has strict booleans and 256 inclusive, 257 rejecting c
     assert.match(source, /acceptedPlacement\("placement-upper-bound", placement\(Integer\.valueOf\(256\)\), true\)/);
     assert.match(source, /rejectedPlacement\("placement-upper-bound-plus-one", placement\(Integer\.valueOf\(257\)\), range\)/);
     assert.match(source, /rejectedPanelOrder\("panel-order-number", Integer\.valueOf\(1\), panelType\)/);
-    assert.doesNotMatch(source, /new\s+AsterEngine|System\.loadLibrary|Class\.forName/);
+    assert.doesNotMatch(source, /new\s+BaroChartEngine|System\.loadLibrary|Class\.forName/);
     assert.deepEqual([...source.matchAll(/^import ([^;]+);$/gm)].map(match => match[1]), ['org.json.JSONException', 'org.json.JSONObject']);
-    assert.deepEqual([...source.matchAll(/\bAsterEngine\.(\w+)/g)].map(match => match[1]), [
+    assert.deepEqual([...source.matchAll(/\bBaroChartEngine\.(\w+)/g)].map(match => match[1]), [
         'LayoutReceipt', 'LayoutReceipt', 'LayoutReceipt', 'LayoutReceipt',
     ]);
 });

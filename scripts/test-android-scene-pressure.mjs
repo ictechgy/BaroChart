@@ -18,14 +18,14 @@ try{await access(resultDir);throw new Error('Results exist; choose a fresh immut
 const duration=process.argv.includes('--approved-long-run')?900000:process.argv.includes('--short')?60000:30000;
 if(duration!==30000&&!process.argv.includes('--quiet-go'))throw new Error('Comparative/900s sampling requires coordinator --quiet-go');
 if(process.argv.includes('--sdk')||process.argv.includes('--timezone'))throw new Error('Pressure-only runner; SDK/timezone use preserved runners');
-const pkg='dev.aster.charts.packet.pressure',manifest=JSON.parse(await readFile(join(dir,'build-manifest.json'),'utf8'));
+const pkg='kr.coden.barochart.packet.pressure',manifest=JSON.parse(await readFile(join(dir,'build-manifest.json'),'utf8'));
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 if(sha(await readFile(manifest.apk))!==manifest.apkSHA256)throw new Error('Selected APK changed after manifest freeze');
 if(manifest.pressure!==true||manifest.pkg!==pkg)throw new Error('Selected APK is not a frozen pressure fixture');
-const componentProof=spawnSync('python3',['-c','import zipfile,sys,json,hashlib\nwith zipfile.ZipFile(sys.argv[1]) as z:print(json.dumps({k:hashlib.sha256(z.read(k)).hexdigest() for k in ["assets/aster-core.js","lib/arm64-v8a/libaster.so"]}))',manifest.apk],{encoding:'utf8'});
+const componentProof=spawnSync('python3',['-c','import zipfile,sys,json,hashlib\nwith zipfile.ZipFile(sys.argv[1]) as z:print(json.dumps({k:hashlib.sha256(z.read(k)).hexdigest() for k in ["assets/aster-core.js","lib/arm64-v8a/libbarochart.so"]}))',manifest.apk],{encoding:'utf8'});
 if(componentProof.status!==0||componentProof.error)throw new Error('APK component inspection failed');
 const components=JSON.parse(componentProof.stdout);
-if(components['assets/aster-core.js']!==manifest.coreSHA256||components['lib/arm64-v8a/libaster.so']!==manifest.jniSHA256)throw new Error('Frozen APK core/JNI differs from build manifest');
+if(components['assets/aster-core.js']!==manifest.coreSHA256||components['lib/arm64-v8a/libbarochart.so']!==manifest.jniSHA256)throw new Error('Frozen APK core/JNI differs from build manifest');
 const guardSources=[new URL(import.meta.url),new URL('./android-ingestion-contract.mjs',import.meta.url),new URL('./android-scene-cleanup.mjs',import.meta.url),new URL('./android-scene-pressure-contract.mjs',import.meta.url)];
 const guardHashes=await Promise.all(guardSources.map(async url=>sha(await readFile(url))));
 const env={...process.env,ANDROID_USER_HOME:process.env.ANDROID_USER_HOME??'/tmp/aster-cycle7-android-user',ADB_VENDOR_KEYS:process.env.ADB_VENDOR_KEYS??'/tmp/aster-cycle7-adb-keys/adbkey'};
@@ -53,7 +53,7 @@ await finalizePressureCompletion({runnerManifest:runner,
   if(avd!=='aster-validation')throw new Error('AVD identity mismatch');ownershipConfirmed=true;runner.avd=avd;
   run(['install','-r',manifest.apk]);run(['shell','am','force-stop',pkg]);
   run(['shell','run-as',pkg,'rm','-f','files/progress.json','files/final.json']);
-  run(['shell','am','start','-W','-n',`${pkg}/dev.aster.charts.ScenePressureActivity`,'--el','duration',String(duration),'--es','runId',runId,'--es','transport',manifest.transport]);
+  run(['shell','am','start','-W','-n',`${pkg}/kr.coden.barochart.ScenePressureActivity`,'--el','duration',String(duration),'--es','runId',runId,'--es','transport',manifest.transport]);
   let progress;const readyDeadline=Date.now()+240000;
   while(Date.now()<readyDeadline){progress=file('progress.json');if(progress?.state==='running')break;if(progress?.state==='failed')throw new Error(progress.error);await sleep(500);}
   if(progress?.state!=='running')throw new Error('Preparation did not become ready');

@@ -8,11 +8,11 @@ import {dirname, join, relative, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const harnessClass = 'dev.aster.charts.WorkspaceRestoreJobHarness';
+const harnessClass = 'kr.coden.barochart.WorkspaceRestoreJobHarness';
 export const JAVA_WORKSPACE_JOB_SOURCES = Object.freeze([
-    'native/android/java/dev/aster/charts/WorkspaceRestoreJob.java',
-    'native/android/java/dev/aster/charts/NativeJobBudget.java',
-    'test/java-workspace-job/dev/aster/charts/WorkspaceRestoreJobHarness.java',
+    'native/android/java/kr/coden/barochart/WorkspaceRestoreJob.java',
+    'native/android/java/kr/coden/barochart/NativeJobBudget.java',
+    'test/java-workspace-job/kr/coden/barochart/WorkspaceRestoreJobHarness.java',
 ]);
 export const JAVA_WORKSPACE_JOB_EXPECTED = Object.freeze({scenarios: 108, checks: 1635,
     unavailableOwnerScenarios: 1, unavailableOwnerChecks: 9});

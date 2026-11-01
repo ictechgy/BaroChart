@@ -3,7 +3,7 @@
 실행: `node scripts/check-java-host.mjs`
 
 이 폴더는 Android SDK를 설치하지 않은 환경에서 실제
-`AsterEngine.java`, `AsterColumns.java`, `WorkspaceRestoreJob.java`의 Java 문법·타입·checked exception
+`BaroChartEngine.java`, `BaroChartColumns.java`, `WorkspaceRestoreJob.java`의 Java 문법·타입·checked exception
 경계를 검사하는 **test-only compile signatures**입니다. 생산 소스를
 재작성하거나 native 메서드와 `System.loadLibrary`를 제거하지 않습니다.
 실제 JNI, Android `Handler`/`Looper`, JSON 파서, 메모리 계측을 구현하지
@@ -53,7 +53,7 @@ test constructor만 scripted bridge를 받을 수 있습니다. native library l
 production bridge를 선택할 때만 수행하고 기본 public 경로의 의미를 유지해야
 합니다. 모든 context 생성·호출·buffer 전송·메모리 조회·free는 같은 instance
 bridge를 지나야 하며 서로 다른 engine의 bridge를 static 전역으로 바꾸면
-안 됩니다. `AsterColumns`의 native `writeSlice`도 이 경계를 통과해야 합니다.
+안 됩니다. `BaroChartColumns`의 native `writeSlice`도 이 경계를 통과해야 합니다.
 
 소유권·callback 순서를 실행 검증하려면 native bridge 외에 명시적인 owner
 queue/clock 경계가 필요합니다. 위 compile-only `Handler`/`Looper`나 JSON

@@ -41,7 +41,7 @@ for(const [name,from,to,label]of [
  t.diagnostic(failure.stack);
 });
 test('Swift/UIKit and Java/Android facades forward options to the same command validator (source only)',async()=>{
- const swift=await read('../native/AsterNative.swift'),ui=await read('../native/AsterUIKit.swift'),java=await read('../native/android/java/dev/aster/charts/AsterEngine.java'),view=await read('../native/android/java/dev/aster/charts/AsterChartView.java');
+ const swift=await read('../native/BaroChartEngine.swift'),ui=await read('../native/BaroChartUIView.swift'),java=await read('../native/android/java/kr/coden/barochart/BaroChartEngine.java'),view=await read('../native/android/java/kr/coden/barochart/BaroChartView.java');
  assert.match(swift,/public func setDrawingMagnet\(_ options: \[String: Any\]\) throws \{ try command\("setDrawingMagnet", \[options\]\) \}/);
  assert.match(java,/public void setDrawingMagnet\(JSONObject options\) throws JSONException \{command\("setDrawingMagnet",options\);\}/);
  assert.match(ui,/public func setDrawingMagnet[^\n]+guard !isDisposed,!disposing[^\n]+try engine.setDrawingMagnet\(options\);setNeedsDisplay\(\)[^\n]+lastError = String\(describing: error\)/);

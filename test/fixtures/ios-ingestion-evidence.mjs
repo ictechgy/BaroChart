@@ -10,8 +10,8 @@ export function distribution(values) {
 export function iosEvidence({pilot = true, instrumented = true, seconds = pilot ? 30 : 900} = {}) {
   const bars = pilot ? 512 : 100000, warmup = pilot ? 2 : 30, begin = 10000, elapsed = seconds + .02;
   const id = '11111111-2222-3333-4444-555555555555', core = hash('core'), original = hash('original'), hooked = instrumented ? hash('hooked') : original;
-  const sources = Object.fromEntries(['native/AsterNative.swift','native/AsterColumns.swift','native/AsterFrameRenderer.swift','/fixture/native/AsterUIKit.swift','examples/ios/cycle12/IngestionApp.swift','examples/ios/cycle12/IngestionFeed.swift','examples/ios/cycle12/IngestionProbe.swift','examples/ios/cycle12/IngestionSystemTests.swift','scripts/build-ios-ingestion.mjs','scripts/test-ios-ingestion.mjs','examples/ios/Info.plist','package.json'].map(name => [name, hash(name)]));
-  sources['/fixture/native/AsterUIKit.swift'] = original;
+  const sources = Object.fromEntries(['native/BaroChartEngine.swift','native/BaroChartColumns.swift','native/BaroChartFrameRenderer.swift','/fixture/native/BaroChartUIView.swift','examples/ios/cycle12/IngestionApp.swift','examples/ios/cycle12/IngestionFeed.swift','examples/ios/cycle12/IngestionProbe.swift','examples/ios/cycle12/IngestionSystemTests.swift','scripts/build-ios-ingestion.mjs','scripts/test-ios-ingestion.mjs','examples/ios/Info.plist','package.json'].map(name => [name, hash(name)]));
+  sources['/fixture/native/BaroChartUIView.swift'] = original;
   const bundled = {schema:'aster.cycle12.ios.build', protocol:1, packageVersion:'0.2.12', instrumented, simulatorOnly:true, signingAllowed:false, systemInputAPI:'public XCTest/XCUIAutomation', coreSHA256:core, originalUIKitSHA256:original, hookedUIKitSHA256:hooked, uikitSHA256:hooked, hookPatchSHA256:hash('patch'), sources};
   const manifest = {...bundled, appPath:'/fixture/Cycle12Apple.app', xctestrunPath:'/fixture/owned.xctestrun', appBinarySHA256:hash('app')};
   const run = {id, runtime:'com.apple.CoreSimulator.SimRuntime.iOS-27-0', createdByThisRun:true, pilot, seconds, bars};

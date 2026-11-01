@@ -3,7 +3,7 @@ import JavaScriptCore
 
 /// Actual public Swift/JSC command and observer behavior; no device/UI claim.
 func verifyNativeLayoutNotifications(_ bundleURL:URL)throws->[String:Any] {
-    let engine=try AsterEngine(bundleURL:bundleURL,count:64,options:["panels":[["id":"price","weight":3],["id":"osc","weight":1]],"series":[]])
+    let engine=try BaroChartEngine(bundleURL:bundleURL,count:64,options:["panels":[["id":"price","weight":3],["id":"osc","weight":1]],"series":[]])
     defer {try? engine.close()}
     _=try engine.command("addIndicator",["rsi","rsi",["period":4]])
     _=try engine.command("addSeries",[["id":"rsi-line","type":"line","panel":"osc","indicator":"rsi"]])

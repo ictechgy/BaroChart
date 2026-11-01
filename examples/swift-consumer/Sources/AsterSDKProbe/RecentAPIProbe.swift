@@ -1,5 +1,5 @@
 import Foundation
-import AsterNative
+import BaroChart
 
 /// 클라우드에서 작성만 되고 Swift/JSC에서 실행된 적 없던 최근 공개 API를 실제로 실행한다.
 ///
@@ -8,9 +8,9 @@ import AsterNative
 /// - Parameter makeColumns: 테스트용 OHLCV 열을 만드는 함수(기존 probe의 `columns`)
 /// - Returns: 통과한 검사 이름 목록
 /// - Throws: 검사가 실패하면 `ProbeError.failed`
-func runRecentAPIProbe(makeColumns: (Int) throws -> AsterColumns) throws -> [String] {
+func runRecentAPIProbe(makeColumns: (Int) throws -> BaroChartColumns) throws -> [String] {
     var passed = [String]()
-    let engine = try AsterEngine()
+    let engine = try BaroChartEngine()
     defer { try? engine.close() }
     let source = try makeColumns(64)
     try engine.setData(probeBars(source))
@@ -22,16 +22,16 @@ func runRecentAPIProbe(makeColumns: (Int) throws -> AsterColumns) throws -> [Str
     return passed
 }
 
-/// 열 데이터를 `AsterBar` 배열로 바꾼다
-private func probeBars(_ source: AsterColumns) -> [AsterBar] {
+/// 열 데이터를 `BaroChartBar` 배열로 바꾼다
+private func probeBars(_ source: BaroChartColumns) -> [BaroChartBar] {
     (0..<source.length).map {
-        AsterBar(time: source.time[$0], open: source.open[$0], high: source.high[$0],
+        BaroChartBar(time: source.time[$0], open: source.open[$0], high: source.high[$0],
                  low: source.low[$0], close: source.close[$0], volume: source.volume[$0])
     }
 }
 
 /// `inspect` 명령 결과의 저장 봉 수
-private func storedBars(_ engine: AsterEngine) throws -> Int? {
+private func storedBars(_ engine: BaroChartEngine) throws -> Int? {
     (try engine.command("inspect").toDictionary() as? [String: Any])?["storedBars"] as? Int
 }
 
@@ -42,7 +42,7 @@ private func expectThrow(_ name: String, _ body: () throws -> Void) throws -> St
 }
 
 /// 보존 창 압축: 정상 축소와 잘못된 옵션 거부
-private func probeCompaction(_ engine: AsterEngine) throws -> [String] {
+private func probeCompaction(_ engine: BaroChartEngine) throws -> [String] {
     _ = try engine.compactData(["keepLastBars": 40, "studyHistory": "restart"])
     guard try storedBars(engine) == 40 else { throw ProbeError.failed("compactData keeps the newest 40 bars") }
     let rejected = try expectThrow("compactData rejects a non-positive window") {
@@ -52,7 +52,7 @@ private func probeCompaction(_ engine: AsterEngine) throws -> [String] {
 }
 
 /// 드로잉 묶음 이동·삭제: 정상 경로와 없는 ID 거부
-private func probeDrawingGroups(_ engine: AsterEngine, source: AsterColumns) throws -> [String] {
+private func probeDrawingGroups(_ engine: BaroChartEngine, source: BaroChartColumns) throws -> [String] {
     let anchor = source.time[source.length - 5]
     let id = try engine.addDrawing(["id": "recent-line", "type": "horizontal", "points": [["time": anchor, "price": 101.0]]])
     let before = try engine.saveDrawings()
@@ -68,14 +68,14 @@ private func probeDrawingGroups(_ engine: AsterEngine, source: AsterColumns) thr
 }
 
 /// 비동기 지표 파라미터 변경: 커밋 성공과 없는 지표 거부
-private func probeParamsAsync(_ engine: AsterEngine) throws -> [String] {
-    var result: Result<AsterParamsMetrics, Error>?
+private func probeParamsAsync(_ engine: BaroChartEngine) throws -> [String] {
+    var result: Result<BaroChartParamsMetrics, Error>?
     let job = try engine.setIndicatorParamsAsync("recent-ema", params: ["period": 5]) { result = $0 }
     try wait { result != nil }
     _ = job
     let metrics = try result!.get()
     guard metrics.outcome == .committed else { throw ProbeError.failed("setIndicatorParamsAsync commits (\(metrics.outcome))") }
-    var missing: Result<AsterParamsMetrics, Error>?
+    var missing: Result<BaroChartParamsMetrics, Error>?
     var rejectedAtCall = false
     do {
         let missingJob = try engine.setIndicatorParamsAsync("missing-study", params: ["period": 5]) { missing = $0 }
@@ -87,20 +87,20 @@ private func probeParamsAsync(_ engine: AsterEngine) throws -> [String] {
 }
 
 /// 비동기 작업공간 복원: 저장 → 새 엔진 복원 성공과 바인딩 불일치 거부
-private func probeWorkspaceAsync(_ engine: AsterEngine, makeColumns: (Int) throws -> AsterColumns) throws -> [String] {
+private func probeWorkspaceAsync(_ engine: BaroChartEngine, makeColumns: (Int) throws -> BaroChartColumns) throws -> [String] {
     let binding: [String: Any] = ["key": "SYNTH:US", "revision": "r1", "adjustmentVersion": "a1", "priceUnit": "USD", "adjustment": "raw"]
     let document = try engine.saveWorkspace(binding)
-    let target = try AsterEngine()
+    let target = try BaroChartEngine()
     defer { try? target.close() }
     let compacted = try makeColumns(64)
     try target.setData(Array(probeBars(compacted).suffix(40)))
-    var restored: Result<AsterWorkspaceMetrics, Error>?
+    var restored: Result<BaroChartWorkspaceMetrics, Error>?
     let job = try target.restoreWorkspaceAsync(document, datasetBinding: binding) { restored = $0 }
     try wait { restored != nil }
     _ = job
     _ = try restored!.get()
     guard try target.saveWorkspace(binding) == document else { throw ProbeError.failed("restoreWorkspaceAsync reproduces the saved document") }
-    var mismatch: Result<AsterWorkspaceMetrics, Error>?
+    var mismatch: Result<BaroChartWorkspaceMetrics, Error>?
     var mismatchAtCall = false
     var wrongBinding = binding
     wrongBinding["revision"] = "r2"

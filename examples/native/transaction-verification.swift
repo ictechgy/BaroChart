@@ -4,24 +4,24 @@ import JavaScriptCore
 /// Only this fixture evaluates trusted, fixed probes. Production input remains
 /// the public Swift command facade and nativePointer bridge; no user source is
 /// evaluated. State probes preserve rollback/history/input for atomic checks.
-private func transactionProbe(_ engine:AsterEngine,_ source:String)throws->JSValue {
-    guard let value=engine.context.evaluateScript(source) else{throw AsterError.javaScript("Transaction probe failed")}
-    if let error=engine.context.exception{engine.context.exception=nil;throw AsterError.javaScript(error.toString() ?? "Transaction probe exception")}
+private func transactionProbe(_ engine:BaroChartEngine,_ source:String)throws->JSValue {
+    guard let value=engine.context.evaluateScript(source) else{throw BaroChartLowLevelError.javaScript("Transaction probe failed")}
+    if let error=engine.context.exception{engine.context.exception=nil;throw BaroChartLowLevelError.javaScript(error.toString() ?? "Transaction probe exception")}
     return value
 }
-private func transactionState(_ engine:AsterEngine)throws->[String:Any] {
+private func transactionState(_ engine:BaroChartEngine)throws->[String:Any] {
     let source="(()=>{const d=nativeModel.drawings;return {items:d.items,transaction:d.transaction,undo:d.undoStack,redo:d.redoStack,gesture:nativeInput.gesture,pointers:[...nativeInput.pointers],selected:d.selected,target:nativeInput.drawingTarget,axes:nativeModel.axes,panels:nativeModel.panels,view:nativeModel.view,follow:nativeModel.follow,crosshair:nativeModel.crosshair};})()"
-    guard let value=try transactionProbe(engine,source).toDictionary() as? [String:Any] else{throw AsterError.invalidScene};return value
+    guard let value=try transactionProbe(engine,source).toDictionary() as? [String:Any] else{throw BaroChartLowLevelError.invalidScene};return value
 }
 private func transactionJSON(_ state:[String:Any])throws->Data {try JSONSerialization.data(withJSONObject:state,options:[.sortedKeys])}
 private let transactionTime=1700000000000.0
 private func transactionAnchor(_ price:Double)->[String:Double] {["time":transactionTime+120000,"price":price]}
-private func transactionPoint(_ engine:AsterEngine,axis:String="A",price:Double=3000,width:Double,height:Double)throws->(Double,Double) {
-    guard ["A","B","C"].contains(axis),price.isFinite,width.isFinite,height.isFinite,width>=100,height>=80,width<=8192,height<=8192 else{throw AsterError.invalidScene}
+private func transactionPoint(_ engine:BaroChartEngine,axis:String="A",price:Double=3000,width:Double,height:Double)throws->(Double,Double) {
+    guard ["A","B","C"].contains(axis),price.isFinite,width.isFinite,height.isFinite,width>=100,height>=80,width<=8192,height<=8192 else{throw BaroChartLowLevelError.invalidScene}
     let expression="Aster.createLayout(nativeModel,\(width),\(height)).toScreen({time:1700000120000,price:\(price)},'price','\(axis)')"
-    guard let p=try transactionProbe(engine,expression).toDictionary() as? [String:Double],let x=p["x"],let y=p["y"],x.isFinite,y.isFinite else{throw AsterError.invalidScene};return(x,y)
+    guard let p=try transactionProbe(engine,expression).toDictionary() as? [String:Double],let x=p["x"],let y=p["y"],x.isFinite,y.isFinite else{throw BaroChartLowLevelError.invalidScene};return(x,y)
 }
-private func transactionSetup(_ engine:AsterEngine,width:Double,height:Double)throws {
+private func transactionSetup(_ engine:BaroChartEngine,width:Double,height:Double)throws {
     let options:[String:Any]=["panels":[["id":"price","range":[80,120],"padding":0],["id":"other","range":[0,100],"axisSide":"left"]],"axes":[["id":"A","panel":"price","range":[1000,5000],"padding":0],["id":"B","panel":"price","range":[0,100],"padding":0]],"series":[]]
     _=try engine.call("nativeInit",[0,options])
     let bars=(0..<12).map{i in ["time":transactionTime+Double(i)*60000,"open":100.0,"high":120.0,"low":90.0,"close":110.0,"volume":1.0]}
@@ -37,9 +37,9 @@ private func transactionIdle(_ state:[String:Any])->Bool {state["gesture"] is NS
 /// programmatic nativePointer controller because public UITouch construction
 /// is unavailable. The report records that distinction instead of certifying
 /// system/physical touch input.
-func verifyNativeTransactions(_ engine:AsterEngine,width:Double,height:Double,inputKind:String,send:(String,Double,Double)throws->Void)throws->[String:Any] {
+func verifyNativeTransactions(_ engine:BaroChartEngine,width:Double,height:Double,inputKind:String,send:(String,Double,Double)throws->Void)throws->[String:Any] {
     var checks:[String]=[],cases:[String]=[]
-    func require(_ value:Bool,_ label:String)throws {guard value else{throw AsterError.javaScript("Native transaction: \(label)")};checks.append(label)}
+    func require(_ value:Bool,_ label:String)throws {guard value else{throw BaroChartLowLevelError.javaScript("Native transaction: \(label)")};checks.append(label)}
     func start(_ label:String)throws->(Double,Double) {
         cases.append(label);try transactionSetup(engine,width:width,height:height);let p=try transactionPoint(engine,width:width,height:height);try send("down",p.0,p.1)
         let s=try transactionState(engine);try require((s["gesture"] as? [String:Any])?["kind"] as? String=="edit" && !(s["transaction"] is NSNull),label+" starts actual controller edit");return p
@@ -156,9 +156,9 @@ func verifyNativeTransactions(_ engine:AsterEngine,width:Double,height:Double,in
     return ["passed":checks.count,"checks":checks,"cases":cases,"inputKind":inputKind,"runtime":"JavaScriptCore","nativeUITouchInjected":false,"physicalDevice":false]
 }
 
-func verifyNativeComparisonTargetPolicy(_ engine:AsterEngine,width:Double,height:Double,send:(String,Double,Double)throws->Void)throws->[String:Any] {
+func verifyNativeComparisonTargetPolicy(_ engine:BaroChartEngine,width:Double,height:Double,send:(String,Double,Double)throws->Void)throws->[String:Any] {
     var checks:[String]=[]
-    func check(_ value:Bool,_ label:String)throws{guard value else{throw AsterError.javaScript("Native transaction: \(label)")};checks.append(label)}
+    func check(_ value:Bool,_ label:String)throws{guard value else{throw BaroChartLowLevelError.javaScript("Native transaction: \(label)")};checks.append(label)}
     _=try engine.call("nativeComparisonDemo");_=try engine.command("addAxis",[["id":"C","panel":"price","range":[10,20],"padding":0]])
     _=try engine.command("setDrawingTarget",[["panel":"price","axisId":"C"]]);_=try engine.call("nativeComparisonAction",["series",width,height])
     try check((try transactionState(engine)["target"] as? [String:Any])?["axisId"] as? String=="C","comparison helper removes B without replacing C target")
@@ -174,9 +174,9 @@ func verifyNativeComparisonTargetPolicy(_ engine:AsterEngine,width:Double,height
     return ["passed":checks.count,"checks":checks]
 }
 
-func verifyNativeTransactionControls(_ engine:AsterEngine,width:Double,height:Double,send:(String,Double,Double)throws->Void,perform:(String)throws->Void)throws->[String:Any] {
+func verifyNativeTransactionControls(_ engine:BaroChartEngine,width:Double,height:Double,send:(String,Double,Double)throws->Void,perform:(String)throws->Void)throws->[String:Any] {
     var checks:[String]=[]
-    func check(_ value:Bool,_ label:String)throws{guard value else{throw AsterError.javaScript("Native transaction controls: \(label)")};checks.append(label)}
+    func check(_ value:Bool,_ label:String)throws{guard value else{throw BaroChartLowLevelError.javaScript("Native transaction controls: \(label)")};checks.append(label)}
     try transactionSetup(engine,width:width,height:height);let p=try transactionPoint(engine,width:width,height:height)
     try send("down",p.0,p.1);try send("move",p.0,p.1+10);try perform("rebind")
     var state=try transactionState(engine)
@@ -188,8 +188,8 @@ func verifyNativeTransactionControls(_ engine:AsterEngine,width:Double,height:Do
     return ["passed":checks.count,"checks":checks,"uiControlActions":true]
 }
 
-func verifyTransactionCommonAPI(_ engine:AsterEngine)throws->[String:Any] {
+func verifyTransactionCommonAPI(_ engine:BaroChartEngine)throws->[String:Any] {
     var result=try verifyCommonAPI(engine);let small=try nativeTextInk("12px monospace"),large=try nativeTextInk("bold 36px monospace")
-    guard large>small*2 else{throw AsterError.javaScript("Common API native font sizing regression")}
+    guard large>small*2 else{throw BaroChartLowLevelError.javaScript("Common API native font sizing regression")}
     var checks=result["checks"] as! [String];checks.append("Native font size changes raster coverage");result["checks"]=checks;result["passed"]=checks.count;result["fontSmallInk"]=small;result["fontLargeInk"]=large;return result
 }

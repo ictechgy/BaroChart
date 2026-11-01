@@ -1,5 +1,5 @@
 import UIKit
-import AsterNative
+import BaroChart
 
 @main final class SDKAppDelegate:UIResponder,UIApplicationDelegate {
     func application(_ application:UIApplication,configurationForConnecting session:UISceneSession,options:UIScene.ConnectionOptions)->UISceneConfiguration {
@@ -12,25 +12,25 @@ final class SDKSceneDelegate:UIResponder,UIWindowSceneDelegate {
     func sceneDidDisconnect(_ scene:UIScene){(window?.rootViewController as? SDKController)?.cleanup()}
 }
 final class SDKController:UIViewController {
-    private var engine:AsterEngine?,chart:AsterChartView?,job:AsterAsyncJob?
+    private var engine:BaroChartEngine?,chart:BaroChartUIView?,job:BaroChartAsyncJob?
     private let status=UILabel(),stack=UIStackView()
     private var checks=[String](),buttons=[UIButton](),saved="",interactionCount=0
     private func require(_ value:Bool,_ name:String)throws {if !value{throw NSError(domain:"SDKConsumer",code:1,userInfo:[NSLocalizedDescriptionKey:name])};checks.append(name)}
     override func viewDidLoad(){super.viewDidLoad();view.backgroundColor = .systemBackground
         stack.axis = .vertical;stack.spacing=8;stack.translatesAutoresizingMaskIntoConstraints=false;view.addSubview(stack)
         NSLayoutConstraint.activate([stack.topAnchor.constraint(equalTo:view.safeAreaLayoutGuide.topAnchor,constant:12),stack.bottomAnchor.constraint(equalTo:view.safeAreaLayoutGuide.bottomAnchor,constant:-12),stack.leadingAnchor.constraint(equalTo:view.leadingAnchor,constant:12),stack.trailingAnchor.constraint(equalTo:view.trailingAnchor,constant:-12)])
-        let title=UILabel();title.text="Independent SwiftPM · AsterNative";title.font = .preferredFont(forTextStyle:.headline);stack.addArrangedSubview(title)
+        let title=UILabel();title.text="Independent SwiftPM · BaroChart";title.font = .preferredFont(forTextStyle:.headline);stack.addArrangedSubview(title)
         status.numberOfLines=3;status.accessibilityIdentifier="sdk.status";stack.addArrangedSubview(status)
         for row in [[("Prepare external512","sdk.prepare",#selector(prepareFeed)),("Draw / save / reload","sdk.drawings",#selector(drawings))],[("Async correction","sdk.correct",#selector(correct)),("Dispose borrowed view","sdk.dispose",#selector(disposeView))],[("Close owned engine","sdk.close",#selector(closeEngine))]]{
             let controls=UIStackView();controls.spacing=8;controls.distribution = .fillEqually
             for (title,id,action) in row{let button=UIButton(type:.system);button.setTitle(title,for:.normal);button.accessibilityIdentifier=id;button.addTarget(self,action:action,for:.touchUpInside);button.heightAnchor.constraint(greaterThanOrEqualToConstant:44).isActive=true;controls.addArrangedSubview(button);buttons.append(button)};stack.addArrangedSubview(controls)
         }
-        do {let engine=try AsterEngine();self.engine=engine;try require(try engine.scene(width:400,height:300).stats["storedBars"]==0,"Bundle.module default engine starts at0")
+        do {let engine=try BaroChartEngine();self.engine=engine;try require(try engine.scene(width:400,height:300).stats["storedBars"]==0,"Bundle.module default engine starts at0")
             try engine.addIndicator("sdk-ema","ema",["period":3]);try engine.addSeries(["id":"sdk-ema-line","type":"line","panel":"price","indicator":"sdk-ema"])
-            let chart=AsterChartView(engine:engine);chart.onInteraction={[weak self] in self?.interactionCount+=1};chart.accessibilityIdentifier="sdk.chart";chart.heightAnchor.constraint(greaterThanOrEqualToConstant:200).isActive=true;stack.addArrangedSubview(chart);self.chart=chart;status.text="Ready · empty engine0 / SDK resource"
+            let chart=BaroChartUIView(engine:engine);chart.onInteraction={[weak self] in self?.interactionCount+=1};chart.accessibilityIdentifier="sdk.chart";chart.heightAnchor.constraint(greaterThanOrEqualToConstant:200).isActive=true;stack.addArrangedSubview(chart);self.chart=chart;status.text="Ready · empty engine0 / SDK resource"
         }catch{fail(error)}
     }
-    private func columns()throws->AsterColumns {let times=(0..<512).map{1700000000000+Double($0)*60000},close=(0..<512).map{100+Double($0)*0.1};return try AsterColumns(time:times,open:close,high:close.map{$0+1},low:close.map{$0-1},close:close,volume:(0..<512).map{Double(10+$0)})}
+    private func columns()throws->BaroChartColumns {let times=(0..<512).map{1700000000000+Double($0)*60000},close=(0..<512).map{100+Double($0)*0.1};return try BaroChartColumns(time:times,open:close,high:close.map{$0+1},low:close.map{$0-1},close:close,volume:(0..<512).map{Double(10+$0)})}
     private func busy(_ value:Bool){for button in buttons{button.isEnabled = !value}}
     private func finishRender(_ text:String){let deadline=ProcessInfo.processInfo.systemUptime+5
         func poll(){guard let engine=self.engine,let chart=self.chart else{self.status.text=text;return};if chart.renderedRevision>=engine.revision&&chart.lastError==nil{self.checks.append("UIKit view drew the current engine revision");self.status.text=text;self.busy(false)}else if ProcessInfo.processInfo.systemUptime>=deadline{self.fail(NSError(domain:"SDKConsumer",code:2,userInfo:[NSLocalizedDescriptionKey:"UIKit render did not reach current revision: \(chart.lastError ?? "pending")"]))}else{DispatchQueue.main.asyncAfter(deadline:.now()+0.05,execute:poll)}};poll()
@@ -47,7 +47,7 @@ final class SDKController:UIViewController {
         // The local strong variable is released after this method returns.
         DispatchQueue.main.async{[weak self,weak chart] in guard let self=self else{return};do{try self.require(chart==nil,"disposed view is released");self.status.text="View disposed · borrowed engine alive"}catch{self.fail(error)}}
     }catch{fail(error)}}
-    @objc private func closeEngine(){guard let engine=engine else{return};do{if ProcessInfo.processInfo.arguments.contains("--sdk-xcui"){try require(interactionCount>0,"XCUI drag reaches UIKit onInteraction")};try engine.close();try engine.close();do{_ = try engine.scene(width:400,height:300);throw NSError(domain:"SDKConsumer",code:3)}catch AsterAsyncError.engineClosed{checks.append("owner close repeatable / closed calls rejected")};self.engine=nil;status.text="Closed · SDK consumer passed";write(["passed":checks.count,"checks":checks,"interactionCallbacks":interactionCount,"sourceCopyDemoImport":false,"appSuppliedBundleURL":false,"borrowedEngineClosedByView":false,"host":"independent Xcode app / local SwiftPM product / UIKit / JavaScriptCore / CoreGraphics","ios":UIDevice.current.systemVersion])}catch{fail(error)}}
+    @objc private func closeEngine(){guard let engine=engine else{return};do{if ProcessInfo.processInfo.arguments.contains("--sdk-xcui"){try require(interactionCount>0,"XCUI drag reaches UIKit onInteraction")};try engine.close();try engine.close();do{_ = try engine.scene(width:400,height:300);throw NSError(domain:"SDKConsumer",code:3)}catch BaroChartAsyncError.engineClosed{checks.append("owner close repeatable / closed calls rejected")};self.engine=nil;status.text="Closed · SDK consumer passed";write(["passed":checks.count,"checks":checks,"interactionCallbacks":interactionCount,"sourceCopyDemoImport":false,"appSuppliedBundleURL":false,"borrowedEngineClosedByView":false,"host":"independent Xcode app / local SwiftPM product / UIKit / JavaScriptCore / CoreGraphics","ios":UIDevice.current.systemVersion])}catch{fail(error)}}
     func cleanup(){job?.cancel();job=nil
         #if ASTER_SDK_EXPLICIT_VIEW_DISPOSE
         chart?.dispose()

@@ -3,16 +3,16 @@ import JavaScriptCore
 import CoreGraphics
 
 private func axisJSON(_ value:Any)throws->String {String(data:try JSONSerialization.data(withJSONObject:value,options:[.sortedKeys,.fragmentsAllowed]),encoding:.utf8)!}
-private func axisObject(_ engine:AsterEngine,_ name:String,_ args:[Any]=[])throws->[String:Any] {
-    guard let value=try engine.call(name,args).toDictionary() as? [String:Any] else{throw AsterError.javaScript("Axis fixture object: \(name)")};return value
+private func axisObject(_ engine:BaroChartEngine,_ name:String,_ args:[Any]=[])throws->[String:Any] {
+    guard let value=try engine.call(name,args).toDictionary() as? [String:Any] else{throw BaroChartLowLevelError.javaScript("Axis fixture object: \(name)")};return value
 }
 /// Constant fixture expression only. Values are bounded numbers, never user
 /// supplied JavaScript. Public nativePointer remains the interaction entrypoint.
-func nativeAxisPoint(_ engine:AsterEngine,index:Int,price:Double=2100,width:Double,height:Double)throws->[String:Double] {
-    guard index>=0,index<24,price.isFinite,width.isFinite,height.isFinite,width>=100,height>=80 else{throw AsterError.invalidScene}
+func nativeAxisPoint(_ engine:BaroChartEngine,index:Int,price:Double=2100,width:Double,height:Double)throws->[String:Double] {
+    guard index>=0,index<24,price.isFinite,width.isFinite,height.isFinite,width>=100,height>=80 else{throw BaroChartLowLevelError.invalidScene}
     let expression="(()=>{const l=Aster.createLayout(nativeModel,\(width),\(height)),b=l.axis('price','comparison-B');return {x:l.x(\(index)),y:b.y(\(price)),top:b.top,bottom:b.bottom,primaryMin:l.panels[0].min,primaryMax:l.panels[0].max,min:b.min,max:b.max,drawingCommands:nativeModel.drawings.items.reduce((n,d)=>n+Aster.drawingGeometry(d,l).length,0)};})()"
-    guard let raw=engine.context.evaluateScript(expression),let object=raw.toDictionary() as? [String:Double] else{throw AsterError.invalidScene}
-    if let error=engine.context.exception{engine.context.exception=nil;throw AsterError.javaScript(error.toString() ?? "Axis probe error")};return object
+    guard let raw=engine.context.evaluateScript(expression),let object=raw.toDictionary() as? [String:Double] else{throw BaroChartLowLevelError.invalidScene}
+    if let error=engine.context.exception{engine.context.exception=nil;throw BaroChartLowLevelError.javaScript(error.toString() ?? "Axis probe error")};return object
 }
 func nativeComparisonLabel(_ packet:[String:Any])->String {
     guard let reading=packet["reading"] as? [String:Any],let primary=reading["primary"] as? [String:Any],let bar=primary["bar"] as? [String:Any] else{return packet["text"] as? String ?? "A OHLCV / B exact price · move cursor"}
@@ -23,18 +23,18 @@ func nativeComparisonLabel(_ packet:[String:Any])->String {
     let utc=(reading["time"] as? NSNumber)?.stringValue ?? "—"
     return "\(a) / SYNTH:B \(value) / UTC \(utc)"
 }
-func nativeComparisonPacket(_ engine:AsterEngine,width:Double,height:Double)throws->[String:Any] {try axisObject(engine,"nativeComparisonReadout",[width,height])}
-@discardableResult func nativeComparisonAction(_ engine:AsterEngine,_ action:String,width:Double,height:Double,saved:String?=nil)throws->[String:Any] {
+func nativeComparisonPacket(_ engine:BaroChartEngine,width:Double,height:Double)throws->[String:Any] {try axisObject(engine,"nativeComparisonReadout",[width,height])}
+@discardableResult func nativeComparisonAction(_ engine:BaroChartEngine,_ action:String,width:Double,height:Double,saved:String?=nil)throws->[String:Any] {
     try axisObject(engine,"nativeComparisonAction",[action,width,height,saved as Any? ?? NSNull()])
 }
-private func axisReading(_ packet:[String:Any])throws->[String:Any] {guard let value=packet["reading"] as? [String:Any] else{throw AsterError.javaScript("Missing comparison readout")};return value}
-private func axisSeries(_ reading:[String:Any])throws->[String:Any] {guard let series=(reading["series"] as? [[String:Any]])?.first(where:{$0["id"] as? String=="comparison-B-line"}) else{throw AsterError.javaScript("Missing B readout")};return series}
+private func axisReading(_ packet:[String:Any])throws->[String:Any] {guard let value=packet["reading"] as? [String:Any] else{throw BaroChartLowLevelError.javaScript("Missing comparison readout")};return value}
+private func axisSeries(_ reading:[String:Any])throws->[String:Any] {guard let series=(reading["series"] as? [[String:Any]])?.first(where:{$0["id"] as? String=="comparison-B-line"}) else{throw BaroChartLowLevelError.javaScript("Missing B readout")};return series}
 
 /// Crosses the real Swift/JSC generic facade. Rendering and actual mouse/touch
 /// routing are additionally checked by the corresponding app window fixture.
-func verifyNativeAxes(_ engine:AsterEngine,width:Double=800,height:Double=500)throws->[String:Any] {
+func verifyNativeAxes(_ engine:BaroChartEngine,width:Double=800,height:Double=500)throws->[String:Any] {
     var checks:[String]=[]
-    func require(_ value:Bool,_ message:String)throws {guard value else{throw AsterError.javaScript("Native axes: \(message)")};checks.append(message)}
+    func require(_ value:Bool,_ message:String)throws {guard value else{throw BaroChartLowLevelError.javaScript("Native axes: \(message)")};checks.append(message)}
     let shared=try axisObject(engine,"nativeAxesSelfTest"),sharedChecks=shared["checks"] as? [String] ?? []
     try require(!sharedChecks.isEmpty&&(shared["passed"] as? Int)==sharedChecks.count,"Shared independent-axis numerical checks")
     let setup=try axisObject(engine,"nativeComparisonDemo")
@@ -88,14 +88,14 @@ func verifyNativeAxes(_ engine:AsterEngine,width:Double=800,height:Double=500)th
 
 /// Returns immediately to the UI event loop. Waiting inside a main-queue UI
 /// callback would prevent the host's source-capture rendezvous from executing.
-@discardableResult func verifyNativeAxesHandoff(_ engine:AsterEngine,width:Double,height:Double,completion:@escaping(Result<[String:Any],Error>)->Void)throws->AsterAsyncJob {
+@discardableResult func verifyNativeAxesHandoff(_ engine:BaroChartEngine,width:Double,height:Double,completion:@escaping(Result<[String:Any],Error>)->Void)throws->BaroChartAsyncJob {
     _=try axisObject(engine,"nativeComparisonDemo")
     _=try nativeComparisonAction(engine,"drawing",width:width,height:height)
     let hostSaved=try nativeComparisonAction(engine,"save",width:width,height:height)["savedDocument"] as! String,originalContext=ObjectIdentifier(engine.context)
     return try engine.applyDataEventAsync(["kind":"correction","bar":["time":1700000000000.0,"open":100.0,"high":106.0,"low":99.0,"close":105.0,"volume":1000.0]],timeout:5){result in
         do{
             _=try result.get();var checks:[String]=[]
-            func require(_ value:Bool,_ text:String)throws{guard value else{throw AsterError.javaScript("Native axes: \(text)")};checks.append(text)}
+            func require(_ value:Bool,_ text:String)throws{guard value else{throw BaroChartLowLevelError.javaScript("Native axes: \(text)")};checks.append(text)}
             try require(Thread.isMainThread&&ObjectIdentifier(engine.context) != originalContext,"Comparison correction hands off isolated context on owner")
             _=try nativeComparisonAction(engine,"series",width:width,height:height);_=try nativeComparisonAction(engine,"series",width:width,height:height)
             _=try nativeComparisonAction(engine,"load",width:width,height:height,saved:hostSaved)

@@ -24,7 +24,7 @@ export function ingestionPlan(){return {
     query:'IndicatorEngine.get EMA/RSI/session VWAP5/linked module2; scalar per-event versus explicitly different burst-end policy recorded',
     scene:'buildScene CPU including data index/axis/time/label work; no Canvas/GPU/raster/compositor FPS',
     surrogate:'Node JSON.stringify/parse stages are synthetic serialization only, never native bridge performance',
-    apple:'Actual AsterEngine.command→JSC value bridge + notifyChanges. setData JSONEncoder/JSONSerialization separately. No invented JSON arg parse in ordinary command',
+    apple:'Actual BaroChartEngine.command→JSC value bridge + notifyChanges. setData JSONEncoder/JSONSerialization separately. No invented JSON arg parse in ordinary command',
     android:'Actual JSONArray(args).toString→JNI/QuickJS arg parse→nativeCommand→result stringify→Java JSON parse + notifyChanges',
     taskqueue:'Nested source mutation probe checks FIFO observer version snapshots, latest query visibility, bounded error ledger/drained pendingChanges'},
   long:{durationSeconds:900,allowedDurationSeconds:[600,900],epochSeconds:60,policy:'Common planned scalar per-event and future candidate atomic-batch adapter must use same immutable ordered ingress trace',

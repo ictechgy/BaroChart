@@ -1,4 +1,4 @@
-package dev.aster.charts;
+package kr.coden.barochart;
 
 import android.app.Instrumentation;
 import android.os.*;
@@ -29,7 +29,7 @@ public final class HoverBindingVerification {
     private JSONObject drawing() throws Exception {return inspect().getJSONArray("drawings").getJSONObject(0);}
     private JSONArray point(double price) throws Exception {return new JSONArray().put(new JSONObject().put("time",TIME).put("price",price));}
     private double[] screen(String id,double price) throws Exception {
-        AsterChartView view=activity.chart;float density=view.getResources().getDisplayMetrics().density;double width=Math.max(100,view.getWidth()/density),height=Math.max(80,view.getHeight()/density);
+        BaroChartView view=activity.chart;float density=view.getResources().getDisplayMetrics().density;double width=Math.max(100,view.getWidth()/density),height=Math.max(80,view.getHeight()/density);
         JSONObject scene=activity.engine.scene(width,height),panel=scene.getJSONObject("layout").getJSONArray("panels").getJSONObject(0),axis=null;JSONArray all=panel.getJSONArray("axes");for(int i=0;i<all.length();i++)if(id.equals(all.getJSONObject(i).optString("axisId")))axis=all.getJSONObject(i);if(axis==null)throw new AssertionError("Missing axis "+id);
         JSONObject visible=inspect().getJSONObject("view");double x=panel.getDouble("left")+(2-visible.getDouble("from"))/(visible.getDouble("to")-visible.getDouble("from"))*(panel.getDouble("right")-panel.getDouble("left"));
         double fraction=(price-axis.getDouble("min"))/(axis.getDouble("max")-axis.getDouble("min"));if(!axis.getBoolean("inverted"))fraction=1-fraction;

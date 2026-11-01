@@ -2,7 +2,7 @@ import {readFile,writeFile,mkdir,copyFile} from 'node:fs/promises';import {spawn
 import {outputRoot,scriptRoot,candidateRoot,baselineRoot,hashOption} from './config.mjs';
 const work=outputRoot,root=candidateRoot,baseline='479b870900d9a98eee8829687747d56af5e162ad';
 const supplied=hashOption,candidateSHA=supplied??createHash('sha256').update(await readFile(join(root,'native/Resources/aster-core.js'))).digest('hex');if(!/^[a-f0-9]{64}$/.test(candidateSHA))throw new Error('Candidate source SHA required');
-const paths=['native/AsterNative.swift','native/AsterColumns.swift','native/AsterFrameRenderer.swift','native/Resources/aster-core.js'],hash=x=>createHash('sha256').update(x).digest('hex'),sources={};
+const paths=['native/BaroChartEngine.swift','native/BaroChartColumns.swift','native/BaroChartFrameRenderer.swift','native/Resources/aster-core.js'],hash=x=>createHash('sha256').update(x).digest('hex'),sources={};
 const probes=await readFile(join(scriptRoot,'probes.js'),'utf8'),hooks=await readFile(join(scriptRoot,'phase-hooks.js'),'utf8');
 for(const version of ['baseline','candidate']){
  const folder=join(work,version==='candidate'?'candidate-'+candidateSHA.slice(0,12):version);await mkdir(folder,{recursive:true});

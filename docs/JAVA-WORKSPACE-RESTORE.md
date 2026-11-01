@@ -1,6 +1,6 @@
 # Java workspace restore ownership slice
 
-Private 0.2.13 source implementation. `AsterEngine.restoreWorkspaceAsync` now
+Private 0.2.13 source implementation. `BaroChartEngine.restoreWorkspaceAsync` now
 connects the existing native source/target protocol to a dedicated production Java
 ownership state machine. The state machine executes under an independent Java
 fake transport with real worker threads. The actual Engine typechecks against

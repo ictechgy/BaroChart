@@ -9,11 +9,11 @@ import {fileURLToPath} from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const JAVA_HOST_PRODUCTION_SOURCES = Object.freeze([
-    'native/android/java/dev/aster/charts/AsterEngine.java',
-    'native/android/java/dev/aster/charts/AsterColumns.java',
-        'native/android/java/dev/aster/charts/WorkspaceRestoreJob.java',
-    'native/android/java/dev/aster/charts/NativeJobBudget.java',
-    'native/android/java/dev/aster/charts/ParamsUpdateJob.java',
+    'native/android/java/kr/coden/barochart/BaroChartEngine.java',
+    'native/android/java/kr/coden/barochart/BaroChartColumns.java',
+        'native/android/java/kr/coden/barochart/WorkspaceRestoreJob.java',
+    'native/android/java/kr/coden/barochart/NativeJobBudget.java',
+    'native/android/java/kr/coden/barochart/ParamsUpdateJob.java',
 ]);
 export const JAVA_HOST_BOUNDARY = Object.freeze({
     evidence: 'Java typecheck against independent compile-only signatures',
@@ -73,8 +73,8 @@ export async function checkJavaHost({java = process.env.ASTER_JAVA ?? 'java'} = 
         const after = await sourceHashes(sources);
         if (JSON.stringify(before) !== JSON.stringify(after)) throw new Error('A Java input changed during compilation; rerun against a stable source checkpoint.');
         const compiled = await filesIn(classes, '.class');
-        for (const name of ['AsterEngine', 'AsterEngine$AsyncJob', 'AsterEngine$WorkspaceJob', 'WorkspaceRestoreJob', 'AsterColumns']) {
-            const bytes = await readFile(join(classes, 'dev/aster/charts', name + '.class'));
+        for (const name of ['BaroChartEngine', 'BaroChartEngine$AsyncJob', 'BaroChartEngine$WorkspaceJob', 'WorkspaceRestoreJob', 'BaroChartColumns']) {
+            const bytes = await readFile(join(classes, 'kr/coden/barochart', name + '.class'));
             if (bytes.readUInt32BE(0) !== 0xcafebabe || bytes.readUInt16BE(6) !== 52) throw new Error(`Unexpected Java 8 class output: ${name}`);
         }
         return {schema: 'aster.java-host-compile', version: 1, compiler: (version.stdout + version.stderr).trim(),

@@ -1,4 +1,4 @@
-package dev.aster.charts;
+package kr.coden.barochart;
 
 import android.graphics.*;
 import org.json.*;
@@ -8,8 +8,8 @@ final class StudyVerification {
     private final JSONArray checks=new JSONArray();
     private void check(boolean value,String reason){if(!value)throw new AssertionError(reason);checks.put(reason);}
     private boolean unavailable(JSONObject value)throws JSONException {return value.length()==3&&value.has("value")&&value.has("sourceIndex")&&value.has("sourceTime")&&value.isNull("value")&&value.isNull("sourceIndex")&&value.isNull("sourceTime");}
-    private JSONObject inspect(AsterEngine engine)throws JSONException{return (JSONObject)engine.command("inspect");}
-    JSONObject run(AsterEngine engine,AsterChartView view)throws Exception {
+    private JSONObject inspect(BaroChartEngine engine)throws JSONException{return (JSONObject)engine.command("inspect");}
+    JSONObject run(BaroChartEngine engine,BaroChartView view)throws Exception {
         String original=inspect(engine).toString();JSONObject shared=(JSONObject)engine.invoke("nativeStudyVerification");check(shared.getInt("passed")>0&&shared.getInt("passed")==shared.getJSONArray("checks").length(),"Actual QuickJS shared independent study checks");check(original.equals(inspect(engine).toString()),"Shared study verification preserves visible model");
         engine.invoke("nativeInit",0,new JSONObject().put("panels",new JSONArray().put(new JSONObject().put("id","price")).put(new JSONObject().put("id","volume"))).put("series",new JSONArray().put(new JSONObject().put("id","price").put("type","candles").put("panel","price"))));
         long time=1700000000000L;int[] closes={10,11,9,9,12},volumes={2,3,5,7,11};JSONArray bars=new JSONArray();for(int i=0;i<5;i++)bars.put(new JSONObject().put("time",time+i*60000L).put("open",closes[i]).put("high",closes[i]+1).put("low",closes[i]-1).put("close",closes[i]).put("volume",volumes[i]));engine.setData(bars);

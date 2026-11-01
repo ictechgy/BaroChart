@@ -1,4 +1,4 @@
-package dev.aster.charts;
+package kr.coden.barochart;
 import android.app.Instrumentation;import android.os.Bundle;import org.json.*;import java.io.*;
 
 /** Functional SDK regression entry, separate from external ADB system input run. */

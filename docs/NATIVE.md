@@ -31,7 +31,7 @@ npm run test:axes:ios
 
 iOS runner는 새 전용 iPhone17Pro 시뮬레이터를 만들고 설치·실행·결과 수집 후 그 기기만 삭제합니다. `ASTER_IOS_RUNTIME`, `ASTER_IOS_DEVICE`로 설치된 runtime/type을 지정할 수 있습니다. iOS27 SDK 요구에 따라 데모는 UISceneDelegate 수명주기를 사용합니다. 실제 UIKit 창/스냅샷/JavaScriptCore/DST/Redo와 지표 실행을 검증했고, 이전 기록에서는 자동 UITouch 주입·실기기 서명/실행을 검증하지 않았습니다. 최신 XCTest 입력 근거는 0.2.10 보고서에 구분하며 실기기는 여전히 미검증입니다. 터치 전달 코드는 UIKit View에 구현되어 있습니다.
 
-Swift Package로 `AsterNative`를 추가하고 `AsterEngine()` 및 `AsterChartView(engine:)`를 사용합니다. `setData([AsterBar])`, `applyDataEvent`, `command`, 지표·시리즈·도형·테마 메서드와 `scene(width:height:)`, 저장·로드를 제공합니다. 한 엔진은 한 소유 스레드에서 호출합니다. OS framework binary는 소스 ZIP에 포함하지 않습니다.
+Swift Package로 `BaroChart`를 추가하고 `BaroChartEngine()` 및 `BaroChartUIView(engine:)`를 사용합니다. `setData([BaroChartBar])`, `applyDataEvent`, `command`, 지표·시리즈·도형·테마 메서드와 `scene(width:height:)`, 저장·로드를 제공합니다. 한 엔진은 한 소유 스레드에서 호출합니다. OS framework binary는 소스 ZIP에 포함하지 않습니다.
 
 ## Android
 
@@ -44,9 +44,9 @@ npm run build:android
 ASTER_ANDROID_SERIAL=emulator-5580 npm run test:android
 ```
 
-`ANDROID_SDK_ROOT` 또는 `ANDROID_HOME`, `ASTER_NDK`, `ASTER_JDK`로 도구 경로를 변경합니다. 기본 경로/버전은 현재 Mac 설치에 맞춰져 있습니다. APK는 `artifacts/android/aster-native.apk`이며 로컬 debug key만 사용합니다. Key/APK/NDK binaries/build cache는 소스 ZIP에서 제외합니다. runner는 선택한 기기에 `dev.aster.charts.demo`를 설치하고 그 앱의 검증 파일만 읽습니다. 실기기 serial을 지정해 실행해도 별도 검증 보고 없이 지원 완료로 간주하지 마세요.
+`ANDROID_SDK_ROOT` 또는 `ANDROID_HOME`, `ASTER_NDK`, `ASTER_JDK`로 도구 경로를 변경합니다. 기본 경로/버전은 현재 Mac 설치에 맞춰져 있습니다. APK는 `artifacts/android/aster-native.apk`이며 로컬 debug key만 사용합니다. Key/APK/NDK binaries/build cache는 소스 ZIP에서 제외합니다. runner는 선택한 기기에 `kr.coden.barochart.demo`를 설치하고 그 앱의 검증 파일만 읽습니다. 실기기 serial을 지정해 실행해도 별도 검증 보고 없이 지원 완료로 간주하지 마세요.
 
-재사용 파일: `native/android/java/dev/aster/charts/{AsterEngine,AsterChartView,AsterBitmapCachePool}.java`, `aster_jni.c`, `quickjs/`. 앱 빌드 시스템에서 JNI library를 연결하고 `aster-core.js`를 assets에 넣으세요. Compose adapter와 공개 Maven 배포는 제공하지 않습니다. 로컬 Gradle library/AAR 및 독립 Kotlin 소비 앱은 [ANDROID-SDK.md](ANDROID-SDK.md)에 있습니다. `new AsterEngine(context,0)`에 데이터를 주입하고 `new AsterChartView(context,engine)`을 사용할 수 있습니다. `setData(JSONArray)`, `applyDataEvent(JSONObject)`, `command`, 지표·시리즈·도형·테마 메서드와 저장·로드를 제공합니다. close는 소유 스레드에서 호출하며 여러 번 호출해도 안전합니다.
+재사용 파일: `native/android/java/kr/coden/barochart/{BaroChartEngine,BaroChartView,BaroChartBitmapCachePool}.java`, `aster_jni.c`, `quickjs/`. 앱 빌드 시스템에서 JNI library를 연결하고 `aster-core.js`를 assets에 넣으세요. Compose adapter와 공개 Maven 배포는 제공하지 않습니다. 로컬 Gradle library/AAR 및 독립 Kotlin 소비 앱은 [ANDROID-SDK.md](ANDROID-SDK.md)에 있습니다. `new BaroChartEngine(context,0)`에 데이터를 주입하고 `new BaroChartView(context,engine)`을 사용할 수 있습니다. `setData(JSONArray)`, `applyDataEvent(JSONObject)`, `command`, 지표·시리즈·도형·테마 메서드와 저장·로드를 제공합니다. close는 소유 스레드에서 호출하며 여러 번 호출해도 안전합니다.
 
 QuickJS의 일반 Intl 구현은 제공하지 않습니다. 코어의 timezone `DateTimeFormat.formatToParts` 호출만 Java `java.time.ZoneId`로 연결합니다. NY DST 반복/존재하지 않는 시각, tiny Float64·UTC, JNI 유니코드/숫자 왕복과 JS 예외 복구를 실제 Android에서 검사했습니다. 휴장표·공급자 데이터는 호스트가 주입합니다.
 
@@ -64,7 +64,7 @@ JSON bridge는 zero-copy가 아닙니다. 원본·지표·anchors는 Float64이�
 
 0.2.3 당시의 API와 비용 기록입니다.0.2.4에서도 같은 public correction API를 유지하지만 큰 UI/history는 분할 전송하며 old monolithic UI checkpoint 경로를 host가 사용하지 않습니다. 계산 후 UI capture 시점까지의 변경은 반영하고, 분할 전송 중 UI가 바뀌면 stale로 거부합니다. 현재 한도·owner·정리 규칙은 [PREPARE-CONTRACT.md](PREPARE-CONTRACT.md)를 따릅니다.
 
-기존 동기 메서드는 유지합니다. Apple `applyDataEventAsync(_:timeout:progress:completion:)`는 `AsterAsyncJob.cancel()`과 `Result<AsterAsyncMetrics,Error>`를 제공합니다. Android `applyDataEventAsync(JSONObject,AsyncOptions,AsyncListener)`는 `AsyncJob.cancel()`과 owner Handler의 결과를 제공합니다. main/UI 소유 engine에서만 이 opt-in API를 사용합니다. 별도 JSC VM/QuickJS runtime에서 계산하고, 계산 스레드 종료 후 prepared context를 owner로 전달합니다. Apple은 동시에 두 작업을 거부하고 Android는 이전 작업을 supersede합니다.
+기존 동기 메서드는 유지합니다. Apple `applyDataEventAsync(_:timeout:progress:completion:)`는 `BaroChartAsyncJob.cancel()`과 `Result<BaroChartAsyncMetrics,Error>`를 제공합니다. Android `applyDataEventAsync(JSONObject,AsyncOptions,AsyncListener)`는 `AsyncJob.cancel()`과 owner Handler의 결과를 제공합니다. main/UI 소유 engine에서만 이 opt-in API를 사용합니다. 별도 JSC VM/QuickJS runtime에서 계산하고, 계산 스레드 종료 후 prepared context를 owner로 전달합니다. Apple은 동시에 두 작업을 거부하고 Android는 이전 작업을 supersede합니다.
 
 예시:
 
@@ -76,10 +76,10 @@ let job = try engine.applyDataEventAsync(event, progress: { progress in
 ```
 
 ```java
-AsterEngine.AsyncJob job = engine.applyDataEventAsync(event,
-    new AsterEngine.AsyncOptions(30000, 4096),
-    new AsterEngine.AsyncListener() {
-        public void onComplete(AsterEngine.AsyncResult result) { /* UI owner */ }
+BaroChartEngine.AsyncJob job = engine.applyDataEventAsync(event,
+    new BaroChartEngine.AsyncOptions(30000, 4096),
+    new BaroChartEngine.AsyncListener() {
+        public void onComplete(BaroChartEngine.AsyncResult result) { /* UI owner */ }
     });
 // job.cancel();
 ```
@@ -94,9 +94,9 @@ AsterEngine.AsyncJob job = engine.applyDataEventAsync(event,
 
 ```swift
 // owner main thread; 필요한 panel/지표/series는 작은 빈 모델에서 설정합니다.
-let engine = try AsterEngine(count:0,options:["panels":[["id":"price"]],
+let engine = try BaroChartEngine(count:0,options:["panels":[["id":"price"]],
     "series":[["id":"price","type":"candles","panel":"price"]]])
-let columns = try AsterColumns(time:time,open:open,high:high,low:low,close:close,volume:volume)
+let columns = try BaroChartColumns(time:time,open:open,high:high,low:low,close:close,volume:volume)
 let job = try engine.prepareColumnsAsync(columns,progress:{ progress in
     print(progress.phase)
 },completion:{ result in /* owner main queue; 성공/오류 처리 */ })
@@ -106,11 +106,11 @@ job.cancel()
 
 ```java
 // 큰 입력의 copyOf는 calling thread에서 복사하므로 UI 밖에서 준비합니다.
-AsterColumns columns=AsterColumns.copyOf(time,open,high,low,close,volume);
+BaroChartColumns columns=BaroChartColumns.copyOf(time,open,high,low,close,volume);
 // 이미 owner main thread에 만든 engine에서 시작합니다.
-AsterEngine.AsyncJob job=engine.prepareColumnsAsync(columns,200,
-    new AsterEngine.AsyncOptions(30000,4096),new AsterEngine.AsyncListener(){
-        @Override public void onComplete(AsterEngine.AsyncResult result) { /* main Handler */ }
+BaroChartEngine.AsyncJob job=engine.prepareColumnsAsync(columns,200,
+    new BaroChartEngine.AsyncOptions(30000,4096),new BaroChartEngine.AsyncListener(){
+        @Override public void onComplete(BaroChartEngine.AsyncResult result) { /* main Handler */ }
     });
 job.cancel();
 ```

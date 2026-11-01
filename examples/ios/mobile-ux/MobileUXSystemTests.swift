@@ -1,7 +1,7 @@
 import XCTest
 
 @MainActor final class MobileUXSystemTests:XCTestCase {
-    let app=XCUIApplication(bundleIdentifier:"dev.aster.charts.mobileux")
+    let app=XCUIApplication(bundleIdentifier:"kr.coden.barochart.mobileux")
     override func setUpWithError()throws{continueAfterFailure=false;app.launch();XCTAssertTrue(app.buttons["ux-reset"].waitForExistence(timeout:10))}
     func state()throws->[String:Any]{let text=app.staticTexts["ux-state"].label;return try JSONSerialization.jsonObject(with:Data(text.utf8)) as! [String:Any]}
     func viewSpan()throws->Double{let view=try state()["view"] as! [String:Double];return view["to"]!-view["from"]!}

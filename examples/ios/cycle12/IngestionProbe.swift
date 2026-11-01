@@ -1,14 +1,14 @@
 import UIKit
 import QuartzCore
 
-// PRIVATE TEST HARNESS ONLY. Injected into a byte-copied AsterUIKit.swift at
+// PRIVATE TEST HARNESS ONLY. Injected into a byte-copied BaroChartUIView.swift at
 // matching draw locations. It is not a production SDK API. A 900s candidate
 // trace is not compared to a shorter baseline and does not measure presentation.
 final class Cycle12Probe {
     static weak var current:Cycle12Probe?
     static func clock()->Double {CACurrentMediaTime()}
-    static func beginDraw(_ view:AsterChartView)->Double? {guard current?.measuring==true else{return nil};return clock()}
-    static func endDraw(_ view:AsterChartView,_ start:Double?) {guard let start=start,let probe=current else{return};probe.draw(view,start:start,end:clock())}
+    static func beginDraw(_ view:BaroChartUIView)->Double? {guard current?.measuring==true else{return nil};return clock()}
+    static func endDraw(_ view:BaroChartUIView,_ start:Double?) {guard let start=start,let probe=current else{return};probe.draw(view,start:start,end:clock())}
     struct Frame {let start,end:Double,inputEpoch:UInt64,revision:UInt64}
     struct Input {let entered,returned,oldest,newest:Double,epoch:UInt64,count:Int}
     private(set) var frames:[Frame]=[],inputs:[Input]=[],heartbeats:[Double]=[],errors:[String]=[]
@@ -21,7 +21,7 @@ final class Cycle12Probe {
     private func beat(){guard measuring else{return};let now=Self.clock();if heartbeats.count<recordLimit{heartbeats.append((now-lastBeat)*1000)}else if errors.isEmpty{errors.append("Heartbeat trace limit")};lastBeat=now}
     func inputEntered()->UInt64 {guard measuring else{return 0};inputEpoch &+= 1;return inputEpoch}
     func inputReturned(epoch:UInt64,entered:Double,returned:Double,timestamps:[Double]) {guard measuring,epoch>0,!timestamps.isEmpty else{return};guard inputs.count<recordLimit else{errors.append("Input trace limit");return};inputs.append(Input(entered:entered,returned:returned,oldest:timestamps.min()!,newest:timestamps.max()!,epoch:epoch,count:timestamps.count))}
-    private func draw(_ view:AsterChartView,start:Double,end:Double){guard measuring else{return};guard frames.count<recordLimit else{errors.append("Frame trace limit");return};if inputEpoch>lastCompletedInput{if inputEpoch>lastCompletedInput+1{supersededInputs+=Int(inputEpoch-lastCompletedInput-1)};lastCompletedInput=inputEpoch};frames.append(Frame(start:start,end:end,inputEpoch:inputEpoch,revision:view.renderedRevision))}
+    private func draw(_ view:BaroChartUIView,start:Double,end:Double){guard measuring else{return};guard frames.count<recordLimit else{errors.append("Frame trace limit");return};if inputEpoch>lastCompletedInput{if inputEpoch>lastCompletedInput+1{supersededInputs+=Int(inputEpoch-lastCompletedInput-1)};lastCompletedInput=inputEpoch};frames.append(Frame(start:start,end:end,inputEpoch:inputEpoch,revision:view.renderedRevision))}
     func stop(){precondition(Thread.isMainThread);if measuring{beat();end=Self.clock()};measuring=false;heartbeat?.cancel();heartbeat=nil;Self.current=nil}
     func report()->[String:Any] {precondition(Thread.isMainThread)
         func stats(_ values:[Double])->[String:Any]{guard !values.isEmpty else{return ["samples":0]};let a=values.sorted();return ["samples":a.count,"p50":a[min(a.count-1,Int(Double(a.count)*0.50))],"p95":a[min(a.count-1,Int(Double(a.count)*0.95))],"p99":a[min(a.count-1,Int(Double(a.count)*0.99))],"max":a.last!]}
@@ -34,7 +34,7 @@ final class Cycle12Probe {
 final class Cycle12Window:UIWindow {
     weak var probe:Cycle12Probe?
     private(set) var activeTouchIDs=Set<ObjectIdentifier>()
-    override func sendEvent(_ event:UIEvent){let relevant=(event.allTouches ?? []).filter{$0.view is AsterChartView && $0.phase != .stationary};let entered=Cycle12Probe.clock(),epoch=relevant.isEmpty ? 0:probe?.inputEntered() ?? 0
+    override func sendEvent(_ event:UIEvent){let relevant=(event.allTouches ?? []).filter{$0.view is BaroChartUIView && $0.phase != .stationary};let entered=Cycle12Probe.clock(),epoch=relevant.isEmpty ? 0:probe?.inputEntered() ?? 0
         for touch in relevant where touch.phase == .began{activeTouchIDs.insert(ObjectIdentifier(touch))}
         super.sendEvent(event)
         for touch in relevant where touch.phase == .ended||touch.phase == .cancelled{activeTouchIDs.remove(ObjectIdentifier(touch))}

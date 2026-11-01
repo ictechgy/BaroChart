@@ -4,13 +4,13 @@ import android.app.Activity
 import android.os.Bundle
 import android.os.Looper
 import android.widget.TextView
-import dev.aster.charts.AsterEngine
+import kr.coden.barochart.BaroChartEngine
 import org.json.JSONArray
 import org.json.JSONObject
 
 /** Small independent AAR consumer of the named ingestion API. */
 class ConsumerActivity : Activity() {
-    private lateinit var engine: AsterEngine
+    private lateinit var engine: BaroChartEngine
     private val checks = JSONArray()
     private val scenarios = JSONArray()
     private val jobs = JSONArray()
@@ -37,8 +37,8 @@ class ConsumerActivity : Activity() {
     private fun packet(sequence: Int, events: JSONArray): JSONObject = JSONObject().put("streamId", "kotlin-feed")
         .put("generation", 3).put("firstSequence", sequence).put("events", events)
     private fun typedError(code: String, action: () -> Unit) {
-        var caught: AsterEngine.IngestionException? = null
-        try { action() } catch (error: AsterEngine.IngestionException) { caught = error }
+        var caught: BaroChartEngine.IngestionException? = null
+        try { action() } catch (error: BaroChartEngine.IngestionException) { caught = error }
         check(caught?.code == code, "typed IngestionException.code = $code")
     }
     private fun conservation(): JSONObject {
@@ -54,7 +54,7 @@ class ConsumerActivity : Activity() {
         for (i in 1..3) check(values.getDouble(i) == expected[i - 1], "small independent SMA2[$i]")
     }
     private fun runContract() {
-        engine = AsterEngine(this, 0, JSONObject().put("series", JSONArray()))
+        engine = BaroChartEngine(this, 0, JSONObject().put("series", JSONArray()))
         engine.setData(JSONArray().put(bar(0, 10.0)).put(bar(1, 11.0)).put(bar(2, 12.0)))
         engine.addIndicator("small-sma", "sma", JSONObject().put("period", 2))
         val policy = JSONObject().put("streamId", "kotlin-feed").put("generation", 3).put("firstSequence", 100)
@@ -89,7 +89,7 @@ class ConsumerActivity : Activity() {
         val saved: String = engine.saveDataIngestion()
         val stats: JSONObject = engine.dataIngestionStats()
         check(engine.revision() == revision && notifications == observed, "named stats/save preserve revision and observers")
-        val receiver = AsterEngine(this, 0, JSONObject().put("series", JSONArray()))
+        val receiver = BaroChartEngine(this, 0, JSONObject().put("series", JSONArray()))
         try {
             receiver.setData(JSONArray().put(bar(0, 10.0)).put(bar(1, 11.5)).put(bar(2, 12.0)).put(bar(3, 13.0)))
             val restored: JSONObject = receiver.loadDataIngestion(saved)
@@ -98,14 +98,14 @@ class ConsumerActivity : Activity() {
         complete("typed-readonly-save-load")
         val before = engine.saveDataIngestion()
         var delivered = false
-        engine.applyDataEventAsync(event("correction", 2, 12.5), object : AsterEngine.AsyncListener {
-            override fun onProgress(update: AsterEngine.AsyncProgress) {
+        engine.applyDataEventAsync(event("correction", 2, 12.5), object : BaroChartEngine.AsyncListener {
+            override fun onProgress(update: BaroChartEngine.AsyncProgress) {
                 try {
                     if (delivered || finished || Looper.myLooper() != Looper.getMainLooper()) throw AssertionError("async progress owner/order")
                     progress++
                 } catch (error: Throwable) { fail(error) }
             }
-            override fun onComplete(result: AsterEngine.AsyncResult) {
+            override fun onComplete(result: BaroChartEngine.AsyncResult) {
                 try {
                     check(!delivered && !finished && Looper.myLooper() == Looper.getMainLooper(), "async exactly one owner terminal")
                     delivered = true; terminals++; jobs.put(result.toJSON())
@@ -129,7 +129,7 @@ class ConsumerActivity : Activity() {
             val report = JSONObject().put("schema", "aster.kotlin-ingestion-consumer").put("version", 1)
                 .put("failed", error || failed != null).put("error", failed ?: JSONObject.NULL).put("passed", checks.length())
                 .put("checks", checks).put("scenarios", scenarios).put("jobs", jobs).put("terminals", terminals).put("progressCallbacks", progress)
-                .put("sourceClosed", sourceClosed).put("targetClosed", targetClosed).put("sdkVersion", getString(dev.aster.charts.R.string.aster_sdk_version))
+                .put("sourceClosed", sourceClosed).put("targetClosed", targetClosed).put("sdkVersion", getString(kr.coden.barochart.R.string.barochart_sdk_version))
             openFileOutput("ingestion-consumer-validation.json", MODE_PRIVATE).use { it.write(report.toString(2).toByteArray(Charsets.UTF_8)) }
         }
     }

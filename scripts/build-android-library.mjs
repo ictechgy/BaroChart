@@ -40,7 +40,7 @@ export function auditAar(aar,core,jdk=process.env.ASTER_GRADLE_JAVA_HOME??proces
     const inspected=JSON.parse(run('python3',['-c',String.raw`
 import zipfile,io,json,sys,hashlib,struct,xml.etree.ElementTree as ET,tempfile,pathlib
 p=pathlib.Path(sys.argv[1]); core=pathlib.Path(sys.argv[2]); jdk=pathlib.Path(sys.argv[3])
-required=['AndroidManifest.xml','classes.jar','assets/aster-core.js','jni/arm64-v8a/libaster.so','proguard.txt','R.txt','public.txt','res/values/values.xml','assets/licenses/QUICKJS-LICENSE.txt','assets/licenses/LICENSE.txt','assets/licenses/NOTICE.txt']
+required=['AndroidManifest.xml','classes.jar','assets/aster-core.js','jni/arm64-v8a/libbarochart.so','proguard.txt','R.txt','public.txt','res/values/values.xml','assets/licenses/QUICKJS-LICENSE.txt','assets/licenses/LICENSE.txt','assets/licenses/NOTICE.txt']
 with zipfile.ZipFile(p) as z:
  names=z.namelist()
  for name in required:
@@ -55,12 +55,12 @@ with zipfile.ZipFile(p) as z:
  if b'Copyright' not in z.read('assets/licenses/QUICKJS-LICENSE.txt') or b'Permission is hereby granted' not in z.read('assets/licenses/QUICKJS-LICENSE.txt'):raise ValueError('QuickJS MIT notice incomplete')
  if not all(term in z.read('assets/licenses/LICENSE.txt') for term in [b'Apache License',b'Version 2.0, January 2004',b'END OF TERMS AND CONDITIONS']):raise ValueError('Apache-2.0 project license incomplete')
  if not all(term in z.read('assets/licenses/NOTICE.txt') for term in [b'BaroChart',b'QuickJS',b'Copyright (c) 2017-2025 Fabrice Bellard']):raise ValueError('Project or QuickJS attribution notice incomplete')
- if b'aster_sdk_version' not in z.read('R.txt') or b'aster_sdk_version' not in z.read('public.txt'):raise ValueError('Public SDK version resource missing')
- version=ET.fromstring(z.read('res/values/values.xml')).find("string[@name='aster_sdk_version']")
+ if b'barochart_sdk_version' not in z.read('R.txt') or b'barochart_sdk_version' not in z.read('public.txt'):raise ValueError('Public SDK version resource missing')
+ version=ET.fromstring(z.read('res/values/values.xml')).find("string[@name='barochart_sdk_version']")
  if version is None or not version.text:raise ValueError('SDK version resource value missing')
  rules=z.read('proguard.txt').decode()
- if 'dev.aster.charts.AsterEngine' not in rules or 'dev.aster.charts.AsterColumns' not in rules or 'native <methods>' not in rules or 'zonedParts' not in rules:raise ValueError('JNI consumer rules missing')
- native=z.read('jni/arm64-v8a/libaster.so')
+ if 'kr.coden.barochart.BaroChartEngine' not in rules or 'kr.coden.barochart.BaroChartColumns' not in rules or 'native <methods>' not in rules or 'zonedParts' not in rules:raise ValueError('JNI consumer rules missing')
+ native=z.read('jni/arm64-v8a/libbarochart.so')
  if native[:6]!=b'\x7fELF\x02\x01' or struct.unpack_from('<H',native,18)[0]!=183:raise ValueError('JNI is not arm64 ELF64')
  phoff=struct.unpack_from('<Q',native,32)[0];size,count=struct.unpack_from('<HH',native,54)
  aligns=[struct.unpack_from('<IIQQQQQQ',native,phoff+i*size)[7] for i in range(count) if struct.unpack_from('<I',native,phoff+i*size)[0]==1]
@@ -68,15 +68,15 @@ with zipfile.ZipFile(p) as z:
  jar=z.read('classes.jar')
  with zipfile.ZipFile(io.BytesIO(jar)) as c:
   classes=c.namelist()
-  expected=['AsterEngine','AsterEngine$AsyncJob','AsterEngine$AsyncResult','AsterEngine$AsyncOptions','AsterEngine$AsyncListener','AsterEngine$AsyncProgress','AsterEngine$ParamsJob','ParamsUpdateJob','NativeJobBudget','AsterColumns','AsterChartView','AsterBitmapCachePool']
+  expected=['BaroChartEngine','BaroChartEngine$AsyncJob','BaroChartEngine$AsyncResult','BaroChartEngine$AsyncOptions','BaroChartEngine$AsyncListener','BaroChartEngine$AsyncProgress','BaroChartEngine$ParamsJob','ParamsUpdateJob','NativeJobBudget','BaroChartColumns','BaroChartView','BaroChartBitmapCachePool']
   for name in expected:
-   if 'dev/aster/charts/'+name+'.class' not in classes:raise ValueError('Missing SDK class: '+name)
+   if 'kr/coden/barochart/'+name+'.class' not in classes:raise ValueError('Missing SDK class: '+name)
   if any('Verification' in name or 'Activity' in name or 'Instrumentation' in name for name in classes):raise ValueError('Demo/test classes in SDK')
  with tempfile.TemporaryDirectory() as d:
   j=pathlib.Path(d)/'classes.jar';j.write_bytes(jar)
   import subprocess
-  api=subprocess.run([str(jdk/'bin/javap'),'-public','-classpath',str(j),'dev.aster.charts.AsterEngine','dev.aster.charts.AsterColumns','dev.aster.charts.AsterChartView'],capture_output=True,text=True,check=True).stdout
-  for contract in ['implements java.lang.AutoCloseable','public dev.aster.charts.AsterEngine(android.content.Context, int)','setColumns(org.json.JSONObject)','addIndicator(','addDrawing(','applyDataEventAsync(','prepareColumnsAsync(','setIndicatorParamsAsync(','public void close()','public static dev.aster.charts.AsterColumns copyOf(','public dev.aster.charts.AsterChartView(android.content.Context, dev.aster.charts.AsterEngine)','setTool(java.lang.String)','renderCacheMetrics()']:
+  api=subprocess.run([str(jdk/'bin/javap'),'-public','-classpath',str(j),'kr.coden.barochart.BaroChartEngine','kr.coden.barochart.BaroChartColumns','kr.coden.barochart.BaroChartView'],capture_output=True,text=True,check=True).stdout
+  for contract in ['implements java.lang.AutoCloseable','public kr.coden.barochart.BaroChartEngine(android.content.Context, int)','setColumns(org.json.JSONObject)','addIndicator(','addDrawing(','applyDataEventAsync(','prepareColumnsAsync(','setIndicatorParamsAsync(','public void close()','public static kr.coden.barochart.BaroChartColumns copyOf(','public kr.coden.barochart.BaroChartView(android.content.Context, kr.coden.barochart.BaroChartEngine)','setTool(java.lang.String)','renderCacheMetrics()']:
    if contract not in api:raise ValueError('Missing public API: '+contract)
  print(json.dumps({'entries':names,'classCount':len(classes),'sdkVersion':version.text,'coreSHA256':hashlib.sha256(js).hexdigest(),'jniSHA256':hashlib.sha256(native).hexdigest(),'classesSHA256':hashlib.sha256(jar).hexdigest(),'jniLoadAlignment':aligns,'minSDK':26,'abis':['arm64-v8a'],'publicAPI':api}))
 `,resolve(aar),resolve(core),jdk]));
@@ -90,7 +90,7 @@ export async function buildLibrary(output,core,version){
     const aar=join(output,'aster-charts.aar');await copyFile(join(output,'library/outputs/aar/aster-android-release.aar'),aar);
     const audit=auditAar(aar,core,environment.javaHome);
     if(audit.sdkVersion!==version)throw new Error('AAR version resource does not match selected build version');
-    const sources={};for(const name of await readdir(join(projectRoot,'native/android/java/dev/aster/charts')))if(name.endsWith('.java'))sources[name]=sha(await readFile(join(projectRoot,'native/android/java/dev/aster/charts',name)));
+    const sources={};for(const name of await readdir(join(projectRoot,'native/android/java/kr/coden/barochart')))if(name.endsWith('.java'))sources[name]=sha(await readFile(join(projectRoot,'native/android/java/kr/coden/barochart',name)));
     const report={...audit,version,gradle:'8.14.5',agp:'8.13.2',ndk:'29.0.14033849',cmake:'3.22.1',javaHome:environment.javaHome,gradleHome:environment.gradleHome,aarSHA256:sha(await readFile(aar)),javaSources:sources,assetSource:resolve(core)};
     await writeFile(join(output,'aar-audit.json'),JSON.stringify(report,null,2));return report;
 }

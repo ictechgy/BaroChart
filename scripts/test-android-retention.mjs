@@ -14,13 +14,13 @@ const adb=(args,optional=false)=>{const result=spawnSync(join(sdk,'platform-tool
 const api=Number(adb(['shell','getprop','ro.build.version.sdk']).trim());
 const abi=adb(['shell','getprop','ro.product.cpu.abi']).trim();
 if(api!==36||abi!=='arm64-v8a')throw new Error(`Retention fixture requires API36 arm64-v8a; selected ${api} ${abi}`);
-adb(['shell','am','force-stop','dev.aster.charts.demo']);
+adb(['shell','am','force-stop','kr.coden.barochart.demo']);
 adb(['install','-r',apk]);
-adb(['shell','run-as','dev.aster.charts.demo','rm','-f','files/android-retention-validation.json']);
-adb(['shell','am','start','-n','dev.aster.charts.demo/dev.aster.charts.DemoActivity','--ez','retention-test','true']);
+adb(['shell','run-as','kr.coden.barochart.demo','rm','-f','files/android-retention-validation.json']);
+adb(['shell','am','start','-n','kr.coden.barochart.demo/kr.coden.barochart.DemoActivity','--ez','retention-test','true']);
 let report;
 for(let attempt=0;attempt<120;attempt++){
-    try{report=JSON.parse(adb(['exec-out','run-as','dev.aster.charts.demo','cat','files/android-retention-validation.json'],true));break;}catch{}
+    try{report=JSON.parse(adb(['exec-out','run-as','kr.coden.barochart.demo','cat','files/android-retention-validation.json'],true));break;}catch{}
     await new Promise(resolve=>setTimeout(resolve,500));
 }
 report??={failed:true,error:'No Android retention report within60seconds'};

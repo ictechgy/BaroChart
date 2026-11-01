@@ -6,7 +6,7 @@
 
 ## 파일 소유권
 
-root: src/core, src/web, examples/native/bridge.mjs, build/test scripts, declarations, docs/benchmarks/package/Library. Apple worker: native/AsterNative.swift, examples/native/async.swift, examples/native/main.swift, examples/ios/App.swift. Android worker: native/android/java/dev/aster/charts/AsterEngine.java, native/android/aster_jni.c, examples/android/AsyncVerification.java, examples/android/DemoActivity.java. Explorer는 frozen0.2.2의 /tmp 계측만 담당합니다. generated assets/실제 기기·성능 실행은 root가 조율합니다.
+root: src/core, src/web, examples/native/bridge.mjs, build/test scripts, declarations, docs/benchmarks/package/Library. Apple worker: native/BaroChartEngine.swift, examples/native/async.swift, examples/native/main.swift, examples/ios/App.swift. Android worker: native/android/java/kr/coden/barochart/BaroChartEngine.java, native/android/aster_jni.c, examples/android/AsyncVerification.java, examples/android/DemoActivity.java. Explorer는 frozen0.2.2의 /tmp 계측만 담당합니다. generated assets/실제 기기·성능 실행은 root가 조율합니다.
 
 ## native JS protocol (root 구현)
 

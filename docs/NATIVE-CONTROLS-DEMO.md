@@ -5,7 +5,7 @@ This is experimental **example source**, not a new verified UIKit/Android UI or 
 ## Enable on an already configured development machine
 
 - iOS: build the existing `examples/ios/App.swift` application using `node scripts/build-ios.mjs`, then include `--data-controls` in its launch arguments.
-- Android: build the existing `examples/android/DemoActivity.java` application using `node scripts/build-android.mjs`, then launch `dev.aster.charts.demo/dev.aster.charts.DemoActivity` with boolean Intent extra `data-controls=true` (for example `adb shell am start -n dev.aster.charts.demo/dev.aster.charts.DemoActivity --ez data-controls true`).
+- Android: build the existing `examples/android/DemoActivity.java` application using `node scripts/build-android.mjs`, then launch `kr.coden.barochart.demo/kr.coden.barochart.DemoActivity` with boolean Intent extra `data-controls=true` (for example `adb shell am start -n kr.coden.barochart.demo/kr.coden.barochart.DemoActivity --ez data-controls true`).
 - Existing validation modes omit this optional panel even if the flag is supplied. These commands require an independently configured SDK/device; the cloud checks do not run or install them. The AppKit desktop example has no new controls in this unit.
 
 ## Explicit actions

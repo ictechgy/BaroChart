@@ -23,8 +23,8 @@ for(const [name,from,to,label]of [
  ['missing hover repaint',"this.invalidate('hover');return;}}\n        else if(d.type==='freehand')","return;}}\n        else if(d.type==='freehand')",'rejected drag hover oracle'],
 ])test(`intentional ${name} fails the specific independent assertion`,t=>{assert.equal(canonical.split(from).length,2,'unique mutation');const r=run(canonical.replace(from,to));let failure;assert.throws(()=>verify(r),e=>{failure=e;return e instanceof assert.AssertionError&&e.message.includes(label);});t.diagnostic(failure.stack);});
 test('native public metrics wrappers are validated dictionary reads excluded from redraw notification (source only)',async()=>{
- const swift=await read('../native/AsterNative.swift'),java=await read('../native/android/java/dev/aster/charts/AsterEngine.java');
- assert.match(swift,/public func positionMetrics\(_ id: String\) throws -> \[String: Any\][\s\S]*?guard let result = try command\("positionMetrics", \[id\]\).toDictionary\(\) as\? \[String: Any\] else \{throw AsterError.invalidScene\}/);
+ const swift=await read('../native/BaroChartEngine.swift'),java=await read('../native/android/java/kr/coden/barochart/BaroChartEngine.java');
+ assert.match(swift,/public func positionMetrics\(_ id: String\) throws -> \[String: Any\][\s\S]*?guard let result = try command\("positionMetrics", \[id\]\).toDictionary\(\) as\? \[String: Any\] else \{throw BaroChartLowLevelError.invalidScene\}/);
  assert.match(swift,/else if !\[[^\n]+"positionMetrics"[^\n]+\.contains\(operation\)/);
  assert.match(java,/public JSONObject positionMetrics\(String id\) throws JSONException[\s\S]*?command\("positionMetrics",id\);if\(!\(result instanceof JSONObject\)\)throw new JSONException/);
  assert.match(java,/!operation.equals\("positionMetrics"\)/);

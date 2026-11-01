@@ -1,4 +1,4 @@
-package dev.aster.charts;
+package kr.coden.barochart;
 
 import android.app.Activity;
 import android.os.*;
@@ -10,8 +10,8 @@ import java.util.concurrent.CountDownLatch;
 
 /** The same measurement adapter is compiled over pinned baseline and candidate sources. */
 public final class HoverActivity extends Activity {
-    AsterEngine engine;
-    AsterChartView chart;
+    BaroChartEngine engine;
+    BaroChartView chart;
     volatile Throwable failure;
     volatile Sample pending;
     private volatile boolean measuring;
@@ -25,7 +25,7 @@ public final class HoverActivity extends Activity {
     private int droppedFrameReports;
     static final class Sample {
         final long eventTime;long injectNanos;final CountDownLatch submitted=new CountDownLatch(1);
-        long captureNanos,pointerNanos;int action,source,tool;float x,y;AsterChartView.DrawTiming draw;String error;
+        long captureNanos,pointerNanos;int action,source,tool;float x,y;BaroChartView.DrawTiming draw;String error;
         Sample(long time,long injection){eventTime=time;injectNanos=injection;}
         JSONObject json() throws JSONException {
             return new JSONObject().put("eventTimeMs",eventTime).put("action",action).put("source",source).put("toolType",tool).put("x",x).put("y",y)
@@ -38,7 +38,7 @@ public final class HoverActivity extends Activity {
     }
     @Override public void onCreate(Bundle state){super.onCreate(state);getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN|WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);try{
         int count=getIntent().getIntExtra("bars",100000),lines=getIntent().getIntExtra("lines",1);JSONArray series=new JSONArray();for(int i=0;i<lines;i++)series.put(new JSONObject().put("id","line"+i).put("type","line").put("panel","price").put("source","close").put("color",i%2==0?"#3abbd2":"#ecb65b"));
-        engine=new AsterEngine(this,count,new JSONObject().put("visibleBars",200).put("panels",new JSONArray().put(new JSONObject().put("id","price"))).put("series",series));chart=new AsterChartView(this,engine);
+        engine=new BaroChartEngine(this,count,new JSONObject().put("visibleBars",200).put("panels",new JSONArray().put(new JSONObject().put("id","price"))).put("series",series));chart=new BaroChartView(this,engine);
         chart.setOnHoverListener((view,event)->{
             int action=event.getActionMasked();if(action!=MotionEvent.ACTION_HOVER_ENTER&&action!=MotionEvent.ACTION_HOVER_MOVE)return true;
             Sample sample=pending;boolean match=sample!=null&&sample.captureNanos==0&&sample.eventTime==event.getEventTime();
@@ -52,7 +52,7 @@ public final class HoverActivity extends Activity {
         return new JSONObject().put("heartbeatGapsMs",new JSONArray(heartbeatGaps)).put("frameMetricsAvailable",true).put("frameMetricColumns",new JSONArray(new String[]{"totalMs","drawMs","syncMs","swapBuffersMs"})).put("frameMetrics",frames).put("frameMetricDroppedReports",dropped);
     }
     JSONObject memorySnapshot() throws Exception {Debug.MemoryInfo memory=new Debug.MemoryInfo();Debug.getMemoryInfo(memory);long rss=0;try(BufferedReader input=new BufferedReader(new FileReader("/proc/self/status"))){String line;while((line=input.readLine())!=null)if(line.startsWith("VmRSS:")){rss=Long.parseLong(line.substring(6).trim().split("\\s+")[0]);break;}}
-        JSONObject value=new JSONObject().put("processPSSKiB",memory.getTotalPss()).put("processRSSKiB",rss).put("runtime",engine.runtimeMetrics());try{value.put("cache",AsterChartView.class.getMethod("renderCacheMetrics").invoke(chart)).put("sharedPool",AsterChartView.class.getMethod("sharedCacheMetrics").invoke(null));}catch(NoSuchMethodException baseline){value.put("cacheAvailable",false);}return value;
+        JSONObject value=new JSONObject().put("processPSSKiB",memory.getTotalPss()).put("processRSSKiB",rss).put("runtime",engine.runtimeMetrics());try{value.put("cache",BaroChartView.class.getMethod("renderCacheMetrics").invoke(chart)).put("sharedPool",BaroChartView.class.getMethod("sharedCacheMetrics").invoke(null));}catch(NoSuchMethodException baseline){value.put("cacheAvailable",false);}return value;
     }
     @Override protected void onDestroy(){heartbeat.removeCallbacksAndMessages(null);measuring=false;if(frameListener!=null)getWindow().removeOnFrameMetricsAvailableListener(frameListener);if(frameThread!=null)frameThread.quitSafely();if(chart!=null){chart.setDrawProbe(null);chart.setOnHoverListener(null);}if(engine!=null)engine.close();super.onDestroy();}
 }

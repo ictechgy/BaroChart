@@ -1,16 +1,16 @@
 import UIKit
 import CoreText
 
-private func glyphDataSnapshot(_ engine:AsterEngine)throws->String {
+private func glyphDataSnapshot(_ engine:BaroChartEngine)throws->String {
     _=try engine.call("nativeThemeFont") // owner/closed guard before fixed test probe
     let source="(()=>{if(nativeModel.store.length>512)throw new RangeError('Glyph fixture bars');return JSON.stringify(Array.from({length:nativeModel.store.length},(_,i)=>nativeModel.store.at(i)));})()"
-    guard let value=engine.context.evaluateScript(source)?.toString() else{throw AsterError.invalidScene}
-    if let error=engine.context.exception{engine.context.exception=nil;throw AsterError.javaScript(error.toString() ?? "Glyph data probe")};return value
+    guard let value=engine.context.evaluateScript(source)?.toString() else{throw BaroChartLowLevelError.invalidScene}
+    if let error=engine.context.exception{engine.context.exception=nil;throw BaroChartLowLevelError.javaScript(error.toString() ?? "Glyph data probe")};return value
 }
 
 /// Real CoreText advances and glyph ink bounds for the fonts in this fixture.
 /// This validates portable label bounds; it does not certify all installed fonts.
-func verifyUIKitGlyphMatrix(_ engine:AsterEngine,documents:URL)throws->[String:Any] {
+func verifyUIKitGlyphMatrix(_ engine:BaroChartEngine,documents:URL)throws->[String:Any] {
     let before=try engine.command("inspect").toDictionary()!,anchors=try engine.saveDrawings(),beforeData=try glyphDataSnapshot(engine),originalFont=(before["theme"] as! [String:Any])["font"] as! String
     _=try engine.command("addAxis",[["id":"matrix-b","panel":"price","side":"left","label":"比較価格 B","padding":0]])
     let values=(0..<240).map{Double(2000+$0*7)}
@@ -42,12 +42,12 @@ func verifyUIKitGlyphMatrix(_ engine:AsterEngine,documents:URL)throws->[String:A
         }
         if !labels.contains(where:{$0["role"] as? String=="time-tick"}) || !labels.contains(where:{$0["role"] as? String=="panel-title"}) || !labels.contains(where:{$0["role"] as? String=="price-tick"}){violations.append("\(width)x\(height)/\(css) missing label roles")}
         let format=UIGraphicsImageRendererFormat();format.scale=1
-        let image=UIGraphicsImageRenderer(size:CGSize(width:width,height:height),format:format).image{ctx in AsterCoreGraphicsRenderer.render(scene,in:ctx.cgContext)}
+        let image=UIGraphicsImageRenderer(size:CGSize(width:width,height:height),format:format).image{ctx in BaroChartCoreGraphicsRenderer.render(scene,in:ctx.cgContext)}
         let name="glyph-\(Int(width))-\(Int(height))-\(Int(fontSize))-\(css.contains("bold") ? "sans" : "mono").png";try image.pngData()!.write(to:documents.appendingPathComponent(name))
         rows.append(["width":width,"height":height,"font":css,"labels":labels,"png":name,"boundary":"CoreText glyph bounds + renderer scene to offscreen CoreGraphics PNG, DPR1"])
     }}
     let after=try engine.command("inspect").toDictionary()!,sameLast=NSDictionary(dictionary:before["lastBar"] as! [String:Any]).isEqual(to:after["lastBar"] as! [AnyHashable:Any]),afterAnchors=try engine.saveDrawings(),afterData=try glyphDataSnapshot(engine)
     let unchanged=sameLast&&(before["storedBars"] as! Int)==(after["storedBars"] as! Int)&&afterAnchors==anchors&&beforeData==afterData
-    guard violations.isEmpty,unchanged,total>0 else{throw AsterError.javaScript("UIKit glyph matrix: \(violations.prefix(6)); raw data/anchors unchanged=\(unchanged)")}
+    guard violations.isEmpty,unchanged,total>0 else{throw BaroChartLowLevelError.javaScript("UIKit glyph matrix: \(violations.prefix(6)); raw data/anchors unchanged=\(unchanged)")}
     return ["cases":rows.count,"glyphLabels":total,"violations":violations,"rows":rows,"rawDataAndAnchorsUnchanged":unchanged,"rawBarsCompared":before["storedBars"]!,"dataSnapshotUtf8Bytes":beforeData.utf8.count,"fontsScope":"Menlo-Regular 12/24/36 and bold Helvetica36 with actual CoreText fallback runs; no all-font guarantee"]
 }

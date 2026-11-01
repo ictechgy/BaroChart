@@ -3,11 +3,11 @@ import UIKit
 @main
 final class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
-    var engine: AsterEngine!
-    var chart: AsterChartView!
+    var engine: BaroChartEngine!
+    var chart: BaroChartUIView!
     var checks:[String]=[]
-    var asyncJob:AsterAsyncJob?
-    var soak:AsterPrepareSoak?,soakContainer:UIStackView?,soakViews:[Int:AsterChartView]=[:],soakWidths:[Int:NSLayoutConstraint]=[:]
+    var asyncJob:BaroChartAsyncJob?
+    var soak:AsterPrepareSoak?,soakContainer:UIStackView?,soakViews:[Int:BaroChartUIView]=[:],soakWidths:[Int:NSLayoutConstraint]=[:]
     let asyncStatus=UILabel()
     let comparisonReadout=UILabel();var comparisonButtons:[String:UIButton]=[:],comparisonActive=false,savedComparison:String?,analysisCaption:String?;let analysisButton=UIButton(type:.system)
     private var dataReadout:UITextView?,dataActionGeneration=0,dataControlsMount=0,dataControlsClosed=false
@@ -41,7 +41,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         stopDataControls();dataControlsClosed=false
         do {
             let args=ProcessInfo.processInfo.arguments,prepareDemo=args.contains("--prepare-demo"),validationMode=["--study-test","--study-ui-test","--closed-observer-test","--self-test","--async-test","--async-bench","--prepare-test","--prepare-bench","--soak-test"].contains(where:args.contains),empty=(!validationMode && !prepareDemo)||["--study-test","--study-ui-test","--closed-observer-test","--async-test","--async-bench","--prepare-test","--prepare-bench","--soak-test","--prepare-demo"].contains(where:args.contains)
-            engine = try AsterEngine(bundleURL: Bundle.main.url(forResource: "aster-core", withExtension: "js")!, count:empty ? 0 : 10000,options:prepareDemo ? ["panels":[["id":"price","weight":3]],"series":[["id":"price","type":"candles","panel":"price"]]] : nil)
+            engine = try BaroChartEngine(bundleURL: Bundle.main.url(forResource: "aster-core", withExtension: "js")!, count:empty ? 0 : 10000,options:prepareDemo ? ["panels":[["id":"price","weight":3]],"series":[["id":"price","type":"candles","panel":"price"]]] : nil)
             if prepareDemo{for name in ["sma","ema","bollinger","macd","donchian","stochastic","rsi","atr"]{_=try engine.call("nativeIndicator",[name,name,[:],"price"])}}
             let window = UIWindow(windowScene:windowScene), controller = UIViewController(); controller.view.backgroundColor = .black
             let toolScroll=UIScrollView(),toolbar = UIStackView();toolbar.axis = .horizontal;toolbar.spacing=8;toolbar.translatesAutoresizingMaskIntoConstraints=false;toolScroll.addSubview(toolbar)
@@ -54,7 +54,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
             for (title,action) in [("Compare","setup"),("Hide B labels","hide-axis"),("Scale B","scale"),("B series","series"),("Add B line","drawing"),("Save B","save"),("Load B","load"),("Primary draw","primary"),("Range B","range"),("Digits B","precision")]{let button=UIButton(type:.system);button.setTitle(title,for:.normal);button.accessibilityIdentifier="comparison-"+action;button.addTarget(self,action:#selector(comparisonAction(_:)),for:.touchUpInside);comparisonButtons[action]=button;compareBar.addArrangedSubview(button);button.widthAnchor.constraint(greaterThanOrEqualToConstant:86).isActive=true}
             analysisButton.setTitle("Session VWAP",for:.normal);analysisButton.accessibilityIdentifier="analysis-session";analysisButton.addTarget(self,action:#selector(analysisAction),for:.touchUpInside);analysisButton.widthAnchor.constraint(greaterThanOrEqualToConstant:116).isActive=true;compareBar.insertArrangedSubview(analysisButton,at:0)
             comparisonReadout.textColor = .white;comparisonReadout.font = .monospacedSystemFont(ofSize:11,weight:.regular);comparisonReadout.numberOfLines=3;comparisonReadout.accessibilityIdentifier="comparison-readout";comparisonReadout.heightAnchor.constraint(equalToConstant:52).isActive=true
-            chart = AsterChartView(engine: engine);chart.onInteraction={ [weak self] in self?.refreshComparison() }; let stack = UIStackView(arrangedSubviews:[toolScroll,asyncBar,compareScroll,comparisonReadout,chart]); stack.axis = .vertical; stack.translatesAutoresizingMaskIntoConstraints = false; toolScroll.heightAnchor.constraint(equalToConstant:44).isActive = true
+            chart = BaroChartUIView(engine: engine);chart.onInteraction={ [weak self] in self?.refreshComparison() }; let stack = UIStackView(arrangedSubviews:[toolScroll,asyncBar,compareScroll,comparisonReadout,chart]); stack.axis = .vertical; stack.translatesAutoresizingMaskIntoConstraints = false; toolScroll.heightAnchor.constraint(equalToConstant:44).isActive = true
             if args.contains("--data-controls") && !validationMode{addDataControls(stack)}
             controller.view.addSubview(stack); NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo:controller.view.leadingAnchor),stack.trailingAnchor.constraint(equalTo:controller.view.trailingAnchor),stack.topAnchor.constraint(equalTo:controller.view.safeAreaLayoutGuide.topAnchor),stack.bottomAnchor.constraint(equalTo:controller.view.safeAreaLayoutGuide.bottomAnchor)])
             window.rootViewController = controller; self.window = window; window.makeKeyAndVisible()
@@ -77,7 +77,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
                     guard let self=self else{return}
                     self.soak=startNativePrepareSoak(Bundle.main.url(forResource:"aster-core",withExtension:"js")!,seconds:Double(self.argument("--soak-seconds",180)),bars:self.argument("--soak-bars",20000),charts:self.argument("--soak-charts",3),status:{[weak self] text in self?.asyncStatus.text=text},onEngine:{[weak self] index,source in
                         guard let self=self else{return};if let old=self.soakViews.removeValue(forKey:index){self.soakWidths.removeValue(forKey:index)?.isActive=false;self.soakContainer?.removeArrangedSubview(old);old.removeFromSuperview()}
-                        if let source=source{let view=AsterChartView(engine:source);self.soakViews[index]=view;self.soakContainer?.addArrangedSubview(view);let width=view.widthAnchor.constraint(equalToConstant:min(600,self.window?.bounds.width ?? 390));width.isActive=true;self.soakWidths[index]=width}
+                        if let source=source{let view=BaroChartUIView(engine:source);self.soakViews[index]=view;self.soakContainer?.addArrangedSubview(view);let width=view.widthAnchor.constraint(equalToConstant:min(600,self.window?.bounds.width ?? 390));width.isActive=true;self.soakWidths[index]=width}
                     },onResize:{[weak self] index,width,_ in guard let self=self else{return};let available=self.window?.bounds.width ?? 390;self.soakWidths[index]?.constant=min(available,width*(available<500 ? 0.5 : 1));self.soakContainer?.layoutIfNeeded();self.soakViews[index]?.setNeedsDisplay()}){[weak self] result in
                         switch result{case .success(var report):report["ios"]=UIDevice.current.systemVersion;report["nativeWindow"]=self?.window != nil;report["host"]="UIKit + CoreGraphics + JavaScriptCore";self?.write("ios-soak-validation.json",report);case .failure(let error):self?.write("ios-soak-validation.json",["failed":true,"error":String(describing:error)])};self?.soak=nil
                     }
@@ -118,12 +118,12 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     }
     func verifyStudyUI(){do{
         window?.rootViewController?.view.layoutIfNeeded();analysisButton.sendActions(for:.touchUpInside)
-        guard analysisCaption != nil else{throw AsterError.javaScript("Session VWAP button did not install the study demo")}
+        guard analysisCaption != nil else{throw BaroChartLowLevelError.javaScript("Session VWAP button did not install the study demo")}
         let width=max(100,chart.bounds.width),height=max(80,chart.bounds.height);var report=try verifyNativeAnalysisView(engine,width:width,height:height)
         chart.setNeedsDisplay();chart.layoutIfNeeded();let image=UIGraphicsImageRenderer(bounds:chart.bounds).image{_ in chart.drawHierarchy(in:chart.bounds,afterScreenUpdates:true)}
-        guard chart.lastError==nil,let png=image.pngData(),png.count>10000 else{throw AsterError.invalidScene}
+        guard chart.lastError==nil,let png=image.pngData(),png.count>10000 else{throw BaroChartLowLevelError.invalidScene}
         let expected=try engine.call("nativeAccessibilityText",[true,"uikit"]).toString()
-        guard chart.accessibilityValue==expected else{throw AsterError.javaScript("UIKit accessibility value did not follow the current rendered hover")}
+        guard chart.accessibilityValue==expected else{throw BaroChartLowLevelError.javaScript("UIKit accessibility value did not follow the current rendered hover")}
         report["host"]="UIKit + CoreGraphics + JavaScriptCore";report["ios"]=UIDevice.current.systemVersion;report["nativeWindow"]=window != nil;report["uiControlActions"]=true;report["nativePointerController"]=true;report["nativeUITouchInjected"]=false;report["physicalDevice"]=false;report["accessibilityValueExact"]=true;report["snapshotBytes"]=png.count
         try png.write(to:FileManager.default.urls(for:.documentDirectory,in:.userDomainMask)[0].appendingPathComponent("ios-study-ui.png"));write("ios-studies-ui-validation.json",report)
     }catch{write("ios-studies-ui-validation.json",["failed":true,"error":String(describing:error)])}}
@@ -132,7 +132,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         do{
             if action=="range"||action=="precision"{
                 let axes=try engine.command("inspect").forProperty("axes").toArray() as? [[String:Any]] ?? []
-                guard let axis=axes.first(where:{$0["id"] as? String=="comparison-B"}) else{throw AsterError.javaScript("Missing comparison axis")}
+                guard let axis=axes.first(where:{$0["id"] as? String=="comparison-B"}) else{throw BaroChartLowLevelError.javaScript("Missing comparison axis")}
                 var patch:[String:Any]=[:]
                 if action=="range"{patch["range"]=(axis["range"] as? [Any]) == nil ? [2000,2240] as Any : NSNull()}
                 else{patch["precision"]=(axis["precision"] as? Int)==0 ? 3 : 0}
@@ -147,7 +147,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     }
     func verifyAxesUI(){do{
         window?.rootViewController?.view.layoutIfNeeded();let width=max(100,chart.bounds.width),height=max(80,chart.bounds.height);var report=try verifyNativeAxes(engine,width:width,height:height),uiChecks:[String]=[];comparisonActive=true;refreshComparison()
-        func check(_ value:Bool,_ reason:String)throws{guard value else{throw AsterError.javaScript(reason)};uiChecks.append(reason)}
+        func check(_ value:Bool,_ reason:String)throws{guard value else{throw BaroChartLowLevelError.javaScript(reason)};uiChecks.append(reason)}
         func pointer(_ index:Int)throws{let point=try nativeAxisPoint(engine,index:index,width:width,height:height);_=try engine.call("nativeResize",[width,height]);_=try engine.call("nativePointer",["move",0,point["x"]!,point["y"]!]);refreshComparison()}
         try pointer(2);try check(comparisonReadout.text?.contains("C 103.00")==true&&comparisonReadout.text?.contains("SYNTH:B 2020.000")==true,"UIKit readout separates primary/B")
         try pointer(3);try check(comparisonReadout.text?.contains("C 104.00")==true&&comparisonReadout.text?.contains("SYNTH:B gap")==true,"UIKit readout keeps exact UTC gap")
@@ -169,7 +169,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         } catch {print(error)}
     }
     func write(_ name:String,_ report:[String:Any]) {do {let data=try JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]);try data.write(to:FileManager.default.urls(for:.documentDirectory,in:.userDomainMask)[0].appendingPathComponent(name))}catch{print(error)}}
-    func require(_ value:Bool,_ message:String)throws{if !value {throw AsterError.javaScript(message)};checks.append(message)}
+    func require(_ value:Bool,_ message:String)throws{if !value {throw BaroChartLowLevelError.javaScript(message)};checks.append(message)}
     func verify() {
         do {
             let core = try JSONSerialization.jsonObject(with: engine.call("nativeSelfTest").toString()!.data(using:.utf8)!) as! [String:Any]
@@ -202,7 +202,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
                 let begin=CFAbsoluteTimeGetCurrent();try engine.call("nativeInit",[count]);let load=(CFAbsoluteTimeGetCurrent()-begin)*1000
                 var samples:[Double]=[],stats:[String:Int]=[:];let format=UIGraphicsImageRendererFormat();format.scale=1
                 let renderer=UIGraphicsImageRenderer(size:CGSize(width:1200,height:700),format:format)
-                for i in 0..<70 {let start=CFAbsoluteTimeGetCurrent(),scene=try engine.scene(width:1200,height:700);stats=scene.stats;_ = renderer.image{ctx in AsterCoreGraphicsRenderer.render(scene,in:ctx.cgContext)};if i>=10{samples.append((CFAbsoluteTimeGetCurrent()-start)*1000)}}
+                for i in 0..<70 {let start=CFAbsoluteTimeGetCurrent(),scene=try engine.scene(width:1200,height:700);stats=scene.stats;_ = renderer.image{ctx in BaroChartCoreGraphicsRenderer.render(scene,in:ctx.cgContext)};if i>=10{samples.append((CFAbsoluteTimeGetCurrent()-start)*1000)}}
                 samples.sort();rows.append(["storedBars":count,"stats":stats,"loadGenerateCopyEMAms":load,"sceneJSONDecodeCoreGraphicsImageMs":["p50":samples[29],"p95":samples[56],"p99":samples[58]]])
             }
             write("ios-benchmark.json",["seed":42,"warmup":10,"samples":60,"width":1200,"height":700,"dpr":1,"rows":rows]);try engine.call("nativeInit",[10000]);chart.setNeedsDisplay()

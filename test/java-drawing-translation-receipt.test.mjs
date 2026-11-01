@@ -10,15 +10,15 @@ import {JAVA_DRAWING_TRANSLATION_BOUNDARY, JAVA_DRAWING_TRANSLATION_EXPECTED, JA
 const validOutput = JAVA_DRAWING_TRANSLATION_SCENARIOS.map(name => `PASS ${name}`).join('\n')
     + '\nRESULT scenarios=65 checks=103 scope=drawing-translation-receipt-decoder\n';
 const initializationTrace = [
-    "[0.031s][info][class,init] 100 Initializing 'dev/aster/charts/DrawingTranslationReceiptTest' (0x00000000)",
-    "[0.032s][info][class,init] 101 Initializing 'dev/aster/charts/AsterEngine$DrawingTranslationReceipt'(no method) (0x00000000)",
+    "[0.031s][info][class,init] 100 Initializing 'kr/coden/barochart/DrawingTranslationReceiptTest' (0x00000000)",
+    "[0.032s][info][class,init] 101 Initializing 'kr/coden/barochart/BaroChartEngine$DrawingTranslationReceipt'(no method) (0x00000000)",
     "[0.033s][info][class,init] 102 Initializing 'org/json/JSONException'(no method) (0x00000000)",
     "[0.034s][info][class,init] 103 Initializing 'org/json/JSONObject' (0x00000000)",
 ].join('\n');
 
 test('Java drawing translation evidence distinguishes the actual decoder from compile-only host signatures', () => {
     assert.equal(JAVA_DRAWING_TRANSLATION_BOUNDARY.productionDecoderRuntimeTested, true);
-    assert.equal(JAVA_DRAWING_TRANSLATION_BOUNDARY.productionDecoderMethodExecuted, 'AsterEngine.DrawingTranslationReceipt.changed');
+    assert.equal(JAVA_DRAWING_TRANSLATION_BOUNDARY.productionDecoderMethodExecuted, 'BaroChartEngine.DrawingTranslationReceipt.changed');
     assert.equal(JAVA_DRAWING_TRANSLATION_BOUNDARY.javaSourceLevel, 8);
     assert.equal(JAVA_DRAWING_TRANSLATION_BOUNDARY.javaBytecodeTarget, 8);
     assert.equal(JAVA_DRAWING_TRANSLATION_BOUNDARY.jsonExceptionSignatureExecuted, true);
@@ -28,17 +28,17 @@ test('Java drawing translation evidence distinguishes the actual decoder from co
         'jsonContainerMethodsExecuted', 'ownerThreadBehaviorTested', 'observerNotificationsRuntimeTested', 'nativeDrawingTranslationExecuted',
         'performanceMeasured']) assert.equal(JAVA_DRAWING_TRANSLATION_BOUNDARY[key], false, key);
     assert.deepEqual(JAVA_DRAWING_TRANSLATION_PRODUCTION_SOURCES, [
-        'native/android/java/dev/aster/charts/AsterEngine.java',
-        'native/android/java/dev/aster/charts/AsterColumns.java',
-        'native/android/java/dev/aster/charts/WorkspaceRestoreJob.java',
-        'native/android/java/dev/aster/charts/NativeJobBudget.java',
-        'native/android/java/dev/aster/charts/ParamsUpdateJob.java',
+        'native/android/java/kr/coden/barochart/BaroChartEngine.java',
+        'native/android/java/kr/coden/barochart/BaroChartColumns.java',
+        'native/android/java/kr/coden/barochart/WorkspaceRestoreJob.java',
+        'native/android/java/kr/coden/barochart/NativeJobBudget.java',
+        'native/android/java/kr/coden/barochart/ParamsUpdateJob.java',
     ]);
-    assert.equal(JAVA_DRAWING_TRANSLATION_HARNESS, 'test/java-drawing-translation-receipt/dev/aster/charts/DrawingTranslationReceiptTest.java');
+    assert.equal(JAVA_DRAWING_TRANSLATION_HARNESS, 'test/java-drawing-translation-receipt/kr/coden/barochart/DrawingTranslationReceiptTest.java');
 });
 
 test('Java drawing translation compiler uses warnings-as-errors and explicit isolated Java 8 inputs', () => {
-    const sources = ['/repo/native/AsterEngine.java', '/repo/test/DrawingTranslationReceiptTest.java'];
+    const sources = ['/repo/native/BaroChartEngine.java', '/repo/test/DrawingTranslationReceiptTest.java'];
     assert.deepEqual(javaDrawingTranslationCompilerArguments('/tmp/classes', '/tmp/empty', sources), [
         '-m', 'jdk.compiler/com.sun.tools.javac.Main', '-source', '8', '-target', '8',
         '-Xlint:all,-options', '-Werror', '-proc:none', '-implicit:none', '-encoding', 'UTF-8',
@@ -69,21 +69,21 @@ test('Java drawing translation result rejects incomplete, duplicate, unexpected 
 
 test('Java drawing translation class-init trace verifies that only the nested decoder and exception/NULL signatures initialize', () => {
     assert.deepEqual(verifyJavaDrawingTranslationInitialization(initializationTrace), {
-        initializedProductionClasses: ['dev/aster/charts/AsterEngine$DrawingTranslationReceipt'],
+        initializedProductionClasses: ['kr/coden/barochart/BaroChartEngine$DrawingTranslationReceipt'],
         initializedAndroidClasses: [], initializedJsonClasses: ['org/json/JSONException', 'org/json/JSONObject'],
     });
     // Verifying or loading the outer class is not the same as initializing it.
     assert.deepEqual(verifyJavaDrawingTranslationInitialization(initializationTrace
-        + '\n[info][class,init] Start class verification for: dev.aster.charts.AsterEngine'),
+        + '\n[info][class,init] Start class verification for: kr.coden.barochart.BaroChartEngine'),
     verifyJavaDrawingTranslationInitialization(initializationTrace));
 });
 
 test('Java drawing translation initialization guard fails closed for outer Engine, helpers, Android or JSON runtime', () => {
     assert.throws(() => verifyJavaDrawingTranslationInitialization(''), /did not observe/);
     assert.throws(() => verifyJavaDrawingTranslationInitialization(initializationTrace.replace('org/json/JSONException', 'unrelated/Exception')), /checked exception and NULL placeholder signatures/);
-    for (const forbidden of ['dev/aster/charts/AsterEngine', 'dev/aster/charts/AsterEngine$ScenePacket',
-        'dev/aster/charts/AsterColumns', 'dev/aster/charts/WorkspaceRestoreJob', 'android/os/Looper',
-        'android/os/Handler', 'dev/aster/charts/AsterEngine$CompactionReceipt', 'org/json/JSONArray', 'org/json/JSONTokener']) {
+    for (const forbidden of ['kr/coden/barochart/BaroChartEngine', 'kr/coden/barochart/BaroChartEngine$ScenePacket',
+        'kr/coden/barochart/BaroChartColumns', 'kr/coden/barochart/WorkspaceRestoreJob', 'android/os/Looper',
+        'android/os/Handler', 'kr/coden/barochart/BaroChartEngine$CompactionReceipt', 'org/json/JSONArray', 'org/json/JSONTokener']) {
         assert.throws(() => verifyJavaDrawingTranslationInitialization(initializationTrace
             + `\n[info][class,init] 103 Initializing '${forbidden}' (0x00000000)`), Error, forbidden);
     }
@@ -103,8 +103,8 @@ test('Java drawing translation harness covers boxed counts and malformed values 
     }
     assert.match(source, /checks\+\+;\s*if \(!condition\) throw new AssertionError/);
     assert.deepEqual([...source.matchAll(/^import ([^;]+);$/gm)].map(match => match[1]), ['org.json.JSONException', 'org.json.JSONObject']);
-    assert.deepEqual([...source.matchAll(/\bAsterEngine\.(\w+)/g)].map(match => match[1]), ['DrawingTranslationReceipt', 'DrawingTranslationReceipt']);
-    assert.doesNotMatch(source, /new\s+(?:AsterEngine|JSONObject|JSONArray|Thread)\b|Class\.forName|System\.loadLibrary/);
+    assert.deepEqual([...source.matchAll(/\bBaroChartEngine\.(\w+)/g)].map(match => match[1]), ['DrawingTranslationReceipt', 'DrawingTranslationReceipt']);
+    assert.doesNotMatch(source, /new\s+(?:BaroChartEngine|JSONObject|JSONArray|Thread)\b|Class\.forName|System\.loadLibrary/);
     assert.doesNotMatch(source, /\b(?:Handler|Looper|Executor|JSONArray|JSONTokener)\b/);
     assert.match(source, /rejected\("json-null-sentinel", JSONObject\.NULL, numeric\)/);
     assert.equal((source.match(/JSONObject\./g) || []).length, 1);

@@ -1,6 +1,6 @@
 # 완료된 Android 작업의 참조 정리
 
-0.2.4에서 완료된 `AsterEngine.AsyncJob`을 앱이 보관하면 listener와 캡처한 Activity, 요청 JSON/descriptor, worker 또는 실패 객체에 도달할 수 있었습니다. native handle이 해제되어도 Java 객체가 해제된다는 의미는 아닙니다. 0.2.5는 terminal callback에 결과·metrics를 전달한 뒤 `finally`에서 listener, eventJSON, inputColumns, descriptor, worker, preceding, failure를 비웁니다. 작업 소유 Handler callback도 제거합니다. 이미 큐에 든 progress는 terminal/stopped/null listener를 확인하므로 완료 후 callback을 전달하지 않습니다.
+0.2.4에서 완료된 `BaroChartEngine.AsyncJob`을 앱이 보관하면 listener와 캡처한 Activity, 요청 JSON/descriptor, worker 또는 실패 객체에 도달할 수 있었습니다. native handle이 해제되어도 Java 객체가 해제된다는 의미는 아닙니다. 0.2.5는 terminal callback에 결과·metrics를 전달한 뒤 `finally`에서 listener, eventJSON, inputColumns, descriptor, worker, preceding, failure를 비웁니다. 작업 소유 Handler callback도 제거합니다. 이미 큐에 든 progress는 terminal/stopped/null listener를 확인하므로 완료 후 callback을 전달하지 않습니다.
 
 `close()`는 observers·observer errors·error listener도 비우며 재호출할 수 있습니다. job은 nonstatic inner class여서 보관한 job이 닫힌 outer engine 및 Handler를 보관하는 관계는 유지됩니다. `AutoCloseable`/owner-thread와 명시적 `close()` 계약을 계속 지켜야 합니다. 이 수정은 모든 외부 앱 참조의 자동 수거를 약속하지 않습니다.
 
@@ -21,7 +21,7 @@ runner는 명시적으로 선택한 API36/arm64-v8a 기기에 자체 debug 앱�
 ```sh
 node scripts/build-retention-probe.mjs \
   --base-apk /path/to/baseline.apk \
-  --engine /path/to/baseline/AsterEngine.java \
+  --engine /path/to/baseline/BaroChartEngine.java \
   --out /tmp/aster-retention-probe
 ASTER_ANDROID_SERIAL=<chosen-device> node scripts/test-android-retention.mjs \
   --apk /tmp/aster-retention-probe/aster-retention.apk \

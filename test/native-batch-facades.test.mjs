@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-const swift=readFileSync(new URL('../native/AsterNative.swift',import.meta.url),'utf8'),java=readFileSync(new URL('../native/android/java/dev/aster/charts/AsterEngine.java',import.meta.url),'utf8');
+const swift=readFileSync(new URL('../native/BaroChartEngine.swift',import.meta.url),'utf8'),java=readFileSync(new URL('../native/android/java/kr/coden/barochart/BaroChartEngine.java',import.meta.url),'utf8');
 const sw=swift.slice(swift.indexOf('/// Opt-in final-value deduplication.'),swift.indexOf('/// Synchronous retained-window maintenance'));
 const ja=java.slice(java.indexOf('static final class DataBatchReceipt'),java.indexOf('/** Synchronous retained-window maintenance'));
 function ordered(text,...parts){let at=0;for(const part of parts){const next=text.indexOf(part,at);assert.ok(next>=0,part);at=next+part.length;}}

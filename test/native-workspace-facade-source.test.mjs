@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 // Static source assertions only. Separate Java checks do not execute Android/JNI.
-const swift=readFileSync(new URL('../native/AsterNative.swift',import.meta.url),'utf8');
-const java=readFileSync(new URL('../native/android/java/dev/aster/charts/AsterEngine.java',import.meta.url),'utf8');
+const swift=readFileSync(new URL('../native/BaroChartEngine.swift',import.meta.url),'utf8');
+const java=readFileSync(new URL('../native/android/java/kr/coden/barochart/BaroChartEngine.java',import.meta.url),'utf8');
 function method(source,marker){const start=source.indexOf(marker);assert.ok(start>=0);const begin=source.indexOf('{',start);let depth=1,i=begin+1;for(;depth&&i<source.length;i++){if(source[i]==='{')depth++;else if(source[i]==='}')depth--;}assert.equal(depth,0);return source.slice(begin+1,i-1);}
 for(const [name,source,save,preflight,call] of [
  ['Swift',swift,'public func saveWorkspace(','public func preflightWorkspace(','call'],

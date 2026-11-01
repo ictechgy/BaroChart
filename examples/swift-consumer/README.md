@@ -1,6 +1,6 @@
 # Independent SwiftPM consumer
 
-This executable package and Xcode iOS app depend on the local `AsterNative` library product. Their source targets do not include SDK Swift files or existing demo test imports. `AsterEngine()` resolves the library-owned SwiftPM resource internally.
+This executable package and Xcode iOS app depend on the local `BaroChart` library product. Their source targets do not include SDK Swift files or existing demo test imports. `BaroChartEngine()` resolves the library-owned SwiftPM resource internally.
 
 From the repository root:
 

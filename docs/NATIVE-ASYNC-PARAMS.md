@@ -167,7 +167,7 @@ a related-suite result, not a rerun of the entire project suite or native SDK QA
 
 ## Java source facade and execution boundary
 
-`AsterEngine.setIndicatorParamsAsync(id, params, options, listener)` returns a
+`BaroChartEngine.setIndicatorParamsAsync(id, params, options, listener)` returns a
 `ParamsJob`. The complete parameter object replaces the old settings. The engine
 must be main/UI-owned and no other async job may be active. There is no implicit
 supersession. A custom indicator must be application-linked in the native bundle;
@@ -213,8 +213,8 @@ Swift compilation/JSC runtime validation remains pending for the source implemen
 **Experimental and unverified on Apple platforms.** Static checks cannot establish
 Swift compilation, concurrency diagnostics, actual ARC cleanup, or JSC behavior.
 
-`AsterEngine.setIndicatorParamsAsync(_:params:timeout:maxBarsPerStep:progress:completion:)`
-returns `AsterParamsJob`. Create and call the engine on the main thread. The source
+`BaroChartEngine.setIndicatorParamsAsync(_:params:timeout:maxBarsPerStep:progress:completion:)`
+returns `BaroChartParamsJob`. Create and call the engine on the main thread. The source
 runtime, model, store and unrelated entries stay in place. The worker uses an
 independent VM with a fixed calculation chunk (1..16,384). Static modules must be
 prelinked in the same bundle; arbitrary registered source strings are unsupported.
@@ -234,8 +234,8 @@ by this combined workspace/params accounting. The checkpoint limit remains the
 publication-time policy described above, not a lifetime engine/RSS ceiling.
 
 `cancel()` and `commitOutcome` are thread-safe. `cleanupPending`,
-`job.retryCleanup()`, `AsterEngine.paramsCleanupStatus()` and
-`AsterEngine.retryParamsCleanup(registration)` are main-owner operations.
+`job.retryCleanup()`, `BaroChartEngine.paramsCleanupStatus()` and
+`BaroChartEngine.retryParamsCleanup(registration)` are main-owner operations.
 Cancellation linearizes immediately before publication without holding a lock
 across JavaScript. Once publication begins, a confirmed commit wins over later
 cancellation/deadline. A noop completes as `unchanged`, without redraw.
@@ -247,7 +247,7 @@ of its publicly exposed raw `JSContext`. Therefore close never converts an unkno
 publication to cleanup-complete merely because the engine is closed.
 
 If publication/status or Abort cannot be confirmed, the original completion is
-called **once** with `AsterParamsError.cleanupPending(registration:outcome:)`.
+called **once** with `BaroChartParamsError.cleanupPending(registration:outcome:)`.
 This is **not permission to call the mutation again**. The job drops its client
 progress/completion closures and error references. A bounded recovery registry
 keeps the original context, actual creator-retirement lease, registration,
@@ -277,7 +277,7 @@ let job = try engine.setIndicatorParamsAsync("trend", params: ["period": 30]) { 
     case .success(let metrics):
         print(metrics.outcome) // committed or unchanged
     case .failure(let error):
-        if case AsterParamsError.cleanupPending(let registration, let outcome) = error {
+        if case BaroChartParamsError.cleanupPending(let registration, let outcome) = error {
             pendingRegistration = registration
             print("Publication/cleanup requires recovery", outcome)
             // Do not issue another setIndicatorParamsAsync here.
@@ -288,8 +288,8 @@ let job = try engine.setIndicatorParamsAsync("trend", params: ["period": 30]) { 
 }
 // Later, from the main owner, even if the old engine has closed:
 if let registration = pendingRegistration {
-    let results = try AsterEngine.retryParamsCleanup(registration)
-    let remaining = try AsterEngine.paramsCleanupStatus()
+    let results = try BaroChartEngine.retryParamsCleanup(registration)
+    let remaining = try BaroChartEngine.paramsCleanupStatus()
     // Record each result.outcome; if awaitingCreatorCleanup is true, inspect
     // remaining again after the creator acknowledgment. Do not retry mutation.
     print(results, remaining)

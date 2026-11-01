@@ -74,10 +74,10 @@ chart.api.setTheme({background:'#123',font:'bold 18px sans-serif'});
 Swift Package:
 
 ```swift
-let engine = try AsterEngine(options:["panels":[["id":"price"]],
+let engine = try BaroChartEngine(options:["panels":[["id":"price"]],
     "series":[["id":"price","type":"candles","panel":"price"]]])
-let chart = AsterChartView(engine:engine)
-try engine.setData(bars) // [AsterBar]
+let chart = BaroChartUIView(engine:engine)
+try engine.setData(bars) // [BaroChartBar]
 try engine.applyDataEvent(["kind":"append","bar":nextBar]) // JSON dictionary
 try engine.addIndicator("r","rsi",["period":14])
 try engine.addPanel(["id":"rsi","range":[0,100]])
@@ -90,8 +90,8 @@ Android:
 ```java
 JSONObject options=new JSONObject().put("panels",new JSONArray().put(new JSONObject().put("id","price")))
     .put("series",new JSONArray().put(new JSONObject().put("id","price").put("type","candles").put("panel","price")));
-AsterEngine engine=new AsterEngine(context,0,options);
-AsterChartView chart=new AsterChartView(context,engine);
+BaroChartEngine engine=new BaroChartEngine(context,0,options);
+BaroChartView chart=new BaroChartView(context,engine);
 engine.setData(bars); // JSONArray
 engine.applyDataEvent(new JSONObject().put("kind","append").put("bar",nextBar));
 engine.addIndicator("r","rsi",new JSONObject().put("period",14));

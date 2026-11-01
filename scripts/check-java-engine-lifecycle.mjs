@@ -1,5 +1,5 @@
 // Explicit optional runtime check. Importing this module and npm test never start Java or clang.
-// Production AsterEngine executes with a test-only host JNI stub and primitive Android/JSON fixtures.
+// Production BaroChartEngine executes with a test-only host JNI stub and primitive Android/JSON fixtures.
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {mkdir,mkdtemp,readFile,readdir,rm} from 'node:fs/promises';
@@ -8,13 +8,13 @@ import {dirname,extname,join,relative,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
-const harnessClass='dev.aster.charts.EngineLifecycleHarness';
+const harnessClass='kr.coden.barochart.EngineLifecycleHarness';
 export const JAVA_ENGINE_LIFECYCLE_PRODUCTION_SOURCES=Object.freeze([
-    'native/android/java/dev/aster/charts/AsterEngine.java',
-    'native/android/java/dev/aster/charts/AsterColumns.java',
-    'native/android/java/dev/aster/charts/WorkspaceRestoreJob.java',
-    'native/android/java/dev/aster/charts/NativeJobBudget.java',
-    'native/android/java/dev/aster/charts/ParamsUpdateJob.java',
+    'native/android/java/kr/coden/barochart/BaroChartEngine.java',
+    'native/android/java/kr/coden/barochart/BaroChartColumns.java',
+    'native/android/java/kr/coden/barochart/WorkspaceRestoreJob.java',
+    'native/android/java/kr/coden/barochart/NativeJobBudget.java',
+    'native/android/java/kr/coden/barochart/ParamsUpdateJob.java',
 ]);
 export const JAVA_ENGINE_LIFECYCLE_EXPECTED=Object.freeze({scenarios:5,checks:26});
 export const JAVA_ENGINE_LIFECYCLE_SCENARIOS=Object.freeze([
@@ -49,7 +49,7 @@ export async function checkJavaEngineLifecycle({java=process.env.ASTER_JAVA??'ja
         const inputs=[...sources,nativeFixture,runnerPath];const before=await hashes(inputs);
         const javaVersion=run(java,['-version'],'Java version',15000);const compiler=run(java,['-m','jdk.compiler/com.sun.tools.javac.Main','-version'],'Java compiler version',15000);
         const home=process.env.ASTER_JAVA_HOME??await javaHome(java);const include=join(home,'include');const platform=process.platform==='darwin'?'darwin':'linux';
-        const libraryName=process.platform==='darwin'?'libaster.dylib':'libaster.so';
+        const libraryName=process.platform==='darwin'?'libaster.dylib':'libbarochart.so';
         const nativeArgs=[process.platform==='darwin'?'-dynamiclib':'-shared','-fPIC','-std=c11','-Wall','-Wextra','-Werror',`-I${include}`,`-I${join(include,platform)}`,nativeFixture,'-o',join(library,libraryName)];
         const nativeCompiler=run(clang,nativeArgs,'Host JNI stub compilation');
         const compilerDiagnostics=run(java,javaEngineLifecycleCompilerArguments(classes,empty,sources),'Java lifecycle compilation');

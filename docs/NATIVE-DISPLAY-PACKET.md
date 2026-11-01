@@ -1,6 +1,6 @@
 # Android private Float64 표시 전송
 
-`AsterChartView`는 QuickJS의 display commands를 private packet으로 받는다. 원본 OHLCV·지표 벡터를 변경하거나 transfer하지 않는다. 기존 public `scene()`·`render(Canvas, JSONObject)` 및 native JSON 함수는 유지한다. Apple renderer는 기존 JSON 경로를 사용하며 이 Android 전송의 네이티브 구현을 Apple에도 제공했다고 설명하지 않는다.
+`BaroChartView`는 QuickJS의 display commands를 private packet으로 받는다. 원본 OHLCV·지표 벡터를 변경하거나 transfer하지 않는다. 기존 public `scene()`·`render(Canvas, JSONObject)` 및 native JSON 함수는 유지한다. Apple renderer는 기존 JSON 경로를 사용하며 이 Android 전송의 네이티브 구현을 Apple에도 제공했다고 설명하지 않는다.
 
 packet v1은 작은 UTF-8 JSON metadata와 소유한 `double[]`로 구성된다. metadata에는 string dictionary·layer counts·표시 크기·background·stats가 있으며 geometry와 dash는 Float64Array에서 JNI 소유 복사로 전달한다. JNI 반환은 표준 `Object[]{String,double[]}`라 새 nested Java class 이름을 C에서 찾지 않는다. borrowed QuickJS buffer를 Java에 남기지 않는다. 이는 zero-copy 전송이 아니다.
 

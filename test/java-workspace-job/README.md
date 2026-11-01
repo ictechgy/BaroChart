@@ -29,7 +29,7 @@ node --test test/java-workspace-job.test.mjs
   전달하고 callback/source-protocol/budget/retained 참조가 모두 0인지 검사한다.
   다른 reservation identity 보존, 정상 deferred 시작과 전달 전 취소도 실행한다.
   enqueue한 뒤 throw하는 Host는 계약 밖이지만, 해당 late start도 terminal guard로
-  무시되는 방어 경계를 별도로 검사한다. Node guard가 `AsterEngine`의 실제 호출
+  무시되는 방어 경계를 별도로 검사한다. Node guard가 `BaroChartEngine`의 실제 호출
   연결을 확인하지만 Android adapter 전체를 런타임 실행하는 것은 아니다.
 - 성공 시 source identity, 6개 column의 정확한 bounded chunk 복사, 빈 source,
   262,144 + 1 원소 경계, source fence 해제 후 publication, worker 종료 후
@@ -43,7 +43,7 @@ node --test test/java-workspace-job.test.mjs
   않는지 확인한다.
 - observer/completion 재진입 전에 busy와 예산이 해제되는지 확인한다. 재진입
   시나리오는 해제된 원래 busy 상태를 검사한 뒤 별도 독립 Host의 다음 job을
-  시작한다. 실제 `AsterEngine` adapter의 same-engine 재진입은 실행하지 않는다.
+  시작한다. 실제 `BaroChartEngine` adapter의 same-engine 재진입은 실행하지 않는다.
 - 중복 start/admission, 미완료 admission callback 재전달, 중복/늦은 handoff와
   늦은 copy/progress callback에서 이중 해제, 이중 publication, 두 번째 worker,
   이전 ticket의 새 handle 사용, 중복 completion이 발생하지 않는지 확인한다.
@@ -111,6 +111,6 @@ runner는 source SHA-256, Java/compiler 버전, 고정 scenario/check 수, 경�
 
 사용 compiler 옵션은 `-source 8 -target 8 -Xlint:all,-options -Werror`다.
 이는 최신 JDK에서 Java 8 소스/bytecode target을 확인하는 것이며 Java SE 8 전체 API
-호환성 certification은 아니다. Android SDK 빌드, 실제 `AsterEngine` Host adapter,
+호환성 certification은 아니다. Android SDK 빌드, 실제 `BaroChartEngine` Host adapter,
 Android 런타임, JNI/JSON/native allocator 실행, 물리 기기 성능, 장시간 누수 안정성은
 이 검사의 범위 밖이다. 실행 시간은 성능 측정 결과로 사용하지 않는다.

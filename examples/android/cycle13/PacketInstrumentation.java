@@ -1,4 +1,4 @@
-package dev.aster.charts;
+package kr.coden.barochart;
 
 import android.app.Instrumentation;
 import android.content.Intent;

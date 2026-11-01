@@ -9,8 +9,8 @@ not be assumed to contain this API.
 
 ## API and execution boundary
 
-`AsterEngine.restoreWorkspaceAsync(document, datasetBinding:, timeout: 30,
-maxBarsPerStep: 4096, progress:, completion:)` returns an `AsterWorkspaceJob` whose
+`BaroChartEngine.restoreWorkspaceAsync(document, datasetBinding:, timeout: 30,
+maxBarsPerStep: 4096, progress:, completion:)` returns an `BaroChartWorkspaceJob` whose
 `cancel()` is thread-safe. Start restore on the live Engine's main owner thread.
 One Engine permits one active generic **or** workspace job; a new request does not
 implicitly supersede an existing job. The old chart remains usable while the
@@ -89,8 +89,8 @@ remains, confirms release. In the uncertain case:
   lease delays actual retirement so that the context remains available for Abort;
   merely keeping a context pointer is insufficient.
 
-Main-owner static `AsterEngine.workspaceCleanupStatus` and
-`AsterEngine.retryWorkspaceCleanup` remain reachable after both Engine and job
+Main-owner static `BaroChartEngine.workspaceCleanupStatus` and
+`BaroChartEngine.retryWorkspaceCleanup` remain reachable after both Engine and job
 have died. One retry invocation makes at most one attempt per recovery record;
 records already being retried are skipped on reentry. There is no automatic tight
 retry loop, and successful recovery never emits a second completion. A permanently

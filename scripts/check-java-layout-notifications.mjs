@@ -8,15 +8,15 @@ import {dirname, join, relative, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const harnessClass = 'dev.aster.charts.LayoutReceiptTest';
+const harnessClass = 'kr.coden.barochart.LayoutReceiptTest';
 export const JAVA_LAYOUT_PRODUCTION_SOURCES = Object.freeze([
-    'native/android/java/dev/aster/charts/AsterEngine.java',
-    'native/android/java/dev/aster/charts/AsterColumns.java',
-    'native/android/java/dev/aster/charts/WorkspaceRestoreJob.java',
-    'native/android/java/dev/aster/charts/NativeJobBudget.java',
-    'native/android/java/dev/aster/charts/ParamsUpdateJob.java',
+    'native/android/java/kr/coden/barochart/BaroChartEngine.java',
+    'native/android/java/kr/coden/barochart/BaroChartColumns.java',
+    'native/android/java/kr/coden/barochart/WorkspaceRestoreJob.java',
+    'native/android/java/kr/coden/barochart/NativeJobBudget.java',
+    'native/android/java/kr/coden/barochart/ParamsUpdateJob.java',
 ]);
-export const JAVA_LAYOUT_HARNESS = 'test/java-layout-receipt/dev/aster/charts/LayoutReceiptTest.java';
+export const JAVA_LAYOUT_HARNESS = 'test/java-layout-receipt/kr/coden/barochart/LayoutReceiptTest.java';
 export const JAVA_LAYOUT_JSON_FIXTURE = 'test/java-layout-receipt/org/json/JSONObject.java';
 export const JAVA_LAYOUT_EXPECTED = Object.freeze({scenarios: 19, checks: 32});
 export const JAVA_LAYOUT_SCENARIOS = Object.freeze([
@@ -29,7 +29,7 @@ export const JAVA_LAYOUT_SCENARIOS = Object.freeze([
 export const JAVA_LAYOUT_BOUNDARY = Object.freeze({
     evidence: 'Production nested layout receipt decoder executed with a test-only JSONObject fixture; full Engine typechecked against compile-only Android/org.json signatures',
     productionDecoderRuntimeTested: true,
-    productionDecoderMethodsExecuted: ['AsterEngine.LayoutReceipt.panelOrder', 'AsterEngine.LayoutReceipt.indicatorPlacement'],
+    productionDecoderMethodsExecuted: ['BaroChartEngine.LayoutReceipt.panelOrder', 'BaroChartEngine.LayoutReceipt.indicatorPlacement'],
     javaSourceLevel: 8,
     javaBytecodeTarget: 8,
     javaSE8ApiCompatibilityVerified: false,
@@ -91,9 +91,9 @@ export function verifyJavaLayoutOutput(stdout, stderr) {
 
 export function verifyJavaLayoutInitialization(trace) {
     const initialized = [...trace.matchAll(/\bInitializing '([^']+)'/g)].map(match => match[1]);
-    const production = initialized.filter(name => name.startsWith('dev/aster/charts/'));
+    const production = initialized.filter(name => name.startsWith('kr/coden/barochart/'));
     const harness = harnessClass.replaceAll('.', '/');
-    const decoders = ['dev/aster/charts/AsterEngine$LayoutReceipt'];
+    const decoders = ['kr/coden/barochart/BaroChartEngine$LayoutReceipt'];
     for (const decoder of decoders) if (!production.includes(decoder)) throw new Error(`Class initialization trace did not observe ${decoder}`);
     for (const name of production) if (!decoders.includes(name) && name !== harness)
         throw new Error(`Unexpected production host/helper class initialized: ${name}`);
@@ -127,8 +127,8 @@ export async function checkJavaLayoutNotifications({java = process.env.ASTER_JAV
             const bytes = await readFile(path);
             if (bytes.readUInt32BE(0) !== 0xcafebabe || bytes.readUInt16BE(6) !== 52) throw new Error(`Expected Java 8 bytecode: ${path}`);
         }
-        for (const name of ['AsterEngine', 'AsterEngine$LayoutReceipt', 'AsterColumns', 'WorkspaceRestoreJob', 'LayoutReceiptTest'])
-            await readFile(join(classes, 'dev/aster/charts', `${name}.class`));
+        for (const name of ['BaroChartEngine', 'BaroChartEngine$LayoutReceipt', 'BaroChartColumns', 'WorkspaceRestoreJob', 'LayoutReceiptTest'])
+            await readFile(join(classes, 'kr/coden/barochart', `${name}.class`));
         await readFile(join(classes, 'org/json/JSONObject.class'));
         const runtime = runJava(java, ['-ea', `-Djava.library.path=${empty}`,
             `-Xlog:class+init=info:file=${tracePath}`, '-cp', classes, harnessClass], 15000);

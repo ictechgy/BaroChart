@@ -1,4 +1,4 @@
-package dev.aster.charts;
+package kr.coden.barochart;
 
 import android.app.Activity;
 import android.content.*;
@@ -13,7 +13,7 @@ import java.util.*;
 public final class MobileUXActivity extends Activity {
     static volatile MobileUXActivity latest;
     static int creations,destroys;
-    AsterEngine engine; AsterChartView chart; ScrollView scroll;
+    BaroChartEngine engine; BaroChartView chart; ScrollView scroll;
     volatile Throwable failure;
     final JSONArray events=new JSONArray(),draws=new JSONArray();
     int clicks,interceptTrue,interceptFalse;
@@ -30,11 +30,11 @@ public final class MobileUXActivity extends Activity {
                 .put("series",new JSONArray().put(new JSONObject().put("id","close").put("panel","price").put("type","line").put("source","close"))
                     .put(new JSONObject().put("id","volume").put("panel","volume").put("type","histogram").put("source","volume")));
             if(getIntent().getBooleanExtra("profile",false)){JSONArray lines=new JSONArray();for(int i=0;i<getIntent().getIntExtra("lines",1);i++)lines.put(new JSONObject().put("id","line"+i).put("type","line").put("panel","price").put("source","close").put("color",i%2==0?"#3abbd2":"#ecb65b"));options=new JSONObject().put("visibleBars",200).put("panels",new JSONArray().put(new JSONObject().put("id","price"))).put("series",lines);}
-            engine=new AsterEngine(this,getIntent().getBooleanExtra("profile",false)?100000:4096,options);
+            engine=new BaroChartEngine(this,getIntent().getBooleanExtra("profile",false)?100000:4096,options);
             if(state!=null){if(state.containsKey("drawings"))engine.loadDrawings(state.getString("drawings"));if(state.containsKey("from"))engine.invoke("nativeView",state.getDouble("from"),state.getDouble("to"));}
             Configuration config=new Configuration(getResources().getConfiguration());config.fontScale=getIntent().getFloatExtra("fontScale",1f);
             Context viewContext=createConfigurationContext(config);
-            chart=new AsterChartView(viewContext,engine);chart.setId(0x415354);chart.setOnClickListener(v->clicks++);
+            chart=new BaroChartView(viewContext,engine);chart.setId(0x415354);chart.setOnClickListener(v->clicks++);
             chart.setOnTouchListener((view,event)->{try{events.put(new JSONObject().put("action",event.getActionMasked()).put("count",event.getPointerCount()).put("source",event.getSource()).put("tool",event.getToolType(0)).put("time",event.getEventTime()).put("x",event.getX()).put("y",event.getY()));}catch(JSONException e){failure=e;}return false;});
             installDrawProbe();
             scroll=new ScrollView(this){@Override public void requestDisallowInterceptTouchEvent(boolean disallow){if(disallow)interceptTrue++;else interceptFalse++;super.requestDisallowInterceptTouchEvent(disallow);}};

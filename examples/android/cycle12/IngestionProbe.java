@@ -1,4 +1,4 @@
-package dev.aster.charts;
+package kr.coden.barochart;
 import android.os.*;import android.view.*;import org.json.*;import java.util.*;import java.io.*;
 
 /** Test-only activity input capture + existing production View draw endpoint. */
@@ -21,7 +21,7 @@ final class IngestionProbe {
         if(pending.size()==512){pending.removeFirst();sampleDrops++;}pending.addLast(row);return row;
     }
     void dispatch(JSONObject row,long began)throws JSONException {if(row!=null)row.put("dispatchCpuMs",(System.nanoTime()-began)/1e6);}
-    void submitted(AsterChartView.DrawTiming timing,long revision)throws JSONException {
+    void submitted(BaroChartView.DrawTiming timing,long revision)throws JSONException {
         if(!measuring)return;drawCount++;draw.add((timing.submitNanos-timing.startNanos)/1e6);sceneJNI.add(timing.scene.jniNanos/1e6);envelopeParse.add(timing.scene.envelopeParseNanos/1e6);bodyParse.add(timing.scene.bodyParseNanos/1e6);canvas.add(timing.canvasNanos/1e6);accessibility.add(timing.accessibilityNanos/1e6);bitmap.add(timing.bitmapCopyNanos/1e6);
         while(!pending.isEmpty()){
             JSONObject row=pending.removeFirst();long captured=row.getLong("captureNanos");if(timing.startNanos<captured){pending.addFirst(row);break;}

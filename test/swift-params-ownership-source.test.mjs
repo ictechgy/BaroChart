@@ -5,7 +5,7 @@ import {readFileSync} from 'node:fs';
 // Static source assertions only. This does not compile or execute Swift, JSC,
 // ARC, DispatchQueue, or creator run loops. Apple SDK/runtime checks remain
 // necessary to establish actual publication, cancellation, and release behavior.
-const raw = readFileSync(new URL('../native/AsterNative.swift', import.meta.url), 'utf8');
+const raw = readFileSync(new URL('../native/BaroChartEngine.swift', import.meta.url), 'utf8');
 const source = raw.replace(/"(?:\\.|[^"\\])*"|\/\/[^\n]*|\/\*[\s\S]*?\*\//g,
   token => token.startsWith('/') ? token.replace(/[^\n]/g, ' ') : token);
 const compact = value => value.replace(/\s+/g, '');
@@ -42,26 +42,26 @@ function ordered(scope, ...parts) {
     after = index + fragment.length;
   }
 }
-const record = block(source, /\bclass\s+AsterParamsSourceRecord\b/);
-const registry = block(source, /\benum\s+AsterParamsRegistry\b/);
-const job = block(source, /\bclass\s+AsterParamsJob\b/);
-const engine = block(source, /\bclass\s+AsterEngine\b/);
-const admission = block(source, /\benum\s+AsterNativeAdmission\b/);
+const record = block(source, /\bclass\s+BaroChartParamsSourceRecord\b/);
+const registry = block(source, /\benum\s+BaroChartParamsRegistry\b/);
+const job = block(source, /\bclass\s+BaroChartParamsJob\b/);
+const engine = block(source, /\bclass\s+BaroChartEngine\b/);
+const admission = block(source, /\benum\s+BaroChartNativeAdmission\b/);
 const method = (scope,name) => block(scope,new RegExp(`\\bfunc\\s+${name}\\s*(?:<[^>]+>)?\\s*\\(`));
 const check = (name,run) => test(`Swift params static source assertion: ${name}`,run);
 
 check('main owner and stable source precede registration and deferred Begin', () => {
   ordered(method(engine,'setIndicatorParamsAsync'),'try asyncPreflight(timeout)','JSONSerialization.data(',
     'try asyncPreflight(timeout)','guard contextBacking === source, revision == capturedRevision',
-    'AsterParamsRegistry.reserve(self,id,source,contextRuntime)','AsterParamsJob(', 'activeParams = job', 'DispatchQueue.main.async','job.start(bundle:bundle)');
+    'BaroChartParamsRegistry.reserve(self,id,source,contextRuntime)','BaroChartParamsJob(', 'activeParams = job', 'DispatchQueue.main.async','job.start(bundle:bundle)');
   assert.doesNotMatch(method(engine,'setIndicatorParamsAsync'), /nativeParamsSourceBegin/);
   ordered(method(job,'start'),'record.began = true','nativeParamsSourceBegin','begin["registration"]','begin["ticket"]','self.params = nil','admit(ticket:ticket,bundle:bundle)');
 });
 check('workspace and params share opaque admission, not source registries', () => {
-  for(const name of ['AsterParamsRegistry','AsterWorkspaceRegistry']) {
+  for(const name of ['BaroChartParamsRegistry','BaroChartWorkspaceRegistry']) {
     const scope = block(source,new RegExp(`enum\\s+${name}\\b`));
-    assert.match(method(scope,'reserve'), /AsterNativeAdmission\.reserve\(\)/);
-    assert.match(method(scope,'remove'), /AsterNativeAdmission\.release\(record\.admission\)/);
+    assert.match(method(scope,'reserve'), /BaroChartNativeAdmission\.reserve\(\)/);
+    assert.match(method(scope,'remove'), /BaroChartNativeAdmission\.release\(record\.admission\)/);
   }
   ordered(method(admission,'reserve'),'guard slots < 2','slots += 1');
   ordered(method(admission,'admit'),'!lease.released','!lease.admitted','cost <= asterWorkspaceMaxBytes - bytes','bytes += cost');
@@ -70,7 +70,7 @@ check('workspace and params share opaque admission, not source registries', () =
 });
 check('pending record cannot own client callbacks, Error or strong Engine/job', () => {
   const fields=record.slice(0,record.search(/\binit\s*\(/));
-  assert.match(fields,/weak var engine: AsterEngine\?/);assert.match(fields,/weak var job: AsterParamsJob\?/);
+  assert.match(fields,/weak var engine: BaroChartEngine\?/);assert.match(fields,/weak var job: BaroChartParamsJob\?/);
   assert.match(fields,/weak var sourceIdentity: JSContext\?/);
   assert.doesNotMatch(fields,/\b(?:Error|Result|Any|AnyObject|JSValue)\b|->|\b(?:completion|callback|progress)\b/);
   ordered(method(job,'finish'),'terminal = true','lock.unlock()','params = nil','plan = nil','record = nil','let callback = completion','completion = nil','progress = nil','callback?(');
@@ -79,7 +79,7 @@ check('captured Status/Abort remains available after Engine close', () => {
   const recover=method(record,'recover');
   ordered(recover,'if released {return}','if !began','try autoreleasepool','guard let context = context','nativeParamsSourceStatus','if status == "active"','nativeParamsSourceAbort','guard released');
   assert.doesNotMatch(recover,/engine|closed|contextBacking|handle|ticket/);
-  const close=method(engine,'close');assert.match(close,/AsterParamsRegistry\.retry\(pending\)/);assert.match(close,/activeParams\?\.cancel\(\)/);
+  const close=method(engine,'close');assert.match(close,/BaroChartParamsRegistry\.retry\(pending\)/);assert.match(close,/activeParams\?\.cancel\(\)/);
   assert.doesNotMatch(close,/record\.released|sourceFreed|indeterminate|ParamsRegistry\.remove/);
 });
 check('terminal receipts bind registration, id, schema, output names and offsets', () => {
@@ -90,16 +90,16 @@ check('terminal receipts bind registration, id, schema, output names and offsets
 });
 check('late committed notification follows creator acknowledgment and budget release', () => {
   const remove=method(registry,'remove');
-  ordered(remove,'record.detach','records.removeValue','AsterNativeAdmission.release','record.detaching = false','owner?.pendingParamsRegistration = nil','owner?.activeParams = nil','record.outcome == .committed','record.notified = true','!owner.closed','!owner.closing','owner.contextBacking === source','if shouldNotify {owner?.notifyChanges()}','completion()');
+  ordered(remove,'record.detach','records.removeValue','BaroChartNativeAdmission.release','record.detaching = false','owner?.pendingParamsRegistration = nil','owner?.activeParams = nil','record.outcome == .committed','record.notified = true','!owner.closed','!owner.closing','owner.contextBacking === source','if shouldNotify {owner?.notifyChanges()}','completion()');
   ordered(method(record,'detach'),'detaching = true','context = nil','let owner = runtime','runtime = nil','releaseCaptureLease(afterRetirementIfNeeded:completion)');
   assert.doesNotMatch(registry,/NSLock|lock\(|while\s/);
   const identityPool=block(remove,/let shouldNotify: Bool = autoreleasepool/);assert.doesNotMatch(identityPool,/notifyChanges/);
 });
 check('one pending completion drops callbacks and leaves minimal registry record', () => {
   const settle=method(job,'settle');
-  ordered(settle,'try record.recover()','AsterParamsRegistry.remove(record)');
+  ordered(settle,'try record.recover()','BaroChartParamsRegistry.remove(record)');
   const pending=block(settle,/\bcatch\s*/);
-  ordered(pending,'record.pending = true','engine?.pendingParamsRegistration = registration','self.record = nil','plan = nil','finish(.failure(AsterParamsError.cleanupPending(');
+  ordered(pending,'record.pending = true','engine?.pendingParamsRegistration = registration','self.record = nil','plan = nil','finish(.failure(BaroChartParamsError.cleanupPending(');
   assert.doesNotMatch(pending,/record\.\w+\s*=\s*(?:error|self|completion|progress)\b/);
   assert.doesNotMatch(method(registry,'retry'),/completion|finish\(|DispatchQueue|while\s/);
 });
@@ -107,8 +107,8 @@ check('recovery is bounded, main-only and returns status instead of redelivery',
   const retry=method(registry,'retry');
   ordered(retry,'precondition(Thread.isMainThread)','Array(records.values)','record.pending && !record.retrying && !record.detaching','record.retrying = true','try record.recover()','record.retrying = false','remove(record)','results.append(record.statusValue())');
   assert.match(compact(retry),/min\(32,record\.failures\+1\)/);
-  for(const name of ['paramsCleanupStatus','retryParamsCleanup']) ordered(method(engine,name),'guard Thread.isMainThread','AsterParamsRegistry.');
-  ordered(method(job,'retryCleanup'),'guard Thread.isMainThread','AsterParamsRegistry.retry(registration)');
+  for(const name of ['paramsCleanupStatus','retryParamsCleanup']) ordered(method(engine,name),'guard Thread.isMainThread','BaroChartParamsRegistry.');
+  ordered(method(job,'retryCleanup'),'guard Thread.isMainThread','BaroChartParamsRegistry.retry(registration)');
 });
 check('original runtime never swaps to worker context', () => {
   assert.doesNotMatch(job,/contextBacking\s*=(?!=)|contextRuntime\s*=(?!=)|nativeAsyncFinish|nativeWorkspaceSourceFinish/);
@@ -117,7 +117,7 @@ check('original runtime never swaps to worker context', () => {
 });
 check('whole worker autoreleasepool exits before owner publication or cleanup', () => {
   const admit=method(job,'admit');
-  ordered(admit,'AsterNativeAdmission.admit(record.admission,plan.bytes)','Thread.detachNewThread','let result: Result<Int,Error> = autoreleasepool','compute(bundle:bundle,plan:plan)','DispatchQueue.main.async','case .success','publish(ticket:ticket)','case .failure','settle(error)');
+  ordered(admit,'BaroChartNativeAdmission.admit(record.admission,plan.bytes)','Thread.detachNewThread','let result: Result<Int,Error> = autoreleasepool','compute(bundle:bundle,plan:plan)','DispatchQueue.main.async','case .success','publish(ticket:ticket)','case .failure','settle(error)');
   const thread=block(admit,/Thread\.detachNewThread/),pool=block(thread,/autoreleasepool/);
   assert.doesNotMatch(pool,/DispatchQueue|publish\(|settle\(/);
   assert.doesNotMatch(thread.slice(thread.indexOf('DispatchQueue.main.async')),/JSContext|JSValue|\bcontext\b/);
@@ -153,7 +153,7 @@ check('checkpoint transport is per bounded record and output validation chunked'
   assert.doesNotMatch(compute,/JSONSerialization.*checkpoints|checkpoint.*joined/);
 });
 check('busy and source lifetime include parameters without changing generic raw context close', () => {
-  ordered(method(engine,'workspaceAvailability'),'AsterParamsRegistry.contains(pending)','guard activeParams == nil');
+  ordered(method(engine,'workspaceAvailability'),'BaroChartParamsRegistry.contains(pending)','guard activeParams == nil');
   assert.match(method(engine,'command'),/activeParams != nil/);assert.match(method(engine,'command'),/pendingParamsRegistration.map/);
   assert.match(method(engine,'close'),/if workspaceContextInstalled \{contextBacking = nil\}/);
   assert.match(block(engine,/\bdeinit\b/),/activeParams\?\.cancel\(\)/);

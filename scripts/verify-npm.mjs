@@ -16,7 +16,7 @@ const packed=JSON.parse(run('npm',['--cache',cache,'pack','--offline','--ignore-
 assert(packed?.filename);const tarball=join(scratch,packed.filename),names=packed.files.map(f=>f.path);
 assert(names.length>0);assert(!names.some(n=>/^(artifacts|benchmarks|test|examples|scripts)\//.test(n)),'npm payload includes development/evidence outputs');
 assert(!names.some(n=>/\.(?:zip|apk|jks|so|png|log)$/.test(n)),'npm payload includes an output binary/key/log');
-for(const n of ['LICENSE','NOTICE','THIRD_PARTY_NOTICES.md','src/index.mjs','src/index.d.mts','native/Resources/aster-core.js','native/android/quickjs/LICENSE','native/android/quickjs/PROVENANCE.json','native/AsterColumns.swift','Package.swift'])assert(names.includes(n),`Missing packaged source/license ${n}`);
+for(const n of ['LICENSE','NOTICE','THIRD_PARTY_NOTICES.md','src/index.mjs','src/index.d.mts','native/Resources/aster-core.js','native/android/quickjs/LICENSE','native/android/quickjs/PROVENANCE.json','native/BaroChartColumns.swift','Package.swift'])assert(names.includes(n),`Missing packaged source/license ${n}`);
 await writeFile(join(consumer,'package.json'),JSON.stringify({name:'aster-isolated-consumer',private:true,type:'module'}));
 run('npm',['--cache',cache,'install','--offline','--ignore-scripts','--no-audit','--no-fund',tarball],consumer);
 await copyFile(join(root,'test/package-types.test.mts'),join(consumer,'consumer.mts'));

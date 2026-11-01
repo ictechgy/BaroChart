@@ -6,7 +6,7 @@ def generatedAssets = layout.buildDirectory.dir('generated/asterAssets')
 if (providers.gradleProperty('asterBuildDir').isPresent()) layout.buildDirectory = file(providers.gradleProperty('asterBuildDir').get())
 
 android {
-    namespace 'dev.aster.charts'
+    namespace 'kr.coden.barochart'
     compileSdk 36
     buildToolsVersion '36.0.0'
     ndkVersion '29.0.14033849'
@@ -14,7 +14,7 @@ android {
         minSdk 26
         ndk { abiFilters 'arm64-v8a' }
         consumerProguardFiles 'consumer-rules.pro'
-        resValue 'string', 'aster_sdk_version', sdkVersion
+        resValue 'string', 'barochart_sdk_version', sdkVersion
         externalNativeBuild { cmake { arguments '-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON' } }
     }
     sourceSets.main {

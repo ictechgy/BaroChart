@@ -80,7 +80,7 @@ test('independent expected app binary rejects foreign evidence',()=>{
   assert.throws(()=>validateIOSIngestionEvidence(e),/resource\/binary binding/);
 });
 test('foreign bundled source hash rejects without changing expected manifest',()=>{
-  const e=iosEvidence();e.report.buildManifest.sources={...e.report.buildManifest.sources,'native/AsterNative.swift':'0'.repeat(64)};sealEvidence(e);
+  const e=iosEvidence();e.report.buildManifest.sources={...e.report.buildManifest.sources,'native/BaroChartEngine.swift':'0'.repeat(64)};sealEvidence(e);
   assert.throws(()=>validateIOSIngestionEvidence(e),/source\/fixture hashes/);
 });
 test('original UIKit pilot has no fabricated draw samples or900 status',()=>{
