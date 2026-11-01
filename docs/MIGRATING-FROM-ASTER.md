@@ -1,6 +1,6 @@
 # Migrating from Aster names to BaroChart
 
-Version 0.3.0 renames the native SDK's public names to the product name before the first public release. Behavior is unchanged, and documents saved by earlier versions still load. [한국어](MIGRATING-FROM-ASTER.ko.md)
+Version 0.3.0 renames the native SDK's public names to the product name before the first public release. Saved documents keep their `aster.*` schemas and still load. One behavior changed: view setters now throw instead of recording a silent `lastError` (see the [changelog](../CHANGELOG.md)). [한국어](MIGRATING-FROM-ASTER.ko.md)
 
 ## What changed
 
@@ -52,4 +52,4 @@ chart.setOnChartErrorListener { error -> android.util.Log.w("Chart", error.toStr
 
 ## Saved documents
 
-Nothing to migrate. A workspace or drawings document saved by 0.2.x reads and re-saves byte-for-byte in 0.3.0 (covered by `test/legacy-documents-compat.test.mjs`).
+Nothing to migrate. Workspace and drawings documents saved by 0.2.x load in 0.3.0; Node, iOS and Android tests restore a pre-rename fixture and re-save it unchanged. A workspace saved by 0.2.x on iOS may re-save with its dataset keys in a different order, because 0.3.0 writes them in one fixed order on every platform. The content is the same.

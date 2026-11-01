@@ -69,6 +69,8 @@ struct PriceChartScreen: View {
 
 `BaroChartEngineOptions()`는 라벨 없는 `price` 패널 하나와 캔들 시리즈로 시작합니다. 저수준 `BaroChartEngine()` 생성자는 라벨이 붙은 데모 차트를 만드니 앱에서는 `BaroChartEngine(options:)`를 쓰세요.
 
+Dynamic Type 같은 뷰 옵션은 `configure`로 설정합니다. 새 내부 뷰마다 한 번 실행됩니다: `BaroChartView(engine: engine, configure: { $0.adjustsFontForContentSizeCategory = true })`.
+
 ## UIKit
 
 ```swift
@@ -117,8 +119,12 @@ try engine.apply(.prepend(olderBars))       // 과거 이력 추가
 ## 지표, 드로잉, 테마
 
 ```swift
+// RSI 선은 rsi 패널이 있어야 하므로 그 패널을 가진 엔진을 만든다
+let engine = try BaroChartEngine(options: BaroChartEngineOptions(panels: [BaroChartPanel(id: "price", weight: 3), BaroChartPanel(id: "rsi", weight: 1)]))
+try engine.setBars(history)
 try engine.addIndicator(.rsi(period: 14), id: "rsi14")
 try engine.addSeries(BaroChartSeries(id: "rsi14-line", type: .line, panel: "rsi", indicator: "rsi14"))
+try engine.updateSeries(id: "rsi14-line", BaroChartSeriesPatch(color: "#f0b755"))   // 색만 바꾼다
 let rsi = try engine.indicatorValue(id: "rsi14", index: 199)
 
 try engine.setTool(.trendline)              // 이제 터치로 추세선을 그림
@@ -129,7 +135,7 @@ try engine.undo()
 try engine.setTheme(.light)
 ```
 
-내장 지표 35종은 `BaroChartIndicatorKind`, 드로잉 도구 16종은 `BaroChartDrawingTool`에 있습니다. `rsi` 같은 패널은 `BaroChartEngineOptions(panels:)`로 추가합니다.
+내장 지표 35종은 `BaroChartIndicatorKind`, 드로잉 도구 16종은 `BaroChartDrawingTool`에 있습니다. `rsi` 같은 패널은 `BaroChartEngineOptions(panels:)`로 추가합니다. `updateSeries`와 `updateDrawing`은 패치를 받습니다. 설정한 필드만 바뀌고, 시리즈 종류와 드로잉 도구는 바꿀 수 없습니다.
 
 ## 저장과 복원
 

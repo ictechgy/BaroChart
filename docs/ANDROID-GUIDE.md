@@ -73,6 +73,8 @@ fun PriceChart(viewModel: PriceChartViewModel) {
 
 `EngineOptions.defaults()` creates one unlabeled `price` panel with a candlestick series. The constructor `new BaroChartEngine(context, count)` builds a labeled demonstration chart; prefer `BaroChartEngine.create` in apps.
 
+To set view options such as system font scaling, pass `configure`. It runs once for each new underlying view: `BaroChart(engine = engine, configure = { it.setSystemFontScaleEnabled(true) })`.
+
 ## Android View
 
 ```java
@@ -113,8 +115,17 @@ An invalid event, such as an `update` whose time is not the last bar's time or a
 ## Indicators, drawings and themes
 
 ```kotlin
+// An RSI line needs an `rsi` panel, so create the engine with one.
+val options = EngineOptions(
+    listOf(Panel("price", 3.0), Panel("rsi", 1.0)),
+    listOf(Series.builder("price", SeriesType.CANDLES).build()),
+    null,
+)
+val engine = BaroChartEngine.create(context, options)
+engine.setBars(history)
 engine.addIndicator(Indicator.rsi(14), "rsi14")
 engine.addSeries(Series.builder("rsi14-line", SeriesType.LINE).panel("rsi").indicator("rsi14").build())
+engine.updateSeries("rsi14-line", SeriesPatch.builder().color("#f0b755").build())   // changes only the color
 val rsi = engine.indicatorValue("rsi14", null, 199)
 
 engine.setTool(DrawingTool.TRENDLINE)            // touch input now draws trend lines
@@ -125,7 +136,7 @@ engine.undo()
 engine.setTheme(Theme.LIGHT)
 ```
 
-`IndicatorKind` lists the 35 built-in indicators and `DrawingTool` the 16 drawing tools. Add panels such as `rsi` through `EngineOptions(panels, series, theme)`.
+`IndicatorKind` lists the 35 built-in indicators and `DrawingTool` the 16 drawing tools. Add panels such as `rsi` through `EngineOptions(panels, series, theme)`. `updateSeries` and `updateDrawing` take a `SeriesPatch` / `DrawingPatch`: only the fields you set change, and the series type or drawing tool cannot change.
 
 ## Saving and restoring
 

@@ -69,6 +69,8 @@ struct PriceChartScreen: View {
 
 `BaroChartEngineOptions()` creates one unlabeled `price` panel with a candlestick series. The low-level `BaroChartEngine()` initializer builds a labeled demonstration chart; prefer `BaroChartEngine(options:)` in apps.
 
+To set view options such as Dynamic Type, pass `configure`. It runs once for each new underlying view: `BaroChartView(engine: engine, configure: { $0.adjustsFontForContentSizeCategory = true })`.
+
 ## UIKit
 
 ```swift
@@ -117,8 +119,12 @@ An invalid event, such as an `update` whose time is not the last bar's time or a
 ## Indicators, drawings and themes
 
 ```swift
+// An RSI line needs an `rsi` panel, so create the engine with one.
+let engine = try BaroChartEngine(options: BaroChartEngineOptions(panels: [BaroChartPanel(id: "price", weight: 3), BaroChartPanel(id: "rsi", weight: 1)]))
+try engine.setBars(history)
 try engine.addIndicator(.rsi(period: 14), id: "rsi14")
 try engine.addSeries(BaroChartSeries(id: "rsi14-line", type: .line, panel: "rsi", indicator: "rsi14"))
+try engine.updateSeries(id: "rsi14-line", BaroChartSeriesPatch(color: "#f0b755"))   // changes only the color
 let rsi = try engine.indicatorValue(id: "rsi14", index: 199)
 
 try engine.setTool(.trendline)              // touch input now draws trend lines
@@ -129,7 +135,7 @@ try engine.undo()
 try engine.setTheme(.light)
 ```
 
-`BaroChartIndicatorKind` lists the 35 built-in indicators and `BaroChartDrawingTool` the 16 drawing tools. Add panels such as `rsi` through `BaroChartEngineOptions(panels:)`.
+`BaroChartIndicatorKind` lists the 35 built-in indicators and `BaroChartDrawingTool` the 16 drawing tools. Add panels such as `rsi` through `BaroChartEngineOptions(panels:)`. `updateSeries` and `updateDrawing` take a patch: only the fields you set change, and the series type or drawing tool cannot change.
 
 ## Saving and restoring
 

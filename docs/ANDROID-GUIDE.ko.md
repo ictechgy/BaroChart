@@ -76,6 +76,8 @@ fun PriceChart(viewModel: PriceChartViewModel) {
 
 `EngineOptions.defaults()`는 라벨 없는 `price` 패널 하나와 캔들 시리즈로 시작합니다. 생성자 `new BaroChartEngine(context, count)`는 라벨이 붙은 데모 차트를 만드니 앱에서는 `BaroChartEngine.create`를 쓰세요.
 
+시스템 글꼴 크기 같은 뷰 옵션은 `configure`로 설정합니다. 새 내부 뷰마다 한 번 실행됩니다: `BaroChart(engine = engine, configure = { it.setSystemFontScaleEnabled(true) })`.
+
 ## Android View
 
 ```java
@@ -116,8 +118,17 @@ engine.apply(DataEvent.prepend(olderBars))       // 과거 이력 추가
 ## 지표, 드로잉, 테마
 
 ```kotlin
+// RSI 선은 rsi 패널이 있어야 하므로 그 패널을 가진 엔진을 만든다
+val options = EngineOptions(
+    listOf(Panel("price", 3.0), Panel("rsi", 1.0)),
+    listOf(Series.builder("price", SeriesType.CANDLES).build()),
+    null,
+)
+val engine = BaroChartEngine.create(context, options)
+engine.setBars(history)
 engine.addIndicator(Indicator.rsi(14), "rsi14")
 engine.addSeries(Series.builder("rsi14-line", SeriesType.LINE).panel("rsi").indicator("rsi14").build())
+engine.updateSeries("rsi14-line", SeriesPatch.builder().color("#f0b755").build())   // 색만 바꾼다
 val rsi = engine.indicatorValue("rsi14", null, 199)
 
 engine.setTool(DrawingTool.TRENDLINE)            // 이제 터치로 추세선을 그림
@@ -128,7 +139,7 @@ engine.undo()
 engine.setTheme(Theme.LIGHT)
 ```
 
-내장 지표 35종은 `IndicatorKind`, 드로잉 도구 16종은 `DrawingTool`에 있습니다. `rsi` 같은 패널은 `EngineOptions(panels, series, theme)`로 추가합니다.
+내장 지표 35종은 `IndicatorKind`, 드로잉 도구 16종은 `DrawingTool`에 있습니다. `rsi` 같은 패널은 `EngineOptions(panels, series, theme)`로 추가합니다. `updateSeries`와 `updateDrawing`은 `SeriesPatch`·`DrawingPatch`를 받습니다. 설정한 필드만 바뀌고, 시리즈 종류와 드로잉 도구는 바꿀 수 없습니다.
 
 ## 저장과 복원
 
