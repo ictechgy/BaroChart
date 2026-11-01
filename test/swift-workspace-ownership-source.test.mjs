@@ -250,7 +250,9 @@ staticTest('only workspace-installed backing is dropped on close or deinit', () 
   const context = block(engine, /\bvar\s+context\s*:\s*JSContext/);
   assert.match(compact(context), /set\{contextBacking=newValue;workspaceContextInstalled=false\}/);
   assert.match(compact(context), /get\{guardletcontext=contextBackingelse\{preconditionFailure\(/);
-  const close = method(engine, 'close');
+  // 공개 close()는 정리 본체 closeOnOwner()를 BaroChartError로 감싼다
+  assert.match(method(engine, 'close'), /try BaroChartError\.mapping \{try closeOnOwner\(\)\}/);
+  const close = method(engine, 'closeOnOwner');
   ordered(close, 'guard Thread.current === owner', 'if closing',
     'BaroChartWorkspaceRegistry.retry(pending)', 'if closed', 'activeWorkspace?.cancel()',
     'closed = true', 'if workspaceContextInstalled {contextBacking = nil}',

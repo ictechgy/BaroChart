@@ -12,7 +12,7 @@ public struct BaroChartIngestionError: Error, CustomStringConvertible {
     public init(code: String, message: String) {self.code=code;self.message=message}
     public var description: String {"IngestionError[\(code)]: \(message)"}
 }
-public struct BaroChartBar: Codable {
+public struct BaroChartBar: Codable, Equatable, Sendable {
     public let time, open, high, low, close, volume: Double
     public init(time: Double, open: Double, high: Double, low: Double, close: Double, volume: Double) {
         self.time = time; self.open = open; self.high = high; self.low = low; self.close = close; self.volume = volume
@@ -1308,6 +1308,8 @@ public final class BaroChartEngine {
     fileprivate var closing = false
     fileprivate var activeAsync: BaroChartAsyncJob?
     fileprivate var closed = false
+    /// 타입 API(isClosed)용 읽기 전용 상태
+    var closedState: Bool { closed }
     private let bundleSource: String
     private let owner = Thread.current
     private var observers: [UUID: () throws -> Void] = [:]
@@ -1483,7 +1485,10 @@ public final class BaroChartEngine {
     /// and opt-in ingestion ring are retired now. Legacy source columns in the
     /// nonoptional raw context live until engine release;
     /// raw JS access after close is unsupported.
-    public func close() throws {
+    /// Closes the engine on its owner thread. Repeated calls are no-ops. Throws `BaroChartError`.
+    public func close() throws {try BaroChartError.mapping {try closeOnOwner()}}
+    /// 엔진 정리 본체(저수준 오류를 던진다)
+    private func closeOnOwner() throws {
         guard Thread.current === owner else {throw BaroChartLowLevelError.wrongThread}
         if closing {return};closing = true;defer {closing = false}
         if Thread.isMainThread, let pending = pendingWorkspaceRegistration {BaroChartWorkspaceRegistry.retry(pending)}
@@ -1736,11 +1741,11 @@ public final class BaroChartEngine {
     }
     public func addSeries(_ options: [String: Any]) throws {try command("addSeries", [options])}
     public func setSeries(_ id: String, _ patch: [String: Any]) throws {try command("setSeries", [id, patch])}
-    public func removeSeries(_ id: String) throws {try command("removeSeries", [id])}
+    public func removeSeries(_ id: String) throws {try BaroChartError.mapping {try command("removeSeries", [id])}}
     public func setSeriesValues(_ id: String, _ values: [Double?]) throws {try command("setSeriesValues", [id, values.map { $0.map { $0 as Any } ?? NSNull() }])}
     @discardableResult public func addIndicator(_ id: String, _ name: String, _ params: [String: Any] = [:]) throws -> JSValue {try command("addIndicator", [id, name, params])}
     @discardableResult public func setIndicatorParams(_ id: String, _ params: [String: Any]) throws -> JSValue {try command("setIndicatorParams", [id, params])}
-    public func removeIndicator(_ id: String) throws {try command("removeIndicator", [id])}
+    public func removeIndicator(_ id: String) throws {try BaroChartError.mapping {try command("removeIndicator", [id])}}
     /// Select an application-linked module by id/version. This does not fetch
     /// or evaluate source code. Returned names are the canonical factory names.
     public func registerIndicatorModule(_ id: String, version: Int = 1) throws -> [String] {
@@ -1813,23 +1818,23 @@ public final class BaroChartEngine {
     @discardableResult public func deleteDrawings(_ ids: [String]) throws -> [String: Any] {
         try ingestionCommand("deleteDrawings",[ids])
     }
-    public func selectDrawing(_ id: String?) throws {try command("selectDrawing", [id as Any? ?? NSNull()])}
+    public func selectDrawing(_ id: String?) throws {try BaroChartError.mapping {try command("selectDrawing", [id as Any? ?? NSNull()])}}
     public func setTheme(_ patch: [String: Any]) throws {try command("setTheme", [patch])}
     public func setSymbol(_ symbol: [String: Any]) throws {try command("setSymbol", [symbol])}
     public func setCrosshairSnap(_ options: [String: Any]) throws { try command("setCrosshairSnap", [options]) }
     public func setDrawingMagnet(_ options: [String: Any]) throws { try command("setDrawingMagnet", [options]) }
     public func setTool(_ tool: String) throws {try command("setTool", [tool])}
     public func setText(_ text: String) throws {try command("setText", [text])}
-    public func undo() throws {try command("undo")}
-    public func redo() throws {try command("redo")}
-    public func fit() throws {try command("fit")}
+    public func undo() throws {try BaroChartError.mapping {try command("undo")}}
+    public func redo() throws {try BaroChartError.mapping {try command("redo")}}
+    public func fit() throws {try BaroChartError.mapping {try command("fit")}}
     public func scene(width: Double, height: Double) throws -> BaroChartScene {
         let value = try call("nativeSceneJSON", [width, height])
         guard let json = value.toString()?.data(using: .utf8) else { throw BaroChartLowLevelError.invalidScene }
         return try JSONDecoder().decode(BaroChartScene.self, from: json)
     }
-    public func saveDrawings() throws -> String {try call("nativeSave").toString() ?? ""}
-    public func loadDrawings(_ document: String) throws {try command("loadDrawings", [document])}
+    public func saveDrawings() throws -> String {try BaroChartError.mapping {try call("nativeSave").toString() ?? ""}}
+    public func loadDrawings(_ document: String) throws {try BaroChartError.mapping {try command("loadDrawings", [document])}}
 }
 
 public enum BaroChartCoreGraphicsRenderer {
