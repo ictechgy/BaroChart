@@ -177,31 +177,71 @@ test('the engine script is self-contained and reproduces the oracle in a fresh c
  assert.equal(output,tasks.map(expected).join('\n'));
 });
 
-/** 가짜 커널: 오라클 결과를 돌려준다. FAKE_CORRUPT_LINE번째 결과를 틀리게, FAKE_STOP_AFTER개 뒤에 멈출 수 있다(process.exit 없이 출력을 비우고 끝난다) */
+/**
+ * 가짜 커널: 오라클 결과를 돌려준다(process.exit 없이 출력을 비우고 끝난다). 환경 변수로 고장을 흉내 낸다.
+ * - FAKE_CORRUPT_LINE: 그 줄 결과 뒤에 X를 붙인다
+ * - FAKE_STOP_AFTER: 그 수만큼 답한 뒤 멈춘다
+ * - FAKE_GARBAGE_LINE: 그 줄은 어느 엔진과도 다른 'garbage'를 낸다
+ * - FAKE_Q_SUFFIX_LINE: 그 줄에 QuickJS 방언 결과 q(ECMA 결과 뒤에 Q)를 더한다(가짜 엔진 alter:N과 짝)
+ * - FAKE_FORCE_NAN_LINE: 그 줄은 'NaN'을 낸다
+ */
 const FAKE_KERNEL=conformanceUrl=>[
  `import {createOracle} from ${JSON.stringify(conformanceUrl)};`,
  'import {createInterface} from \'node:readline\';',
  'if(process.argv.includes(\'--unicode-version\'))console.log(`${process.versions.unicode}.0`);',
  'else{',
  ' const expected=createOracle(),corrupt=Number(process.env.FAKE_CORRUPT_LINE??0),stop=Number(process.env.FAKE_STOP_AFTER??Infinity);',
+ ' const garbage=Number(process.env.FAKE_GARBAGE_LINE??0),qSuffix=Number(process.env.FAKE_Q_SUFFIX_LINE??0),forceNaN=Number(process.env.FAKE_FORCE_NAN_LINE??0);',
  ' let line=0;',
  ' for await(const text of createInterface({input:process.stdin,crlfDelay:Infinity})){',
  '  if(++line>stop)break;',
- '  const result=expected(JSON.parse(text));',
- '  process.stdout.write(JSON.stringify({r:line===corrupt?result+\'X\':result})+\'\\n\');',
+ '  let result=expected(JSON.parse(text));',
+ '  if(line===corrupt)result+=\'X\';',
+ '  if(line===garbage)result=\'garbage\';',
+ '  if(line===forceNaN)result=\'NaN\';',
+ '  process.stdout.write(JSON.stringify(line===qSuffix?{r:result,q:result+\'Q\'}:{r:result})+\'\\n\');',
  ' }',
  ' process.stdin.destroy();',
  '}',
  '',
 ].join('\n');
 
+/**
+ * 가짜 JS 엔진(JSC·QuickJS 자리): 대조 스크립트를 node:vm에서 돌려 결과 줄을 낸다. 첫 인자가 엔진 이름이다.
+ * FAKE_<ENGINE>_MODE=broken이면 오라클이 모든 작업에서 실패하고('!oracle-error'), alter:N이면 N번째 결과 뒤에 Q를 붙인다.
+ */
+const FAKE_ENGINE=[
+ 'import {readFileSync} from \'node:fs\';',
+ 'import vm from \'node:vm\';',
+ 'const [engine,script]=process.argv.slice(2),mode=process.env[`FAKE_${engine.toUpperCase()}_MODE`]??\'\';',
+ 'const context=vm.createContext({});',
+ 'if(mode===\'broken\')vm.runInContext(\'Object.prototype.hasOwnProperty=function(){throw new TypeError("engine cannot run the oracle")};\',context);',
+ 'const lines=String(vm.runInContext(readFileSync(script,\'utf8\'),context)).split(\'\\n\');',
+ 'if(mode.startsWith(\'alter:\'))lines[Number(mode.slice(6))-1]+=\'Q\';',
+ 'process.stdout.write(lines.join(\'\\n\')+\'\\n\');',
+ '',
+].join('\n');
+
+/**
+ * 가짜 커널 실행 파일과 가짜 jsc·QuickJS 호스트를 디렉터리에 만든다.
+ * @param {string} dir 임시 디렉터리
+ * @returns {Promise<{binary: string, jsc: string, quickjs: string}>} 실행 파일 경로
+ */
+async function writeFakes(dir){
+ const kernel=join(dir,'fake-kernel.mjs'),engine=join(dir,'fake-engine.mjs');
+ await writeFile(kernel,FAKE_KERNEL(pathToFileURL(conformanceScript).href));
+ await writeFile(engine,FAKE_ENGINE);
+ const paths={binary:join(dir,'bc-conformance'),jsc:join(dir,'fake-jsc'),quickjs:join(dir,'fake-quickjs')};
+ await writeFile(paths.binary,`#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(kernel)} "$@"\n`);
+ for(const name of ['jsc','quickjs'])await writeFile(paths[name],`#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(engine)} ${name} "$@"\n`);
+ for(const path of Object.values(paths))await chmod(path,0o755);
+ return paths;
+}
+
 test('the harness passes a correct kernel, reports a wrong result and fails on missing results, and merges reports',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'barochart-conformance-'));
  try{
-  const kernel=join(dir,'fake-kernel.mjs'),binary=join(dir,'bc-conformance'),report=join(dir,'report.json');
-  await writeFile(kernel,FAKE_KERNEL(pathToFileURL(conformanceScript).href));
-  await writeFile(binary,`#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(kernel)} "$@"\n`);
-  await chmod(binary,0o755);
+  const {binary}=await writeFakes(dir),report=join(dir,'report.json');
   const common=['--binary',binary,'--count','25','--seed','5'];
 
   const passed=runConformance([...common,'--report',report]);
@@ -237,6 +277,60 @@ test('the harness passes a correct kernel, reports a wrong result and fails on m
   const usage=runConformance(['--suite','nope']);
   assert.equal(usage.status,2);
   assert.match(usage.stderr,/--suite/);
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('triangulation compares every engine with the kernel built for its platform and stops on broken engines',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'barochart-conformance-'));
+ try{
+  const {binary,jsc,quickjs}=await writeFakes(dir);
+  const env={...process.env,JSC_PATH:jsc,QUICKJS_HOST_PATH:quickjs};
+  const common=['--binary',binary,'--count','25','--seed','5','--engines','v8,jsc,quickjs','--work-dir',dir];
+  const cases=25*SUITES.length;
+
+  const agreed=runConformance(common,env);
+  assert.equal(agreed.status,0,agreed.stdout+agreed.stderr);
+  assert.match(agreed.stdout,new RegExp(`\\b${cases} compared, 0 excluded, 0 engine disagreements, 0 mismatches\\b`));
+  assert.match(agreed.stdout,new RegExp(`engine quickjs: ${cases} matched`));
+
+  // QuickJS만 number#6에서 다르고 커널의 QuickJS 방언(q)이 그 값이면 통과한다. 엔진 차이는 세고 보여 준다
+  const dialect=runConformance(common,{...env,FAKE_QUICKJS_MODE:'alter:7',FAKE_Q_SUFFIX_LINE:'7'});
+  assert.equal(dialect.status,0,dialect.stdout+dialect.stderr);
+  assert.match(dialect.stdout,/\b1 engine disagreements\b/);
+  assert.match(dialect.stdout,/DISAGREE number#6 op=toString/);
+
+  // QuickJS가 다른데 커널의 Android 쪽 값이 따라가지 않으면 불일치다(예전에는 엔진 차이로 빠져 통과했다)
+  const android=runConformance(common,{...env,FAKE_QUICKJS_MODE:'alter:7'});
+  assert.equal(android.status,1,android.stdout+android.stderr);
+  assert.match(android.stdout,/MISMATCH number#6 op=toString .*quickjs expected/);
+
+  // 엔진끼리 다른 작업에서 어느 엔진과도 다른 커널 값은 불일치다
+  const garbage=runConformance(common,{...env,FAKE_QUICKJS_MODE:'alter:7',FAKE_GARBAGE_LINE:'7'});
+  assert.equal(garbage.status,1,garbage.stdout+garbage.stderr);
+  assert.match(garbage.stdout,/MISMATCH number#6 op=toString .*v8 expected .*jsc expected .*quickjs expected/);
+
+  // 오라클을 돌리지 못하는 엔진은 엔진 차이가 아니라 하네스 오류다
+  const broken=runConformance(common,{...env,FAKE_JSC_MODE:'broken',FAKE_GARBAGE_LINE:'3'});
+  assert.equal(broken.status,2,broken.stdout+broken.stderr);
+  assert.match(broken.stderr,/jsc could not run the oracle/);
+
+  const missing=runConformance(common,{...env,QUICKJS_HOST_PATH:join(dir,'missing-quickjs')});
+  assert.equal(missing.status,2,missing.stdout+missing.stderr);
+  assert.match(missing.stderr,/QUICKJS_HOST_PATH/);
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('a suite in which nothing was compared is a harness error, not a pass',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'barochart-conformance-'));
+ try{
+  const {binary}=await writeFakes(dir);
+  // 시드 197의 date#0은 달을 접은 연도가 범위 밖인 Date.UTC다. 커널이 NaN을 내면 알려진 차이로 빠져 비교한 작업이 없다
+  const [first]=corpusCases({seed:197,count:1,suites:['date']});
+  assert.equal(first.task.op,'dateUtc');
+  const result=runConformance(['--binary',binary,'--suite','date','--count','1','--seed','197','--work-dir',dir],{...process.env,FAKE_FORCE_NAN_LINE:'1'});
+  assert.equal(result.status,2,result.stdout+result.stderr);
+  assert.match(result.stdout,/EXCLUDED date#0 op=dateUtc reason=date-utc-folded-year/);
+  assert.match(result.stderr,/nothing was compared in suite date/);
  }finally{await rm(dir,{recursive:true,force:true});}
 });
 

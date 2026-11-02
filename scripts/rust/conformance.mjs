@@ -11,15 +11,20 @@
 //   문자열 안의 원문 단독 서로게이트까지 시험한다(커널 parse_json_utf16)
 // - carrier: jsonLossless에서 오라클만 읽는 표준 JSON. 같은 텍스트에서 특수 값만 표지 객체로 바꿨다
 // 결과는 정규 문자열이다. 수는 NaN이면 'NaN', 아니면 16진 비트다(설계 §6.2: Object.is 기준, NaN만 정규화).
-// 문자열·JSON은 16진, 정수는 십진, 불리언은 'true'/'false', 오류는 'E:<이름>'이다.
+// 문자열·JSON은 16진, 정수는 십진, 불리언은 'true'/'false', 오류는 'E:<이름>'이다. 커널 결과 줄은 {"r":"..."}이고,
+// 숫자를 쓰는 연산의 QuickJS 방언(Android 빌드) 결과가 다르면 {"r":"...","q":"..."}다(커널 NumberDialect, 리뷰 C1).
 //
-// 판정:
-// - 엔진끼리 값이 다르면(삼각측량) 판정하지 않고 제외 목록에 남긴다.
-// - 알려진 엔진 차이(KNOWN_DIVERGENCES)는 커널이 문서화한 쪽으로 답했을 때만 제외한다. 그 밖의 차이는 모두 불일치다.
+// 판정(설계 §6.1: 오라클은 같은 플랫폼의 JS 백엔드):
+// - 엔진마다 그 플랫폼의 커널 결과와 비교한다. V8(WASM 하네스)·JSC(iOS)는 r, QuickJS(Android)는 q(없으면 r)다.
+//   엔진끼리 값이 달라도 판정을 건너뛰지 않는다. 엔진 차이는 따로 세고 예시를 남긴다.
+// - 알려진 엔진 차이(KNOWN_DIVERGENCES)는 정해진 엔진과의 비교에서, 커널이 문서화한 쪽으로 답했을 때만 뺀다.
+//   어느 엔진과도 비교하지 못한 작업만 제외(excluded)로 센다. 그 밖의 차이는 모두 불일치다.
+// - 오라클을 돌리지 못한 엔진('!oracle-error')과, 비교한 작업이 하나도 없는 스위트는 하네스 오류(종료 코드 2)다.
 // - 엔진마다 다른 Math.log/exp/hypot(설계 §6.3)은 코퍼스에 넣지 않는다. WASM 하네스(Task 9)가 V8 값을 주입해 맞춘다.
 //
 // 사용법: node scripts/rust/conformance.mjs [--count N] [--seed S] [--suite LIST] [--engines LIST] [--report PATH]
 //         [--work-dir DIR] [--binary PATH] [--emit-corpus]
+// 환경 변수: JSC_PATH(JavaScriptCore 셸), QUICKJS_HOST_PATH(미리 빌드한 QuickJS 호스트, 없으면 저장소 QuickJS로 빌드), CC
 // 종료 코드: 0 불일치 없음, 1 불일치 있음, 2 인자·환경·하네스 오류
 import {spawn,spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -59,8 +64,8 @@ export const ENGINES=Object.freeze(['v8','jsc','quickjs']);
 
 /** 알려진 엔진 차이: 이유 → 설명. 커널이 문서화한 쪽으로 답한 경우만 판정에서 뺀다 */
 export const KNOWN_DIVERGENCES=Object.freeze({
- 'date-utc-folded-year':'Date.UTC whose month-folded year lies outside -271821..275760: the kernel returns NaN like QuickJS, while V8 and JSC still compute a value when large time fields bring it back into range (M1 Task 3 ruling)',
- 'unicode-version':'toLowerCase input with code points that this Node treats as unassigned: Node and the kernel use different Unicode versions, so newer case mappings and casing properties differ',
+ 'date-utc-folded-year':'Date.UTC whose month-folded year lies outside -271821..275760: the kernel returns NaN like QuickJS, while V8 and JSC still compute a value when large time fields bring it back into range (M1 Task 3 ruling; applies to the v8 and jsc comparisons)',
+ 'unicode-version':'toLowerCase input with code points that this Node treats as unassigned: Node and the kernel use different Unicode versions, so newer case mappings and casing properties differ (applies to the v8 comparison)',
 });
 
 /** 기본값: 스위트마다 작업 1만 건, 시드 1, 모든 스위트, V8만 */
@@ -71,6 +76,12 @@ const EXAMPLE_LIMIT=20;
 
 /** 보고서 스키마 이름 */
 const REPORT_SCHEMA='barochart.rust-js-kernel-conformance';
+
+/**
+ * 보고서 판. 2: 삼각측량에서 엔진마다 그 플랫폼의 커널 결과와 비교하고(byEngine), excluded는 어느 엔진과도 비교하지
+ * 못한 작업만 센다(판 1은 엔진 차이를 판정 없이 제외했다).
+ */
+const REPORT_VERSION=2;
 
 /** macOS 시스템 JavaScriptCore 셸 */
 const DEFAULT_JSC='/System/Library/Frameworks/JavaScriptCore.framework/Versions/A/Helpers/jsc';
@@ -98,6 +109,8 @@ const USAGE=[
  '  --work-dir DIR   engine scripts and the QuickJS host build (default <tmp>/barochart-conformance)',
  '  --binary PATH    use this bc-conformance instead of building it with cargo',
  '  --emit-corpus    print the task lines and exit (no cargo, no engines)',
+ 'Environment: JSC_PATH (JavaScriptCore shell), QUICKJS_HOST_PATH (prebuilt QuickJS host; default builds',
+ '  rust/tools/conformance/quickjs-host.c with the repository QuickJS), CC (C compiler for that build)',
 ].join('\n');
 
 /** 인자가 잘못됐을 때 던진다(종료 코드 2, 사용법을 함께 보인다) */
@@ -982,7 +995,8 @@ export function createOracle(){
 }
 
 /**
- * 오라클이 던진 오류를 결과 문자열로 바꾼다(엔진 스크립트와 같은 모양). 커널 결과와 다르므로 불일치로 드러난다.
+ * 오라클이 던진 오류를 결과 문자열로 바꾼다(엔진 스크립트와 같은 모양). expectBatch·engineResults가 이 표지를 보고
+ * 하네스 오류(종료 코드 2)로 멈춘다. 커널 불일치나 엔진 차이로 셈하지 않는다.
  * @param {unknown} error 오류
  * @returns {string} 표지 결과
  */
@@ -1059,7 +1073,7 @@ function buildQuickjsHost(workDir){
  * 삼각측량 엔진을 준비한다: jsc 경로를 확인하고 QuickJS 호스트를 빌드한다.
  * @param {{engines: string[], workDir: string}} options CLI 선택
  * @returns {{workDir: string, batch: number, jsc?: string, quickjs?: string}} 엔진 실행 정보
- * @throws {HarnessError} jsc가 없거나 QuickJS 빌드가 실패할 때
+ * @throws {HarnessError} jsc나 QUICKJS_HOST_PATH가 없거나 QuickJS 빌드가 실패할 때
  */
 function prepareEngines(options){
  const engines={workDir:options.workDir,batch:0};
@@ -1068,7 +1082,11 @@ function prepareEngines(options){
   engines.jsc=process.env.JSC_PATH||DEFAULT_JSC;
   if(!existsSync(engines.jsc))throw new HarnessError(`jsc not found at ${engines.jsc}; set JSC_PATH to a JavaScriptCore shell or drop jsc from --engines`);
  }
- if(options.engines.includes('quickjs'))engines.quickjs=buildQuickjsHost(options.workDir);
+ if(options.engines.includes('quickjs')){
+  const host=process.env.QUICKJS_HOST_PATH;
+  if(host&&!existsSync(host))throw new HarnessError(`QUICKJS_HOST_PATH ${host} does not exist; point it at a QuickJS host or unset it to build one from native/android/quickjs`);
+  engines.quickjs=host||buildQuickjsHost(options.workDir);
+ }
  return engines;
 }
 
@@ -1078,7 +1096,7 @@ function prepareEngines(options){
  * @param {string[]} lines 작업 JSON 줄
  * @param {ReturnType<typeof prepareEngines>} engines 엔진 실행 정보
  * @returns {string[]} 작업마다 정규 결과
- * @throws {HarnessError} 엔진이 실패하거나 결과 수가 맞지 않을 때
+ * @throws {HarnessError} 엔진이 실패하거나, 결과 수가 맞지 않거나, 오라클을 돌리지 못한 작업('!oracle-error')이 있을 때
  */
 function engineResults(engine,lines,engines){
  const script=join(engines.workDir,`batch-${process.pid}-${engines.batch++}-${engine}.js`);
@@ -1086,6 +1104,8 @@ function engineResults(engine,lines,engines){
  const output=runTool(engines[engine],[script],`the script is kept at ${script}; rerun ${engine} on it to debug`);
  const results=output.endsWith('\n')?output.slice(0,-1).split('\n'):output.split('\n');
  if(results.length!==lines.length)throw new HarnessError(`${engine} returned ${results.length} results for ${lines.length} tasks; the script is kept at ${script}`);
+ const failed=results.findIndex(value=>value.startsWith('!'));
+ if(failed>=0)throw new HarnessError(`${engine} could not run the oracle for task ${lines[failed]}: ${results[failed]}; the batch script is kept at ${script}; fix the engine or drop ${engine} from --engines`);
  rmSync(script,{force:true});
  return results;
 }
@@ -1096,9 +1116,12 @@ function engineResults(engine,lines,engines){
  * @param {string[]} engineNames 엔진(첫째는 v8)
  * @param {{oracle: (task: object) => string, engines: object}} context 실행 정보
  * @returns {object[]} 판정할 항목(작업 줄, 기대값, 엔진 차이)
+ * @throws {HarnessError} 어느 엔진이든 오라클을 돌리지 못했을 때
  */
 function expectBatch(chunk,engineNames,context){
  const lines=chunk.map(item=>JSON.stringify(item.task)),results={v8:chunk.map(item=>context.oracle(item.task))};
+ const failed=results.v8.findIndex(value=>value.startsWith('!'));
+ if(failed>=0)throw new HarnessError(`the V8 oracle failed on task ${lines[failed]}: ${results.v8[failed]}; this is a bug in createOracle or the corpus generator`);
  for(const engine of engineNames)if(engine!=='v8')results[engine]=engineResults(engine,lines,context.engines);
  return chunk.map((item,index)=>{
   const values=engineNames.map(engine=>results[engine][index]),agreed=values.every(value=>value===values[0]);
@@ -1152,29 +1175,39 @@ function writable(stream){
 }
 
 /**
- * 결과 줄 `{"r":"..."}`을 읽는다.
+ * 결과 줄 `{"r":"..."}` 또는 `{"r":"...","q":"..."}`를 읽는다. q는 커널의 QuickJS 방언 결과가 r과 다를 때만 있다.
  * @param {string} line 결과 줄
- * @returns {string} 정규 결과
+ * @returns {{r: string, q?: string}} 정규 결과
  * @throws {HarnessError} 형식이 틀렸을 때
  */
 function parseResult(line){
  let parsed;
  try{parsed=JSON.parse(line);}
  catch(error){throw new HarnessError(`bc-conformance wrote a line that is not JSON (${error.message}): ${line.slice(0,200)}`);}
- if(typeof parsed?.r!=='string')throw new HarnessError(`bc-conformance results must look like {"r":"..."}; got ${line.slice(0,200)}`);
- return parsed.r;
+ if(typeof parsed?.r!=='string'||(parsed.q!==undefined&&typeof parsed.q!=='string'))throw new HarnessError(`bc-conformance results must look like {"r":"..."} or {"r":"...","q":"..."}; got ${line.slice(0,200)}`);
+ return parsed.q===undefined?{r:parsed.r}:{r:parsed.r,q:parsed.q};
 }
 
 /**
- * 커널 결과가 알려진 엔진 차이인지 본다. 커널이 문서화한 쪽으로 답했을 때만 이유를 돌려준다.
+ * 엔진과 비교할 커널 값: V8(WASM 하네스)·JSC(iOS)는 ECMA 방언 r, QuickJS(Android)는 QuickJS 방언 q(같으면 r).
+ * @param {string} engine 엔진
+ * @param {{r: string, q?: string}} result 커널 결과
+ * @returns {string} 그 엔진의 플랫폼에서 커널이 낼 값
+ */
+const kernelValueFor=(engine,result)=>engine==='quickjs'?(result.q??result.r):result.r;
+
+/**
+ * 한 엔진과 다른 커널 결과가 그 엔진의 알려진 차이인지 본다. 커널이 문서화한 쪽으로 답했을 때만 이유를 돌려준다.
  * @param {object} task 작업
- * @param {string} actual 커널 결과
+ * @param {string} actual 그 엔진과 비교한 커널 결과
+ * @param {string} expected 그 엔진의 결과
+ * @param {string} engine 엔진
  * @param {{unicodeDiffers: boolean}} context 실행 정보
  * @returns {string|null} KNOWN_DIVERGENCES의 이유
  */
-function knownDivergence(task,actual,context){
- if(task.op==='dateUtc'&&actual==='NaN'&&foldedYearOutOfRange(task.args))return 'date-utc-folded-year';
- if(task.op==='toLowerCase'&&context.unicodeDiffers&&/\p{Cn}/u.test(unitsFromHex(task.units)))return 'unicode-version';
+function knownDivergence(task,actual,expected,engine,context){
+ if(task.op==='dateUtc'&&(engine==='v8'||engine==='jsc')&&actual==='NaN'&&expected!=='NaN'&&foldedYearOutOfRange(task.args))return 'date-utc-folded-year';
+ if(task.op==='toLowerCase'&&engine==='v8'&&context.unicodeDiffers&&/\p{Cn}/u.test(unitsFromHex(task.units)))return 'unicode-version';
  return null;
 }
 
@@ -1192,13 +1225,15 @@ function foldedYearOutOfRange(args){
 }
 
 /**
- * 판정 통계를 만든다. 이름으로 세는 표(ops, excluded)는 프로토타입 없는 객체다. 연산 이름 'toString'이
+ * 판정 통계를 만든다. 스위트마다 엔진별로 커널과 같았던 수, 알려진 차이(이유별), 불일치 수를 센다(byEngine).
+ * 이름으로 세는 표(ops, excluded, divergent)는 프로토타입 없는 객체다. 연산 이름 'toString'이
  * Object.prototype.toString을 읽으면 개수가 문자열로 이어 붙으며 자라기 때문이다.
  * @param {object} options CLI 선택
  * @returns {object} 스위트별 통계와 예시
  */
 function createStats(options){
- const suites=Object.fromEntries(options.suites.map(suite=>[suite,{cases:0,compared:0,excluded:Object.create(null),disagreements:0,mismatches:0,ops:Object.create(null)}]));
+ const engineTallies=()=>Object.fromEntries(options.engines.map(engine=>[engine,{matched:0,divergent:Object.create(null),mismatched:0}]));
+ const suites=Object.fromEntries(options.suites.map(suite=>[suite,{cases:0,compared:0,excluded:Object.create(null),disagreements:0,mismatches:0,ops:Object.create(null),byEngine:engineTallies()}]));
  return {received:0,expectedTotal:options.count*options.suites.length,suites,examples:{mismatches:[],excluded:[],disagreements:[]}};
 }
 
@@ -1212,29 +1247,41 @@ function remember(list,item){
 }
 
 /**
- * 커널 결과 하나를 판정한다.
+ * 커널 결과 하나를 판정한다. 엔진마다 그 플랫폼의 커널 값(kernelValueFor)과 비교한다.
+ * - 어느 엔진과든 알려진 차이가 아닌데 다르면 불일치다(비교한 작업으로 센다).
+ * - 불일치 없이 한 엔진이라도 같으면 비교한 작업이다. 다른 엔진과의 알려진 차이는 byEngine에 남는다.
+ * - 모든 엔진과 알려진 차이로만 갈렸으면 제외다(비교하지 못한 작업).
+ * 엔진끼리 값이 다르면(삼각측량) 그것과 별개로 엔진 차이를 세고 예시를 남긴다.
  * @param {object} stats 판정 통계
  * @param {object} entry 기대값을 붙인 작업
- * @param {string} actual 커널 결과
- * @param {object} context 실행 정보
+ * @param {{r: string, q?: string}} result 커널 결과
+ * @param {{engineNames: string[], unicodeDiffers: boolean}} context 실행 정보
  */
-function judge(stats,entry,actual,context){
+function judge(stats,entry,result,context){
  const suite=stats.suites[entry.suite],{op}=entry.task,label=`${entry.suite}#${entry.index}`;
  stats.received++;suite.cases++;suite.ops[op]=(suite.ops[op]??0)+1;
  if(entry.engineValues){
   suite.disagreements++;
-  remember(stats.examples.disagreements,{label,source:entry.source,task:entry.task,engines:entry.engineValues,rust:actual});
+  remember(stats.examples.disagreements,{label,source:entry.source,task:entry.task,engines:entry.engineValues,rust:result});
+ }
+ let matched=0;
+ const divergences=[],failures=[];
+ for(const engine of context.engineNames){
+  const tally=suite.byEngine[engine],expected=entry.engineValues?entry.engineValues[engine]:entry.expected,actual=kernelValueFor(engine,result);
+  if(actual===expected){tally.matched++;matched++;continue;}
+  const reason=knownDivergence(entry.task,actual,expected,engine,context);
+  if(reason){tally.divergent[reason]=(tally.divergent[reason]??0)+1;divergences.push({engine,reason,expected,actual});continue;}
+  tally.mismatched++;failures.push({engine,expected,actual});
+ }
+ if(failures.length){
+  suite.compared++;suite.mismatches++;
+  remember(stats.examples.mismatches,{label,source:entry.source,task:entry.task,failures});
   return;
  }
- if(actual===entry.expected){suite.compared++;return;}
- const reason=knownDivergence(entry.task,actual,context);
- if(reason){
-  suite.excluded[reason]=(suite.excluded[reason]??0)+1;
-  remember(stats.examples.excluded,{label,source:entry.source,reason,task:entry.task,expected:entry.expected,actual});
-  return;
- }
- suite.compared++;suite.mismatches++;
- remember(stats.examples.mismatches,{label,source:entry.source,task:entry.task,expected:entry.expected,actual});
+ if(matched){suite.compared++;return;}
+ const [{reason,expected,actual}]=divergences;
+ suite.excluded[reason]=(suite.excluded[reason]??0)+1;
+ remember(stats.examples.excluded,{label,source:entry.source,reason,task:entry.task,expected,actual,divergences});
 }
 
 /** 판정을 끝낸 결과 칸을 이만큼 모으면 대기열 앞을 잘라 낸다 */
@@ -1385,7 +1432,10 @@ function describeEnvironment(options,context){
   const productVersion=spawnSync('sw_vers',['-productVersion'],{encoding:'utf8'});
   environment.jsc={path:context.engines.jsc,macOS:productVersion.status===0?productVersion.stdout.trim():null};
  }
- if(options.engines.includes('quickjs'))environment.quickjs=readFileSync(join(QUICKJS_DIR,'VERSION'),'utf8').trim();
+ if(options.engines.includes('quickjs')){
+  environment.quickjs=readFileSync(join(QUICKJS_DIR,'VERSION'),'utf8').trim();
+  if(process.env.QUICKJS_HOST_PATH)environment.quickjsHost=process.env.QUICKJS_HOST_PATH;
+ }
  return environment;
 }
 
@@ -1409,15 +1459,19 @@ function commandLine(options){
  */
 function summarize(stats,options,environment,seconds){
  const totals={cases:0,compared:0,excluded:0,disagreements:0,mismatches:0},reasons=new Set();
+ const byEngine=Object.fromEntries(options.engines.map(engine=>[engine,{matched:0,divergent:Object.create(null),mismatched:0}]));
  for(const suite of Object.values(stats.suites)){
-  const excluded=Object.values(suite.excluded).reduce((sum,value)=>sum+value,0);
-  totals.cases+=suite.cases;totals.compared+=suite.compared;totals.disagreements+=suite.disagreements;
-  totals.excluded+=excluded+suite.disagreements;totals.mismatches+=suite.mismatches;
-  for(const reason of Object.keys(suite.excluded))reasons.add(reason);
+  totals.cases+=suite.cases;totals.compared+=suite.compared;totals.disagreements+=suite.disagreements;totals.mismatches+=suite.mismatches;
+  for(const [reason,count] of Object.entries(suite.excluded)){totals.excluded+=count;reasons.add(reason);}
+  for(const [engine,tally] of Object.entries(suite.byEngine)){
+   const total=byEngine[engine];
+   total.matched+=tally.matched;total.mismatched+=tally.mismatched;
+   for(const [reason,count] of Object.entries(tally.divergent)){total.divergent[reason]=(total.divergent[reason]??0)+count;reasons.add(reason);}
+  }
  }
  return {
   command:commandLine(options),date:new Date().toISOString().slice(0,10),seed:options.seed,count:options.count,suites:options.suites,engines:options.engines,
-  result:totals.mismatches?'fail':'pass',totals,bySuite:stats.suites,
+  result:totals.mismatches?'fail':'pass',totals,byEngine,bySuite:stats.suites,
   knownDivergences:Object.fromEntries([...reasons].sort().map(reason=>[reason,KNOWN_DIVERGENCES[reason]])),
   examples:stats.examples,environment,durationSeconds:Math.round(seconds*10)/10,
  };
@@ -1469,21 +1523,37 @@ function describeResult(op,value){
  */
 function printSummary(run){
  console.log(`conformance: seed ${run.seed}, ${run.count} cases per suite, suites ${run.suites.join(',')}, engines ${run.engines.join(',')}`);
- const rows=[['suite','cases','compared','excluded','mismatches'],...run.suites.map(name=>{
-  const suite=run.bySuite[name],excluded=Object.values(suite.excluded).reduce((sum,value)=>sum+value,0)+suite.disagreements;
-  return [name,suite.cases,suite.compared,excluded,suite.mismatches];
+ const rows=[['suite','cases','compared','excluded','disagreements','mismatches'],...run.suites.map(name=>{
+  const suite=run.bySuite[name],excluded=Object.values(suite.excluded).reduce((sum,value)=>sum+value,0);
+  return [name,suite.cases,suite.compared,excluded,suite.disagreements,suite.mismatches];
  })];
- for(const row of rows)console.log(row.map((cell,index)=>index?String(cell).padStart(12):String(cell).padEnd(12)).join(''));
- for(const item of run.examples.mismatches)console.log(`MISMATCH ${item.label} op=${item.task.op} ${describeInput(item.task)} source=${item.source} expected ${describeResult(item.task.op,item.expected)} actual ${describeResult(item.task.op,item.actual)}`);
+ for(const row of rows)console.log(row.map((cell,index)=>index?String(cell).padStart(14):String(cell).padEnd(12)).join(''));
+ if(run.engines.length>1)for(const [engine,tally] of Object.entries(run.byEngine)){
+  const reasons=Object.entries(tally.divergent),divergent=reasons.reduce((sum,[,count])=>sum+count,0);
+  const detail=reasons.length?` (${reasons.map(([reason,count])=>`${reason} ${count}`).join(', ')})`:'';
+  console.log(`engine ${engine}: ${tally.matched} matched the kernel${engine==='quickjs'?' (QuickJS dialect)':''}, ${divergent} known divergences${detail}, ${tally.mismatched} mismatched`);
+ }
+ for(const item of run.examples.mismatches){
+  const failures=item.failures.map(failure=>`${failure.engine} expected ${describeResult(item.task.op,failure.expected)} actual ${describeResult(item.task.op,failure.actual)}`).join('; ');
+  console.log(`MISMATCH ${item.label} op=${item.task.op} ${describeInput(item.task)} source=${item.source} ${failures}`);
+ }
  for(const item of run.examples.disagreements){
   const values=Object.entries(item.engines).map(([engine,value])=>`${engine} ${describeResult(item.task.op,value)}`).join(' ');
-  console.log(`DISAGREE ${item.label} op=${item.task.op} ${describeInput(item.task)} ${values} rust ${describeResult(item.task.op,item.rust)}`);
+  const dialect=item.rust.q===undefined?'':` (QuickJS dialect ${describeResult(item.task.op,item.rust.q)})`;
+  console.log(`DISAGREE ${item.label} op=${item.task.op} ${describeInput(item.task)} ${values} rust ${describeResult(item.task.op,item.rust.r)}${dialect}`);
  }
  for(const item of run.examples.excluded.slice(0,5))console.log(`EXCLUDED ${item.label} op=${item.task.op} reason=${item.reason} ${describeInput(item.task)} expected ${describeResult(item.task.op,item.expected)} actual ${describeResult(item.task.op,item.actual)}`);
  for(const [reason,text] of Object.entries(run.knownDivergences))console.log(`known divergence ${reason}: ${text}`);
  const {totals}=run,noun=totals.mismatches===1?'mismatch':'mismatches';
- console.log(`conformance: ${run.result==='pass'?'PASS':'FAIL'} — ${totals.cases} cases: ${totals.compared} compared, ${totals.excluded} excluded (${totals.disagreements} engine disagreements), ${totals.mismatches} ${noun} (${run.durationSeconds} s)`);
+ console.log(`conformance: ${run.result==='pass'?'PASS':'FAIL'} — ${totals.cases} cases: ${totals.compared} compared, ${totals.excluded} excluded, ${totals.disagreements} engine disagreements, ${totals.mismatches} ${noun} (${run.durationSeconds} s)`);
 }
+
+/**
+ * 비교한 작업이 하나도 없는 스위트(모든 작업이 알려진 차이로 빠졌다). 그런 실행은 아무것도 증명하지 못한다.
+ * @param {object} run 실행 요약
+ * @returns {string[]} 스위트 이름
+ */
+const unverifiedSuites=run=>run.suites.filter(name=>run.bySuite[name].cases>0&&run.bySuite[name].compared===0);
 
 /**
  * 보고서에서 같은 선택의 실행을 찾는 열쇠.
@@ -1496,14 +1566,15 @@ const runKey=run=>`${run.suites.join(',')}|${run.engines.join(',')}|${run.seed}|
  * 실행 요약을 JSON 보고서에 합친다. 같은 선택(스위트, 엔진, 시드, 수)의 실행은 바꾸고, 다른 실행은 남긴다.
  * @param {string} path 보고서 경로
  * @param {object} run 실행 요약
- * @throws {HarnessError} 기존 파일이 이 스키마의 보고서가 아닐 때
+ * @throws {HarnessError} 기존 파일이 이 스키마·판의 보고서가 아닐 때
  */
 function writeReport(path,run){
- let report={schema:REPORT_SCHEMA,version:1,description:'barochart-js (Rust JS-semantics kernel) compared with JavaScript engines on seeded corpora; written by node scripts/rust/conformance.mjs --report (M1 plan Task 4)',runs:[]};
+ let report={schema:REPORT_SCHEMA,version:REPORT_VERSION,description:'barochart-js (Rust JS-semantics kernel) compared with JavaScript engines on seeded corpora; with --engines every engine is compared with the kernel built for its platform (v8 and jsc: ECMA number dialect r, quickjs: QuickJS number dialect q); written by node scripts/rust/conformance.mjs --report (M1 plan Task 4)',runs:[]};
  if(existsSync(path)){
   try{report=JSON.parse(readFileSync(path,'utf8'));}
   catch(error){throw new HarnessError(`cannot read the report ${path} (${error.message}); fix or delete it`);}
   if(report?.schema!==REPORT_SCHEMA||!Array.isArray(report.runs))throw new HarnessError(`${path} is not a ${REPORT_SCHEMA} report; choose another --report path`);
+  if(report.version!==REPORT_VERSION)throw new HarnessError(`${path} is a version ${report.version} report but this harness writes version ${REPORT_VERSION} (engine comparisons changed); move it aside or delete it and rerun`);
  }
  const position=report.runs.findIndex(saved=>runKey(saved)===runKey(run));
  if(position<0)report.runs.push(run);else report.runs[position]=run;
@@ -1593,13 +1664,14 @@ function parseOptions(args){
  * CLI 본체.
  * @param {string[]} args CLI 인자
  * @returns {Promise<number>} 종료 코드(0 통과, 1 불일치)
+ * @throws {HarnessError} 비교한 작업이 없는 스위트가 있을 때(종료 코드 2)
  */
 async function main(args){
  const options=parseOptions(args);
  if(options.help){console.log(USAGE);return 0;}
  if(options.emitCorpus){await emitCorpus(options);return 0;}
  const started=performance.now(),binary=options.binary??buildKernel(),expected=createOracle();
- const context={engines:prepareEngines(options),kernelUnicode:kernelUnicodeVersion(binary),oracle:task=>{
+ const context={engines:prepareEngines(options),engineNames:options.engines,kernelUnicode:kernelUnicodeVersion(binary),oracle:task=>{
   try{return expected(task);}catch(error){return oracleFailure(error);}
  }};
  context.unicodeDiffers=majorMinor(context.kernelUnicode)!==majorMinor(process.versions.unicode);
@@ -1607,6 +1679,8 @@ async function main(args){
  await compareWithKernel(options,binary,context,stats);
  const run=summarize(stats,options,describeEnvironment(options,context),(performance.now()-started)/1000);
  printSummary(run);
+ const unverified=unverifiedSuites(run);
+ if(unverified.length)throw new HarnessError(`nothing was compared in suite ${unverified.join(', ')}: every task was excluded as a known divergence, so the run proves nothing; check the KNOWN_DIVERGENCES rules and the kernel answers (the report was not written)`);
  if(options.report)writeReport(options.report,run);
  return run.totals.mismatches?1:0;
 }
