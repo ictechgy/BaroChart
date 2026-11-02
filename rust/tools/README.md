@@ -3,6 +3,9 @@
 개발 전용 도구 크레이트를 두는 곳이다. 출하 산출물(XCFramework, Android `.so`)에는 들어가지 않는다.
 
 - `conformance`: JS 의미 커널을 V8·JSC·QuickJS와 대조하는 `bc-conformance` 바이너리(M1 Task 4)
+  - 직접 부르지 않고 `node scripts/rust/conformance.mjs`로 돌린다. 이 스크립트가 release로 빌드하고 코퍼스·기대값·판정을 맡는다.
+  - 삼각측량(`--engines v8,jsc,quickjs`)은 macOS `jsc`와 C 컴파일러가 필요하다. `quickjs-host.c`를 저장소의 QuickJS와 함께 컴파일한다.
+  - 대량 대조 결과는 `docs/measurements/rust-js-kernel-conformance.json`에 남긴다(`--report`).
 - `trace-replay`: 이음새 추적 재생기(설계 §6.5)
 
 이 파일은 `rust/Cargo.toml`의 `members = ["crates/*", "tools/*"]`가 도구 크레이트가 하나도 없을 때도 열리게 한다.

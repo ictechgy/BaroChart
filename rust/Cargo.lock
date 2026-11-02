@@ -10,6 +10,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "bc-conformance"
+version = "0.0.0"
+dependencies = [
+ "barochart-js",
+]
+
+[[package]]
 name = "ryu-js"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
