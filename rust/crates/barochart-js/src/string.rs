@@ -90,6 +90,10 @@ impl JsString {
     }
 
     /// 진단용 UTF-8 문자열. 단독 서로게이트는 U+FFFD로 바뀌므로 JS 값과 바이트가 같다고 보면 안 된다.
+    ///
+    /// `JSON.parse` 입력으로 쓰지 않는다. 단독 서로게이트가 든 문서의 결과가 JS와 달라진다(U+FFFD로 바뀌어
+    /// 받아들이거나, 서로게이트를 거절해야 할 검증을 통과한다). JS 문자열의 JSON은
+    /// `json::parse_json_utf16(text.as_units(), mode)`로 읽는다.
     pub fn to_string_lossy(&self) -> String {
         String::from_utf16_lossy(&self.0)
     }

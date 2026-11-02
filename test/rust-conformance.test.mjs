@@ -137,6 +137,10 @@ test('the oracle computes the JS engine results for exact inputs and normalizes 
  assert.equal(expected({op:'jsonLossless',text:utf8Of('[NaN,-0,Infinity,{"4294967295":1,"1":undefined,"__proto__":-Infinity}]'),carrier:utf8Of(carrier)}),
   `${utf8Of('[null,0,null,{"4294967295":1,"__proto__":null}]')},${utf8Of('[NaN,-0,Infinity,{"1":undefined,"4294967295":1,"__proto__":-Infinity}]')}`);
  assert.equal(expected({op:'jsonLossless',text:utf8Of('undefined'),carrier:utf8Of(special('undefined'))}),`${utf8Of('null')},${utf8Of('undefined')}`);
+ // jsonUnits: JS 문자열(코드 단위)에 JSON.parse. 문자열 안 원문 단독 서로게이트는 그 단위, 문자열 밖이면 SyntaxError다
+ assert.equal(expected({op:'jsonUnits',units:unitsOf('{"text":"\ud83d"}')}),utf8Of('{"text":"\\ud83d"}'));
+ assert.equal(expected({op:'jsonUnits',units:unitsOf('"\ud83d\\ude00"')}),utf8Of('"\u{1f600}"'));
+ assert.equal(expected({op:'jsonUnits',units:unitsOf('[\ud83d]')}),'E:SyntaxError');
 
  assert.equal(expected({op:'trim',units:unitsOf('\ufeff a\u0085 \u180e')}),unitsOf('a\u0085 \u180e'));
  assert.equal(expected({op:'toLowerCase',units:unitsOf('blac\u212a \u0391\u03a3')}),unitsOf('black \u03b1\u03c2'));

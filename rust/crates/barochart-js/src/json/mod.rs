@@ -5,7 +5,8 @@
 //!
 //! - `JsValue`: `undefined`를 포함한 JS 값. 수는 -0·NaN·±Infinity를, 문자열은 단독 서로게이트를 담는다.
 //! - `JsObject`: JS 자기 키 순서(배열 인덱스 키 오름차순, 나머지는 삽입 순서)를 지키는 객체.
-//! - `parse_json`·`stringify_json`: 반복 구현이라 중첩 깊이와 무관하게 스레드 스택을 일정하게 쓴다.
+//! - `parse_json`(UTF-8 바이트)·`parse_json_utf16`(JS 문자열의 WTF-16 코드 단위)·`stringify_json`: 반복 구현이라
+//!   중첩 깊이와 무관하게 스레드 스택을 일정하게 쓴다.
 //!   값의 해제·복제도 반복이다(`value` 모듈 참고).
 //! - `JsonMode::Lossless`는 iOS 결과 인코딩과 호출 추적이 쓰는 JSON 상위 집합이다(설계 §4.2, M0 계획 Task 5의 BCJSON).
 
@@ -15,7 +16,7 @@ mod value;
 mod write;
 
 pub use object::JsObject;
-pub use parse::parse_json;
+pub use parse::{parse_json, parse_json_utf16};
 pub use value::JsValue;
 pub use write::stringify_json;
 

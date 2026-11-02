@@ -27,7 +27,9 @@ use barochart_js::date::{
     civil_from_days, date_utc, days_from_civil, parse_iso_clock, parse_iso_date, time_clip,
     to_iso_string,
 };
-use barochart_js::json::{JsObject, JsValue, JsonMode, parse_json, stringify_json};
+use barochart_js::json::{
+    JsObject, JsValue, JsonMode, parse_json, parse_json_utf16, stringify_json,
+};
 use barochart_js::num::{
     js_max, js_min, js_round, js_sign, number_to_string, same_value, to_exponential, to_fixed,
     to_int32, to_precision, to_uint32,
@@ -68,6 +70,7 @@ const OPERATIONS: &[(&str, Operation)] = &[
     ("objectIs", op_object_is),
     ("json", op_json),
     ("jsonLossless", op_json_lossless),
+    ("jsonUnits", op_json_units),
     ("trim", op_trim),
     ("toLowerCase", op_to_lower_case),
     ("slice", op_slice),
@@ -237,6 +240,17 @@ fn op_json(task: &JsObject) -> Outcome {
         Ok(value) => hex_of_bytes(&stringify_json(&value, JsonMode::Standard)),
         Err(error) => format!("E:{}", error.name),
     })
+}
+
+/// JS 문자열(UTF-16 코드 단위, 원문 단독 서로게이트 허용)에 `JSON.parse` 뒤 `JSON.stringify`. 파싱 오류는 `E:SyntaxError`다.
+fn op_json_units(task: &JsObject) -> Outcome {
+    let text = units_field(task, "units")?;
+    Ok(
+        match parse_json_utf16(text.as_units(), JsonMode::Standard) {
+            Ok(value) => hex_of_bytes(&stringify_json(&value, JsonMode::Standard)),
+            Err(error) => format!("E:{}", error.name),
+        },
+    )
 }
 
 /// 무손실(BCJSON) 텍스트를 읽어 표준 JSON과 무손실 텍스트로 다시 쓴다: `<표준 16진>,<무손실 16진>`.
@@ -560,6 +574,9 @@ mod tests {
             "{\"op\":\"json\",\"text\":\"7b2262223a312c2231223a327d\"}\n",
             "{\"op\":\"slice\",\"units\":\"d83dde00\",\"start\":0,\"end\":1}\n",
             "{\"op\":\"parseIsoDate\",\"text\":\"323032362d30322d3330\"}\n",
+            "{\"op\":\"jsonUnits\",\"units\":\"0022d83d005c007500640065003000300022\"}\n",
+            "{\"op\":\"jsonUnits\",\"units\":\"007b0022d83d0022003a0031007d\"}\n",
+            "{\"op\":\"jsonUnits\",\"units\":\"d83d\"}\n",
         );
         let expected = concat!(
             "{\"r\":\"0.13\"}\n",
@@ -569,6 +586,9 @@ mod tests {
             "{\"r\":\"7b2231223a322c2262223a317d\"}\n",
             "{\"r\":\"d83d\"}\n",
             "{\"r\":\"none\"}\n",
+            "{\"r\":\"22f09f988022\"}\n",
+            "{\"r\":\"7b225c7564383364223a317d\"}\n",
+            "{\"r\":\"E:SyntaxError\"}\n",
         );
         assert_eq!(results(input), Ok(String::from(expected)));
     }

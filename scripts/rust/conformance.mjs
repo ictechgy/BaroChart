@@ -7,7 +7,8 @@
 // - x, y, t: IEEE-754 비트를 16진 16자리(빅엔디언)로 쓴 수. xs, args는 그런 16진의 배열이다
 // - d, p, start, end, unit, year, month, day, days: 정수. toExponential의 d와 slice의 end는 없으면 undefined다
 // - text: UTF-8 바이트의 16진. 원문에는 단독 서로게이트를 넣지 않는다(\uXXXX 이스케이프로만 넣는다)
-// - units: UTF-16 코드 단위마다 16진 네 자리(단독 서로게이트도 담는다)
+// - units: UTF-16 코드 단위마다 16진 네 자리(단독 서로게이트도 담는다). jsonUnits는 이 형식으로 JS 문자열 원문을 보내
+//   문자열 안의 원문 단독 서로게이트까지 시험한다(커널 parse_json_utf16)
 // - carrier: jsonLossless에서 오라클만 읽는 표준 JSON. 같은 텍스트에서 특수 값만 표지 객체로 바꿨다
 // 결과는 정규 문자열이다. 수는 NaN이면 'NaN', 아니면 16진 비트다(설계 §6.2: Object.is 기준, NaN만 정규화).
 // 문자열·JSON은 16진, 정수는 십진, 불리언은 'true'/'false', 오류는 'E:<이름>'이다.
@@ -42,7 +43,7 @@ export const SUITE_OPS=Object.freeze({
  precision:['toPrecision'],
  exponential:['toExponential'],
  round:['round','sign','max','min','toInt32','toUint32','objectIs'],
- json:['json','jsonLossless'],
+ json:['json','jsonLossless','jsonUnits'],
  string:['trim','toLowerCase','slice','length','isWhitespace','quote'],
  date:['dateUtc','timeClip','toISOString','daysFromCivil','civilFromDays','parseIsoDate','parseIsoClock'],
 });
@@ -153,6 +154,9 @@ const JSON_SPACES=Object.freeze([' ','\t','\n','\r','  ','\r\n']);
 
 /** JSON 변형에 넣는 조각: 문법 문자와 JSON이 받지 않는 공백(VT, NBSP, BOM, NEL, U+2028) */
 const JSON_NOISE=Object.freeze(['',',',']','}','[','{','"',':','x','-','.','e','0','1',' ','\\','tru','nul','NaN','undefined','\u000b','\u00a0','\ufeff','\u0085','\u2028','\t']);
+
+/** jsonUnits 변형 조각: JSON_NOISE에 원문 단독 서로게이트(상위·하위)를 더한다. UTF-8 텍스트로는 나타낼 수 없는 입력이다 */
+const JSON_UNITS_NOISE=Object.freeze([...JSON_NOISE,'\ud83d','\ude00','\udbff']);
 
 /**
  * 정확한 반올림·넘침·-0을 시험하는 수 표기. 뒤의 일곱 개는 명시 지수가 6자리 이상이라 커널이 dec2flt 대신
@@ -502,16 +506,36 @@ function escapeUnit(random,unit){
 }
 
 /**
+ * 서로게이트 쌍을 원문과 이스케이프로 섞어 쓴다(jsonUnits 전용). JS 문자열 원문에서는 원문 상위와 이스케이프한 하위가
+ * 이어져도 쌍이 된다.
+ * @param {ReturnType<typeof createRandom>} random 난수 도구
+ * @param {number} high 상위 서로게이트
+ * @param {number} low 하위 서로게이트
+ * @returns {string} 토큰 조각
+ */
+function mixedPair(random,high,low){
+ const roll=random.float();
+ if(roll<0.7)return String.fromCharCode(high,low);
+ if(roll<0.8)return escapeUnit(random,high)+escapeUnit(random,low);
+ if(roll<0.9)return String.fromCharCode(high)+escapeUnit(random,low);
+ return escapeUnit(random,high)+String.fromCharCode(low);
+}
+
+/**
  * JSON 문자열 토큰. 단독 서로게이트는 늘 이스케이프하고, 서로게이트 쌍은 둘 다 원문이거나 둘 다 이스케이프한다.
+ * rawSurrogates(jsonUnits)면 단독 서로게이트를 절반은 원문으로 쓰고, 쌍은 원문·이스케이프를 섞는다.
  * @param {ReturnType<typeof createRandom>} random 난수 도구
  * @param {string} value 문자열 값
+ * @param {boolean} [rawSurrogates] JS 문자열 원문(코드 단위)으로 보낼 텍스트인지
  * @returns {string} 따옴표를 포함한 토큰
  */
-function stringToken(random,value){
+function stringToken(random,value,rawSurrogates=false){
  let out='"';
  for(let index=0;index<value.length;index++){
   const unit=value.charCodeAt(index),next=value.charCodeAt(index+1);
-  if(unit>=0xd800&&unit<=0xdbff&&next>=0xdc00&&next<=0xdfff){
+  if(rawSurrogates&&unit>=0xd800&&unit<=0xdbff&&next>=0xdc00&&next<=0xdfff){out+=mixedPair(random,unit,next);index++;}
+  else if(rawSurrogates&&unit>=0xd800&&unit<=0xdfff)out+=random.chance(0.5)?String.fromCharCode(unit):escapeUnit(random,unit);
+  else if(unit>=0xd800&&unit<=0xdbff&&next>=0xdc00&&next<=0xdfff){
    out+=random.chance(0.1)?escapeUnit(random,unit)+escapeUnit(random,next):value.slice(index,index+2);
    index++;
   }else if(unit>=0xd800&&unit<=0xdfff)out+=escapeUnit(random,unit);
@@ -631,17 +655,18 @@ function renderContainer(random,open,close,parts){
  * 값 나무를 JSON 텍스트(Lossless면 BCJSON)와 오라클용 carrier로 쓴다.
  * @param {ReturnType<typeof createRandom>} random 난수 도구
  * @param {object} node 값 나무
+ * @param {boolean} [rawSurrogates] 문자열 토큰에 원문 단독 서로게이트를 쓸지(jsonUnits)
  * @returns {[string, string]} 텍스트와 carrier
  */
-function renderJson(random,node){
+function renderJson(random,node,rawSurrogates=false){
  switch(node.kind){
   case 'number':return [node.text,node.carrier];
   case 'literal':return [node.text,node.text];
   case 'undefined':return ['undefined',sentinelText('undefined')];
-  case 'string':{const text=stringToken(random,node.value);return [text,text];}
-  case 'array':return renderContainer(random,'[',']',node.items.map(item=>()=>renderJson(random,item)));
+  case 'string':{const text=stringToken(random,node.value,rawSurrogates);return [text,text];}
+  case 'array':return renderContainer(random,'[',']',node.items.map(item=>()=>renderJson(random,item,rawSurrogates)));
   default:return renderContainer(random,'{','}',node.entries.map(([key,value])=>()=>{
-   const name=stringToken(random,key),colon=`${jsonSpace(random)}:${jsonSpace(random)}`,[text,carrier]=renderJson(random,value);
+   const name=stringToken(random,key,rawSurrogates),colon=`${jsonSpace(random)}:${jsonSpace(random)}`,[text,carrier]=renderJson(random,value,rawSurrogates);
    return [name+colon+text,name+colon+carrier];
   }));
  }
@@ -662,15 +687,20 @@ function mutate(random,text,noise){
 }
 
 /**
- * json 스위트 작업 하나. 셋 중 둘은 표준 JSON(30%는 변형해 오류도 시험), 하나는 무손실(BCJSON) 왕복이다.
+ * json 스위트 작업 하나. 넷 중 둘은 표준 JSON(UTF-8 바이트), 하나는 무손실(BCJSON) 왕복, 하나는 JS 문자열 원문
+ * (코드 단위, 원문 단독 서로게이트 포함)이다. 표준·코드 단위는 30%를 변형해 오류도 시험한다.
  * @param {ReturnType<typeof createRandom>} random 난수 도구
  * @param {number} index 스위트 안 색인
  * @returns {{source: string, task: object}} 작업
  */
 function jsonCase(random,index){
- const lossless=index%3===2,node=random.chance(0.02)?deepNode(random,lossless):jsonNode(random,4,lossless);
- const before=jsonSpace(random),[body,carrierBody]=renderJson(random,node),after=jsonSpace(random);
+ const lossless=index%4===2,units=index%4===3,node=random.chance(0.02)?deepNode(random,lossless):jsonNode(random,4,lossless);
+ const before=jsonSpace(random),[body,carrierBody]=renderJson(random,node,units),after=jsonSpace(random);
  if(lossless)return {source:'lossless',task:{op:'jsonLossless',text:utf8Hex(before+body+after),carrier:utf8Hex(before+carrierBody+after)}};
+ if(units){
+  const text=random.chance(0.3)?mutate(random,before+body+after,JSON_UNITS_NOISE):before+body+after;
+  return {source:'units',task:{op:'jsonUnits',units:unitsHex(text)}};
+ }
  const text=random.chance(0.3)?mutate(random,before+body+after,JSON_NOISE):before+body+after;
  return {source:'standard',task:{op:'json',text:utf8Hex(text)}};
 }
@@ -918,6 +948,11 @@ export function createOracle(){
   json:function(task){
    var value;
    try{value=JSON.parse(decodeUtf8(task.text));}catch(error){return 'E:'+error.name;}
+   return utf8Hex(JSON.stringify(value));
+  },
+  jsonUnits:function(task){
+   var value;
+   try{value=JSON.parse(decodeUnits(task.units));}catch(error){return 'E:'+error.name;}
    return utf8Hex(JSON.stringify(value));
   },
   jsonLossless:function(task){
@@ -1421,7 +1456,7 @@ const NUMBER_RESULT_OPS=new Set(['round','sign','max','min','dateUtc','timeClip'
  */
 function describeResult(op,value){
  if(typeof value!=='string'||value.startsWith('E:')||value.startsWith('!'))return JSON.stringify(value);
- if(op==='json'||op==='quote')return JSON.stringify(Buffer.from(value,'hex').toString('utf8'));
+ if(op==='json'||op==='jsonUnits'||op==='quote')return JSON.stringify(Buffer.from(value,'hex').toString('utf8'));
  if(op==='jsonLossless')return value.split(',').map(part=>JSON.stringify(Buffer.from(part,'hex').toString('utf8'))).join(' | ');
  if(op==='trim'||op==='toLowerCase'||op==='slice')return JSON.stringify(unitsFromHex(value));
  if(NUMBER_RESULT_OPS.has(op)&&/^[0-9a-f]{16}$/.test(value))return `${value}(${formatNumber(numberFromBits(value))})`;

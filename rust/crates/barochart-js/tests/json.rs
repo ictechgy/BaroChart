@@ -5,7 +5,9 @@
 //! 엔진마다 다른 두 경우는 해당 테스트에 적었다(깊은 중첩, 40자리를 넘는 숫자). 오류는 이름(`SyntaxError`)만
 //! 계약이다(이식 지도 D8). Lossless는 M0 계획 Task 5의 BCJSON 문법에서 `F64` 토큰을 뺀 것이다.
 
-use barochart_js::json::{JsObject, JsValue, JsonMode, parse_json, stringify_json};
+use barochart_js::json::{
+    JsObject, JsValue, JsonMode, parse_json, parse_json_utf16, stringify_json,
+};
 use barochart_js::string::JsString;
 
 /// 텍스트를 파싱한다. 실패하면 입력과 오류를 보여 주며 멈춘다.
@@ -570,6 +572,137 @@ fn invalid_utf8_is_a_syntax_error() {
         assert_syntax_error(input, JsonMode::Standard);
         assert_syntax_error(input, JsonMode::Lossless);
     }
+}
+
+/// 자리표시 문자를 단독 서로게이트로 바꾼 UTF-16 코드 단위를 만든다(테스트 입력을 읽기 쉽게 적으려는 것).
+///
+/// U+E001 → 0xD83D(상위), U+E002 → 0xDE00(하위), U+E003 → 0xDC00(하위). 나머지는 그대로 UTF-16이다.
+/// - `text`: 자리표시 문자를 쓴 문자열
+/// - 반환: WTF-16 코드 단위
+fn wtf16(text: &str) -> Vec<u16> {
+    text.encode_utf16()
+        .map(|unit| match unit {
+            0xE001 => 0xD83D,
+            0xE002 => 0xDE00,
+            0xE003 => 0xDC00,
+            other => other,
+        })
+        .collect()
+}
+
+/// 코드 단위 진입점(`parse_json_utf16`)은 JS 문자열에 `JSON.parse`를 한 것과 같다. 원문 단독 서로게이트도 다룬다.
+///
+/// 기대값은 같은 JS 문자열을 V8(Node 22.20.0), JSC(macOS 시스템 `jsc`), QuickJS 2026-06-04에서
+/// `JSON.stringify(JSON.parse(text))`로 계산했고 17건 모두 세 엔진이 같았다(2026-11-02 실측). `None`은 SyntaxError다.
+/// - 문자열 안의 원문 단독 서로게이트는 그 코드 단위다. 이스케이프와 이어지면 서로게이트 쌍이 된다.
+/// - 문자열 밖(값 자리, 수 뒤)이나 역슬래시·`\u` 뒤의 원문 단독 서로게이트는 SyntaxError다.
+/// - 바이트 진입점(`parse_json`)은 UTF-8만 받으므로 이 입력들을 손실 없이 나타낼 수 없다(리뷰 C5).
+#[test]
+fn utf16_input_keeps_raw_lone_surrogates_like_json_parse() {
+    let cases: &[(&str, Option<&str>)] = &[
+        ("{\"text\":\"\u{E001}\"}", Some(r#"{"text":"\ud83d"}"#)),
+        ("\"\\\u{E001}\"", None),
+        ("\"\\\\\u{E001}\"", Some(r#""\\\ud83d""#)),
+        ("\u{E001}", None),
+        ("\"\\u\u{E001}\"", None),
+        ("[\u{E001}]", None),
+        ("\"\u{E001}\\ude00\"", Some("\"\u{1F600}\"")),
+        ("\"\\ud83d\u{E002}\"", Some("\"\u{1F600}\"")),
+        ("{\"\u{E001}\":1}", Some(r#"{"\ud83d":1}"#)),
+        ("\"\u{E001}\u{E002}\"", Some("\"\u{1F600}\"")),
+        ("\"a\u{E003}b\"", Some(r#""a\udc00b""#)),
+        ("\"\u{E002}\u{E001}\"", Some(r#""\ude00\ud83d""#)),
+        ("[1\u{E001}]", None),
+        ("\"\\uD8\u{E001}\"", None),
+        ("\u{E001}1", None),
+        (
+            "{\"a\":{\"\u{E002}\":\"\u{E001}\"}}",
+            Some(r#"{"a":{"\ude00":"\ud83d"}}"#),
+        ),
+        (
+            "{\"\u{E001}\":\"\u{E002}\"}",
+            Some(r#"{"\ud83d":"\ude00"}"#),
+        ),
+    ];
+    for &(input, expected) in cases {
+        let units = wtf16(input);
+        let outcome = parse_json_utf16(&units, JsonMode::Standard);
+        match (outcome, expected) {
+            (Ok(value), Some(text)) => assert_eq!(
+                stringify(&value, JsonMode::Standard),
+                text,
+                "JSON.stringify(JSON.parse({units:x?}))"
+            ),
+            (Err(error), None) => assert_eq!(error.name, "SyntaxError", "{units:x?}: {error:?}"),
+            (outcome, expected) => {
+                panic!("JSON.parse({units:x?}): expected {expected:?}, got {outcome:?}")
+            }
+        }
+    }
+}
+
+/// 올바른 텍스트에서는 코드 단위 진입점과 바이트 진입점이 같은 값·같은 오류 이름을 낸다(두 모드 모두).
+#[test]
+fn utf16_and_utf8_entry_points_agree_on_well_formed_text() {
+    let inputs = [
+        "{\"b\":1,\"2\":[true,false,null],\"a\":\"é😀\\u2028\\ud800\",\"__proto__\":-0}",
+        " [1e400, -1e-400, 0.1, 123456789012345678901234567890, \"\\\"\\\\\\/\\b\\f\\n\\r\\t\"] ",
+        "[NaN,Infinity,-Infinity,undefined,-0]",
+        "{\"a\":1,}",
+        "[\"한글\u{3000}\", 1",
+        "\"tab\tinside\"",
+        "[01]",
+        "\u{FEFF}[1]",
+    ];
+    for input in inputs {
+        let units: Vec<u16> = input.encode_utf16().collect();
+        for mode in [JsonMode::Standard, JsonMode::Lossless] {
+            let from_units = parse_json_utf16(&units, mode);
+            let from_bytes = parse_json(input.as_bytes(), mode);
+            match (&from_units, &from_bytes) {
+                (Ok(left), Ok(right)) => assert_eq!(
+                    stringify(left, JsonMode::Lossless),
+                    stringify(right, JsonMode::Lossless),
+                    "{mode:?} {input:?}"
+                ),
+                (Err(left), Err(right)) => assert_eq!(left.name, right.name, "{mode:?} {input:?}"),
+                _ => panic!("{mode:?} {input:?}: utf16 {from_units:?} vs utf8 {from_bytes:?}"),
+            }
+        }
+    }
+}
+
+/// 코드 단위 진입점의 오류 위치는 코드 단위(JS 문자열 위치)다. 바이트 진입점은 바이트 위치다.
+/// 무손실 모드와 원문 단독 서로게이트도 같은 파서로 읽는다.
+#[test]
+fn utf16_entry_point_reports_code_unit_positions_and_reads_lossless() {
+    // x는 코드 단위로 8번째(😀가 두 단위), 바이트로 11번째(😀 4바이트, é 2바이트)다
+    let text = "[\"\u{1F600}é\", x]";
+    let units: Vec<u16> = text.encode_utf16().collect();
+    let from_units = parse_json_utf16(&units, JsonMode::Standard).expect_err("x is not a value");
+    assert!(
+        from_units.message.to_string_lossy().starts_with("JSON: 8 "),
+        "{from_units:?}"
+    );
+    let from_bytes = parse_json(text.as_bytes(), JsonMode::Standard).expect_err("x is not a value");
+    assert!(
+        from_bytes
+            .message
+            .to_string_lossy()
+            .starts_with("JSON: 11 "),
+        "{from_bytes:?}"
+    );
+    let nbsp = parse_json_utf16(&wtf16("[\u{A0}1]"), JsonMode::Standard).expect_err("NBSP");
+    assert!(
+        nbsp.message.to_string_lossy().contains("code unit 0x00a0"),
+        "{nbsp:?}"
+    );
+    let lossless = parse_json_utf16(&wtf16("[NaN,\"\u{E001}\",-0]"), JsonMode::Lossless)
+        .unwrap_or_else(|error| panic!("lossless parse failed: {error:?}"));
+    assert_eq!(
+        stringify(&lossless, JsonMode::Lossless),
+        r#"[NaN,"\ud83d",-0]"#
+    );
 }
 
 /// writer의 문자열 이스케이프는 `JSON.stringify`와 같다: `\"`, `\\`, `\b`, `\f`, `\n`, `\r`, `\t`, 나머지 C0는
