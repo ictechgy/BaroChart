@@ -2,6 +2,9 @@
 //!
 //! - 공백은 SP·TAB·LF·CR만 받는다(JS 공백 표가 아니다).
 //! - 숫자는 문법을 먼저 확인한 뒤 `str::parse::<f64>`로 정확히 반올림한다. `1e400`은 Infinity, `-0`은 -0이다.
+//!   명시 지수가 크면(앞의 0을 뺀 숫자 6자리 이상) 리터럴을 그대로 넘기지 않는다. Rust 1.98.1 dec2flt는 명시 지수를
+//!   65536 근처에서 포화시켜 `"0." + "0"×700000 + "1e700001"`을 0으로 읽었다(JS 엔진은 1). 그래서 첫 유효 숫자의
+//!   지수를 포화 연산으로 직접 구해 넘침·밑넘침을 가르고, 그 사이 값은 정규화한 `d.ddd…e<지수>`로 읽는다.
 //! - 문자열 이스케이프 `\uD800`은 단독 서로게이트로 받는다. 원문 바이트는 올바른 UTF-8이어야 한다.
 //! - 중복 키는 마지막 값이 이기고 처음 자리를 지킨다(`JsObject::insert`). `__proto__`는 평범한 키다.
 //! - 재귀하지 않는다. 만들고 있는 컨테이너를 힙 스택에 쌓으므로 깊이 100,000도 스레드 스택과 무관하다.
@@ -9,9 +12,37 @@
 //!   `JSON: <바이트 위치> <이유>`(Lossless는 M0 BCJSON 형식 `BCJSON: <위치> <이유>`)로 쓴다. 위치는 입력의
 //!   바이트 위치라 비ASCII 문자 뒤에서는 JS 문자열 위치와 다르다.
 
+use std::ops::Range;
+
 use super::{JsObject, JsValue, JsonMode};
 use crate::error::JsError;
 use crate::string::JsString;
+
+/// 명시 지수(앞의 0을 뺀 숫자)가 이 자릿수 이상이면 리터럴을 `str::parse::<f64>`에 그대로 넘기지 않는다.
+///
+/// Rust 1.98.1 dec2flt는 명시 지수를 누적하다 65536을 넘으면 남은 숫자를 버린다. 655359까지는 정확하고
+/// 655360부터 틀리므로, 그보다 작은 6자리부터 정규화 경로로 보낸다.
+const LARGE_EXPONENT_DIGITS: usize = 6;
+
+/// 첫 유효 숫자의 십진 지수가 이보다 크면 값이 10^310 이상이라 늘 Infinity다(최댓값은 약 1.8e308)
+const MAX_DECIMAL_EXPONENT: i64 = 309;
+
+/// 첫 유효 숫자의 십진 지수가 이보다 작으면 값이 10^-325 미만이라 늘 0이다(최소 부분정규수의 절반은 약 2.47e-324)
+const MIN_DECIMAL_EXPONENT: i64 = -325;
+
+/// 문법을 확인한 수 리터럴의 구간들. 정규화 경로(`Parser::parse_large_exponent`)가 쓴다.
+struct NumberParts {
+    /// `-`로 시작했는지
+    negative: bool,
+    /// 정수부 숫자 구간
+    integer: Range<usize>,
+    /// 소수부 숫자 구간(소수부가 없으면 빈 구간)
+    fraction: Range<usize>,
+    /// 지수 부호가 `-`인지
+    exponent_negative: bool,
+    /// 지수 숫자 구간
+    exponent: Range<usize>,
+}
 
 /// `JSON.parse(text)`(Standard) 또는 BCJSON 파싱(Lossless). 반복 구현이라 재귀가 없다.
 ///
@@ -211,29 +242,53 @@ impl Parser<'_> {
     /// 수를 읽는다: `-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?`, Lossless는 `-Infinity`도 받는다.
     ///
     /// 문법을 확인한 텍스트만 `str::parse::<f64>`에 넘긴다(Rust 파서는 `+1`, `.5`, `inf` 같은 JSON 밖 형식도 받으므로).
+    /// 명시 지수가 크면(앞의 0을 뺀 숫자가 `LARGE_EXPONENT_DIGITS`자리 이상) 그대로 넘기지 않고
+    /// `parse_large_exponent`로 정규화한다. dec2flt가 명시 지수를 65536 근처에서 포화시키기 때문이다.
     fn parse_number(&mut self) -> Result<f64, JsError> {
         let start = self.position;
-        if self.eat(b'-') && self.mode == JsonMode::Lossless && self.peek() == Some(b'I') {
+        let negative = self.eat(b'-');
+        if negative && self.mode == JsonMode::Lossless && self.peek() == Some(b'I') {
             return if self.eat_word("Infinity") {
                 Ok(f64::NEG_INFINITY)
             } else {
                 Err(self.error("invalid literal; expected '-Infinity'"))
             };
         }
+        let integer_start = self.position;
         match self.peek() {
             Some(b'0') => self.position += 1,
             Some(b'1'..=b'9') => self.skip_digits(),
             _ => return Err(self.unexpected("a digit")),
         }
+        let integer = integer_start..self.position;
+        let mut fraction = self.position..self.position;
         if self.eat(b'.') {
+            let fraction_start = self.position;
             self.require_digits("a digit after '.'")?;
+            fraction = fraction_start..self.position;
         }
+        let mut exponent = None;
         if matches!(self.peek(), Some(b'e' | b'E')) {
             self.position += 1;
+            let exponent_negative = self.peek() == Some(b'-');
             if matches!(self.peek(), Some(b'+' | b'-')) {
                 self.position += 1;
             }
+            let exponent_start = self.position;
             self.require_digits("a digit in the exponent")?;
+            exponent = Some((exponent_negative, exponent_start..self.position));
+        }
+        if let Some((exponent_negative, digits)) = exponent
+            && self.significant_length(digits.clone()) >= LARGE_EXPONENT_DIGITS
+        {
+            let parts = NumberParts {
+                negative,
+                integer,
+                fraction,
+                exponent_negative,
+                exponent: digits,
+            };
+            return self.parse_large_exponent(start, &parts);
         }
         // 문법을 확인한 ASCII라 UTF-8 변환과 f64 파싱은 실패하지 않는다. 실패하면 위치를 담아 SyntaxError로 알린다
         let literal = std::str::from_utf8(&self.text[start..self.position])
@@ -241,6 +296,80 @@ impl Parser<'_> {
         literal
             .parse::<f64>()
             .map_err(|_| self.error_at(start, "number does not parse as f64"))
+    }
+
+    /// 명시 지수가 큰 수를 정규화해 읽는다.
+    ///
+    /// 정수부·소수부 숫자를 이은 열에서 처음과 마지막 유효 숫자(0이 아닌 숫자)를 찾고, 첫 유효 숫자의 십진 지수를
+    /// 포화 연산으로 직접 구한다. 지수가 `MAX_DECIMAL_EXPONENT`보다 크면 ±Infinity, `MIN_DECIMAL_EXPONENT`보다
+    /// 작으면 ±0이고, 그 사이면 `d.ddd…e<지수>`(지수 절댓값 326 미만)를 다시 만들어 `str::parse::<f64>`로 정확히
+    /// 반올림한다. 유효 숫자가 없으면 부호 있는 0이다(`-0e999999` → -0).
+    /// - `start`: 수가 시작한 위치(오류 위치)
+    /// - `parts`: 문법을 확인한 수의 구간들
+    fn parse_large_exponent(&self, start: usize, parts: &NumberParts) -> Result<f64, JsError> {
+        let integer_length = parts.integer.len();
+        let digit_at = |index: usize| {
+            let position = if index < integer_length {
+                parts.integer.start + index
+            } else {
+                parts.fraction.start + (index - integer_length)
+            };
+            self.text.get(position).copied().unwrap_or(b'0')
+        };
+        let total = integer_length + parts.fraction.len();
+        let first = (0..total).find(|&index| digit_at(index) != b'0');
+        let last = (0..total).rev().find(|&index| digit_at(index) != b'0');
+        let (Some(first), Some(last)) = (first, last) else {
+            return Ok(if parts.negative { -0.0 } else { 0.0 });
+        };
+        let explicit = parts.exponent.clone().fold(0_i64, |value, position| {
+            // 문법을 확인한 십진 숫자라 b'0'을 빼도 0..=9다
+            let digit = self
+                .text
+                .get(position)
+                .map_or(0, |&byte| byte.saturating_sub(b'0'));
+            value.saturating_mul(10).saturating_add(i64::from(digit))
+        });
+        let explicit = if parts.exponent_negative {
+            -explicit
+        } else {
+            explicit
+        };
+        // 첫 유효 숫자의 지수 = (정수부 자릿수 - 첫 유효 숫자 위치 - 1) + 명시 지수. 자릿수는 입력 길이라 i64에 든다
+        let leading = saturating_i64(integer_length)
+            .saturating_sub(saturating_i64(first))
+            .saturating_sub(1)
+            .saturating_add(explicit);
+        let magnitude = if leading > MAX_DECIMAL_EXPONENT {
+            f64::INFINITY
+        } else if leading < MIN_DECIMAL_EXPONENT {
+            0.0
+        } else {
+            let mut text = String::with_capacity(last - first + 8);
+            text.push(char::from(digit_at(first)));
+            if last > first {
+                text.push('.');
+                text.extend((first + 1..=last).map(|index| char::from(digit_at(index))));
+            }
+            text.push('e');
+            text.push_str(&leading.to_string());
+            text.parse::<f64>()
+                .map_err(|_| self.error_at(start, "number does not parse as f64"))?
+        };
+        Ok(if parts.negative {
+            -magnitude
+        } else {
+            magnitude
+        })
+    }
+
+    /// 숫자 구간에서 앞의 0을 뺀 자릿수
+    ///
+    /// - `digits`: 십진 숫자만 든 구간
+    fn significant_length(&self, digits: Range<usize>) -> usize {
+        digits
+            .skip_while(|&position| self.text.get(position) == Some(&b'0'))
+            .count()
     }
 
     /// 문자열을 읽는다. 여는 따옴표에 있을 때 부른다.
@@ -433,6 +562,13 @@ impl Parser<'_> {
             JsString::from_str(&format!("{prefix}: {position} {reason}")),
         )
     }
+}
+
+/// 위치·길이(usize)를 i64로 바꾼다. 넘치면 `i64::MAX`에 붙인다(입력 길이라 실제로는 넘치지 않는다).
+///
+/// - `value`: 바꿀 값
+fn saturating_i64(value: usize) -> i64 {
+    i64::try_from(value).unwrap_or(i64::MAX)
 }
 
 /// 닫힌 프레임을 값으로 바꾼다.

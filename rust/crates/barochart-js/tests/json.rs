@@ -314,6 +314,103 @@ fn long_decimal_inputs_round_correctly() {
     );
 }
 
+/// 명시 지수가 아주 커도(앞의 0을 뺀 지수 숫자 6자리 이상) 자릿수가 지수를 상쇄하면 `JSON.parse`와 같은 값이다.
+///
+/// Rust `str::parse::<f64>`(dec2flt, 1.98.1)는 명시 지수를 누적하다 65536을 넘으면 남은 지수 숫자를 버린다.
+/// 그래서 리터럴을 그대로 넘기면 `"0." + "0"×700000 + "1e700001"`이 0, `"1" + "0"×700000 + "e-700000"`이
+/// Infinity였다. V8·JSC·QuickJS는 둘 다 1이다(2026-11-02 실측). 명시 지수 655359까지는 정확히 누적되고
+/// 655360부터 틀렸다. 문서 한도(8,388,608자) 안에 드는 입력이다.
+/// 넘침·밑넘침 경계 사례는 정규화한 경로(첫 유효 숫자의 지수 308·309·310, -324·-325·-326)를 지난다.
+#[test]
+fn huge_exponents_offset_by_digits_parse_like_json_parse() {
+    let zeros = |count: usize| "0".repeat(count);
+    let cases: Vec<(String, u64)> = vec![
+        (
+            format!("0.{}1e700001", zeros(700_000)),
+            0x3FF0_0000_0000_0000,
+        ),
+        (
+            format!("1{}e-700000", zeros(700_000)),
+            0x3FF0_0000_0000_0000,
+        ),
+        (
+            format!("-0.{}15e700001", zeros(700_000)),
+            0xBFF8_0000_0000_0000,
+        ),
+        (
+            format!("12345{}e-700004", zeros(700_000)),
+            0x3FF3_C083_126E_978D,
+        ),
+        (
+            format!("0.{}1e655359", zeros(655_358)),
+            0x3FF0_0000_0000_0000,
+        ),
+        (
+            format!("0.{}1e655360", zeros(655_359)),
+            0x3FF0_0000_0000_0000,
+        ),
+        (
+            format!("1{}e-655359", zeros(655_359)),
+            0x3FF0_0000_0000_0000,
+        ),
+        (
+            format!("1{}e-655360", zeros(655_360)),
+            0x3FF0_0000_0000_0000,
+        ),
+        (
+            format!("0.{}17976931348623157e100309", zeros(100_000)),
+            0x7FEF_FFFF_FFFF_FFFF,
+        ),
+        (
+            format!("0.{}17976931348623159e100309", zeros(100_000)),
+            0x7FF0_0000_0000_0000,
+        ),
+        (
+            format!("0.{}1e100310", zeros(100_000)),
+            0x7FF0_0000_0000_0000,
+        ),
+        (
+            format!("-0.{}1e100311", zeros(100_000)),
+            0xFFF0_0000_0000_0000,
+        ),
+        (
+            format!("24703282292062328{}e-100340", zeros(100_000)),
+            0x0000_0000_0000_0001,
+        ),
+        (
+            format!("24703282292062327{}e-100340", zeros(100_000)),
+            0x0000_0000_0000_0000,
+        ),
+        (
+            format!("1{}e-100325", zeros(100_000)),
+            0x0000_0000_0000_0000,
+        ),
+        (
+            format!("-1{}e-100326", zeros(100_000)),
+            0x8000_0000_0000_0000,
+        ),
+        (String::from("1e1000000"), 0x7FF0_0000_0000_0000),
+        (String::from("-1e+1000000"), 0xFFF0_0000_0000_0000),
+        (String::from("1e-1000000"), 0x0000_0000_0000_0000),
+        (String::from("-0.000e-1000000"), 0x8000_0000_0000_0000),
+        (format!("1e{}100000", zeros(50)), 0x7FF0_0000_0000_0000),
+        (format!("0e{}", "9".repeat(40)), 0x0000_0000_0000_0000),
+    ];
+    for (input, bits) in &cases {
+        let shown = format!("{}…({} bytes)", &input[..input.len().min(24)], input.len());
+        assert_eq!(
+            number(&parse(input, JsonMode::Standard)).to_bits(),
+            *bits,
+            "JSON.parse({shown})"
+        );
+        assert_eq!(
+            number(&parse(input, JsonMode::Lossless)).to_bits(),
+            *bits,
+            "Lossless parse({shown})"
+        );
+    }
+}
+
 /// JSON 공백은 SP·TAB·LF·CR뿐이다. VT·FF·NBSP·BOM·U+2028은 SyntaxError다.
 #[test]
 fn json_whitespace_is_space_tab_lf_cr_only() {
