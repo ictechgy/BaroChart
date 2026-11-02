@@ -1,0 +1,10 @@
+[package]
+name = "barochart-js"
+description = "BaroChart Rust 코어의 JS 의미 커널: Number 포맷, Math, WTF-16 문자열, 순서 보존 JSON, 날짜"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# 런타임 의존성은 워크스페이스 전체에서 ryu-js(=1.0.3)뿐이다. 숫자 포맷을 구현하는 Task 2에서 더한다.
+[dependencies]

@@ -73,6 +73,49 @@ jobs:
           fi
           CHROME_BIN="${chrome_bin}" npm run test:indicator-layout:browser
 
+  rust:
+    # Rust 네이티브 코어 워크스페이스: 포맷, clippy 경고 0, 테스트, 이식 코드 금지 패턴, JS 의미 커널의 V8 대조
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Install the Rust toolchain pinned in rust-toolchain.toml
+        # rust/에서 인자 없이 부르면 rustup이 rust-toolchain.toml의 채널·구성요소·타깃을 설치한다(러너 기본 stable과 무관).
+        # cargo 래퍼가 cargo를 못 찾을 때 원인을 바로 볼 수 있게 CARGO_HOME과 rustup 위치를 남긴다.
+        working-directory: rust
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "CARGO_HOME=${CARGO_HOME:-unset}"
+          command -v rustup cargo || true
+          rustup --version
+          rustup toolchain install --no-self-update
+          rustup show active-toolchain
+
+      - name: Check Rust formatting
+        run: node scripts/rust/cargo.mjs fmt --check
+
+      - name: Clippy with warnings as errors
+        # --locked: 커밋한 Cargo.lock과 다른 의존성으로 조용히 빌드하지 않는다
+        run: node scripts/rust/cargo.mjs clippy --locked --workspace --all-targets -- -D warnings
+
+      - name: Test the Rust workspace
+        run: node scripts/rust/cargo.mjs test --locked --workspace
+
+      - name: Check banned patterns in ported Rust code
+        run: node scripts/rust/check-bans.mjs
+
+      - name: Compare the JS kernel with V8 on a seeded corpus
+        # 시드 고정 코퍼스로 barochart-js 결과를 Node(V8)와 비교한다(대조 하네스는 M1 Task 4)
+        run: node scripts/rust/conformance.mjs --count 100000
+
   ios-build:
     # 네이티브 SDK(Swift): 경고 0 빌드, macOS JavaScriptCore 테스트, iOS 시뮬레이터 빌드
     runs-on: macos-latest

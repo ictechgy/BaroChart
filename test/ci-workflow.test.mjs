@@ -14,6 +14,32 @@ test('native SDK build jobs run on every pull request',()=>{
  assert.match(workflow,/kr\.coden\.barochart\.TypedEngineTest/);
 });
 
+/**
+ * 잡 하나의 YAML 블록을 잘라 낸다. 다음 잡(들여쓰기 두 칸의 키)이나 파일 끝에서 멈춘다.
+ * @param {string} name 잡 이름
+ * @returns {string} 잡 블록(없으면 빈 문자열)
+ */
+function jobBlock(name){
+ const lines=workflow.split('\n'),start=lines.indexOf(`  ${name}:`);
+ if(start<0)return '';
+ const end=lines.findIndex((line,index)=>index>start&&/^  \S/.test(line));
+ return lines.slice(start,end<0?lines.length:end).join('\n');
+}
+
+test('the Rust workspace job installs the pinned toolchain and runs every Rust gate on Linux',()=>{
+ const job=jobBlock('rust');
+ assert.match(job,/runs-on: ubuntu-latest/);
+ for(const command of [
+  'rustup toolchain install',
+  'node scripts/rust/cargo.mjs fmt --check',
+  'node scripts/rust/cargo.mjs clippy',
+  '--workspace --all-targets -- -D warnings',
+  'node scripts/rust/cargo.mjs test',
+  'node scripts/rust/check-bans.mjs',
+  'node scripts/rust/conformance.mjs --count 100000',
+ ])assert.ok(job.includes(command),`rust job must run ${command}`);
+});
+
 test('every action is pinned to a full commit SHA',()=>{
  const uses=[...workflow.matchAll(/uses:\s*([^\s#]+)/g)].map(match=>match[1]);
  assert.ok(uses.length>=6);

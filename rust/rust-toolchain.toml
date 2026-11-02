@@ -1,0 +1,16 @@
+# Rust 코어 툴체인 고정. rust/ 안에서 실행한 rustup 프록시(cargo, rustc)는 이 파일을 따른다.
+# 설치: rust/에서 `rustup toolchain install`(인자 없음)을 부르면 채널·구성요소·타깃을 한 번에 설치한다.
+# minimal 프로필은 CI 러너에 문서(rust-docs)를 내려받지 않게 한다.
+[toolchain]
+channel = "1.98.1"
+profile = "minimal"
+components = ["rustfmt", "clippy"]
+targets = [
+  "aarch64-apple-ios",
+  "aarch64-apple-ios-sim",
+  "aarch64-apple-darwin",
+  "x86_64-apple-darwin",
+  "aarch64-linux-android",
+  "x86_64-linux-android",
+  "wasm32-unknown-unknown",
+]

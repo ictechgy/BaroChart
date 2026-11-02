@@ -8,6 +8,7 @@ examples/react-web/qa-results*.json
 .swiftpm/
 .cxx/
 native/android/library/build/
+rust/target/
 examples/kotlin-consumer/build/
 examples/kotlin-consumer/app/build/
 *.aar
