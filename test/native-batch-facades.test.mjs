@@ -12,7 +12,7 @@ test('additive false overloads preserve the legacy path before new owner/decode 
 });
 test('Swift scopes JSC aliases and lease before outer notifications and preserves source identity',()=>{
  const helper=sw.slice(sw.indexOf('private func unchangedDataBatch'));
- ordered(helper,'let runtime = contextRuntime','acquireCaptureLease()','defer {runtime?.releaseCaptureLease()}','return try autoreleasepool','let source = contextBacking','source.objectForKeyedSubscript','source.exception','value.toDictionary()','source.exception','contextBacking === source','return (receipt,unchanged)');
+ ordered(helper,'let runtime = contextRuntime','acquireCaptureLease()','defer {runtime?.releaseCaptureLease()}','return try autoreleasepool','let source = contextBacking','source.perform("nativeApplyUnchangedDataEvents", [events])','case .threw','value.toDictionary()','source.takeException()','contextBacking === source','return (receipt,unchanged)');
  assert.doesNotMatch(helper,/notifyChanges|try call\(|checkException/);
  ordered(sw,'outcome = try unchangedDataBatch(events)','contextBacking.map(ObjectIdentifier.init) == identity','} catch {','contextBacking.map(ObjectIdentifier.init) == identity {notifyChanges()}','throw error','if !outcome.1 || revision != beforeRevision {notifyChanges()}','return outcome.0');
 });

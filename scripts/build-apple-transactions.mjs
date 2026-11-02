@@ -9,7 +9,7 @@ const core=resolve(process.env.ASTER_APPLE_CORE??'native/Resources/aster-core.js
 const digest=b=>createHash('sha256').update(b).digest('hex');
 const coreBytes=await readFile(core),coreSHA256=digest(coreBytes);
 if(process.env.ASTER_APPLE_CORE_SHA&&coreSHA256!==process.env.ASTER_APPLE_CORE_SHA)throw new Error('Frozen native core SHA mismatch');
-const common=['native/BaroChartEngine.swift','native/BaroChartTrace.swift','native/BaroChartError.swift','native/BaroChartColumns.swift','native/BaroChartFrameRenderer.swift','examples/native/parity.swift','examples/native/axis-verification.swift','examples/native/transaction-verification.swift'];
+const common=['native/BaroChartEngine.swift','native/BaroChartCoreRuntime.swift','native/BaroChartTrace.swift','native/BaroChartError.swift','native/BaroChartColumns.swift','native/BaroChartFrameRenderer.swift','examples/native/parity.swift','examples/native/axis-verification.swift','examples/native/transaction-verification.swift'];
 const sources=[...common,'native/BaroChartUIView.swift','examples/native/transaction-main.swift','examples/ios/TransactionApp.swift','scripts/build-apple-transactions.mjs','scripts/test-apple-transactions.mjs','package.json'];
 const hashes=Object.fromEntries(await Promise.all(sources.map(async f=>[f,digest(await readFile(f))])));
 const packageVersion=JSON.parse(await readFile('package.json','utf8')).version;

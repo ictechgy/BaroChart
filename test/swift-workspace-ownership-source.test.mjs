@@ -92,7 +92,7 @@ staticTest('two global slots and admitted bytes are independently bounded', () =
 staticTest('pending records retain source ownership but no job, engine, Error, or callback', () => {
   const fields = record.slice(0, record.search(/\binit\s*\(/));
   assert.match(compact(fields), /letregistration:Int/);
-  assert.match(compact(fields), /varcontext:JSContext\?/);
+  assert.match(compact(fields), /varcontext:BaroChartCoreRuntime\?/);
   assert.match(compact(fields), /varruntime:BaroChartContextRuntime\?/);
   assert.doesNotMatch(fields, /\b(?:BaroChartWorkspaceJob|BaroChartEngine|Error|Result|Any|AnyObject|JSValue)\b|->|\b(?:completion|callback|progress)\b/);
   const fail = method(job, 'fail');
@@ -149,12 +149,12 @@ staticTest('source Finish precedes callback-free locked final publication', () =
     'owner.contextBacking = context', 'owner.workspaceContextInstalled = true',
     'owner.contextRuntime = runtime', 'committed = true', 'lock.unlock()');
   const critical = install.slice(install.indexOf('lock.lock()'), install.indexOf('lock.unlock()'));
-  assert.doesNotMatch(critical, /\b(?:asterInvoke|sourceCall|notifyChanges|autoreleasepool|retire|releaseCaptureLease|progress|completion|callback)\s*\??\s*\(/);
+  assert.doesNotMatch(critical, /\b(?:asterInvoke|invoke|perform|readFloat64Data|writeFloat64|sourceCall|notifyChanges|autoreleasepool|retire|releaseCaptureLease|progress|completion|callback)\s*\??\s*\(/);
   const finalOwner = method(job, 'finalOwner');
   assert.match(compact(finalOwner), /!engine\.closed&&!engine\.closing/);
   assert.match(compact(finalOwner), /engine\.activeWorkspace===self,engine\.revision==sourceRevision/);
   assert.match(compact(finalOwner), /letsource=record\?\.context,engine\.contextBacking===source/);
-  assert.doesNotMatch(finalOwner, /asterInvoke|sourceCall|notifyChanges|\.call\(|progress|completion|callback/);
+  assert.doesNotMatch(finalOwner, /asterInvoke|\.invoke\(|\.perform\(|sourceCall|notifyChanges|\.call\(|progress|completion|callback/);
 });
 
 staticTest('source operations check ownership before and after callback-capable JS', () => {
@@ -213,7 +213,7 @@ staticTest('failure waits for creator cleanup before source Abort and completion
 });
 
 staticTest('creator finally clears the workspace context after retirement leases drain', () => {
-  assert.match(compact(runtime), /privatevarownedContext:JSContext\?/);
+  assert.match(compact(runtime), /privatevarownedContext:BaroChartCoreRuntime\?/);
   ordered(method(runtime, 'run'), 'retirement.install(CFRunLoopGetCurrent())',
     'performInitialJob()', 'while !retirement.shouldStop',
     'autoreleasepool {ownedContext = nil}', 'RunLoop.current.remove(',
@@ -246,10 +246,12 @@ staticTest('progress is coalesced and terminal delivery clears stored callbacks'
 });
 
 staticTest('only workspace-installed backing is dropped on close or deinit', () => {
-  assert.match(compact(engine), /varcontextBacking:JSContext\?/);
-  const context = block(engine, /\bvar\s+context\s*:\s*JSContext/);
+  // 엔진은 JSContext 대신 이음새 런타임을 담는다(M0 Task 6). 공개 context는 그 런타임의 JSContext를 읽기만 한다.
+  assert.match(compact(engine), /varcontextBacking:BaroChartCoreRuntime\?/);
+  assert.match(compact(engine), /publicvarcontext:JSContext\{coreRuntime\.javaScriptContext\}/);
+  const context = block(engine, /\bvar\s+coreRuntime\s*:\s*BaroChartCoreRuntime/);
   assert.match(compact(context), /set\{contextBacking=newValue;workspaceContextInstalled=false\}/);
-  assert.match(compact(context), /get\{guardletcontext=contextBackingelse\{preconditionFailure\(/);
+  assert.match(compact(context), /get\{guardletruntime=contextBackingelse\{preconditionFailure\(/);
   // 공개 close()는 정리 본체 closeOnOwner()를 BaroChartError로 감싼다
   assert.match(method(engine, 'close'), /try BaroChartError\.mapping \{try closeOnOwner\(\)\}/);
   const close = method(engine, 'closeOnOwner');
@@ -290,7 +292,7 @@ staticTest('public entry points preserve main/owner and closed-engine guards', (
   }
   ordered(method(engine, 'applyDataEventAsync'), 'guard Thread.current === owner',
     'guard Thread.isMainThread', 'guard !closed', 'try workspaceAvailability()');
-  ordered(method(engine, 'call'), 'guard Thread.current === owner', 'guard !closed', 'function.call(');
+  ordered(method(engine, 'call'), 'guard Thread.current === owner', 'guard !closed', 'coreRuntime.perform(');
   ordered(method(engine, 'command'), 'guard Thread.current === owner', 'guard !closed', 'try call(');
   ordered(method(engine, 'workspaceAvailability'), 'guard !closing',
     'BaroChartWorkspaceRegistry.contains(pending)', 'guard activeWorkspace == nil');

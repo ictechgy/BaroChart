@@ -63,7 +63,7 @@ final class TraceRecorderTests: XCTestCase {
 
     /// 훅을 끄면 새 런타임은 기록기를 받지 않고 파일도 만들지 않는다.
     func testTracingOffCreatesNoFiles() throws {
-        let directory = try TraceFiles.temporaryDirectory("off")
+        let directory = try TraceFiles.temporaryDirectory("off", removedAfter: self)
         BaroChartEngine.traceDirectoryForTesting = directory
         BaroChartEngine.traceDirectoryForTesting = nil
         XCTAssertNil(BaroChartTraceSettings.makeWriter())
@@ -77,7 +77,7 @@ final class TraceRecorderTests: XCTestCase {
     /// 시나리오마다 추적이 멈추지 않고 끝까지 기록된다. 자식 프로세스로 불리면 골든 비교용 추적을 그 디렉터리에 쓴다.
     func testScenarioTraces() async throws {
         let requested = ProcessInfo.processInfo.environment[Self.childOutputVariable].map {URL(fileURLWithPath: $0)}
-        let output = try requested ?? TraceFiles.temporaryDirectory("scenarios")
+        let output = try requested ?? TraceFiles.temporaryDirectory("scenarios", removedAfter: self)
         for scenario in TraceScenario.allCases {
             let directory = output.appendingPathComponent(scenario.rawValue)
             if FileManager.default.fileExists(atPath: directory.path) {try FileManager.default.removeItem(at: directory)}
@@ -94,7 +94,7 @@ final class TraceRecorderTests: XCTestCase {
     #if os(macOS)
     /// 새 프로세스에서 기록한 추적이 골든과 바이트까지 같다(렌더러가 만드는 무작위 UUID 토큰만 순번으로 바꿔 비교한다).
     func testFreshProcessTracesMatchGoldens() throws {
-        let output = try TraceFiles.temporaryDirectory("fresh")
+        let output = try TraceFiles.temporaryDirectory("fresh", removedAfter: self)
         try runScenarioChild(output: output)
         let record = ProcessInfo.processInfo.environment[Self.recordVariable] == "1"
         for scenario in TraceScenario.allCases {
@@ -118,6 +118,9 @@ final class TraceRecorderTests: XCTestCase {
         var environment = ProcessInfo.processInfo.environment
         environment[Self.childOutputVariable] = output.path
         environment.removeValue(forKey: Self.recordVariable)
+        // Xcode가 띄운 실행이면 이 두 변수가 자식의 테스트 선택을 IDE 세션으로 돌리므로 지운다(swift test에는 없다)
+        environment.removeValue(forKey: "XCTestConfigurationFilePath")
+        environment.removeValue(forKey: "XCTestSessionIdentifier")
         process.environment = environment
         let logURL = output.appendingPathComponent("child.log")
         XCTAssertTrue(FileManager.default.createFile(atPath: logURL.path, contents: nil))
@@ -419,10 +422,13 @@ enum TraceFiles {
         let text: String
     }
 
-    /// 이 테스트만 쓰는 빈 임시 디렉터리
-    static func temporaryDirectory(_ label: String) throws -> URL {
+    /// 이 테스트만 쓰는 빈 임시 디렉터리. 테스트가 끝나면 지운다(지우지 못하면 테스트 실패로 알린다).
+    static func temporaryDirectory(_ label: String, removedAfter testCase: XCTestCase) throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("barochart-trace-\(label)-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        testCase.addTeardownBlock {
+            do {try FileManager.default.removeItem(at: url)} catch {XCTFail("Temporary trace directory \(url.path) could not be removed: \(error)")}
+        }
         return url
     }
 

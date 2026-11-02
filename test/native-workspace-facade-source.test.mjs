@@ -17,9 +17,10 @@ for(const [name,source,save,preflight,call] of [
 });
 test('Swift direct call retains owning-thread and closed-engine guards before JavaScript entry',()=>{
  const body=method(swift,'public func call(');
- assert.ok(body.indexOf('Thread.current === owner')<body.indexOf('function.call'));
- assert.ok(body.indexOf('guard !closed')<body.indexOf('function.call'));
- assert.match(body,/checkException\(\)/);
+ // 코어 진입은 이음새 런타임의 perform이다(M0 Task 6). 예외는 이전 checkException과 같은 문구로 던진다.
+ assert.ok(body.indexOf('Thread.current === owner')<body.indexOf('coreRuntime.perform('));
+ assert.ok(body.indexOf('guard !closed')<body.indexOf('coreRuntime.perform('));
+ assert.match(body,/case \.threw\(let exception\): throw BaroChartLowLevelError\.javaScript\(exception\.toString\(\) \?\? "Unknown JS error"\)/);
 });
 test('Java direct invoke retains owning-thread and closed-handle guards before JNI entry',()=>{
  const check=method(java,'private void check('),body=method(java,'public Object invoke(');

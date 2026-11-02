@@ -64,7 +64,7 @@ public final class BaroChartFrameRenderer {
         try engine.checkFrameOwner()
         let w=Int((cssWidth*scale).rounded()),h=Int((cssHeight*scale).rounded());guard w<=16384,h<=16384,w*h<=16777216 else{throw BaroChartLowLevelError.invalidScene}
         let key="\(w)/\(h)/\(scale)/\(budget.maxBytes)/\(budget.generation)",bytes=((w*4+63)/64)*64*h*2
-        var available=abs(cssWidth*scale-Double(w))<1e-9 && abs(cssHeight*scale-Double(h))<1e-9 && bytes<=33554432 && failedGeometry != key && engine.context.objectForKeyedSubscript("nativeRenderFrameJSON")?.isUndefined==false
+        var available=abs(cssWidth*scale-Double(w))<1e-9 && abs(cssHeight*scale-Double(h))<1e-9 && bytes<=33554432 && failedGeometry != key && engine.supports("nativeRenderFrameJSON")
         if width != w || height != h || ratio != scale {release(resetFailure:false);ratio=scale}
         if available {available=budget.reserve(token,bytes,{[weak self] in self?.release()})}
         if available && base==nil {base=bitmap(w,h,scale);stable=bitmap(w,h,scale);if base==nil || stable==nil {failedGeometry=key;release(resetFailure:false);available=false}else{width=w;height=h;cachedBytes=bytes;force=true}}

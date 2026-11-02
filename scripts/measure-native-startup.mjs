@@ -19,7 +19,7 @@ try{
  const binary=join(work,'bench'),main=join(work,'main.swift');
  // Swift는 main.swift에서만 최상위 실행 코드를 허용한다
  await copyFile(join(root,'benchmarks/native-startup.swift'),main);
- run('swiftc',['-O',...['BaroChartEngine','BaroChartTrace','BaroChartError','BaroChartColumns','BaroChartFrameRenderer'].map(name=>`native/${name}.swift`),main,'-o',binary]);
+ run('swiftc',['-O',...['BaroChartEngine','BaroChartCoreRuntime','BaroChartTrace','BaroChartError','BaroChartColumns','BaroChartFrameRenderer'].map(name=>`native/${name}.swift`),main,'-o',binary]);
  console.log(run(binary,['native/Resources/aster-core.js',...process.argv.slice(2)]).trim());
 }finally{
  await rm(work,{recursive:true,force:true});

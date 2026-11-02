@@ -560,36 +560,50 @@ enum BaroChartTraceEncoder {
     }
 }
 
-/// M0 Task 6 1단계: 이음새를 넣기 전 구조(asterInvoke·call·전용 경로)에 넣는 최소 기록 훅.
-/// JSContext마다 기록기를 연관 객체로 붙여 두고, 코어 함수를 부르는 자리와 호스트가 뷰에 쓰는 자리에서 부른다.
-/// 이음새 리팩터링 뒤에는 BaroChartRecordingCoreRuntime이 같은 기록기로 같은 줄을 쓴다.
-enum BaroChartTraceHooks {
-    /// 연관 객체 키(주소만 쓴다)
-    private static let key = UnsafeMutableRawPointer.allocate(byteCount: 1, alignment: 1)
+/// 다른 런타임을 감싸 BCJSON 추적을 쓰는 런타임(테스트·디버그 전용). 모든 호출을 안쪽 런타임에 그대로 넘기고,
+/// 넘긴 호출과 결과(또는 코어 예외), 호스트가 Float64Array 뷰에 쓴 바이트만 기록한다. 함수가 없는 호출과 supports·번들 평가는 코어 호출이 아니라 쓰지 않는다.
+/// invoke·readFloat64는 프로토콜 기본 구현을 그대로 쓰므로 안쪽 런타임과 같은 오류 규칙으로 이 런타임의 perform을 거친다.
+/// M1의 Rust 런타임은 readFloat64·writeFloat64를 직접 구현하므로, 그때 이 기록기의 쓰기 기록 방식도 함께 정한다.
+final class BaroChartRecordingCoreRuntime: BaroChartCoreRuntime {
+    /// 감싼 런타임
+    let inner: BaroChartCoreRuntime
+    /// 이 런타임의 추적 파일
+    private let writer: BaroChartTraceWriter
 
-    /// 새로 만든 컨텍스트에 추적이 켜져 있으면 기록기를 붙인다.
-    /// - Parameter context: 방금 만든 JSContext
-    static func attach(_ context: JSContext) {
-        guard let writer = BaroChartTraceSettings.makeWriter() else {return}
-        objc_setAssociatedObject(context, key, writer, .OBJC_ASSOCIATION_RETAIN)
+    /// 런타임을 감싼다. 런타임 하나에 한 번만 부른다(엔진은 감싼 객체를 런타임 신원으로 쓴다).
+    /// - Parameters:
+    ///   - inner: 감쌀 런타임
+    ///   - writer: 추적 파일
+    init(_ inner: BaroChartCoreRuntime, writer: BaroChartTraceWriter) {self.inner = inner;self.writer = writer}
+
+    /// 안쪽 런타임의 백엔드
+    var backend: BaroChartRuntimeBackend {inner.backend}
+    /// 안쪽 런타임의 JSContext
+    var javaScriptContext: JSContext {inner.javaScriptContext}
+    /// 안쪽 런타임에 그대로 묻는다(기록하지 않는다).
+    func supports(_ name: String) -> Bool {inner.supports(name)}
+    /// 안쪽 런타임의 대기 예외를 꺼낸다(기록하지 않는다).
+    func takeException() -> BaroChartCoreValue? {inner.takeException()}
+    /// 안쪽 런타임에 번들을 평가한다(기록하지 않는다).
+    func evaluateBundle(_ source: String) -> BaroChartCoreValue? {inner.evaluateBundle(source)}
+
+    /// 인자를 먼저 쓰고 안쪽 런타임을 부른 뒤, 결과나 코어 예외를 기록한다.
+    func perform(_ name: String, _ arguments: [Any]) -> BaroChartCoreOutcome {
+        let pending = writer.begin(name, arguments)
+        let outcome = inner.perform(name, arguments)
+        if let pending = pending {
+            switch outcome {
+            case .missing: break
+            case .returned(let value): writer.finish(pending, returned: value.javaScriptValue, in: value.javaScriptContext)
+            case .threw(let exception): writer.finish(pending, threw: exception.javaScriptValue, in: exception.javaScriptContext)
+            }
+        }
+        return outcome
     }
 
-    /// 코어 함수를 부르기 직전에 인자를 쓴다.
-    /// - Returns: 기록기와 머리. 추적이 꺼져 있으면 nil
-    static func begin(_ context: JSContext, _ name: String, _ arguments: [Any]) -> (writer: BaroChartTraceWriter, pending: BaroChartTracePending)? {
-        guard let writer = objc_getAssociatedObject(context, key) as? BaroChartTraceWriter, let pending = writer.begin(name, arguments) else {return nil}
-        return (writer, pending)
-    }
-
-    /// 코어 함수가 돌아온 직전에(예외 처리 전에) 결과나 예외를 쓴다.
-    static func end(_ trace: (writer: BaroChartTraceWriter, pending: BaroChartTracePending)?, _ context: JSContext, _ value: JSValue) {
-        guard let trace = trace else {return}
-        if let exception = context.exception {trace.writer.finish(trace.pending, threw: exception, in: context)}
-        else {trace.writer.finish(trace.pending, returned: value, in: context)}
-    }
-
-    /// 호스트가 직전 결과 뷰에 바이트를 쓴 뒤 부른다.
-    static func hostWrote(_ context: JSContext, _ view: JSValue, _ bytes: UnsafeRawPointer, _ count: Int) {
-        (objc_getAssociatedObject(context, key) as? BaroChartTraceWriter)?.hostWrote(into: view, from: bytes, count: count)
+    /// 기본 쓰기 경로로 바이트를 옮긴 뒤, 직전 호출이 돌려준 뷰에 쓴 바이트를 write 줄로 남긴다.
+    func writeFloat64(_ name: String, _ arguments: [Any], from source: UnsafeRawPointer, count: Int) throws {
+        let view = try writeFloat64View(name, arguments, from: source, count: count)
+        writer.hostWrote(into: view.javaScriptValue, from: source, count: count)
     }
 }

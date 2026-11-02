@@ -15,7 +15,7 @@ const main=join(out,'main.swift');
 await mkdir(moduleCache,{recursive:true});
 await writeFile(main,'import Foundation\nlet report=try verifyNativeJSONInputs(URL(fileURLWithPath:CommandLine.arguments[1]))\nlet data=try JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys])\nprint(String(data:data,encoding:.utf8)!)\nif report["failed"] as? Bool == true {exit(1)}\n');
 const run=async(command,argv,log)=>{const result=spawnSync(command,argv,{encoding:'utf8',timeout:180000,maxBuffer:16*1024*1024});await writeFile(join(out,log),(result.stdout??'')+(result.stderr??''));if(result.error)throw result.error;return result;};
-const sources=['BaroChartEngine.swift','BaroChartTrace.swift','BaroChartError.swift','BaroChartColumns.swift','BaroChartFrameRenderer.swift'].map(name=>join(sdk,'native',name));
+const sources=['BaroChartEngine.swift','BaroChartCoreRuntime.swift','BaroChartTrace.swift','BaroChartError.swift','BaroChartColumns.swift','BaroChartFrameRenderer.swift'].map(name=>join(sdk,'native',name));
 const compile=await run('swiftc',['-O','-warnings-as-errors','-module-cache-path',moduleCache,...sources,join(root,'examples/native/json-input-verification.swift'),main,'-o',join(out,'probe')],'build.log');
 if(compile.status!==0)throw new Error('Native JSON input compile failed; see '+join(out,'build.log'));
 const result=await run(join(out,'probe'),[join(sdk,'native/Resources/aster-core.js')],'run.log');
