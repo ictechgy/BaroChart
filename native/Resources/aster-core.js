@@ -1368,9 +1368,9 @@ class IndicatorEngine {
     identifier(id,'Indicator id');validateIndicatorParams(params);if(this.entries.size>=RESOURCE_LIMITS.maxIndicators)throw new RangeError('Indicator limit');
     if (this.entries.has(id)) throw new Error('Duplicate indicator id'); const make = this.registry.get(name); if (!make) throw new Error(`Unknown indicator: ${name}`);
     const def = make(params); if (!Array.isArray(def.outputs) || !def.outputs.length||def.outputs.length>32 || def.outputs.some(k=>typeof k!=='string'||!k||k.length>128||['__proto__','constructor','prototype'].includes(k)) || new Set(def.outputs).size!==def.outputs.length || typeof def.create !== 'function' || Object.entries(def.plotOffsets??{}).some(([k,v])=>!def.outputs.includes(k)||!Number.isInteger(v)||Math.abs(v)>10000)) throw new TypeError('Invalid indicator definition');
-    const entry={def,name,params:orderedIndicatorParams(name,make,cloneState(params)), dirty: 0, dirtyTo:this.store.length,invalidated:true,length: 0, arrays: [], checkpoints: new Map(), revision: 0};this.entries.set(id,entry);try{return this.get(id);}catch(error){if(this.entries.get(id)===entry){const entries=this.entries;entries.delete(id);retireNativeEntryIfReplaced(entries,id);}throw error;}
+    const entry={def,name,params:orderedIndicatorParams(name,make,cloneState(params)), dirty: 0, dirtyTo:this.store.length,invalidated:true,length: 0, arrays: [], checkpoints: new Map(), revision: 0};this.entries.set(id,entry);try{return this.get(id);}catch(error){if(this.entries.get(id)===entry)this.entries.delete(id);throw error;}
   }
-  remove(id) {const entries=this.entries;entries.delete(id);retireNativeEntryIfReplaced(entries,id);}
+  remove(id) {this.entries.delete(id);}
   get(id) {const task=this.calculate(id);let next;do{next=task.next();}while(!next.done);return next.value;}
   *calculate(id,chunkSize=4096) {
     if(!Number.isInteger(chunkSize)||chunkSize<1||chunkSize>65536)throw new RangeError('Calculation chunk size');
@@ -1427,7 +1427,7 @@ class IndicatorEngine {
       if(!completed&&owned()&&!sameSource()){e.dirty=0;e.invalidated=true;}
     }
   }
-  dispose() {try{this.unsubscribe(); const entries=this.entries;entries.clear();retireNativeEntriesAfterClear(entries);}finally{unregisterStoreOwner(this);}}
+  dispose() {try{this.unsubscribe(); this.entries.clear();}finally{unregisterStoreOwner(this);}}
 }
 
 // Chart annotations only: no position sizing, orders, fills or account state.
@@ -2555,8 +2555,9 @@ class NativeCheckpointMap {
  validateHistory(length){this.#check();const epoch=this.#epoch;if(!Number.isSafeInteger(length)||length<0||length>nativeCheckpointMaxIndex)throw new RangeError('Native checkpoint history length');const expected=length===0?0:Math.floor(length/this.#block)+1;if(this.size!==expected)throw new TypeError('Native checkpoint history count');let i=0;for(const index of this.keys()){if(index!==i++*this.#block)throw new TypeError('Native checkpoint history boundary');const text=this.#records.get(index),state=safeCheckpointParse(text);validateCheckpointState(this.#name,this.#params,state,index);if(nativeCheckpointText(state)!==text)throw new TypeError('Native checkpoint validator mutated state');this.#check(epoch);}this.#check(epoch);return this;}
 }
 
-// Only restored engines install this owner map. Retirement never mutates held
-// output vectors and never invokes a user-controlled cleanup callback.
+// 이 소유 Map은 게시 전 엔진만 쓴다: 복원 대상의 계산 단계와 격리된 params 작업 런타임이다.
+// 게시(finish)는 평범한 Map으로 바꿔 넘기므로 살아 있는 엔진에는 남지 않는다.
+// Retirement never mutates held output vectors and never invokes a user-controlled cleanup callback.
 const nativeCheckpointDispose=NativeCheckpointMap.prototype.dispose;
 function nativeEntryCheckpoints(entry){const value=entry&&Object.getOwnPropertyDescriptor(entry,'checkpoints')?.value;return nativeCheckpointMaps.has(value)?value:null;}
 class NativeCheckpointEntries extends Map {
@@ -2577,24 +2578,34 @@ function ownedCheckpointClear(map){
  ordinaryCheckpointHas.call(map,0);return ()=>ordinaryCheckpointClear.call(map);
 }
 
-// Entry-only native publication can preserve an ordinary entries Map identity.
-// The registry is keyed by that Map, never retained from a caller-held entry.
-// Direct replacement/mutation of engine.entries or Map intrinsics is unsupported.
-const nativeAdoptedOwners=new WeakMap(),nativeMapGet=Map.prototype.get,nativeMapSet=Map.prototype.set,nativeEntriesSet=NativeCheckpointEntries.prototype.set;
-function retireNativeEntryIfReplaced(entries,id){
- const owner=nativeAdoptedOwners.get(entries),row=owner?.rows.get(id);if(!row||nativeMapGet.call(entries,id)===row.entry)return;
- owner.rows.delete(id);nativeCheckpointEntryOwners.delete(row.checkpoints);nativeCheckpointDispose.call(row.checkpoints);
-}
-function retireNativeEntriesAfterClear(entries){
- const owner=nativeAdoptedOwners.get(entries);if(!owner)return;for(const [id]of owner.rows)retireNativeEntryIfReplaced(entries,id);
-}
+// 게시(복원 finish, params 커밋)는 검증을 마친 경계 레코드를 새 차트와 같은 평범한 Map으로 옮긴다(설계 §7.4-3, 이식 지도 D2).
+// 그래서 게시 뒤 엔진에는 경계 맵·공유 예산이 남지 않고, append·재계산·원본 회계가 새 차트와 같다.
+// 애플리케이션이 바꿀 수 있는 메서드 대신 모듈을 불러올 때 붙잡은 내장 메서드만 쓴다.
+const nativeMapGet=Map.prototype.get,nativeMapSet=Map.prototype.set,nativeEntriesSet=NativeCheckpointEntries.prototype.set,nativeCheckpointKeys=NativeCheckpointMap.prototype.keys,nativeCheckpointGet=NativeCheckpointMap.prototype.get;
+/**
+ * 경계 맵의 레코드를 새 평범한 Map으로 복사한다. 원본 맵은 바꾸지 않는다.
+ * 값은 get()과 같은 새 사본(safeCheckpointParse)이고, 새 차트가 계산하며 넣는 순서처럼 색인 오름차순으로 넣는다.
+ * 호출부는 사본을 다 만든 뒤에만 상태를 바꾼다. 여기서 실패하면 게시 전 상태가 그대로 남는다.
+ * @param {NativeCheckpointMap} map 닫히지 않은 실제 경계 맵(호출부가 소유를 확인한다)
+ * @returns {Map<number, object>} 같은 레코드를 담은 평범한 Map
+ */
+function ordinaryCheckpointCopy(map){const copy=new Map();for(const index of nativeCheckpointKeys.call(map))nativeMapSet.call(copy,index,nativeCheckpointGet.call(map,index));return copy;}
+// params 게시는 소유 엔진의 entries Map을 그대로 두고, 그 항목 하나만 평범한 체크포인트 Map으로 바꿔 넣는다.
+// engine.entries나 Map 내장 메서드를 직접 바꾸거나 고치는 것은 지원하지 않는다.
 function prepareNativeEntryCommit(entries,id,previous,entry){
  const proto=Object.getPrototypeOf(entries);if(![Map.prototype,NativeCheckpointEntries.prototype].includes(proto)||Reflect.ownKeys(entries).length||nativeMapGet.call(entries,id)!==previous)throw new TypeError('Native params entry owner');
  const checkpoints=nativeEntryCheckpoints(entry);if(!checkpoints||nativeCheckpointRetired.has(checkpoints)||nativeCheckpointEntryOwners.has(checkpoints)||Object.getPrototypeOf(checkpoints)!==NativeCheckpointMap.prototype||Reflect.ownKeys(checkpoints).length)throw new TypeError('Native params checkpoint ownership');
- let owner=nativeAdoptedOwners.get(entries);if(proto===Map.prototype&&!owner){owner={token:{},rows:new Map()};nativeAdoptedOwners.set(entries,owner);}let used=false;
- return ()=>{if(used||nativeEntryCheckpoints(entry)!==checkpoints||nativeMapGet.call(entries,id)!==previous||nativeCheckpointRetired.has(checkpoints)||nativeCheckpointEntryOwners.has(checkpoints))throw new Error('Native params entry commit stale');used=true;
-  if(proto===NativeCheckpointEntries.prototype){nativeEntriesSet.call(entries,id,entry);return;}
-  nativeMapSet.call(entries,id,entry);retireNativeEntryIfReplaced(entries,id);owner.rows.set(id,{entry,checkpoints});nativeCheckpointEntryOwners.set(checkpoints,{owner:owner.token,id});
+ let used=false;
+ return ()=>{if(used||nativeEntryCheckpoints(entry)!==checkpoints||nativeMapGet.call(entries,id)!==previous||nativeCheckpointRetired.has(checkpoints)||nativeCheckpointEntryOwners.has(checkpoints))throw new Error('Native params entry commit stale');
+  // 사본을 먼저 다 만든다. 여기까지 실패하면 엔트리·소유 Map·준비 원장이 모두 그대로다
+  const ordinary=ordinaryCheckpointCopy(checkpoints);used=true;
+  // 쓰기 금지 속성에 대입하면 모듈(엄격 모드)은 TypeError를 내고 번들(느슨한 모드)은 조용히 무시한다.
+  // 두 환경이 같은 오류를 내도록 먼저 확인하고, 대입 뒤에도 바뀌지 않았으면 설치하지 않는다
+  if(!Object.getOwnPropertyDescriptor(entry,'checkpoints')?.writable)throw new Error('Native params entry commit stale');
+  entry.checkpoints=ordinary;if(Object.getOwnPropertyDescriptor(entry,'checkpoints')?.value!==ordinary)throw new Error('Native params entry commit stale');
+  if(proto===NativeCheckpointEntries.prototype)nativeEntriesSet.call(entries,id,entry);else nativeMapSet.call(entries,id,entry);
+  // 레코드는 이제 평범한 Map에 있으므로 준비용 경계 맵을 닫아 그 원장을 돌려준다
+  nativeCheckpointDispose.call(checkpoints);
  };
 }
 
@@ -2770,7 +2781,7 @@ function setStudyParams(model,id,params,ownerGuard=null){
   if(entry.def.outputs.some(output=>!Object.is(offset(entry.def,output),offset(replacement.def,output))))throw new TypeError('Indicator parameter update cannot change plot offsets');
   const result=metadata(replacement.def);
   if(!current())throw new Error('Indicator params stale: owner changed during staging');if(ownerGuard!==null){if(typeof ownerGuard!=='function')throw new TypeError('Owner guard callback required');ownerGuard();}
-  entriesMap.set(id,replacement);retireNativeEntryIfReplaced(entriesMap,id);
+  entriesMap.set(id,replacement);
   for(const s of series)if(s.indicator===id){s.rangeIndex=null;s.revision=undefined;s.dirtyFrom=0;}
   return result;
  }finally{candidate.dispose();}
@@ -3696,7 +3707,7 @@ class NativeWorkspacePrepared extends PreparedData {
   this.assertActive();if(this.length&&(this.columns.time[0]!==this.workspace.source.firstTime||this.columns.time[this.length-1]!==this.workspace.source.lastTime))throw new TypeError('Native workspace target source extent');
   const m=this.metadata;this.model=new ChartModel({store:this.store,panels:m.panels,axes:m.axes,theme:m.theme,precision:m.precision,axisWidth:m.axisWidth,visibleBars:this.input.visibleBars});this.model.indicators.maxOutputBytes=m.maxOutputBytes;this.model.indicators.entries=new NativeCheckpointEntries();this.workspaceEntryMap=this.model.indicators.entries;this.workspaceColumnRefs=FIELDS.map(k=>this.columns[k]);
   // 문서 키 순서와 상관없이 새 차트와 같은 선언 순서 params를 엔트리에 담는다
-  for(const study of this.workspace.indicators){const factory=resolveIndicatorFactory(study.name);requirePortableFactory(study.name,factory);const params={...study.params},def=factory(params),layout=workspaceSnapshot({outputs:def.outputs,plotOffsets:def.plotOffsets??{}});this.assertActive();if(!nativeTargetEqual(params,study.params)||!nativeTargetEqual(layout,{outputs:study.outputs,plotOffsets:study.plotOffsets}))throw new TypeError('Native workspace target factory binding');const checkpoints=new NativeCheckpointMap(study.name,study.params,{budget:this.checkpointBudget}),entry={def,name:study.name,params:orderedIndicatorParams(study.name,factory,study.params),dirty:0,dirtyTo:this.length,invalidated:true,length:0,arrays:[],checkpoints,revision:0};this.model.indicators.entries.set(study.id,entry);this.workspaceEntries.push([study.id,entry,factory]);}
+  for(const study of this.workspace.indicators){const factory=resolveIndicatorFactory(study.name);requirePortableFactory(study.name,factory);const params={...study.params},def=factory(params),layout=workspaceSnapshot({outputs:def.outputs,plotOffsets:def.plotOffsets??{}});this.assertActive();if(!nativeTargetEqual(params,study.params)||!nativeTargetEqual(layout,{outputs:study.outputs,plotOffsets:study.plotOffsets}))throw new TypeError('Native workspace target factory binding');const checkpoints=new NativeCheckpointMap(study.name,study.params,{budget:this.checkpointBudget}),entry={def,name:study.name,params:orderedIndicatorParams(study.name,factory,study.params),dirty:0,dirtyTo:this.length,invalidated:true,length:0,arrays:[],checkpoints,revision:0};this.model.indicators.entries.set(study.id,entry);this.workspaceEntries.push([study.id,entry,factory,checkpoints]);}
   this.guardTarget();
  }
  guardTarget(metadata=true){this.assertActive();if(!this.model)return;if(this.model.disposed||this.model.store!==this.store||this.store.columns!==this.columns||this.store.version!==this.metadata.version||this.store.timeVersion!==this.metadata.timeVersion||this.store.length!==this.length||this.store.capacity!==this.capacity||this.model.indicators.entries!==this.workspaceEntryMap||this.model.indicators.entries.size!==this.workspaceEntries.length)throw new Error('Native workspace target changed');for(let i=0;i<this.workspaceEntries.length;i++){const [id,entry,factory]=this.workspaceEntries[i],study=this.workspace.indicators[i];if(this.model.indicators.entries.get(id)!==entry||this.model.indicators.registry.get(study.name)!==factory||!nativeTargetEqual(entry.params,study.params))throw new Error('Native workspace target entry changed');if(metadata){const layout=workspaceSnapshot({outputs:entry.def.outputs,plotOffsets:entry.def.plotOffsets??{}});if(!nativeTargetEqual(layout,{outputs:study.outputs,plotOffsets:study.plotOffsets}))throw new Error('Native workspace target output binding');}}this.assertActive();if(this.model.disposed||this.model.store!==this.store||this.store.version!==this.metadata.version||this.store.timeVersion!==this.metadata.timeVersion||this.store.columns!==this.columns||this.store.length!==this.length||this.store.capacity!==this.capacity||this.model.indicators.entries!==this.workspaceEntryMap||this.workspaceEntries.some(([id,e])=>this.workspaceEntryMap.get(id)!==e)||FIELDS.some((k,i)=>this.columns[k]!==this.workspaceColumnRefs[i]))throw new Error('Native workspace target changed');}
@@ -3710,7 +3721,13 @@ class NativeWorkspacePrepared extends PreparedData {
  }
  readySnapshot(){const m=this.model;return {dataIngestion:m.dataIngestion,ingestionEpoch:m.dataIngestion?.epoch,panels:[...m.panels],axes:[...m.axes],series:[...m.series],seriesValues:m.series.map(e=>e.values),theme:m.theme,symbol:m.symbol,priceFormatter:m.priceFormatter,timeFormatter:m.timeFormatter,precision:m.precision,axisWidth:m.axisWidth,view:m.view,from:m.view.from,to:m.view.to,follow:m.follow,drawings:m.drawings,items:m.drawings.items,selected:m.drawings.selected,serial:m.drawings.serial};}
  guardReady(){this.guardTarget(false);const a=this.readyBinding,b=this.readySnapshot();if(!a||Object.keys(a).some(k=>['panels','axes','series','seriesValues'].includes(k)?a[k].length!==b[k].length||a[k].some((v,i)=>v!==b[k][i]):!Object.is(a[k],b[k]))||this.model.drawings.transaction||this.model.drawings.undoStack.length||this.model.drawings.redoStack.length)throw new Error('Native workspace target configuration changed');}
- finish(){this.assertActive();try{if(arguments.length||this.phase!=='workspace-ready')throw new Error('Native workspace target not ready');this.guardReady();const result={model:this.model,size:{...this.workspaceSize},plan:this.plan};this.transferred=true;this.model=null;this.columns={};this.store=null;this.task=null;this.workspace=null;this.workspaceIngestion=null;this.normalizedWorkspace=null;this.workspaceText=null;this.workspaceEntries=[];this.workspaceEntryMap=null;this.workspaceColumnRefs=[];this.checkIterator=null;this.readyBinding=null;return result;}catch(error){this.dispose();throw error;}}
+ finish(){this.assertActive();try{if(arguments.length||this.phase!=='workspace-ready')throw new Error('Native workspace target not ready');this.guardReady();
+  // 게시 직후 엔진이 새 차트와 같은 회계를 쓰도록 공유 예산 컨테이너를 같은 레코드의 평범한 Map으로 바꾼다(설계 §7.4-3, 이식 지도 D2).
+  // 사본을 모두 만든 뒤에만 엔트리와 엔진을 바꾸고, 경계 맵을 닫아 공유 예산을 돌려준 다음 넘긴다. 실패하면 catch가 대상을 버려 게시하지 않는다.
+  const copies=this.workspaceEntries.map(([id,entry,,checkpoints])=>{if(Object.getOwnPropertyDescriptor(entry,'checkpoints')?.value!==checkpoints)throw new Error('Native workspace target entry changed');return [id,entry,ordinaryCheckpointCopy(checkpoints)];}),entries=new Map();
+  for(const [id,entry,checkpoints] of copies){entry.checkpoints=checkpoints;entries.set(id,entry);}
+  this.model.indicators.entries=entries;NativeCheckpointEntries.prototype.clear.call(this.workspaceEntryMap);
+  const result={model:this.model,size:{...this.workspaceSize},plan:this.plan};this.transferred=true;this.model=null;this.columns={};this.store=null;this.task=null;this.workspace=null;this.workspaceIngestion=null;this.normalizedWorkspace=null;this.workspaceText=null;this.workspaceEntries=[];this.workspaceEntryMap=null;this.workspaceColumnRefs=[];this.checkIterator=null;this.readyBinding=null;return result;}catch(error){this.dispose();throw error;}}
  finishUI(){this.dispose();throw new Error('Native workspace target does not import source UI');}
  dispose(){if(this.closed)return;this.closed=true;try{if(!this.transferred){try{super.dispose();}finally{if(this.workspaceEntryMap)NativeCheckpointEntries.prototype.clear.call(this.workspaceEntryMap);}}}finally{this.model=null;this.columns={};this.store=null;this.task=null;this.workspace=null;this.workspaceIngestion=null;this.normalizedWorkspace=null;this.workspaceText=null;this.workspaceEntries=[];this.workspaceEntryMap=null;this.workspaceColumnRefs=[];this.checkIterator=null;this.readyBinding=null;}}
 }
@@ -3824,8 +3841,8 @@ class NativeParamsImport {
   if(this.output<this.arrays.length)return {phase:'validate',done:this.output*b.capacity+this.at,total:this.arrays.length*b.capacity,complete:false};this.guard();this.entry={def:this.def,name:b.name,params:{...b.params},arrays:this.arrays,checkpoints:this.checkpoints,revision:b.length?1:0,computedFrom:0,computedUntil:b.length,dirty:b.length,dirtyTo:0,invalidated:false,length:b.length};this.phase='ready';return {phase:'ready',done:1,total:1,complete:true};
  }catch(error){this.dispose();throw error;}}
  readyEntry(){this.guard();if(this.phase!=='ready')throw new Error('Native params result not ready');return this.entry;}
- // Only call after callback-free adoption has succeeded. This drops wrapper
- // references without disposing the now-live checkpoint ledger or held outputs.
+ // 콜백 없는 게시 커밋이 성공한 뒤에만 부른다. 커밋이 이미 레코드를 평범한 Map으로 옮기고
+ // 준비용 경계 맵(과 그 원장)을 닫았으므로, 여기서는 이제 엔진 것이 된 출력 벡터를 건드리지 않고 참조만 놓는다.
  releasePublished(){this.transferred=true;this.closed=true;this.drop();}
  drop(){this.arrays=[];this.entry=null;this.def=null;this.create=null;this.binding=null;this.checkpoints=null;this.received=[];}
  dispose(){if(this.closed)return;this.closed=true;try{if(!this.transferred)this.checkpoints.dispose();}finally{this.drop();}}

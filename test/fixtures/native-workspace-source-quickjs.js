@@ -66,13 +66,14 @@
  ok(fields.every((k,i)=>model.store.columns[k].buffer!==f.columns[i].buffer&&model.store.columns[k].every((v,j)=>Object.is(v,f.columns[i][j]))),'owned target columns match source');
  ok(api.saveDataIngestion()===ingestion&&f.api.saveDataIngestion()===ingestion&&model.dataIngestion!==f.model.dataIngestion&&model.dataIngestion.nextSequence===21&&model.dataIngestion.paused&&model.dataIngestion.count===0&&fields.every(k=>model.dataIngestion.columns[k].buffer!==f.model.dataIngestion.columns[k].buffer),'empty ingestion policy cursor and pause preserved');
  parity(model,'restored');
- const encoded=[...model.indicators.entries.values()].map(e=>e.checkpoints),encodedBytes=encoded.reduce((n,map)=>n+map.encodedBytes+map.size*128,0);
- ok(encoded.every(map=>map instanceof Aster.NativeCheckpointMap&&map.size===3&&map.validateHistory(513)===map)&&p.checkpointBudget.usedBytes===encoded.reduce((n,map)=>n+map.encodedBytes,0)&&p.checkpointBudget.usedBytes<=33554432,'restored bounded native checkpoint ownership');
- const encodedSource={api,model,input:null,size:f.size};let decoded=0;for(const map of encoded)for(const key of ['get','keys',Symbol.iterator])map[key]=()=>{decoded++;throw Error('encoded source decoded');};
- const encodedCapture=capture(encodedSource);admit(encodedCapture);ok(decoded===0&&encodedCapture.recordCount===0&&encodedCapture.checkpointBytes===encodedBytes,'encoded source accounting avoids decode');
- encodedCapture.dispose();for(const map of encoded)for(const key of ['get','keys',Symbol.iterator])delete map[key];
- ok(released(encodedCapture)&&idle(encodedSource)&&p.checkpointBudget.usedBytes>0&&model.disposed!==true,'encoded capture cleanup preserves owner');
- p.dispose();ok(model.disposed!==true&&p.checkpointBudget.usedBytes>0,'target wrapper preserves returned ownership');
+ // 게시 뒤 복원 엔진은 새 차트와 같은 레코드를 평범한 Map에 담고 복원 공유 예산은 0이다(설계 §7.4-3, 이식 지도 D2)
+ const restoredMaps=[...model.indicators.entries.values()].map(e=>e.checkpoints);
+ ok(Object.getPrototypeOf(model.indicators.entries)===Map.prototype&&restoredMaps.length===snapshots.length&&restoredMaps.every((map,i)=>Object.getPrototypeOf(map)===Map.prototype&&map.size===3&&stringify([...map])===stringify(snapshots[i].records))&&p.checkpointBudget.usedBytes===0,'restored ordinary checkpoint ownership');
+ // 복원 엔진을 다시 원본으로 쓰면 회계가 새 차트(f)의 첫 admission과 같다
+ const restoredSource={api,model,input:null,size:f.size},restoredCapture=capture(restoredSource);admit(restoredCapture);ok(restoredCapture.recordCount===count&&restoredCapture.checkpointBytes===rawBytes,'restored source accounting matches fresh source');
+ restoredCapture.dispose();
+ ok(released(restoredCapture)&&idle(restoredSource)&&p.checkpointBudget.usedBytes===0&&model.disposed!==true,'restored capture cleanup preserves owner');
+ p.dispose();ok(model.disposed!==true&&p.checkpointBudget.usedBytes===0,'target wrapper preserves returned ownership');
  const volume=model.store.at(3).volume,row=f.store.at(3);f.store.update(3,{...row,volume:row.volume+5});
  ok(model.store.at(3).volume===volume&&f.store.at(3).volume===volume+5,'source mutation stays independent');
  const targetRow=model.store.at(5);model.store.update(5,{...targetRow,close:targetRow.low});parity(model,'corrected');

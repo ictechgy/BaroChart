@@ -9,8 +9,7 @@ import {buildScene} from '../src/core/scene.mjs';
 import {drawingGeometry} from '../src/core/drawings.mjs';
 import {PreparedData} from '../src/core/prepare-state.mjs';
 import {saveWorkspace, readWorkspaceDocument} from '../src/core/workspace.mjs';
-import {safeCheckpointParse, safeCheckpointStringify} from '../src/core/checkpoint-validation.mjs';
-import {NativeCheckpointEntries, NativeCheckpointMap} from '../src/core/native-checkpoints.mjs';
+import {safeCheckpointParse, safeCheckpointStringify, validateCheckpointState} from '../src/core/checkpoint-validation.mjs';
 import {NativeWorkspacePrepared, NATIVE_WORKSPACE_RESTORE_BYTES} from '../src/core/native-workspace-target.mjs';
 
 // Direct target tests intentionally never use source capture, old UI import,
@@ -118,10 +117,16 @@ function compareFresh(model, label) {
     }
   } finally {oracle.dispose();}
 }
+// 게시 뒤 엔진은 새 차트와 같은 평범한 Map을 쓰고, 복원 공유 예산은 게시 때 이미 0이다(설계 §7.4-3, 이식 지도 D2).
+// 레코드는 색인 이력(0, 256, …)을 그대로 갖고 하나하나 체크포인트 검증을 통과해야 한다.
 function accounting(p, model) {
-  const maps = [...model.indicators.entries.values()].map(e => e.checkpoints).filter(m => m instanceof NativeCheckpointMap);
-  assert.equal(p.checkpointBudget.usedBytes, maps.reduce((sum, m) => sum + m.encodedBytes, 0));
-  for (const map of maps) assert.equal(map.validateHistory(model.store.length), map);
+  assert.equal(Object.getPrototypeOf(model.indicators.entries), Map.prototype); assert.equal(p.checkpointBudget.usedBytes, 0);
+  const n = model.store.length, history = n ? Array.from({length: Math.floor(n / 256) + 1}, (_, i) => i * 256) : [];
+  for (const entry of model.indicators.entries.values()) {
+    assert.equal(Object.getPrototypeOf(entry.checkpoints), Map.prototype);
+    assert.deepEqual([...entry.checkpoints.keys()].sort((a, b) => a - b), history);
+    for (const [index, state] of entry.checkpoints) validateCheckpointState(entry.name, entry.params, state, index);
+  }
 }
 function sourceState(f) {
   return {model: f.model, store: f.store, columns: f.store.columns, index: f.store.index, version: f.store.version, timeVersion: f.store.timeVersion,
@@ -184,7 +189,7 @@ test('native target restores canonical saved configuration, exact fractional/off
   assert.equal(model.store.version, f.store.version + 1); assert.equal(model.store.timeVersion, f.store.timeVersion + 1);
   for (const key of FIELDS) {assert.notEqual(model.store.columns[key].buffer, f.store.columns[key].buffer); assert.deepEqual([...model.store.columns[key]], before.values[key]);}
   assert.equal(model.store.maxBars, 4096); assert.equal(model.store.timeframeMs, 60000); assert.equal(model.store.timeOrigin, 123);
-  assert.ok(model.indicators.entries instanceof NativeCheckpointEntries); accounting(p, model); unchanged(f, before);
+  accounting(p, model); unchanged(f, before);
   p.dispose(); assert.notEqual(model.disposed, true); assert.equal(model.store.listeners.size, 2);
   assert.notEqual(shared.disposed, true); unchanged(f, before);
 });
@@ -348,22 +353,36 @@ for (const phase of ['capture', 'validate', 'store-index', 'calculate', 'indices
     p.dispose(); released(p, store, model, maps); unchanged(f, before);
   });
 
-test('finish transfers exactly once; later target cleanup preserves returned model until its own disposal', t => {
-  const f = fixture(t, {names: ['ema', 'rsi', 'macd']}), {p, model} = restore(t, f), api = new ChartAPI(model);
+test('finish transfers exactly once with ordinary checkpoints; later target cleanup preserves returned model until its own disposal', t => {
+  const f = fixture(t, {names: ['ema', 'rsi', 'macd']}), p = prepared(t, f); transfer(p, f.store.columns); p.start(); run(p);
+  // 계산 단계의 경계 맵과 그 레코드를 잡아 두고 게시한다
+  const bounded = p.workspaceEntryMap, boundedMaps = [...bounded.values()].map(e => e.checkpoints), expected = new Map([...bounded].map(([id, e]) => [id, [...e.checkpoints].map(([i, s]) => [i, safeCheckpointStringify(s)])]));
+  assert.ok(p.checkpointBudget.usedBytes > 0);
+  const {model} = p.finish(); t.after(() => model.dispose()); const api = new ChartAPI(model);
   assert.deepEqual(p.workspaceColumnRefs, [], 'successful transfer drops wrapper-owned source vector references');
   assert.deepEqual(p.workspaceEntries, []); assert.equal(p.workspaceEntryMap, null);
   assert.equal(p.model, null); assert.equal(p.store, null); assert.deepEqual(p.columns, {});
-  const firstMap = model.indicators.entries.get('ema').checkpoints, firstBytes = firstMap.encodedBytes;
-  const held = model.indicators.get('ema').outputs.value, heldValues = [...held], initialBytes = p.checkpointBudget.usedBytes;
+  // 게시: 같은 레코드를 담은 평범한 Map으로 바꾸고, 경계 맵은 닫아 공유 예산을 0으로 돌려준다
+  assert.equal(p.checkpointBudget.usedBytes, 0); assert.equal(bounded.size, 0); accounting(p, model);
+  for (const map of boundedMaps) {assert.equal(map.encodedBytes, 0); assert.throws(() => map.get(0), /disposed/);}
+  for (const [id, rows] of expected) assert.deepEqual([...model.indicators.entries.get(id).checkpoints].map(([i, s]) => [i, safeCheckpointStringify(s)]), rows, id);
+  const held = model.indicators.get('ema').outputs.value, heldValues = [...held];
   assert.throws(() => p.finish(), /closed/); p.dispose(); p.dispose();
-  assert.notEqual(model.disposed, true); assert.equal(p.checkpointBudget.usedBytes, initialBytes);
-  api.removeIndicator('ema'); assert.equal(p.checkpointBudget.usedBytes, initialBytes - firstBytes);
-  assert.throws(() => firstMap.get(0), /disposed/); assert.deepEqual([...held], heldValues);
-  const replaced = model.indicators.entries.get('rsi').checkpoints, removedBytes = replaced.encodedBytes, before = p.checkpointBudget.usedBytes;
-  api.setIndicatorParams('rsi', {period: 7}); assert.equal(p.checkpointBudget.usedBytes, before - removedBytes);
-  assert.throws(() => replaced.get(0), /disposed/); assert.ok(model.indicators.entries instanceof NativeCheckpointEntries);
+  assert.notEqual(model.disposed, true); assert.equal(p.checkpointBudget.usedBytes, 0);
+  api.removeIndicator('ema'); assert.equal(model.indicators.entries.has('ema'), false); assert.deepEqual([...held], heldValues);
+  const replaced = model.indicators.entries.get('rsi');
+  api.setIndicatorParams('rsi', {period: 7}); assert.notEqual(model.indicators.entries.get('rsi'), replaced);
   compareFresh(model, 'after params replacement'); accounting(p, model);
   model.dispose(); assert.equal(p.checkpointBudget.usedBytes, 0); assert.equal(model.store.listeners.size, 0);
+});
+
+// 게시 변환은 계산 단계가 만든 경계 맵만 옮긴다. 엔트리의 컨테이너가 바뀌었으면 게시하지 않고 대상을 버려 공유 예산을 돌려준다
+test('finish rejects a replaced checkpoint container without publishing and releases the restore budget', t => {
+  const f = fixture(t, {names: ['ema', 'rsi']}), before = sourceState(f), p = prepared(t, f); transfer(p, f.store.columns); p.start(); run(p);
+  const store = p.store, model = p.model, maps = [...model.indicators.entries.values()].map(e => e.checkpoints), entry = model.indicators.entries.get('rsi');
+  assert.ok(p.checkpointBudget.usedBytes > 0); entry.checkpoints = new Map(entry.checkpoints);
+  assert.throws(() => p.finish(), {name: 'Error', message: 'Native workspace target entry changed'});
+  released(p, store, model, maps); unchanged(f, before);
 });
 
 test('a throwing model cleanup still retires the captured checkpoint registry and all target wrapper references', t => {

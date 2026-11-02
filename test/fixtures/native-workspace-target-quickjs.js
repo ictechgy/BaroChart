@@ -24,7 +24,8 @@
  function start(p){p.start();probe.stores.push(p.store);}
  function run(p,until){const phases=new Set([p.phase]);let bounded=true;for(let i=0;i<2000;i++){if(until&&p.phase===until)return {phases,bounded};const r=p.step(127);phases.add(r.phase);bounded=bounded&&typeof r.complete==='boolean'&&Number.isFinite(r.done)&&Number.isFinite(r.total)&&r.done>=0&&r.done<=r.total;if(r.complete){if(until)throw Error('target phase missing: '+until);return {phases,bounded};}}throw Error('target failed to terminate');}
  function released(p){return p.closed&&p.model===null&&p.store===null&&Object.keys(p.columns).length===0&&p.workspaceEntries.length===0&&p.workspaceEntryMap===null&&p.workspaceColumnRefs.length===0&&p.checkpointBudget.usedBytes===0;}
- function accounting(p,model,label){let bytes=0,valid=model.indicators.entries instanceof Aster.NativeCheckpointEntries;for(const entry of model.indicators.entries.values()){const map=entry.checkpoints,keys=[...map.keys()],count=model.store.length?Math.floor(model.store.length/256)+1:0;valid=valid&&map instanceof Aster.NativeCheckpointMap&&keys.length===count&&keys.every((k,i)=>k===i*256)&&map.validateHistory(model.store.length)===map;for(const [,state] of map)valid=valid&&Aster.safeCheckpointStringify(state).length*2<=262144;bytes+=map.encodedBytes;}ok(valid&&bytes===p.checkpointBudget.usedBytes&&bytes<=33554432&&p.checkpointBudget.maxBytes===33554432,label+' bounded checkpoints');}
+ // 게시 뒤 엔진은 새 차트와 같은 평범한 Map을 쓰고 복원 공유 예산은 게시 때 0이 된다(설계 §7.4-3, 이식 지도 D2). 레코드는 색인 이력을 지키고 검증을 통과한다
+ function accounting(p,model,label){let valid=Object.getPrototypeOf(model.indicators.entries)===Map.prototype&&p.checkpointBudget.usedBytes===0&&p.checkpointBudget.maxBytes===33554432;for(const entry of model.indicators.entries.values()){const map=entry.checkpoints,keys=[...map.keys()].sort((a,b)=>a-b),count=model.store.length?Math.floor(model.store.length/256)+1:0;valid=valid&&Object.getPrototypeOf(map)===Map.prototype&&keys.length===count&&keys.every((k,i)=>k===i*256);for(const [index,state] of map){Aster.validateCheckpointState(entry.name,entry.params,state,index);valid=valid&&Aster.safeCheckpointStringify(state).length*2<=262144;}}ok(valid,label+' ordinary checkpoints');}
  function parity(p,model,label){const store=new Aster.BarStore();store.setColumns(model.store.columns,model.store.length);probe.stores.push(store);const oracle=new Aster.IndicatorEngine(store);try{for(const name of names){const actual=model.indicators.get(name),expected=oracle.add(name,name,{});for(const key of Object.keys(expected.outputs)){const a=actual.outputs[key],b=expected.outputs[key];ok(a.length===b.length&&a.every((v,i)=>Object.is(v,b[i])),label+' '+name+'/'+key);}}}finally{oracle.dispose();}accounting(p,model,label);}
  const f=source(513);probe.sourceModel=f.model;probe.sourceStore=f.store;
  const metadata=spec(f),saved=metadata.document,sourceColumns=f.store.columns,sourceVersion=f.store.version,sourceTimeVersion=f.store.timeVersion,sourceListeners=[...f.store.listeners];
@@ -33,7 +34,7 @@
  ok(p.plan.outputs===5&&p.plan.outputBytes===1024*5*8&&p.plan.checkpointBytes===33554432&&p.plan.retainedBytes===123456&&p.plan.totalBytes<=p.plan.maxBytes&&Object.isFrozen(p.plan),'bounded logical admission');
  ok(copy(p,f.store.columns),'copied source buffers');start(p);const progress=run(p);
  ok(progress.bounded&&['validate','store-index','calculate','indices','workspace-checkpoints','workspace-ready'].every(phase=>progress.phases.has(phase)),'bounded target progress');
- const result=p.finish(),model=result.model,store=model.store,api=new Aster.ChartAPI(model);probe.models.push(model);probe.targetModel=model;probe.targetStore=store;
+ const boundedMap=p.model.indicators.entries.get('ema').checkpoints,result=p.finish(),model=result.model,store=model.store,api=new Aster.ChartAPI(model);probe.models.push(model);probe.targetModel=model;probe.targetStore=store;
  ok(Aster.saveWorkspace(api,binding)===saved,'canonical restored configuration');
  ok(model.precision===7&&model.axisWidth===93&&model.theme.background==='#112233'&&model.panels.length===2&&model.axes[0].id==='left'&&model.series.length===3,'saved chart configuration');
  ok(model.view.from===-40.125&&model.view.to===593.875&&model.follow===false,'fractional offscreen view');
@@ -44,7 +45,7 @@
  ok(f.store.columns===sourceColumns&&f.store.version===sourceVersion&&f.store.timeVersion===sourceTimeVersion&&sourceListeners.length===f.store.listeners.size&&sourceListeners.every(listener=>f.store.listeners.has(listener))&&Aster.saveWorkspace(f.api,binding)===saved,'source remains unchanged');
  ok(p.transferred&&p.model===null&&p.store===null&&Object.keys(p.columns).length===0&&p.workspaceEntries.length===0&&p.workspaceEntryMap===null&&p.workspaceColumnRefs.length===0&&p.workspace===null&&p.workspaceText===null,'finish drops wrapper references');
  throws(()=>p.finish(),'single finish ownership');const liveBytes=p.checkpointBudget.usedBytes;p.dispose();p.dispose();
- ok(model.disposed!==true&&store.listeners.size===2&&liveBytes>0&&p.checkpointBudget.usedBytes===liveBytes,'wrapper dispose preserves returned model');
+ ok(model.disposed!==true&&store.listeners.size===2&&liveBytes===0&&p.checkpointBudget.usedBytes===0,'wrapper dispose preserves returned model');
  parity(p,model,'initial');
  const capturedVolume=store.at(2).volume,changed=f.store.at(2);f.store.update(2,{...changed,volume:changed.volume+7});f.api.setTheme({background:'#223344'});
  ok(store.at(2).volume===capturedVolume&&model.theme.background==='#112233'&&Aster.saveWorkspace(api,binding)===saved,'source changes stay independent');
@@ -52,8 +53,8 @@
  row=store.at(store.length-1);store.append({...row,time:row.time+60000});parity(p,model,'append');
  row=store.at(5);store.update(5,{...row,close:row.low,volume:row.volume+11});parity(p,model,'correction');
  ok(f.store.length===513&&f.store.at(5).close===sourceValues.close[5]&&f.store.at(512).close===sourceValues.close[512]&&f.store.listeners.size===sourceListeners.length,'target changes stay independent');
- const map=model.indicators.entries.get('ema').checkpoints,retiredBytes=map.encodedBytes,beforeRemove=p.checkpointBudget.usedBytes,held=model.indicators.get('ema').outputs.value,heldValues=[...held];api.removeIndicator('ema');
- ok(p.checkpointBudget.usedBytes===beforeRemove-retiredBytes&&held.every((v,i)=>Object.is(v,heldValues[i])),'indicator retirement preserves held outputs');throws(()=>map.get(0),'retired checkpoint access rejected');
+ const held=model.indicators.get('ema').outputs.value,heldValues=[...held];api.removeIndicator('ema');
+ ok(p.checkpointBudget.usedBytes===0&&!model.indicators.entries.has('ema')&&held.every((v,i)=>Object.is(v,heldValues[i])),'indicator retirement preserves held outputs');throws(()=>boundedMap.get(0),'retired checkpoint access rejected');
  model.dispose();ok(p.checkpointBudget.usedBytes===0&&store.listeners.size===0,'returned model cleanup');
  throws(()=>new Aster.NativeWorkspacePrepared('{bad'),'malformed target metadata');
  throws(()=>target({...metadata,datasetBinding:{...binding,revision:'wrong'}}),'target binding mismatch');

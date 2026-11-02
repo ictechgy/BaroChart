@@ -25,8 +25,8 @@ export class NativeParamsImport {
   if(this.output<this.arrays.length)return {phase:'validate',done:this.output*b.capacity+this.at,total:this.arrays.length*b.capacity,complete:false};this.guard();this.entry={def:this.def,name:b.name,params:{...b.params},arrays:this.arrays,checkpoints:this.checkpoints,revision:b.length?1:0,computedFrom:0,computedUntil:b.length,dirty:b.length,dirtyTo:0,invalidated:false,length:b.length};this.phase='ready';return {phase:'ready',done:1,total:1,complete:true};
  }catch(error){this.dispose();throw error;}}
  readyEntry(){this.guard();if(this.phase!=='ready')throw new Error('Native params result not ready');return this.entry;}
- // Only call after callback-free adoption has succeeded. This drops wrapper
- // references without disposing the now-live checkpoint ledger or held outputs.
+ // 콜백 없는 게시 커밋이 성공한 뒤에만 부른다. 커밋이 이미 레코드를 평범한 Map으로 옮기고
+ // 준비용 경계 맵(과 그 원장)을 닫았으므로, 여기서는 이제 엔진 것이 된 출력 벡터를 건드리지 않고 참조만 놓는다.
  releasePublished(){this.transferred=true;this.closed=true;this.drop();}
  drop(){this.arrays=[];this.entry=null;this.def=null;this.create=null;this.binding=null;this.checkpoints=null;this.received=[];}
  dispose(){if(this.closed)return;this.closed=true;try{if(!this.transferred)this.checkpoints.dispose();}finally{this.drop();}}

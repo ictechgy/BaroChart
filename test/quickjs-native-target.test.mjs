@@ -11,16 +11,16 @@ const EXPECTED_SCENARIOS=Object.freeze([
  'canonical restored configuration','saved chart configuration','fractional offscreen view','fractional bound drawing anchors',
  'transient UI reset','restored source metadata','owned source columns','source remains unchanged','finish drops wrapper references',
  'single finish ownership','wrapper dispose preserves returned model',
- 'initial ema/value','initial rsi/value','initial bollinger/middle','initial bollinger/upper','initial bollinger/lower','initial bounded checkpoints',
+ 'initial ema/value','initial rsi/value','initial bollinger/middle','initial bollinger/upper','initial bollinger/lower','initial ordinary checkpoints',
  'source changes stay independent',
- 'update ema/value','update rsi/value','update bollinger/middle','update bollinger/upper','update bollinger/lower','update bounded checkpoints',
- 'append ema/value','append rsi/value','append bollinger/middle','append bollinger/upper','append bollinger/lower','append bounded checkpoints',
- 'correction ema/value','correction rsi/value','correction bollinger/middle','correction bollinger/upper','correction bollinger/lower','correction bounded checkpoints',
+ 'update ema/value','update rsi/value','update bollinger/middle','update bollinger/upper','update bollinger/lower','update ordinary checkpoints',
+ 'append ema/value','append rsi/value','append bollinger/middle','append bollinger/upper','append bollinger/lower','append ordinary checkpoints',
+ 'correction ema/value','correction rsi/value','correction bollinger/middle','correction bollinger/upper','correction bollinger/lower','correction ordinary checkpoints',
  'target changes stay independent','indicator retirement preserves held outputs','retired checkpoint access rejected','returned model cleanup',
  'malformed target metadata','target binding mismatch','target output schema mismatch','combined admission limit','partial transfer rejected',
  'partial transfer cleanup','malformed copied column rejected','malformed copied column cleanup','partial calculation owns checkpoints',
  'partial calculation cleanup','cancelled checkpoint access rejected','ready mutation rejected','ready mutation cleanup',
- 'empty target configuration','empty bounded checkpoints','empty target ownership','empty target cleanup',
+ 'empty target configuration','empty ordinary checkpoints','empty target ownership','empty target cleanup',
  'failed targets preserve source','all source and target listeners released'
 ]);
 const EXPECTED_CHECKS=63;
