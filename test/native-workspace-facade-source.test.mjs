@@ -28,7 +28,8 @@ test('Java direct invoke retains owning-thread and closed-handle guards before J
  assert.match(check,/if\(handle==0\)throw new IllegalStateException/);
  assert.ok(check.indexOf('Thread.currentThread()!=owner')<check.indexOf('resumeOwnerCleanup()'));
  assert.ok(check.indexOf('resumeOwnerCleanup()')<check.indexOf('if(handle==0)'));
- assert.ok(body.indexOf('check()')<body.indexOf('call(handle'));
+ // JNI call 진입은 추적 훅을 겸하는 callRuntime 하나다(M0 Task 7). 검사 순서는 그대로다.
+ assert.ok(body.indexOf('check()')<body.indexOf('callRuntime(handle'));
 });
 test('Java workspace close recovery remains reachable after the source handle is retired',()=>{
  const close=method(java,'@Override public void close(');
