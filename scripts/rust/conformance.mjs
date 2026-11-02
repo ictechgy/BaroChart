@@ -18,6 +18,7 @@
 // - 엔진마다 그 플랫폼의 커널 결과와 비교한다. V8(WASM 하네스)·JSC(iOS)는 r, QuickJS(Android)는 q(없으면 r)다.
 //   엔진끼리 값이 달라도 판정을 건너뛰지 않는다. 엔진 차이는 따로 세고 예시를 남긴다.
 // - 알려진 엔진 차이(KNOWN_DIVERGENCES)는 정해진 엔진과의 비교에서, 커널이 문서화한 쪽으로 답했을 때만 뺀다.
+//   unicode-version은 커널 답이 새로 할당된 글자(UNICODE_UPGRADE)로 설명되는 자리에서만 Node와 다를 때만 해당한다.
 //   어느 엔진과도 비교하지 못한 작업만 제외(excluded)로 센다. 그 밖의 차이는 모두 불일치다.
 // - 오라클을 돌리지 못한 엔진('!oracle-error')과, 비교한 작업이 하나도 없는 스위트는 하네스 오류(종료 코드 2)다.
 // - 엔진마다 다른 Math.log/exp/hypot(설계 §6.3)은 코퍼스에 넣지 않는다. WASM 하네스(Task 9)가 V8 값을 주입해 맞춘다.
@@ -68,8 +69,24 @@ export const ENGINES=Object.freeze(['v8','jsc','quickjs']);
 /** 알려진 엔진 차이: 이유 → 설명. 커널이 문서화한 쪽으로 답한 경우만 판정에서 뺀다 */
 export const KNOWN_DIVERGENCES=Object.freeze({
  'date-utc-folded-year':'Date.UTC whose month-folded year lies outside -271821..275760: the kernel returns NaN like QuickJS, while V8 and JSC still compute a value when large time fields bring it back into range (M1 Task 3 ruling; applies to the v8 and jsc comparisons)',
- 'unicode-version':'toLowerCase input with code points that this Node treats as unassigned: Node and the kernel use different Unicode versions, so newer case mappings and casing properties differ (applies to the v8 comparison)',
+ 'unicode-version':'toLowerCase input with code points assigned in the kernel Unicode version but not in this Node (UNICODE_UPGRADE): the kernel answer differs from Node only where those code points can change it, namely their own lowercase (one code point) and a neighboring final sigma (applies to the v8 comparison)',
 });
+
+/**
+ * 커널과 Node의 유니코드 판이 다를 때 toLowerCase 차이를 가르는 표: from 판(Node 22.20.0)에서 미할당이고 to 판(커널
+ * Rust 1.98.1 std)에서 할당된 코드 포인트 구간. JSC(macOS 26.7.2)와 QuickJS 2026-06-04의 \p{Cn}이 서로 같고(둘 다
+ * 유니코드 17.0) 이 Node의 \p{Cn}과 다른 코드 포인트를 모았다(2026-11-02 실측, 4,803자 = 유니코드 17.0이 더한 글자 수).
+ * 두 판에서 모두 미할당인 코드 포인트(평면 4~13 등)는 들어가지 않으므로 그 자리의 차이는 늘 불일치다(리뷰 C6).
+ * 판이 이 쌍과 다르면 표를 쓰지 않고 차이를 불일치로 알린다. 그때는 새 판에서 할당된 코드 포인트로 표를 고친다.
+ */
+export const UNICODE_UPGRADE=Object.freeze({from:'16.0',to:'17.0',added:Object.freeze([
+ [0x88f,0x88f],[0xc5c,0xc5c],[0xcdc,0xcdc],[0x1acf,0x1add],[0x1ae0,0x1aeb],[0x20c1,0x20c1],[0x2b96,0x2b96],[0xa7ce,0xa7cf],[0xa7d2,0xa7d2],
+ [0xa7d4,0xa7d4],[0xa7f1,0xa7f1],[0xfbc3,0xfbd2],[0xfd90,0xfd91],[0xfdc8,0xfdce],[0x10940,0x10959],[0x10ec5,0x10ec7],[0x10ed0,0x10ed8],
+ [0x10efa,0x10efb],[0x11b60,0x11b67],[0x11db0,0x11ddb],[0x11de0,0x11de9],[0x16ea0,0x16eb8],[0x16ebb,0x16ed3],[0x16ff2,0x16ff6],[0x187f8,0x187ff],
+ [0x18d09,0x18d1e],[0x18d80,0x18df2],[0x1ccfa,0x1ccfc],[0x1ceba,0x1ced0],[0x1cee0,0x1cef0],[0x1e6c0,0x1e6de],[0x1e6e0,0x1e6f5],[0x1e6fe,0x1e6ff],
+ [0x1f6d8,0x1f6d8],[0x1f777,0x1f77a],[0x1f8d0,0x1f8d8],[0x1fa54,0x1fa57],[0x1fa8a,0x1fa8a],[0x1fa8e,0x1fa8e],[0x1fac8,0x1fac8],[0x1facd,0x1facd],
+ [0x1faea,0x1faea],[0x1faef,0x1faef],[0x1fbfa,0x1fbfa],[0x2b73a,0x2b73f],[0x2cea2,0x2cead],[0x323b0,0x33479]
+].map(range=>Object.freeze(range)))});
 
 /** 기본값: 스위트마다 작업 1만 건, 시드 1, 모든 스위트, V8만 */
 const DEFAULTS=Object.freeze({count:10000,seed:1});
@@ -151,6 +168,13 @@ const STRING_UNITS=Object.freeze([
 
 /** 문자열에 섞는 보충 평면 문자(대소문자가 있는 Deseret·Adlam·Medefaidrin 포함) */
 const SUPPLEMENTARY=Object.freeze([0x1f600,0x10400,0x10428,0x1d400,0x10ffff,0x1e900,0x16e40,0x10c80,0x118a0]);
+
+/**
+ * 문자열에 섞는 유니코드 17 새 글자(UNICODE_UPGRADE 안): 새 대문자와 소문자 대응(U+A7CE→A7CF, U+A7D2→기존 A7D3,
+ * U+16EA0→16EBB), 새 소문자(cased), 새 결합 표시(대소문자 무시, final sigma 문맥을 바꾼다), 대소문자 없는 새 글자·기호.
+ * 커널(17.0)과 JSC·QuickJS는 같고 Node(16.0)만 달라, 삼각측량은 이 글자를 엄격히 비교하고 V8 단독은 unicode-version 규칙을 시험한다.
+ */
+const UNICODE_ADDITION_PROBES=Object.freeze([0xa7ce,0xa7cf,0xa7d2,0xa7d4,0x16ea0,0x16eb8,0x16ebb,0x1acf,0x1ae0,0x20c1,0x10940,0x323b0,0x88f,0x1f6d8]);
 
 /** JSON 객체 키: 배열 인덱스 키와 그 경계('4294967295'는 일반 키), __proto__, 비ASCII, 빈 키 */
 const KEYS=Object.freeze(['a','b','c','0','1','2','10','01','00','-0','-1','1.5','4294967294','4294967295','4294967296','__proto__','constructor','toString','é','😀','',' 1','9','1e3','+1','\u00a0','\ud800']);
@@ -445,7 +469,7 @@ function roundCase(random,index){
 }
 
 /**
- * 무작위 UTF-16 문자열: 특수 단위, 임의 BMP 단위(단독 서로게이트 포함), 보충 평면 문자를 섞는다.
+ * 무작위 UTF-16 문자열: 특수 단위, 임의 BMP 단위(단독 서로게이트 포함), 보충 평면 문자, 유니코드 17 새 글자를 섞는다.
  * @param {ReturnType<typeof createRandom>} random 난수 도구
  * @param {number} maxLength 최대 길이(문자 수)
  * @returns {string} 문자열
@@ -454,7 +478,8 @@ function randomUnits(random,maxLength){
  let text='';
  for(let left=random.range(0,maxLength);left>0;left--){
   const roll=random.float();
-  if(roll<0.1)text+=String.fromCodePoint(random.pick(SUPPLEMENTARY));
+  if(roll<0.03)text+=String.fromCodePoint(random.pick(UNICODE_ADDITION_PROBES));
+  else if(roll<0.1)text+=String.fromCodePoint(random.pick(SUPPLEMENTARY));
   else if(roll<0.14)text+=String.fromCodePoint(0x10000+random.int(0x100000));
   else if(roll<0.29)text+=String.fromCharCode(random.int(0x10000));
   else text+=String.fromCharCode(random.pick(STRING_UNITS));
@@ -1235,8 +1260,69 @@ const kernelValueFor=(engine,result)=>engine==='quickjs'?(result.q??result.r):re
  */
 function knownDivergence(task,actual,expected,engine,context){
  if(task.op==='dateUtc'&&(engine==='v8'||engine==='jsc')&&actual==='NaN'&&expected!=='NaN'&&foldedYearOutOfRange(task.args))return 'date-utc-folded-year';
- if(task.op==='toLowerCase'&&engine==='v8'&&context.unicodeDiffers&&/\p{Cn}/u.test(unitsFromHex(task.units)))return 'unicode-version';
+ if(task.op==='toLowerCase'&&engine==='v8'&&context.unicodeUpgrade&&unicodeUpgradeExplains(task.units,actual,expected))return 'unicode-version';
  return null;
+}
+
+/** Node 판에서 대소문자 무시(Case_Ignorable) 글자인지 본다(final sigma 문맥을 건너뛸 때 쓴다) */
+const CASE_IGNORABLE=/^\p{Case_Ignorable}$/u;
+
+/**
+ * 코드 포인트가 커널 판에서 새로 할당된 글자인지 본다(UNICODE_UPGRADE).
+ * @param {number} code 코드 포인트
+ * @returns {boolean} 새 글자면 true
+ */
+const isUnicodeAddition=code=>UNICODE_UPGRADE.added.some(([first,last])=>code>=first&&code<=last);
+
+/**
+ * Σ(U+03A3)의 final sigma 문맥에 새 글자가 있는지 본다. Node 판의 대소문자 무시 글자를 건너뛰며 앞뒤로 처음 만나는
+ * 글자가 새 글자면, 커널 판에서는 그 글자가 cased이거나 대소문자 무시일 수 있어 σ와 ς가 모두 맞을 수 있다.
+ * @param {string[]} points 입력의 코드 포인트(단독 서로게이트는 그 단위 하나)
+ * @param {number} index Σ의 자리
+ * @returns {boolean} 문맥에 새 글자가 있으면 true
+ */
+function sigmaContextHasAddition(points,index){
+ for(const step of [-1,1]){
+  for(let at=index+step;at>=0&&at<points.length;at+=step){
+   if(isUnicodeAddition(points[at].codePointAt(0)))return true;
+   if(!CASE_IGNORABLE.test(points[at]))break;
+  }
+ }
+ return false;
+}
+
+/**
+ * 커널의 toLowerCase 답이 Node와 다른 것을 유니코드 판 차이로 설명할 수 있는지 본다(리뷰 C6). 입력을 코드 포인트마다
+ * 따라가며 커널 답을 맞춰 본다.
+ * - 새 글자(UNICODE_UPGRADE): 커널 답의 코드 포인트 하나면 된다(새 소문자 대응).
+ * - 문맥에 새 글자가 있는 Σ: σ 또는 ς.
+ * - 그 밖의 글자: Node가 낸 조각과 정확히 같아야 한다(Σ는 Node 결과의 그 자리, 나머지는 문맥 없는 전체 소문자 대응).
+ * 입력에 새 글자가 없으면 설명할 수 없다(false).
+ * @param {string} units 입력 코드 단위 16진
+ * @param {string} actual 커널 답(코드 단위 16진)
+ * @param {string} expected Node 답(코드 단위 16진)
+ * @returns {boolean} 판 차이로 설명되면 true
+ */
+function unicodeUpgradeExplains(units,actual,expected){
+ const points=Array.from(unitsFromHex(units)),output=unitsFromHex(actual),node=unitsFromHex(expected);
+ if(!points.some(point=>isUnicodeAddition(point.codePointAt(0))))return false;
+ let nodeOffset=0,outputOffset=0;
+ for(let index=0;index<points.length;index++){
+  const point=points[index],code=point.codePointAt(0),piece=code===0x3a3?node.slice(nodeOffset,nodeOffset+1):point.toLowerCase();
+  nodeOffset+=piece.length;
+  if(isUnicodeAddition(code)){
+   const produced=output.codePointAt(outputOffset);
+   if(produced===undefined)return false;
+   outputOffset+=produced>0xffff?2:1;
+  }else if(code===0x3a3&&sigmaContextHasAddition(points,index)){
+   if(output[outputOffset]!=='\u03c3'&&output[outputOffset]!=='\u03c2')return false;
+   outputOffset++;
+  }else{
+   if(!output.startsWith(piece,outputOffset))return false;
+   outputOffset+=piece.length;
+  }
+ }
+ return nodeOffset===node.length&&outputOffset===output.length;
 }
 
 /**
@@ -1703,6 +1789,8 @@ async function main(args){
   try{return expected(task);}catch(error){return oracleFailure(error);}
  }};
  context.unicodeDiffers=majorMinor(context.kernelUnicode)!==majorMinor(process.versions.unicode);
+ context.unicodeUpgrade=majorMinor(process.versions.unicode)===UNICODE_UPGRADE.from&&majorMinor(context.kernelUnicode)===UNICODE_UPGRADE.to;
+ if(context.unicodeDiffers&&!context.unicodeUpgrade)console.log(`conformance: warning: kernel Unicode ${context.kernelUnicode} and Node Unicode ${process.versions.unicode} differ, but UNICODE_UPGRADE covers ${UNICODE_UPGRADE.from} → ${UNICODE_UPGRADE.to} only; toLowerCase differences count as mismatches until the table lists the code points new in the kernel version`);
  const stats=createStats(options);
  await compareWithKernel(options,binary,context,stats);
  const run=summarize(stats,options,describeEnvironment(options,context),(performance.now()-started)/1000);

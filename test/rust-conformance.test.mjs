@@ -11,7 +11,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import vm from 'node:vm';
-import {NUMBER_SOURCES,SENTINEL_KEY,SUITE_OPS,SUITES,corpusCases,corpusText,createOracle,engineScript} from '../scripts/rust/conformance.mjs';
+import {NUMBER_SOURCES,SENTINEL_KEY,SUITE_OPS,SUITES,UNICODE_UPGRADE,corpusCases,corpusText,createOracle,engineScript} from '../scripts/rust/conformance.mjs';
 import {rustupBinDirectory} from '../scripts/rust/cargo.mjs';
 
 /** 저장소 루트(테스트를 어느 cwd에서 돌려도 같다) */
@@ -196,18 +196,37 @@ test('the engine script is self-contained and reproduces the oracle in a fresh c
  * - FAKE_GARBAGE_LINE: 그 줄은 어느 엔진과도 다른 'garbage'를 낸다
  * - FAKE_Q_SUFFIX_LINE: 그 줄에 QuickJS 방언 결과 q(ECMA 결과 뒤에 Q)를 더한다(가짜 엔진 alter:N과 짝)
  * - FAKE_FORCE_NAN_LINE: 그 줄은 'NaN'을 낸다
+ * - FAKE_UNICODE_VERSION: --unicode-version에 이 판을 답한다(기본은 이 Node의 판)
+ * - FAKE_LOWERCASE: toLowerCase 결과를 바꾼다. cn-garbage는 Node 기준 미할당(Cn) 코드 포인트가 든 입력에 '0041',
+ *   non-cn-wrong은 그런 입력의 결과에서 a를 A로, high-plane은 결과의 U+40000..U+DFFFF를 U+FFFD로,
+ *   unicode17은 유니코드 17에서 생긴 대소문자 대응 28자(U+A7CE·A7D2·A7D4, U+16EA0..16EB8)를 소문자로 바꾼다
  */
 const FAKE_KERNEL=conformanceUrl=>[
  `import {createOracle} from ${JSON.stringify(conformanceUrl)};`,
  'import {createInterface} from \'node:readline\';',
- 'if(process.argv.includes(\'--unicode-version\'))console.log(`${process.versions.unicode}.0`);',
+ 'if(process.argv.includes(\'--unicode-version\'))console.log(process.env.FAKE_UNICODE_VERSION??`${process.versions.unicode}.0`);',
  'else{',
+ ' const lowerMode=process.env.FAKE_LOWERCASE??\'\';',
+ ' const decode=hex=>String.fromCharCode(...(hex.match(/.{4}/g)??[]).map(unit=>parseInt(unit,16)));',
+ ' const encode=text=>Array.from({length:text.length},(_,index)=>text.charCodeAt(index).toString(16).padStart(4,\'0\')).join(\'\');',
+ ' const newCase=new Map([[0xa7ce,0xa7cf],[0xa7d2,0xa7d3],[0xa7d4,0xa7d5],...Array.from({length:25},(_,index)=>[0x16ea0+index,0x16ebb+index])]);',
+ ' const mapPoints=(text,map)=>Array.from(text,point=>map(point.codePointAt(0),point)).join(\'\');',
+ ' function lower(task,result){',
+ '  const unassigned=/\\p{Cn}/u.test(decode(task.units));',
+ '  if(lowerMode===\'cn-garbage\')return unassigned?\'0041\':result;',
+ '  if(lowerMode===\'non-cn-wrong\')return unassigned?encode(decode(result).replaceAll(\'a\',\'A\')):result;',
+ '  if(lowerMode===\'high-plane\')return encode(mapPoints(decode(result),(code,point)=>code>=0x40000&&code<=0xdffff?\'\\ufffd\':point));',
+ '  if(lowerMode===\'unicode17\')return encode(mapPoints(decode(result),(code,point)=>newCase.has(code)?String.fromCodePoint(newCase.get(code)):point));',
+ '  return result;',
+ ' }',
  ' const expected=createOracle(),corrupt=Number(process.env.FAKE_CORRUPT_LINE??0),stop=Number(process.env.FAKE_STOP_AFTER??Infinity);',
  ' const garbage=Number(process.env.FAKE_GARBAGE_LINE??0),qSuffix=Number(process.env.FAKE_Q_SUFFIX_LINE??0),forceNaN=Number(process.env.FAKE_FORCE_NAN_LINE??0);',
  ' let line=0;',
  ' for await(const text of createInterface({input:process.stdin,crlfDelay:Infinity})){',
  '  if(++line>stop)break;',
- '  let result=expected(JSON.parse(text));',
+ '  const task=JSON.parse(text);',
+ '  let result=expected(task);',
+ '  if(task.op===\'toLowerCase\')result=lower(task,result);',
  '  if(line===corrupt)result+=\'X\';',
  '  if(line===garbage)result=\'garbage\';',
  '  if(line===forceNaN)result=\'NaN\';',
@@ -344,6 +363,42 @@ test('a suite in which nothing was compared is a harness error, not a pass',asyn
   assert.match(result.stdout,/EXCLUDED date#0 op=dateUtc reason=date-utc-folded-year/);
   assert.match(result.stderr,/nothing was compared in suite date/);
  }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('the unicode-version exclusion excuses only answers that code points new in the kernel Unicode can explain',async t=>{
+ if(process.versions.unicode!=='16.0'){t.skip(`UNICODE_UPGRADE covers Node Unicode 16.0 against a 17.0 kernel; this Node has ${process.versions.unicode}`);return;}
+ const dir=await mkdtemp(join(tmpdir(),'barochart-conformance-'));
+ try{
+  const {binary}=await writeFakes(dir);
+  const common=['--binary',binary,'--suite','string','--count','3000','--seed','8','--work-dir',dir];
+  const env={...process.env,FAKE_UNICODE_VERSION:'17.0.0'};
+  // 예전 규칙은 Node 기준 미할당 코드 포인트가 든 toLowerCase 작업을 커널 답과 무관하게 뺐다(리뷰 C6)
+  for(const mode of ['cn-garbage','non-cn-wrong','high-plane']){
+   const result=runConformance(common,{...env,FAKE_LOWERCASE:mode});
+   assert.equal(result.status,1,`${mode}: ${result.stdout}${result.stderr}`);
+   assert.match(result.stdout,/MISMATCH string#\d+ op=toLowerCase/,mode);
+  }
+  // 유니코드 17의 새 대소문자 대응만 Node와 다른 커널은 통과하고, 그 작업은 unicode-version으로 빠진다
+  const upgraded=runConformance(common,{...env,FAKE_LOWERCASE:'unicode17'});
+  assert.equal(upgraded.status,0,upgraded.stdout+upgraded.stderr);
+  assert.match(upgraded.stdout,/EXCLUDED string#\d+ op=toLowerCase reason=unicode-version/);
+  assert.ok(Number(/(\d+) excluded/.exec(upgraded.stdout)?.[1])>0,upgraded.stdout);
+  // 판 차이를 표가 덮지 않으면(예: 커널 18.0) 빼지 않고 불일치로 알린다
+  const uncovered=runConformance(common,{...process.env,FAKE_UNICODE_VERSION:'18.0.0',FAKE_LOWERCASE:'unicode17'});
+  assert.equal(uncovered.status,1,uncovered.stdout+uncovered.stderr);
+  assert.match(uncovered.stdout,/UNICODE_UPGRADE/);
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('UNICODE_UPGRADE lists exactly code points that are unassigned in this Node',t=>{
+ if(process.versions.unicode!==UNICODE_UPGRADE.from){t.skip(`the table starts at Unicode ${UNICODE_UPGRADE.from}; this Node has ${process.versions.unicode}`);return;}
+ let count=0;
+ for(const [first,last] of UNICODE_UPGRADE.added){
+  assert.ok(first<=last,`${first.toString(16)}..${last.toString(16)}`);
+  for(let code=first;code<=last;code++){assert.ok(/^\p{Cn}$/u.test(String.fromCodePoint(code)),code.toString(16));count++;}
+ }
+ // 유니코드 17.0은 4,803자를 더했다(JSC·QuickJS의 \p{Cn}과 이 Node의 차이로 실측)
+ assert.equal(count,4803);
 });
 
 /**
