@@ -12,6 +12,11 @@ import {seededColumns} from '../src/core/data.mjs';
 import {NativeParamsCapture} from '../src/core/native-params-source.mjs';
 import {NativeParamsTarget} from '../src/core/native-params-target.mjs';
 import {safeCheckpointStringify} from '../src/core/checkpoint-validation.mjs';
+import {setIndicatorParamsAsync,prepareWorkspaceAsync} from '../src/web/worker.mjs';
+import {computeIndicatorParamsRequest} from '../src/web/indicator-params-worker.mjs';
+import {computeWorkspaceRequest} from '../src/web/workspace-worker.mjs';
+import {computeRequest} from '../src/web/compute-worker.mjs';
+import {hydrateModel,validatePreparedPacketAsync,requestOptionsSnapshot} from '../src/web/worker-state.mjs';
 import {buildLegacyChart,LEGACY_BINDING} from './fixtures/legacy/build-legacy-chart.mjs';
 
 /** 생성된 네이티브 번들 원문. 번들 수준 테스트는 커밋된 산출물을 그대로 올린다. */
@@ -282,6 +287,51 @@ test('asynchronous indicator params publish canonical params',t=>{
  source.prepare(3);source.publish(3);
  assert.deepEqual(Object.keys(model.indicators.entries.get('x').params),['period','source']);
  assert.match(api.saveStudies(),/"params":\{"period":9,"source":"close"\}/);
+});
+
+/**
+ * 같은 프로세스에서 웹 Worker 계산을 흉내 내는 workerFactory를 만든다(test/workspace-boundaries.test.mjs와 같은 방식).
+ * 실제 Worker처럼 요청을 structuredClone으로 옮겨 버퍼 소유권을 넘기고, 응답은 마이크로태스크로 돌려준다.
+ * @param {(request: object) => object} compute 워커 모듈의 계산 함수
+ * @returns {() => object} workerFactory 옵션 값
+ */
+function inProcessWorker(compute){return ()=>({postMessage(request,transfer){const packet=compute(structuredClone(request,{transfer}));queueMicrotask(()=>this.onmessage?.({data:packet}));},terminate(){}});}
+/** bollinger의 선언 순서(period, deviation)를 뒤집은 params. 웹 비동기 경로가 호스트 순서를 남기는지 본다. */
+const REVERSED_BOLLINGER={deviation:2.5,period:30};
+
+test('web asynchronous params save the same canonical params as the synchronous path',async t=>{
+ const sync=makeChart(t),web=makeChart(t);
+ for(const {api} of [sync,web])api.addIndicator('b','bollinger',{period:20,deviation:2});
+ sync.api.setIndicatorParams('b',REVERSED_BOLLINGER);
+ await setIndicatorParamsAsync(web.api,'b',REVERSED_BOLLINGER,{workerFactory:inProcessWorker(computeIndicatorParamsRequest)});
+ // 게시된 엔트리와 두 저장 문서 모두 동기 경로와 같은 선언 순서다
+ assert.deepEqual(Object.keys(web.model.indicators.entries.get('b').params),['period','deviation']);
+ assert.equal(web.api.saveStudies(),sync.api.saveStudies());
+ assert.equal(saveWorkspace(web.api,BINDING),saveWorkspace(sync.api,BINDING));
+});
+
+test('web workspace restore re-saves legacy-order params in canonical order',async t=>{
+ const {model,api}=makeChart(t);api.addIndicator('b','bollinger',{period:20,deviation:2});api.addIndicator('m','macd',{fast:12,slow:26,signal:9});
+ const canonical=saveWorkspace(api,BINDING),doc=JSON.parse(canonical);
+ // params 키만 거꾸로 적은 옛 문서(웹에서 객체 리터럴 순서대로 만든 문서)
+ for(const study of doc.indicators)study.params=Object.fromEntries(Object.entries(study.params).reverse());
+ const legacy=JSON.stringify(doc);assert.notEqual(legacy,canonical);
+ const restored=await prepareWorkspaceAsync(model.store,legacy,{datasetBinding:BINDING,workerFactory:inProcessWorker(computeWorkspaceRequest)});
+ try{assert.equal(saveWorkspace(new ChartAPI(restored),BINDING),canonical);}finally{restored.dispose();}
+});
+
+test('web worker hydration saves canonical params',async t=>{
+ // prepareChartModel과 같은 절차: 요청 스냅샷 → 워커 계산 → 비동기 검증 → hydrateModel
+ const store=new BarStore(ROWS),series=[{id:'b-line',type:'line',panel:'price',indicator:'b'}];
+ const expected=requestOptionsSnapshot({indicators:[{id:'b',name:'bollinger',params:{deviation:2,period:20}}],series});
+ const columns=Object.fromEntries(Object.entries(store.columns).map(([key,values])=>[key,values.subarray(0,store.length)]));
+ const packet=await computeRequest(structuredClone({columns,length:store.length,options:expected}));
+ const hydrated=hydrateModel(packet,expected,await validatePreparedPacketAsync(packet,expected));
+ try{
+  assert.deepEqual(Object.keys(hydrated.indicators.entries.get('b').params),['period','deviation']);
+  const {api}=makeChart(t);api.addIndicator('b','bollinger',{period:20,deviation:2});api.addSeries(series[0]);
+  assert.equal(new ChartAPI(hydrated).saveStudies(),api.saveStudies());
+ }finally{hydrated.dispose();}
 });
 
 test('first unsupported field is independent of input order',t=>{

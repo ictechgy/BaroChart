@@ -2,7 +2,7 @@ import {BarStore,RangeIndex} from '../core/data.mjs';
 import {snapshotIngestionEvents,dataIngestionBatchLimits} from '../core/ingestion.mjs';
 import {BlockRangeIndex} from '../core/block-index.mjs';
 import {ChartModel} from '../core/model.mjs';
-import {resolveIndicatorFactory,requirePortableFactory} from '../core/indicators.mjs';
+import {resolveIndicatorFactory,requirePortableFactory,orderedIndicatorParams} from '../core/indicators.mjs';
 import {indicatorModule,validateIndicatorModuleBinding} from '../core/indicator-modules.mjs';
 import {validateIndicatorParams} from '../core/indicator-params.mjs';
 import {RESOURCE_LIMITS,sizeLimit,identifier,optionRecord,AXIS_KEYS,PANEL_KEYS,SERIES_KEYS,THEME_KEYS} from '../core/contracts.mjs';
@@ -119,7 +119,8 @@ function stagedState(model,packet,preparedVersion,expectedOptions,validation){
  for(const e of packet.indicators){const wanted=bindings.expected.get(e.id),def=wanted.def;completedMetadata(e,store.length,model.indicators.checkpointSize);
   if(!Array.isArray(e.arrays)||e.arrays.length!==def.outputs.length||e.arrays.some(a=>!(a instanceof Float64Array)||a.length!==store.capacity))throw new TypeError('Prepared indicator buffers');outputBytes+=e.arrays.reduce((n,a)=>n+a.byteLength,0);if(outputBytes>model.indicators.maxOutputBytes)throw new RangeError('Prepared output byte limit');
   const checked=validated?.checkpoints.get(e.id);if(validated&&(!checked||checked.source!==e.checkpoints))throw new TypeError('Prepared validated checkpoint binding');const checkpoints=checked?.lazy??new LazyCheckpoints(e.checkpoints).validate(store.length,e.checkpointSize,e.name,wanted.params);
-  entries.set(e.id,{name:e.name,params:{...wanted.params},def,arrays:e.arrays.slice(),checkpoints,revision:e.revision,computedFrom:e.computedFrom,computedUntil:e.computedUntil,dirty:store.length,dirtyTo:0,invalidated:false,length:store.length,preparedVersion});
+  // requestedDefinitions가 정규 팩토리를 강제하므로 동기 IndicatorEngine.add와 같은 선언 순서로 담는다(호스트 요청 키 순서를 남기지 않는다)
+  entries.set(e.id,{name:e.name,params:orderedIndicatorParams(e.name,resolveIndicatorFactory(e.name),wanted.params),def,arrays:e.arrays.slice(),checkpoints,revision:e.revision,computedFrom:e.computedFrom,computedUntil:e.computedUntil,dirty:store.length,dirtyTo:0,invalidated:false,length:store.length,preparedVersion});
  }
  const caches=new Map();for(const cache of packet.indices){const series=bindings.replies.get(cache.id),e=series.indicator?entries.get(series.indicator):null,values=e?e.arrays[e.def.outputs.indexOf(series.output??e.def.outputs[0])]:series.values??store.columns[series.source??'close'];if(!(values instanceof Float64Array))throw new TypeError('Prepared series binding');let rangeIndex;
   if(validated){const count=validated.countCaches.get(cache);if(cache.finiteCounts!==true||!count||count.tree!==cache.tree||count.sum!==cache.tree.sum||count.values!==cacheValues(cache,packet,bindings))throw new TypeError('Prepared validated finite-count cache binding');}else for(const unused of countCacheValidation(cache,packet,bindings)){void unused;}
