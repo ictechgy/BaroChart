@@ -4,7 +4,7 @@ _작성 2026-11-02 · 기준 커밋 `b2cef94` · 브랜치 `feat/rust-core`_
 
 관련 문서:
 - 이식 지도(안정 표면): [`2026-11-02-rust-core-porting-map.md`](2026-11-02-rust-core-porting-map.md)
-- 이식 지도(저수준 API 보충): `2026-11-02-rust-core-porting-map-tier-a.md` (작성 중)
+- 이식 지도(저수준 API 보충): [`2026-11-02-rust-core-porting-map-tier-a.md`](2026-11-02-rust-core-porting-map-tier-a.md). 범위 목록과 미결 항목(O1~O8)의 정본이다.
 - 이전 프로그램(상용화) 설계: [`2026-11-01-native-sdk-commercial-design.md`](2026-11-01-native-sdk-commercial-design.md)
 
 ## 1. 의도
@@ -102,6 +102,7 @@ Rust는 `staticlib`으로 빌드한다. `cbindgen`으로 만든 헤더 하나를
 - **표준 모드 (Android):** `JSON.stringify`와 같은 텍스트다. `undefined`는 `null`이 되고, `NaN`과 `±Infinity`도 `null`이 된다(`aster_jni.c:60`과 같음).
 - **무손실 모드 (iOS, 추적 기록):** JSON 상위 집합이다. 이 모드에서만 `NaN`, `Infinity`, `-Infinity`, `-0`, `undefined` 토큰을 쓴다. iOS JS 백엔드는 지금 `JSValue`로 NaN을 그대로 받고, `isUndefined`와 `isNull`을 따로 본다(`BaroChartEngine.swift:1624-1628`). Rust 결과도 Swift에 같은 값으로 보여야 한다. 추적 파일(§7.3)도 같은 형식을 쓴다.
 - 타입 배열은 JSON에 싣지 않는다. 복사 함수(`bc_read_f64`/`bc_write_f64`)로 따로 보낸다.
+  - 예외: Android 범용 `invoke`로 `Float64Array`를 돌려받는 경우(예: `nativeIndicatorBuffer`)는 JS `JSON.stringify`와 같은 인덱스 키 객체(`{"0":…}`)로 쓴다(보충 지도 O6).
 
 **호스트 콜백 (`BcHost`):** 어느 스레드에서 불려도 안전해야 한다.
 - `zone_resolve(name)`: 정규 이름을 돌려주거나 실패한다.
@@ -135,11 +136,12 @@ Rust는 `staticlib`으로 빌드한다. `cbindgen`으로 만든 헤더 하나를
   - NaN과 ±Inf를 다룬다.
   - `CFBoolean`과 `NSNumber`를 구분한다.
   - 키 순서를 결정적으로 만든다. Swift `Dictionary` 순서는 프로세스마다 다르다.
-- **공개 `context`와 `JSValue`를 반환하는 `call`/`command`는 JS 백엔드 전용이다.**
-  - Rust에서 `call`/`command`는 `.unavailable`을 던진다.
-  - `context`는 명확한 메시지로 `preconditionFailure`를 낸다. 지금도 닫힌 엔진에서는 같은 방식이다(`BaroChartEngine.swift:1364-1366`).
-  - 두 백엔드 모두에서 되는 `callValue`/`commandValue`를 새로 추가한다. 반환 타입은 공개 `BaroChartValue`다.
-  - 기존 API에 deprecated 표시는 하지 않는다(§11).
+- **`JSValue`를 반환하는 공개 API는 Rust에서도 동작한다(보충 지도 O1).** 대상: `call`, `command`, `addIndicator`, `setIndicatorParams`.
+  - Rust 결과를 소유 스레드마다 하나 둔 값 전용 `JSContext`에서 `JSValue`로 만든다. 빈 컨텍스트는 약 0.77 MB다.
+  - 값은 `JSON.parse`와 reviver로 만든다. 그래야 NaN, ±Inf, -0, `undefined`가 살아남는다. `JSValue(object:)`는 키 순서를 바꾸므로 쓰지 않는다.
+  - 이렇게 하는 이유는 세 가지다. 문서화된 저수준 API이고(`docs/IOS-GUIDE.md:180`), 기존 XCTest가 쓰며, 주인 결정 1(저수준까지 전부)과 맞는다.
+  - `context` 속성만 Rust에서 막는다. 명확한 메시지로 `preconditionFailure`를 내며, 지금 닫힌 엔진에서 하는 방식과 같다(`BaroChartEngine.swift:1364-1366`).
+  - SDK 내부에서 `context`와 `JSValue`를 직접 쓰는 곳은 M0에서 모두 이음새 뒤로 옮긴다. `close()`가 `context`를 읽는 곳(1591-1592행)도 포함한다.
 - **타입 `init(options:)`:** Rust를 고르면 번들 URL이 필요 없다.
 - **시간대:** Foundation `TimeZone`으로 `@convention(c)` 콜백을 만든다. 이름 해석은 M0에서 고정한 문법(§7.4)을 따른다.
 - **패키징:** XCFramework를 SwiftPM `binaryTarget`으로 붙인다. 슬라이스는 `ios-arm64`, 시뮬레이터, macOS(`examples/native` 하네스용)다. `Package.swift`가 tools 6.0이라 SwiftPM traits(6.1 필요)는 쓰지 않는다.
@@ -147,6 +149,8 @@ Rust는 `staticlib`으로 빌드한다. `cbindgen`으로 만든 헤더 하나를
 ### 4.4 Android
 
 - **JNI는 C(`aster_jni.c`)에 그대로 둔다.**
+  - 백엔드와 무관한 검사(인자 크기, UTF-8 변환)는 분기 전에 둔다. 그래야 두 백엔드의 첫 오류가 같다.
+  - `enter()`는 Rust 핸들에서 `JS_UpdateStackTop`을 건너뛴다.
   - `AsterHost`에 백엔드 태그와 Rust 엔진 포인터를 더한다. `createRust()`를 추가한다.
   - 기존 함수는 `enter()` 직후 태그를 보고 갈린다. 대상: `call`, `packet`, `free`, `readBuffer`, `writeBuffer`, `memory*`, `indicatorSlice`, `writeSlice`.
 - **Rust 분기에서도 기존 헬퍼를 다시 쓴다.** 대상: `utf8_n`, `java_string_n`, `fail`.
@@ -163,7 +167,7 @@ Rust는 `staticlib`으로 빌드한다. `cbindgen`으로 만든 헤더 하나를
   - long handle만 보는 클래스는 그대로 둔다: `WorkspaceRestoreJob`, `ParamsUpdateJob`, `BaroChartView`, Compose.
 - **시간대**
   - C 콜백이 static `zoneOffsetSeconds(long, String)`를 부른다. 이 메서드는 기존 `timezone()` 해석기(`BaroChartEngine.java:1222-1237`)를 쓴다.
-  - 워커 스레드에서 불리면 `AttachCurrentThread`를 한다. 복원 검증 중 `validateSymbol`이 시간대를 부르기 때문이다(`markets.mjs:31`).
+  - JNI로 들어온 호출 안의 업콜은 `enter()`가 저장한 `JNIEnv`를 쓴다. 복원 검증 중 `validateSymbol`(`markets.mjs:31`)이 워커 스레드에서 시간대를 불러도 같다. `AttachCurrentThread`는 Rust가 직접 만든 스레드에서만 필요하다.
 - 저수준 API는 이미 JSON/`JSONObject`를 돌려준다. 그래서 백엔드와 무관하게 그대로 쓴다.
 
 ### 4.5 장면 전송
@@ -193,9 +197,14 @@ Rust는 `staticlib`으로 빌드한다. `cbindgen`으로 만든 헤더 하나를
 - **문구는 JS 원문 그대로다.** 분류 정규식이 보는 문구도 포함한다: `Chart disposed`, `: limit N`, `budget`, `exceeds`.
 - **두 분류기에 `UnavailableError: ` 접두어 규칙을 한 줄씩 더한다.** iOS는 `.unavailable`, Android는 `UNAVAILABLE`이다.
 - **오류 카탈로그는 자동으로 대조한다.** JS 소스의 `throw` 문구에서 카탈로그를 뽑아 CI에서 Rust 문구와 비교한다. 이식 지도 §4가 출발점이다.
-- **OOM:** QuickJS는 768 MB 한도에서 잡을 수 있는 예외를 내지만, Rust의 기본 동작은 abort다. 그래서 다음 두 가지로 막는다.
+- **OOM:** 할당 실패 시 엔진마다 동작이 다르다.
+  - QuickJS: 계산된 805,306,368 B에서 `InternalError: out of memory`
+  - JSC: `RangeError: Out of memory`
+  - Rust: 기본 동작이 abort라 앱이 죽는다.
+  - 그래서 Rust 엔진마다 `MemoryAccount`를 둔다. 한도는 Android 805,306,368 B, iOS는 무제한이다.
   - `RESOURCE_LIMITS`를 할당 전에 검사한다.
-  - 데이터 크기에 비례하는 버퍼는 `try_reserve`로 잡고, 실패하면 JS와 같은 `RangeError`를 낸다.
+  - 데이터 크기에 비례하는 버퍼는 `try_reserve`로 잡고, 실패하면 같은 플랫폼 JS 백엔드와 같은 클래스의 오류를 낸다.
+  - 자원 오류는 클래스만 비교한다.
 
 ## 5. 범위
 
@@ -210,30 +219,39 @@ Rust는 `staticlib`으로 빌드한다. `cbindgen`으로 만든 헤더 하나를
   - compaction(`compactData`)
   - `nativePreflightWorkspace`, `nativeIndicatorBuffer`
 - `nativeCommand` op 65개 전부(`api.mjs:65`)
+- SDK가 부르는 전역 66개 가운데 `nativeRegisterIndicatorSource`를 뺀 65개 전부. `nativeAccessibility`(러너가 `call()`로 부름)도 포함한다.
+- **레거시 헬퍼 15개를 JS 동작 그대로 이식한다.** 공개 `call()`/`invoke()`로 닿고, 예제와 러너가 부르기 때문이다.
+  - 대상: `nativeSetData`, `nativeDataEvent`, `nativeIndicator`, `nativeView`, `nativeFit`, `nativeAddPanel`, `nativeSetPanel`, `nativeAddSeries`, `nativeRemoveSeries`, `nativeTheme`, `nativeInspect`, `nativeTool`, `nativeWheel`, `nativeLoad`, `nativeEcho`
+  - `nativeTheme`은 검증 없이 테마를 순서 보존 값 맵으로 둔다(보충 지도 O3).
+- 벤치마크 헬퍼 `nativeBenchmarkEvent`, `nativeBenchmarkDigest`
 - 기본 링크 신뢰 모듈 `aster.volume-direction`(`pressure`). 이식 지도 D10을 채택한다.
   - 이유: `trusted-studies.mjs`가 `CORE_MODULES`에 있어, 이 모듈을 쓰는 저장 문서가 있을 수 있다.
 
 ### 5.2 Rust가 `UnavailableError`로 거절하는 것
 
 모두 차트 상태를 바꾸기 전에 거절한다.
-- `nativeRegisterIndicatorSource`, 그리고 빌드 때 링크한 커스텀 지표 모듈.
+- **`nativeRegisterIndicatorSource`:** 어느 진입점에서든 `UnavailableError: Indicator source registration requires the javaScript backend`를 낸다. code는 `JAVASCRIPT_BACKEND_REQUIRED`다.
   - 이유: 소스를 `Function()`으로 평가한다(`api.mjs:247-251`). JS 엔진이 있어야 한다.
-  - `registerIndicatorModule`은 Rust에 포팅한 모듈 id만 받는다.
-- 커스텀 모듈을 참조하는 워크스페이스·스터디 문서
-  - `nativePreflightWorkspace`가 `requiredBackend: "javaScript"`로 알린다.
-  - 복원은 차트를 바꾸지 않고 거절한다.
-  - 지표를 조용히 빼지 않는다.
-- Swift의 원시 JS 접근: `context`, `JSValue`를 반환하는 `call`/`command`/`addIndicator`/`setIndicatorParams`, `globalThis.Aster`
+- **링크 가능한 커스텀 모듈 서술자를 담은 `aster.studies`·`aster.workspace` 문서:** `UnavailableError: Indicator module requires the javaScript backend: <name>`(같은 code)을 낸다(보충 지도 O2).
+  - 내는 곳: `loadStudies`, `nativePreflightWorkspace`, `nativeWorkspaceSourceBegin`, `nativeWorkspaceTargetCreate`
+  - preflight 영수증 형식은 바꾸지 않는다.
+  - 복원은 차트를 바꾸지 않고 거절한다. 지표를 조용히 빼지 않는다.
+- **빌드 때 링크한 커스텀 지표 모듈은 Rust에 자리가 없다.**
+  - `registerIndicatorModule`에 그 id를 주면 표준 JS 번들과 같은 `UnsupportedIndicatorError`를 낸다.
+  - `addIndicator`는 `Unknown indicator: <name>`을 낸다.
+- Swift `context` 속성(§4.3)
 
 ### 5.3 이식하지 않는 것
 
-- 문서화되지 않은 레거시 헬퍼(`nativeSetData`, `nativeDataEvent` 등). `ChartAPI` 검증을 우회하고, SDK 코드가 부르지 않는다.
-- 테스트 전용 수명 함수(`nativeAsyncUI`, `nativeWorkspaceSourceBuffer`, `*Dispose` 등)
-- 데모·셀프테스트(`nativeSelfTest` 계열, `nativeAnalysisDemo` 등). 골든 값만 오라클로 쓴다.
-- 웹 전용 모듈
-- JS 객체 모델 방어 코드(accessor 거부, Proxy 재진입 등). Rust 소유권 구조에서는 도달할 수 없다. 메시지 표만 유지한다.
+- **셀프테스트와 데모:** `UnavailableError: <name> is not available in the Rust backend`를 낸다. 골든 값은 오라클로 쓴다.
+  - 셀프테스트: `nativeSelfTest`, `nativeExtendedSelfTest`, `nativeHardeningSelfTest`, `nativePublicationOrderSelfTest`, `nativeStudyVerification`, `nativeAxesSelfTest`
+  - 데모: `nativeAnalysisDemo`, `nativeAnalysisReload`, `nativeComparisonDemo`, `nativeComparisonReadout`, `nativeComparisonAction`
+- **테스트 전용 수명 함수:** 같은 오류를 낸다. 대상: `nativeAsyncUI`, `nativeWorkspaceSourceBuffer`, `nativeWorkspaceSourceDispose`, `nativeWorkspaceTargetDispose`, `nativeParamsTargetDispose`
+- 어느 브리지 함수에서도 닿지 않는 원시 `globalThis.Aster` 함수(`resampleOHLCV`, `BarReplay` 등)
+- 전역 100개에 없는 이름은 플랫폼 JS 동작을 따른다. Android는 `TypeError: not a function`, iOS는 `Missing function: <name>`이다.
+- 웹 전용 모듈과 JS 객체 모델 방어 코드(accessor 거부, Proxy 재진입 등). Rust 소유권 구조에서는 도달할 수 없으므로 메시지 표만 유지한다.
 
-최종 목록은 저수준 보충 지도가 확정한다. 문서에 있는 공개 저수준 API는 모두 §5.1에 들어간다.
+최종 목록과 근거는 보충 지도 §2가 정본이다.
 
 ### 5.4 선택 API
 
@@ -268,7 +286,8 @@ Rust는 `staticlib`으로 빌드한다. `cbindgen`으로 만든 헤더 하나를
 
 - Rust 크기는 M1에서 잰다.
   - 유일한 실측값: std, ryu-js, `catch_unwind`만 넣은 arm64 cdylib이 310,632 B다.
-  - 전체 코어 추정은 0.5~2.5 MB로 갈린다.
+  - 전체 코어 크기 추정은 0.5~2.5 MB로 갈린다.
+  - 이식 줄 수 추정은 약 37,850줄이다. 안정 표면 27,850줄에 tier A 약 10,000줄을 더한 값이다.
 - 예산을 넘으면 주인에게 산출물 분리(듀얼 + Rust 전용 린)를 묻는다. 제외는 CMake·Gradle·SwiftPM 수준에서 한다. Cargo feature로는 QuickJS C 코드나 JS asset을 뺄 수 없다.
 - iOS 현재 크기는 1,014,885 B다. JSC는 시스템 프레임워크라 Rust 크기만 더해진다.
 
@@ -402,19 +421,30 @@ Rust는 `staticlib`으로 빌드한다. `cbindgen`으로 만든 헤더 하나를
 1. **영속 레코드의 키 순서 고정**
    - 현상: iOS 타입 API로 같은 드로잉을 저장해도 실행마다 문서 바이트가 다르다(4회 실행, 4회 모두 다른 해시).
    - 원인: `drawings.mjs`의 `add`가 `{id, panel, locked, style, ...input, id}` 형태라 입력 키 순서가 문서에 남는다. 여기에 Swift `Dictionary` 순서가 프로세스마다 다르다.
-   - 조치: 저장 문서에 들어가는 레코드의 키 순서를 레거시 픽스처 순서로 맞춘다. 대상: 드로잉과 스타일, 시리즈, 지표 params, 심볼 등.
+   - 조치: 입력 키 순서가 남는 곳을 정규화한다.
+     - 문서: 드로잉(레코드, 스타일, 앵커), 지표 params, 심볼, 복원된 view
+     - 반환값: `inspect()`, preflight `dataset`, 장면 레이아웃
+     - 시리즈, 패널, 축, 테마, dataset은 이미 코드의 `*_KEYS` 순서로 쓰이므로 그대로 둔다.
    - 영향: 웹에서 비표준 키 순서로 만든 문서는 다시 저장할 때 바이트가 바뀐다. 의미는 같다.
 2. **시간대 계약 고정**
    - 비유한 시각은 호스트를 부르기 전에 거절한다. 지금 Android는 NaN을 1970년으로 바꾼다.
    - 지원 연도는 1000~9999다. 지금은 999년을 iOS가 `999`, Android가 `0999`로 쓴다.
    - 받는 이름의 문법을 고정한다.
    - 오류 문구는 코어가 정한다. 지금은 iOS가 `invalid time zone: X`, Android가 `Invalid timezone/date`로 다르다.
-3. **복원 엔진의 체크포인트 예산 (이식 지도 D2)**
+3. **복원·params 게시 엔진의 체크포인트 예산 (이식 지도 D2)**
    - 현상: 같은 데이터·지표가 새 차트에서는 되고, 복원한 뒤에는 `Native checkpoint total byte limit`로 실패한다.
-   - 조치: 게시할 때 일반 맵으로 바꾼다.
+   - 조치: 워크스페이스 복원과 params 비동기 게시 모두, 게시할 때 일반 맵으로 바꾼다.
    - 성격: 버그 수정이다. 정규화와 같은 릴리스로 낸다.
 
-**릴리스:** 이 세 가지를 Rust 코드보다 먼저 낸다.
+4. **깊은 JSON 제한 (M0c, 보충 지도 O5, 내 판단)**
+   - 조치:
+     - 코어에서 `JSON.parse`를 그대로 부르는 세 곳(`drawings.mjs:39`, 브리지 B:5·B:6) 앞에 반복형 깊이 검사를 둔다(32).
+     - 두 플랫폼의 호스트 인자에도 깊이 검사를 둔다(64).
+   - 정상 입력은 깊이 5 안팎이라 영향이 없다.
+   - 이유 1: QuickJS는 깊은 입력에서 스택이 넘친다. V8·JSC는 반복 파싱이라 다른 오류 클래스를 낸다. 이 차이를 없앤다.
+   - 이유 2: Rust의 재귀 해제와 순회가 앱을 죽이지 않게 한다.
+
+**릴리스:** 1~3을 Rust 코드보다 먼저 낸다.
 - CHANGELOG의 `0.3.0` 항목에 넣는다.
 - Rust 백엔드는 다음 버전(`0.4.0-dev`) 항목에 쓴다.
 - 태그와 npm·Maven 게시는 별도 승인이다.
@@ -425,13 +455,13 @@ Rust는 `staticlib`으로 빌드한다. `cbindgen`으로 만든 헤더 하나를
 
 | 단계 | 내용 | 검증 |
 |---|---|---|
-| **M0** JS만 수정 | (a) §7.4 정규화와 D2 수정 (b) 이음새: iOS `BaroChartCoreRuntime`(JS 구현만), Android `EngineBackend`·`createRuntime()`(JS만) (c) 추적 기록기 세 가지와 Node 재생기 | 기존 스위트 전부 green. 이음새 리팩터링 전후 JS 추적 바이트 동일. iOS 타입 API 저장 문서가 프로세스 10회에서 같은 해시 |
+| **M0** JS만 수정 | (a) §7.4 정규화와 D2 수정 (b) 이음새: iOS `BaroChartCoreRuntime`(JS 구현만, `close()` 포함 내부 `context` 사용 제거), Android `EngineBackend`·`createRuntime()`(JS만) (c) 추적 기록기 세 가지와 Node 재생기 (d) M0c 깊은 JSON 제한(§7.4-4) | 기존 스위트 전부 green. 이음새 리팩터링 전후 JS 추적 바이트 동일. iOS 타입 API 저장 문서가 프로세스 10회에서 같은 해시 |
 | **M1** 뼈대 | `barochart-js` 커널. 빈 엔진 C ABI. 패키징(XCFramework, CMake 정적 링크, 16 KB 정렬). Android JNI 태그 분기. WASM 하네스 골격. 크기 측정(unwind/abort, `s`/`3`). 워크스페이스 봉투 스파이크 | 숫자 포맷 코퍼스 1천만 건 V8 일치. 동률 코퍼스, JSON 왕복 퍼즈. 배포 리허설과 ELF 정렬 검사. 빈 Rust 엔진으로 닫힌 엔진·다른 스레드 표 green. 크기 외삽 결과 |
 | **M2** 데이터·문서 | contracts, BarStore·RangeIndex, DataEvent 6종, markets(시간대 콜백), ingestion 세션, 드로잉 저장소·undo/redo·`aster.drawings`, 워크스페이스 동기 저장·preflight | 골든 바이트, 백엔드 사이 왕복, 이력 트리밍 일치, 오류 카탈로그 일치, 전체 시간대 전이 대조(1970~2037) |
 | **M3** 지표 | IndicatorEngine(256 체크포인트, dirty, 수렴), 내장 35종, `aster.volume-direction`, 체크포인트 컨테이너 | 스트리밍 추적에서 모든 출력 f64 비트 동일(1만 append, 임의 깊이 정정, prepend, reset) |
 | **M4** 레이아웃·장면 | model(스케일, 레이아웃), labels, scene, packet v1, frame 모드(보수적 무효화), 접근성 텍스트 | 렌더러 투영·packet 비트 동일. 실기기 스크린샷 차분. 실기기 초월함수 비트 확인. 첫 기기 A/B와 단계별 분해(iOS packet 렌더러 판단) |
 | **M5** 상호작용 | 포인터·핀치·휠·키·호버, 그리기 도구, 자석·스냅, 실제 프레임 캐시 무효화 | 회귀 러너 추적 재생. 두 백엔드 플랫폼 스위트 green. 섀도 불일치 0 |
-| **M6** 저수준 전부·수명·성능 | `ChartAPI` 나머지 op, 수집 큐, 비동기 data/prepare/params, 데이터 탐색, compaction, 워크스페이스 원본/대상 봉투, preflight `requiredBackend`, close·poison, 공개 선택 API·문서 | 기존 잡 테스트 무수정 green. 30분 soak, 생성·해제 500회. 실기기 시작·팬 예산. 크기 예산 |
+| **M6** 저수준 전부·수명·성능 | `ChartAPI` 나머지 op, 수집 큐, 비동기 data/prepare/params, 데이터 탐색, compaction, 워크스페이스 원본/대상 봉투, 커스텀 모듈 문서 거절(§5.2), 레거시·벤치마크 헬퍼, iOS 값 전용 `JSContext`(§4.3), close·poison(정리 화이트리스트), 공개 선택 API·문서 | 기존 잡 테스트 무수정 green. 30분 soak, 생성·해제 500회. 실기기 시작·팬 예산. 크기 예산 |
 | **M7** 기본값 전환 | §8.3 게이트를 통과하면 Android부터 플랫폼별로 기본값을 Rust로 바꾼다. JS는 1.x 내내 고를 수 있다 | 게이트 재측정 |
 
 M0의 JS 정규화와 D2 수정은 첫 PR로 따로 낸다. 같은 PR로 묶으면 웹 동작 변경과 이음새 리팩터링이 섞여 리뷰가 어렵다.
@@ -473,14 +503,17 @@ M0의 JS 정규화와 D2 수정은 첫 PR로 따로 낸다. 같은 PR로 묶으�
 | 11 | 성능 기대치 과장 | M4 기기 분해로 기대치를 고정한다. 같은 전송 조건에서만 A/B |
 | 12 | 화이트박스 러너는 Rust를 검증하지 못함 | 시나리오를 추적으로 옮긴다(M5까지) |
 | 13 | 저수준 비동기 프로토콜의 규모와 명세 공백(데이터 탐색 등) | 보충 지도로 먼저 명세한다. M6에 일정 여유를 둔다 |
-| 14 | 워커 스레드 업콜(복원 검증 중 시간대) | Android `AttachCurrentThread`, iOS `Sendable` 콜백, 워커 경로 테스트 |
+| 14 | 워커 스레드 업콜(복원 검증 중 시간대) | Android는 `enter()`가 저장한 `JNIEnv`, iOS는 `Sendable` 콜백. 워커 경로 테스트 |
+| 15 | stale 판정의 동등성(params 지문, 워크스페이스 `sourceRefs`, 비동기 설정 키, `nativeSize` identity) | JS가 객체를 바꾸는 자리마다 세대 카운터를 올린다. 측정한 stale 행렬을 재생한다(보충 지도 §3.1.3, §3.2.3, §3.4.3) |
+| 16 | POISONED와 close 뒤 정리(iOS admission 슬롯 누수, `close()` 실패) | 정리 화이트리스트와 params 원장. busy 가드 해제는 `catch_unwind` 밖에서. 실패하지 않는 `bc_engine_free`. 패닉 주입 수락 테스트(보충 지도 §3.8) |
+| 17 | JS 내부 배치에서 나오는 호스트 가시 숫자(`plan.totalBytes`, `retainedBytes`, 진행 total, 청크 크기) | JS 버퍼 배치와 코덱 텍스트를 그대로 따른다. plan을 바이트 단위로 비교한다 |
 
 ## 10. 이식 지도 결정 항목(D1~D12) 정리
 
 | # | 결정 |
 |---|---|
 | D1 | tier A 전부 구현(주인 결정 1). 커스텀 JS 지표만 `UnavailableError` |
-| D2 | JS에서 먼저 고친다(§7.4-3) |
+| D2 | JS에서 먼저 고친다(§7.4-3). 워크스페이스 복원과 params 게시 모두 |
 | D3 | `fit()`에서 `L+F<10`이면 `follow=false`가 된다. 동등성을 위해 그대로 재현하고, 알려진 특이점으로 기록한다 |
 | D4 | `layout.geometryKey`의 프로세스 전역 serial은 차분 비교에서 정규화한다 |
 | D5 | 기기에서는 플랫폼 libm을 쓰고, 하네스에는 V8 원시 함수를 주입한다(§6.3) |
@@ -495,7 +528,18 @@ M0의 JS 정규화와 D2 수정은 첫 PR로 따로 낸다. 같은 PR로 묶으�
 ## 11. 내가 정한 것 (주인 확인 전, 되돌리기 쉬움)
 
 - **산출물:** 두 백엔드를 함께 싣는다. 예산을 넘으면 그때 주인에게 묻는다.
-- **원시 JS API:** Rust에서는 `unavailable`을 낸다. 두 백엔드 공통 API를 추가한다. deprecated 표시는 보류한다. warnings-as-errors 빌드를 쓰는 기존 앱이 깨질 수 있어서다. 기본값 전환 때 다시 본다.
+- **원시 JS API(보충 지도 O1에 따라 바꿈):** `JSValue`를 반환하는 API는 Rust에서도 값 전용 `JSContext`로 동작한다. `context` 속성만 막는다.
+  - 처음에는 막고 공통 API를 새로 만들려 했다.
+  - 바꾼 이유: 문서화된 API이고, 기존 테스트가 쓰며, 주인 결정 1과 맞지 않았다.
+- **보충 지도 O2~O8**
+  - O2: preflight는 커스텀 모듈 문서에서 `UnavailableError`를 던진다.
+  - O3: `nativeTheme`은 원래 동작 그대로 옮긴다.
+  - O4: 체크포인트 수정은 M0 Task 3에 이미 들어 있다.
+  - O5: 깊은 JSON 제한을 M0c로 넣는다(§7.4-4).
+  - O6: Android `Float64Array` 결과는 인덱스 키 JSON으로 보낸다.
+  - O7: Java 진단 문구는 백엔드별로 다르게 둔다.
+  - O8: 셀프테스트와 데모는 이식하지 않는다.
+- **레거시 헬퍼:** 15개와 벤치마크 헬퍼 2개를 이식한다. 처음 설계 §5.3에서는 뺐었다.
 - **iOS packet 렌더러:** M4 기기 분해에서 전송과 디코드가 프레임의 10%를 넘을 때만 넣는다.
 - **표류 CI:** M2까지 경고만 한다.
 - **기기 단계별 분해:** M0에서 M4로 옮긴다. 첫 A/B와 같은 계측을 쓰려는 것이다. 대가는 기대치 고정이 늦어지는 것이다.
