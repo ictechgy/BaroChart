@@ -138,6 +138,14 @@ engine.setTheme(Theme.LIGHT)
 
 `IndicatorKind` lists the 35 built-in indicators and `DrawingTool` the 16 drawing tools. Add panels such as `rsi` through `EngineOptions(panels, series, theme)`. `updateSeries` and `updateDrawing` take a `SeriesPatch` / `DrawingPatch`: only the fields you set change, and the series type or drawing tool cannot change.
 
+## Symbols and time zones
+
+```kotlin
+engine.setSymbol(Symbol.builder("AAPL", "XNAS", "America/New_York", "USD", 2, 0.01).build())
+```
+
+The symbol's time zone formats the time-axis labels, and the session calendars of `vwap` and `pivots` follow the same rules. Use an IANA name such as `America/New_York` or `Asia/Seoul` (letter case is ignored) or a fixed offset written `+09:00` or `-05:30`. Names that only some platforms accept, such as `Z`, `UT`, `UTC+9`, `GMT+0` or `GMT-03:00`, are rejected, and so are names the device's time zone data does not know: `setSymbol` throws `BaroChartException` with code `INVALID_ARGUMENT` and the message `Unsupported time zone: <name>`. Local dates from year 1000 through 9999 are supported. Formatting a time whose local date falls outside that range fails with `Time zone conversion year out of range`: typed methods throw it with code `INVALID_ARGUMENT`, and the view reports it to `OnChartErrorListener` while drawing. Web, iOS and Android apply the same rules, so results differ only where the platforms' time zone data differs. Before 0.3.0, Android also accepted `java.time` names such as `Z`, `UTC+9`, `GMT+0` and `+0900`; a workspace saved with such a name no longer restores.
+
 ## Saving and restoring
 
 A workspace stores chart settings, indicators, series and drawings, not your bars. Restore it onto the same bars it was saved with; a different dataset binding or a changed bar range is rejected.

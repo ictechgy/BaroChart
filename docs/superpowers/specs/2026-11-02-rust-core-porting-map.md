@@ -4,7 +4,8 @@
 
 - Date: 2026-11-02
 - Source snapshot: `/Users/jinhongan/BaroChart-review-20261023` (not a git checkout, so there is no commit id).
-- Oracle: `native/Resources/aster-core.js`, 588,614 UTF-16 units / 588,726 UTF-8 bytes. Readers confirmed it is byte-identical to a fresh `buildNativeBundle()` (`scripts/native-core-bundle.mjs`). So every `src/core/*` line reference below is valid for the shipped native core.
+- Oracle: `native/Resources/aster-core.js`, 588,614 UTF-16 units / 588,726 UTF-8 bytes. Readers confirmed it is byte-identical to a fresh `buildNativeBundle()` (`scripts/native-core-bundle.mjs`). So every `src/core/*` line reference below is valid for the shipped native core of that snapshot.
+- **M0a update (2026-11-02).** Before any Rust code, M0a normalized the JS oracle (design spec §7.4): one canonical key order for saved and returned records, time-zone contract v1, and ordinary checkpoint maps after a restore or params publish (D2). The M0a bundle is 605,174 UTF-16 units / 611,646 UTF-8 bytes and is again byte-identical to a fresh `buildNativeBundle()`. Sections whose behaviour changed are marked **(M0a)** and describe the new oracle: §1.5 (D2, D6), §3.2, §3.5.2–§3.5.5, §3.7.6, §3.8.5, §3.8.6, §3.9.2, §3.10.1, §3.10.3, §3.10.5, §3.10.6, §3.10.11, §3.13.6, §3.13.8, §3.13.9, §3.14.1, §3.14.5, §3.14.6, §3.15.1, §3.15.4, §3.15.6, §4.3, §4.6, §4.12, §4.13, §6.4, §6.5 and §7. Their `file:line` references still point at the pre-M0a snapshot; look the functions up by name.
 - Inputs: fourteen reader reports: bridge contract, platform consumers, data store, indicators, model/layout, scene, interaction, drawings, API, workspace/markets, restore pipeline, native checkpoints, study setup, ingestion. This document merges them and removes duplicates. Where two reports disagreed, the source was re-read and the fix is marked **(checked)**.
 - Design reviews: the GLM, DeepSeek and Qwen answers from the earlier design consultation were checked claim by claim against this snapshot. Appendix D lists what they agree on, what was corrected, and what changed in this map because of them.
 - Audience: engineers writing a selectable Rust backend that must pass differential tests against the JS core.
@@ -271,11 +272,11 @@ Other tier-A bridge globals:
 | # | Decision | Default recommendation |
 |---|---|---|
 | D1 | What Rust does for tier-A ops and globals | Implement the commonly used ones (axes, panels, group drawing edits, `deleteDrawing`, `setText`, `pan`, `saveDrawings`, `setDrawingTarget`, `crosshairSnapshot`). Reject the rest with one documented error so the host maps it to a code. |
-| D2 | Restored engines keep the 32 MiB `NativeCheckpointMap` budget. Identical data and studies then succeed on a fresh chart and fail after restore (§3.8.5). | Fix in JS first (convert to ordinary maps at publish), then freeze oracles. If not fixed, Rust must replicate provenance tracking. |
+| D2 | Restored engines kept the 32 MiB `NativeCheckpointMap` budget. Identical data and studies then succeeded on a fresh chart and failed after restore (§3.8.5). | **Decided and fixed in M0a.** A restore `finish()` and the params commit copy the bounded records into ordinary maps at publish and release the budget (§3.8.5, §3.8.6). Rust ports the fixed behaviour and needs no provenance tracking. |
 | D3 | `fit()` with `L+F<10` sets `follow=false`, so a short-history reset chart stops following appends (§3.9.4) | Replicate for parity; file a bug. |
 | D4 | `layout.geometryKey` embeds a process-global `BarStore` serial (`data.mjs:99`) | Normalize it in differential tests. Do not try to share the counter. |
 | D5 | `Math.log`, `Math.exp`, `Math.hypot`, `Math.sin` differ by engine (V8 vs JSC vs QuickJS/libm) | Call what the platform's JS engine calls, and use the same-platform JS engine as the oracle. On Android that is libm for all four (`quickjs.c:46816-46833, 47182-47185`, checked). On iOS it is libm for `log`/`exp` and `hypot` as well: JSC on macOS 26.7.2 matched C `hypot` bit for bit on 200,000 inputs, including all 64,337 inputs where libm and the Kahan form differ (measured 2026-11-02, see the design spec §6.3). Confirm on an iPhone in M4. In the `node:vm` harness, inject V8's primitives. Use a 1-ulp tolerance only where neither is possible (§5). Do not pin a portable libm crate or an fdlibm port on device, as the GLM and Qwen reviews suggest: that breaks bit parity with the JS backend on the same device (Appendix D). |
-| D6 | Time-zone source | Use a host callback `zonedParts(ms, tz)` so each platform keeps its current tzdb and formatting (§3.5.2). Do not bundle chrono-tz unless the platform differences in §6.5 are acceptable. The GLM and Qwen reviews agree; DeepSeek's chrono-tz proposal is rejected for this reason. The design synthesis's narrower variant (a host offset callback, with Rust computing proleptic-Gregorian parts) is acceptable only after the JS side pins the supported year range. Otherwise the §6.5 divergences (year padding below 1000, invalid dates) would differ from one platform's JS backend. iOS needs a new Swift callback in either shape, because JSC uses its built-in `Intl` today. |
+| D6 | Time-zone source | Use a host callback `zonedParts(ms, tz)` so each platform keeps its current tzdb and formatting (§3.5.2). Do not bundle chrono-tz unless the platform differences in §6.5 are acceptable. The GLM and Qwen reviews agree; DeepSeek's chrono-tz proposal is rejected for this reason. The design synthesis's narrower variant (a host offset callback, with Rust computing proleptic-Gregorian parts) is acceptable only after the JS side pins the supported year range. Otherwise the §6.5 divergences (year padding below 1000, invalid dates) would differ from one platform's JS backend. **(M0a)** The JS side now pins them: the name grammar, finite times, years 1000–9999, padding and the messages are decided in the core before the host is asked (§3.5.2), so either callback shape is acceptable and only the tz data can differ. iOS needs a new Swift callback in either shape, because JSC uses its built-in `Intl` today. |
 | D7 | Lone UTF-16 surrogates in strings | Use WTF-16/WTF-8 strings in the value model. Rust `String` and `serde_json` defaults cannot represent them. |
 | D8 | Engine-specific messages (JSON `SyntaxError` text, `ReferenceError`, property reads on `undefined`) | Compare the class/name only. |
 | D9 | Known quirks: `'Tool select..'` double period, `nativeAsyncFinish` without rollback, `nativeReleaseDataIngestion` that does not detach, `deleteDrawing` during create, external-values `RangeError 'Range index bounds'` on render, iOS memory-warning budget never restored | Replicate unless D-listed for fixing. Each is described where it occurs. |
@@ -435,7 +436,9 @@ Represent errors as `ChartError { name: &'static str, message: String /*UTF-16-e
 
 | Function | Rule | Message |
 |---|---|---|
-| `optionRecord(value, keys, label='Options')` (`:2-7`) | (1) falsy, non-object (including functions) or array → (2) prototype other than `Object.prototype`/`null` → (3) first key in `Object.keys` order that is `__proto__`, `constructor`, `prototype` or not in `keys`. Values are not checked; returns the same object. | `${label}: object required` / `${label}: plain object required` / `${label}: unsupported field ${key.slice(0,64)}` (all TypeError) |
+| `optionRecord(value, keys, label='Options')` (`:2-7`) | (1) falsy, non-object (including functions) or array → (2) prototype other than `Object.prototype`/`null` → (3) **(M0a)** the first offending key (`__proto__`, `constructor`, `prototype`, or not in `keys`) in canonical order: `canonicalKeys(value, keys without the reserved names)`, so allowed keys first and then the rest in UTF-16 code-unit order. The reported key is therefore the UTF-16-smallest offending key, whatever the input order (before M0a: the first in `Object.keys` order). Inputs without an offending key return at once. Values are not checked; returns the same object. | `${label}: object required` / `${label}: plain object required` / `${label}: unsupported field ${key.slice(0,64)}` (all TypeError) |
+| `canonicalKeys(value, allowed, keys=Object.keys(value))` **(M0a)** | Validation order: the keys of `allowed` that are present, in `allowed` order; then the other string keys in UTF-16 code-unit ascending order; then symbol keys in their original order. Validators that walk `Reflect.ownKeys` pass that list as `keys`. | — |
+| `orderedRecord(value, keys)` **(M0a)** | A new plain object for saved and returned records: own enumerable keys listed in `keys` first, in that order (an `undefined` value keeps its slot), then the other own enumerable string keys in UTF-16 order, then symbol keys. Each getter is read once, like `{...value}`; `__proto__` becomes an ordinary own key; the source is not changed. JS still puts canonical array-index keys first (§3.1.3). | — |
 | `boundedText(v, max=128, label='Text', empty=false)` (`:8`) | not a string, or `length>max`, or (`!empty` and empty) | TypeError `${label}: string limit ${max}` |
 | `sizeLimit(v, max, label='Size')` (`:9`) | `!Number.isSafeInteger(v) \|\| v<0 \|\| v>max` (`-0` passes and is returned as `-0`) | RangeError `${label}: limit ${max}` (hosts classify as budget) |
 | `identifier(v, label='Id')` (`:10`) | `boundedText(v,128,label)` then reserved `__proto__`, `prototype`, `constructor` | TypeError `${label}: string limit 128` / `${label}: reserved identifier` |
@@ -445,6 +448,8 @@ Represent errors as `ChartError { name: &'static str, message: String /*UTF-16-e
 - `AXIS_KEYS`: `id, panel, side, scale, inverted, padding, range, base, precision, tickFormat, prefix, suffix, label, visible, width, formatter`
 - `SERIES_KEYS`: `id, type, panel, source, values, indicator, output, color, fill, width, baseline, offset, upColor, downColor, visible, axisId, symbolId, label`
 - `THEME_KEYS`: `background, grid, text, up, down, crosshair, font`
+- `SYMBOL_KEYS` **(M0a)**: `id, exchange, timezone, currency, volumeUnit, priceDecimals, tickSize, adjustment, provider, adjustmentVersion` (the workspace symbol validator's allowed list).
+- **(M0a)** Saved and returned records are rebuilt with `orderedRecord` in these orders: panels (`PANEL_KEYS`), axes (`AXIS_KEYS`), series (`SERIES_KEYS`, runtime caches such as `dirtyFrom` after them), symbol (`SYMBOL_KEYS`), drawing target (`panel, axisId, seriesId`), view (`from, to`), dataset binding (`key, revision, adjustmentVersion, priceUnit, adjustment`), drawings (§3.10.3) and indicator params (§3.7.6). Themes are already in `THEME_KEYS` order through `{...DARK_THEME, ...theme}`.
 
 **`portableColor(value)`** (`:22-31`). Converts to `#rrggbbaa`, lowercase, 9 chars.
 1. Non-string → TypeError `Color string required`.
@@ -704,40 +709,43 @@ Downstream listeners:
 - **Tier S/V**: `zonedParts`, `marketDate`, `shiftDate`, `zonedEpoch`, `validateSymbol`, `formatPrice`, `applyDataEvent`, and `SessionCalendar` (internal, for vwap/pivots calendars).
 - **J/T**: `normalizeOHLCV`, `TickAggregator`, `alignSeriesByTime` (demo only), `DEMO_SYMBOLS`, `demoCalendar`.
 
-#### 3.5.2 `zonedParts(time, tz)` (`:7-17`) and the host time-zone bridge
+#### 3.5.2 `zonedParts(time, tz)` (`:7-17`) and the host time-zone bridge — time-zone contract v1 **(M0a)**
+The core checks, in this order (first failure wins):
 1. `tz` must be a string of 1..128 units → TypeError `Timezone string, at most 128 characters required`.
-2. Cache key: `tz` with only ASCII A–Z lowercased (Kelvin sign not folded).
-3. Formatter: `new Intl.DateTimeFormat('en-CA', {timeZone: tz (original spelling), year:'numeric', month/day/hour/minute/second:'2-digit', hourCycle:'h23'})`.
-4. Result: `formatToParts(new Date(time))` minus `literal` parts → `{year, month, day, hour, minute, second}` as strings.
-5. The 32-entry LRU is updated only on success.
+2. `Number.isFinite(time)`, else RangeError `Time zone conversion requires a finite time`.
+3. `-30610310400000 <= time <= 253402387199999` (1000-01-01Z minus one day to 9999-12-31T23:59:59.999Z plus one day), else RangeError `Time zone conversion year out of range`.
+4. A fixed offset `^[+-](?:[01]\d|2[0-3]):[0-5]\d$` is computed in the core without `Intl`: `local = new Date(new Date(time).getTime() + sign*(hh*60+mm)*60000)` (TimeClip to integer ms first, as `Intl` does, so fractional times give the same second), then the UTC fields of `local`.
+5. Any other name must match `^[A-Za-z][A-Za-z0-9_+\-]*(?:\/[A-Za-z0-9_+\-]+)*$` and must not match `/^(?:z|ut|(?:utc|gmt|ut)[+\-].*)$/i` (names only java.time accepts), else RangeError `Unsupported time zone: ${tz.slice(0,64)}` with no `cause`. Bare `UT` is rejected too: Android's case-folding cache would otherwise also accept `ut` after `UT` (process-history dependent).
+6. Cache key: `tz` with only ASCII A–Z lowercased (Kelvin sign not folded). Formatter: `new Intl.DateTimeFormat('en-CA', {timeZone: tz (original spelling), year:'numeric', month/day/hour/minute/second:'2-digit', hourCycle:'h23'})`, then `formatToParts(new Date(time))` minus `literal` parts. Any failure in the constructor or in `formatToParts` → RangeError `Unsupported time zone: ${tz.slice(0,64)}` with the host error as `cause`.
+7. The local year must be 1000..9999, else RangeError `Time zone conversion year out of range`.
+8. Result `{year, month, day, hour, minute, second}` as strings: the year as 4 digits, the rest zero-padded to 2.
+9. The 32-entry LRU is updated only when the whole call succeeds (a call that fails step 7 does not insert its formatter).
 
-Platform behaviour, which Rust must reproduce per platform via a host callback (D6):
-- **iOS (JSC/ICU)**:
-  - invalid zone → RangeError `invalid time zone: <tz>`;
-  - invalid date → RangeError `date value is not finite in DateTimeFormat formatToParts()`;
-  - the year is unpadded (`'999'`) and BCE years come out positive;
-  - IANA ids are case-insensitive; links and `Etc/GMT±N` work, as does `'+09:00'`; `'Z'` and `'UTC+9'` are rejected.
-- **Android (QuickJS)**: `aster_jni.c:51` installs the shim `Intl={DateTimeFormat:function(locale,options){this.formatToParts=function(date){return asterZonedParts(date.getTime(),options.timeZone);};}}`, whose constructor never validates.
-  - `asterZonedParts` (`aster_jni.c:42-45`): `JS_ToInt64` maps NaN/Inf to 0 → Java `zonedParts` (`BaroChartEngine.java:1220-1252`, java.time, `%04d` year, `%02d` for the rest) → any Java exception becomes RangeError `Invalid timezone/date`; a null result becomes InternalError `Timezone bridge failed`.
-  - It accepts java.time-only ids (`Z`, `UTC+9`) and maps invalid dates to 1970 parts instead of throwing.
-- **V8/web**: `Invalid time zone specified: <tz>`.
+Platform behaviour (normalized in M0a). The host now only resolves IANA names against its tz data:
+- **iOS (JSC/ICU)** and **V8/web** call their built-in `Intl` in step 6. Their own messages (`invalid time zone: <tz>`, `Invalid time zone specified: <tz>`, the JSC invalid-date text) survive only as `cause`.
+- **Android (QuickJS)**: `aster_jni.c:51` installs the shim `Intl={DateTimeFormat:function(locale,options){this.formatToParts=function(date){return asterZonedParts(date.getTime(),options.timeZone);};}}`, whose constructor never validates. `asterZonedParts` (`aster_jni.c:42-45`) calls Java `zonedParts` (`BaroChartEngine.java:1220-1252`, java.time, ASCII case-insensitive lookup, unchanged). Its RangeError `Invalid timezone/date` and InternalError `Timezone bridge failed` are caught in step 6 and become `Unsupported time zone: <tz>` with the original as `cause`. NaN and out-of-range times never reach the host (steps 2–3), and java.time-only ids (`Z`, `UTC+9`) never reach it either (step 5).
+- Before M0a the platforms differed (kept for reference, no longer reproduced): iOS reported `invalid time zone: <tz>`, wrote year 999 unpadded (`'999'`) and BCE years as positive; Android accepted `Z`/`UTC+9`, mapped NaN/Inf times to 1970 parts and reported `Invalid timezone/date`; V8 reported `Invalid time zone specified: <tz>`. V8 and JSC also accepted `GMT+0`, `GMT-0`, `+0900` and `+09`, which step 4/5 now reject.
 
 #### 3.5.3 Dates and DST
 - `marketDate(t,tz) = `${year}-${month}-${day}`` (`:18`).
-- `shiftDate(date,days) = new Date(Date.parse(date+'T12:00:00Z') + days*86400000).toISOString().slice(0,10)` (`:19`). An invalid date gives the engine's RangeError; years beyond 9999 come back truncated.
+- **(M0a)** Dates and clock times are parsed strictly, never with `Date.parse`:
+  - date `^(\d{4})-(\d{2})-(\d{2})$` with year 1000..9999, month 1..12 and day within the Gregorian month length (leap years: divisible by 4, except centuries not divisible by 400);
+  - clock `^(\d{2}):(\d{2})(?::(\d{2}))?$` with hour 0..23 and minute/second 0..59 (`24:00` and fractional seconds fail).
+- `shiftDate(date,days)` **(M0a)**: a malformed or nonexistent date → TypeError `ISO date required`. Otherwise `shifted = new Date(Date.UTC(y, m-1, d, 12) + days*86400000)`; a UTC year outside 1000..9999 → RangeError `Time zone conversion year out of range`; the result is `YYYY-MM-DD` from the UTC fields. (Before M0a: `Date.parse(date+'T12:00:00Z')`, so V8 rolled `2026-02-30` into March, an invalid date gave the engine's RangeError, and years after 9999 came back truncated.)
 - `zonedEpoch(date, clock, tz, ambiguity='earlier')` (`:20-28`):
-  1. `iso = date+'T'+(clock.length===5 ? clock+':00' : clock)`; `naive = Date.parse(iso+'Z')`. Not finite → TypeError `ISO date and HH:mm[:ss] required`.
-  2. Offsets are a Set over `t ∈ {naive-86400000, naive, naive+86400000}` (in this order): `Date.parse(partsISO(t)+'Z') - t`.
+  1. **(M0a)** A malformed date or clock → TypeError `ISO date and HH:mm[:ss] required`. `iso = date+'T'+(clock.length===5 ? clock+':00' : clock)`; `naive = Date.UTC(y, m-1, d, hh, mm, ss)`.
+  2. Offsets are a Set over `t ∈ {naive-86400000, naive, naive+86400000}` (in this order): `Date.UTC(parts of zonedParts(t)) - t`.
   3. Candidates are `naive - offset`, kept only if `zonedParts` text equals `iso` exactly, sorted ascending.
   4. None → RangeError `Nonexistent local time at DST boundary`. More than one with `'reject'` → RangeError `Ambiguous local time`. `'later'` takes the last; every other value takes the first.
-  - Port this three-sample algorithm literally. A tz library resolver differs on `24:00`, fractional seconds and multi-transition windows.
-  - Engine split: JSC `Date.parse('2026-02-30T…Z')` returns NaN (TypeError path), while V8/QuickJS normalize it (RangeError nonexistent).
+  - Port this three-sample algorithm literally. A tz library resolver differs on multi-transition windows.
+  - **(M0a)** The ±1-day samples call `zonedParts`, so a date within one day of the supported range can fail with `Time zone conversion year out of range` even when the answer itself is in range: (`1000-01-01`,`00:00`,`UTC`) and (`9999-12-31`,`00:00`,`UTC`) fail, (`1000-01-01`,`14:00`,`Etc/GMT-14`) and (`9999-12-31`,`10:00`,`Etc/GMT+12`) succeed. This is deliberate (the sample rule is unchanged).
+  - The pre-M0a engine split (JSC `Date.parse('2026-02-30T…Z')` → NaN and the TypeError path, V8/QuickJS → RangeError nonexistent) is gone: every engine now throws the TypeError.
 
 #### 3.5.4 Symbol, price formatting, data events
 - **`validateSymbol(s)`** (`:29-32`):
   - `id, exchange, timezone, currency, volumeUnit` must be non-empty strings; `priceDecimals` an integer 0..18; `tickSize` finite > 0; `adjustment ∈ {raw, split, total-return}`. Otherwise TypeError `Invalid symbol metadata`.
   - Then `zonedParts(0, tz)`.
-  - Returns `Object.freeze({...s})`, keeping extra keys. A later `saveWorkspace` rejects those keys with `'Workspace: unsupported field <k>'`.
+  - **(M0a)** Returns `Object.freeze(orderedRecord(s, SYMBOL_KEYS))`: the listed keys in `SYMBOL_KEYS` order, extra keys kept after them in UTF-16 order (before M0a: `{...s}` in the caller's order). A later `saveWorkspace` rejects extra keys with `'Workspace: unsupported field <k>'`.
 - **`formatPrice(v, s) = v.toFixed(s.priceDecimals)`** (`:33`).
 - **`applyDataEvent(store, event)`** (`:200-208`):
   - falsy event or non-string kind → TypeError `Data event kind required`;
@@ -758,6 +766,7 @@ Platform behaviour, which Rust must reproduce per platform via a host callback (
   - both with ambiguity `'earlier'`.
   - `close <= open`, or an open before the previous close → RangeError `Ordered nonoverlapping sessions required`.
   - There is no fallback for a nonexistent local midnight (Santiago 2026-09-06 `00:00` throws).
+  - **(M0a)** `zonedEpoch` and `shiftDate` parse strictly (§3.5.3). A provider window with a malformed clock such as `24:00` therefore fails with TypeError `ISO date and HH:mm[:ss] required` on every engine (the portable session calendar already rejects such clocks as `Session HH:mm clock`). Sessions within one day of years 1000 or 9999 can fail with `Time zone conversion year out of range` (the ±1-day samples).
 - **`at(time, kinds=['regular'])`**: the first window in `[...sessions(d-1), ...sessions(d)]` with `open <= time < close` and an allowed kind.
 - **`bucket(time, interval, kinds)`**:
   - a finite `interval > 0` → `open + floor((time-open)/interval)*interval`;
@@ -1065,7 +1074,9 @@ The index-0 snapshot equals the initial state table in `checkpoint-validation.mj
   - `maxOutputBytes` must be a safe int 0..536870912, else RangeError `Indicator output byte limit`.
   - Subscribes an internal store listener and registers itself as the store's `'engine'` owner.
 - **Entry**:
-  - `{def, name, params (cloneState, insertion order kept), dirty, dirtyTo, invalidated, length, arrays: Float64Array(capacity) per output (NaN-filled), checkpoints: Map<int,state> | NativeCheckpointMap, revision, computedFrom?, computedUntil?, preparedVersion?}`.
+  - `{def, name, params (cloneState, canonical order), dirty, dirtyTo, invalidated, length, arrays: Float64Array(capacity) per output (NaN-filled), checkpoints: Map<int,state>, revision, computedFrom?, computedUntil?, preparedVersion?}`.
+  - **(M0a)** `params` are stored through `orderedIndicatorParams(name, factory, params)`: the keys in the order the indicator declares them, then undeclared keys in UTF-16 order. The declared orders are an internal table that mirrors each factory's destructuring order: `sma`/`ema` `period, source`; `macd`/`ppo` `fast, slow, signal`; `bollinger` `period, deviation`; `stochastic` `period, smoothK, smoothD`; `keltner` `period, atrPeriod, multiplier`; `supertrend` `period, multiplier`; `ichimoku` `conversion, base, span, displacement`; `stochRSI` `period, stochPeriod, smoothK, smoothD`; `chaikin`/`volumeOscillator` `fast, slow`; `parabolicSAR` `step, max`; `vwap` `calendar, anchorTime, sessionMs, kinds, source, deviation`; `pivots` `calendar, anchorTime, sessionMs, kinds`; `aster.volume-direction@1/pressure` `factor, shift`; `obv`, `adl` none; every other builtin `period`. A registered user factory, or a replaced factory, uses UTF-16 order only. Before M0a, params kept the caller's insertion order.
+  - **(M0a)** A live engine holds only ordinary checkpoint `Map`s. `NativeCheckpointMap` exists only before publish: in a restore target's calculate phase and in an isolated params job runtime (§3.8.5, §3.8.6).
   - A clean entry has `dirty==n, dirtyTo==0, invalidated==false, length==n`.
 - **Store listener**, on `({from, kind, to, appended})`:
   1. `compact` → return (compaction already reset the entries).
@@ -1285,18 +1296,24 @@ Integrity checks for builtin incremental state.
   - Recompute `invalid`, `positive` and the three Neumaier sums in ring order from head, using `add(q,v){a=q[0]; t=a+v; c=q[1]+(|a|>=|v|?(a-t)+v:(v-t)+a); q[0]=finite(t,c,t+c)?t:NaN; q[1]=finite(q[0])?c:0}`.
   - **Strict mode** (`index%n===0`, no positive volume, or a volume/abs sum that is non-finite or ≥ `MAX_VALUE/4`): sums must be `Object.is`-equal. Otherwise `|actual-wanted|` and `|q[1]|` must be ≤ `max(MIN_VALUE*32*n, |scale|*EPSILON*32*n)`.
 
-#### 3.8.5 Ownership, restore installation, and the post-publish budget (decision D2)
-- **`NativeCheckpointEntries extends Map`** (`:42-49`) replaces `IndicatorEngine.entries` in restored engines.
+#### 3.8.5 Ownership, restore installation, and the post-publish budget (decision D2, fixed in M0a)
+- **`NativeCheckpointEntries extends Map`** (`:42-49`) replaces `IndicatorEngine.entries` in a restore target **until publish** (M0a: no live engine keeps it).
   - `set(id, entry)` adopts `entry.checkpoints` when it is a real `NativeCheckpointMap` (own data property).
   - A retired map, or one owned by another registry or another id → TypeError `Native checkpoint entry ownership`.
   - Replacing an id disposes the previous map, which refunds its budget. `delete` and `clear` dispose the maps too.
   - The constructor with an iterable is tests only (`Native checkpoint entry count` for more than 128 rows).
-- **Restore target** (`native-workspace-target.mjs:38,44-45`): one shared 32 MiB budget per restore. Every restored indicator gets `new NativeCheckpointMap(name, params, {budget: shared})`. `nativeWorkspaceTargetFinish` publishes that model **as is**, so the container and the budget survive into the live engine.
+- **Restore target** (`native-workspace-target.mjs:38,44-45`): one shared 32 MiB budget per restore. Every restored indicator gets `new NativeCheckpointMap(name, params, {budget: shared})` for the calculate phase.
+- **Publish (M0a)**: `NativeWorkspacePrepared.finish()`, after `guardReady`, works in three steps:
+  1. It copies every entry's map with `ordinaryCheckpointCopy(map)`: a new ordinary `Map` holding the same records as fresh `get()` copies, in ascending index order. If an entry's `checkpoints` slot no longer holds the map the target created → Error `Native workspace target entry changed`.
+  2. Only after every copy exists, it sets each `entry.checkpoints` to its copy and installs a new ordinary `entries` Map.
+  3. It closes the bounded map with `NativeCheckpointEntries.prototype.clear`, which refunds the shared budget to 0.
+  - Any failure goes through the existing catch, which disposes the target, so nothing is published. Publishing parses every record once (V8: 436 ms for 24.6 MiB, under 1 ms for a typical chart).
+  - Before M0a, `nativeWorkspaceTargetFinish` published the model **as is**, so the container and the budget survived into the live engine. That was the D2 defect.
 - **Provenance-dependent behaviour** (measured with the shipped bundle):
-  - (a) The current chart holds a record over 256 KiB (e.g. `sma`/`wma` period 10000 on long-decimal closes). Source admission fails with `RangeError 'Native checkpoint record byte limit'`, even if the document does not contain that study. A study present only in the document fails the same way in the target calculate phase.
-  - (b) `sma(5000)` on 60,000 bars works on a fresh chart. A restore fails in the target `calculate` phase with `RangeError 'Native checkpoint total byte limit'`, after the full column copy, because the source does not pre-check the 32 MiB budget.
-  - (c) A 36,000-bar restore succeeds (141 records, 24,567,056 B). Appending 20,000 bars then makes `nativeSceneJSON`, `indicatorValueAt`, `indicatorValues` and `crosshairValues` all throw the same RangeError. Afterwards the state is frozen at 188 records / 33,398,212 B, and retries fail deterministically.
-- **Lifecycle after restore** (measured):
+  - (a) The current chart holds a record over 256 KiB (e.g. `sma`/`wma` period 10000 on long-decimal closes). Source admission fails with `RangeError 'Native checkpoint record byte limit'`, even if the document does not contain that study. A study present only in the document fails the same way in the target calculate phase. **Unchanged in M0a** (a known quirk).
+  - (b) `sma(5000)` on 60,000 bars works on a fresh chart. A restore fails in the target `calculate` phase with `RangeError 'Native checkpoint total byte limit'`, after the full column copy, because the source does not pre-check the 32 MiB budget. **Unchanged in M0a** (a known quirk).
+  - (c) **Fixed in M0a.** Before M0a, a 36,000-bar restore succeeded (141 records, 24,567,056 B), and appending 20,000 bars then made `nativeSceneJSON`, `indicatorValueAt`, `indicatorValues` and `crosshairValues` all throw the same RangeError; the state froze at 188 records / 33,398,212 B. Now the restored engine accepts the appends like a fresh chart (`test/native-checkpoint-publish.test.mjs`, 38,000 bars, 24.65 MiB at publish).
+- **Lifecycle after restore** before M0a (measured; kept for reference). Since M0a every row behaves as on a fresh chart, because the published engine holds only ordinary maps:
 
 | Operation on a restored engine | Container afterwards |
 |---|---|
@@ -1309,16 +1326,23 @@ Integrity checks for builtin incremental state.
 | `removeIndicator`, engine/model dispose | budget refunded |
 | async data job publish (`nativeAsyncFinish`) | all ordinary (new runtime) |
 
-- The shared ledger couples studies: growth in one restored study reduces the headroom of the others.
+- The shared ledger couples studies during the calculate phase: growth in one restored study reduces the headroom of the others. Before M0a this coupling continued after publish.
 - Host classification: these messages contain no `budget`, `exceeds` or `: limit N`, so Swift and Java report `invalidArgument`/`INVALID_ARGUMENT`, not `budgetExceeded` (static reading).
-- Source accounting differs by provenance:
-  - ordinary Map records cost `encoded + nodes*32 + 128` each;
-  - NativeCheckpointMap costs `encoded + size*128`.
-  - Example (`ema(20)+sma(50)`, 3000 bars): `retainedBytes` 47,124 for a fresh source vs 25,940 for a restored source.
+- Source accounting no longer depends on provenance (M0a):
+  - ordinary Map records cost `encoded + nodes*32 + 128` each, now for fresh and restored sources alike;
+  - before M0a, a restored source's `NativeCheckpointMap` cost `encoded + size*128`.
+  - Example (`ema(20)+sma(50)`, 3000 bars, measured on the M0a tree): the source receipt's `checkpointBytes` (the checkpoint part of `retainedBytes`) is 47,134 for a fresh source and for a restored one. Just before the fix, the restored source gave 25,950. This map previously gave 47,124 / 25,940, 10 bytes lower in both cases; those figures probably came from an earlier tree.
+  - A larger restored engine therefore reports more retained bytes than before M0a, so a document near the limit can now hit `Workspace source logical byte limit` first, as a fresh chart would.
 
-#### 3.8.6 Params-path adoption (tier A, `:63-79`)
-- `prepareNativeEntryCommit` installs a `NativeCheckpointMap` with an independent ledger (`32 MiB − encodedBytes of other entries`) into a **plain** `entries` Map. It keeps an adoption registry for later retirement (`retireNativeEntryIfReplaced`, `retireNativeEntriesAfterClear`).
-- Consequence: after a low-level `setIndicatorParamsAsync` publish, even a fresh chart carries a bounded entry (measured: 141 records, 24,562,526 B, then failure after appending 20,000 bars).
+#### 3.8.6 Params-path adoption (tier A, `:63-79`) **(M0a)**
+- `prepareNativeEntryCommit` still validates the imported records in a `NativeCheckpointMap` with an independent ledger (`32 MiB − encodedBytes of other entries`). The commit thunk now works in this order:
+  1. Stale checks, unchanged: a reused thunk, a changed `checkpoints` slot, a replaced entry, or a retired or adopted map → Error `Native params entry commit stale`.
+  2. `ordinaryCheckpointCopy(map)` builds all copies first; a failure here leaves the entry, the entries Map and the ledger untouched.
+  3. A non-writable `checkpoints` slot → the same stale Error. The check runs before the assignment, so the strict module and the sloppy bundle fail alike. If the assignment did not take, the same Error is thrown.
+  4. `entry.checkpoints = copy`; the entry goes into `entries` (`NativeCheckpointEntries.prototype.set` or `Map.prototype.set`, captured at load).
+  5. The preparation map is disposed, which refunds its ledger.
+- The adoption registry (`nativeAdoptedOwners`, `retireNativeEntryIfReplaced`, `retireNativeEntriesAfterClear`) was removed, together with its call sites in `indicators.mjs`, `study-setup.mjs` and `src/web/indicator-params-async.mjs`. No live engine can hold a bounded entry any more, so there is nothing to retire.
+- Before M0a, a low-level `setIndicatorParamsAsync` publish left a bounded entry even on a fresh chart (measured: 141 records, 24,562,526 B, then failure after appending 20,000 bars). Now the append succeeds.
 
 #### 3.8.7 `ownedCheckpointClear(map)` (`:53-58`)
 Used by compaction to separate validation from commit. A real map must be unretired and unmodified, else TypeError `Compaction requires an active unmodified checkpoint map`. A plain Map must have `Map.prototype` and no own keys, else TypeError `Compaction requires an unmodified checkpoint Map`. It returns a clear thunk.
@@ -1349,10 +1373,11 @@ Used by compaction to separate validation from commit. A real map must be unreti
   6. `addPanel` each panel; `axes` must be an array, else TypeError `Axes array required`; `addAxis` each axis.
   7. `IndicatorEngine(store)`, `DrawingStore()`, the store subscription and the owner registration.
 
-#### 3.9.2 Record defaults and key order (visible in `inspect` and workspaces)
-- **Panel**: `{weight:1, scale:'linear', inverted:false, padding:.08, ...options}`. Example: options `{id,weight}` give the key order `weight, scale, inverted, padding, id`. `setPanel` replaces the record with `{...prev,...patch}`. A patch key whose value is `undefined` stays as a positioned key.
-- **Axis**: `{side:'right', scale:'linear', inverted:false, padding:.08, visible:true, tickFormat:'fixed', ...options}`.
-- **Series**: `{color:'#7898ff', width:(candles/ohlc?1:1.5), ...options, offset, dirtyFrom:0}`. Runtime caches `rangeIndex`, `revision` and `dirtyFrom` are never serialized.
+#### 3.9.2 Record defaults and key order (visible in `inspect` and workspaces) **(M0a)**
+- **Panel**: `orderedRecord({weight:1, scale:'linear', inverted:false, padding:.08, ...options}, PANEL_KEYS)`. Example: options `{weight,id}` give the key order `id, weight, scale, inverted, padding` (before M0a: `weight, scale, inverted, padding, id`). `setPanel` replaces the record with `orderedRecord({...prev,...patch}, PANEL_KEYS)`. A patch key whose value is `undefined` stays as a positioned key, now at its `PANEL_KEYS` slot.
+- **Axis**: `orderedRecord({side:'right', scale:'linear', inverted:false, padding:.08, visible:true, tickFormat:'fixed', ...options}, AXIS_KEYS)`; `setAxis` likewise.
+- **Series**: `orderedRecord({color:'#7898ff', width:(candles/ohlc?1:1.5), ...options, offset, dirtyFrom:0}, SERIES_KEYS)`, so `dirtyFrom` follows the listed keys. The `setSeries` presentation patch and placement changes (`cloneSeriesPlacement`, which may add `axisId`) keep `SERIES_KEYS` order too. Runtime caches `rangeIndex`, `revision` and `dirtyFrom` are never serialized.
+- Before M0a these records kept the defaults first and then the caller's key order, so `inspect()` depended on the host's key order and on edit history.
 - `range` holds the caller's array reference. A falsy `range` (`null`, `0`, `false`, `''`) passes validation and is stored as is (inspect and workspace show it). Only the API `setPanel`/`setAxis` turn `range:null`/`base:null` into `undefined`.
 
 #### 3.9.3 Validation and mutation rules
@@ -1496,7 +1521,8 @@ Used by compaction to separate validation from commit. A real map must be unreti
 #### 3.10.1 Types
 - **`DRAWING_TYPES`** (`drawing-validation.mjs:4`): `trendline, horizontal, fibonacci, rectangle, ellipse, text, ray, extendedline, channel, fibextension, fibfan, fibtimezones, freehand, measurement, longposition, shortposition`. The tool set adds `select`.
 - **Point counts** (`:5`): position 4; horizontal and text 1; channel and fibextension 3; freehand 2..2048 (2 at creation); the rest exactly 2.
-- **Drawing record** (ordered keys): `{id, type, panel, points:[{time,price}], style?{color?,fill?,width?,font?}, text?, locked?, visible?, axisId?, seriesId?}`.
+- **Drawing record** (allowed keys, in validator order): `{id, type, panel, points:[{time,price}], style?{color?,fill?,width?,font?}, text?, locked?, visible?, axisId?, seriesId?}`.
+  - **(M0a)** Stored and saved records use the canonical order `DRAWING_RECORD_KEYS = id, panel, locked, style, type, points, text, visible, axisId, seriesId` (the legacy fixture order, then the rest), styles `DRAWING_STYLE_KEYS = color, width, fill, font`, anchors `time, price`. `canonicalDrawing(d)` (`drawing-validation.mjs`) builds that record from a validated record or a JSON copy; an anchor whose own enumerable keys are exactly `time` and `price` takes a fast path without the generic sort.
   - Deep-frozen.
   - `null` `axisId`/`seriesId` are dropped on add/edit/load through the JSON copy. That copy also turns `-0` into `0`, except on the workspace install path.
 
@@ -1523,8 +1549,8 @@ The first failure wins:
 - **`add(input, {items, beforeMutation})`** (`:32`):
   1. `optionRecord`.
   2. A falsy `id` (undefined, null, '', 0, false) generates `'drawing-'+(++local)` from `serial`, skipping collisions in `items`.
-  3. Merge into `{id, panel:'price', locked:false, style:{color:'#f5b85a', width:1.5}, ...input, id}`. Existing keys keep their position and `id` stays first. An `input.style` (even null or `{}`) replaces the default style.
-  4. `validateDrawing`, JSON copy (null bindings dropped), validate again, freeze.
+  3. Merge into `{id, panel:'price', locked:false, style:{color:'#f5b85a', width:1.5}, ...input, id}`. An `input.style` (even null or `{}`) replaces the default style.
+  4. `validateDrawing`, JSON copy (null bindings dropped), **(M0a)** `canonicalDrawing` (so the stored key order no longer follows `input`), validate again, freeze.
   5. A duplicate id → Error `Duplicate drawing id`.
   6. `budget`, then `beforeMutation?.()`, then mutate.
   7. Commit `serial`. Select the drawing if it is visible. Return the id.
@@ -1533,8 +1559,8 @@ The first failure wins:
   2. Missing → Error `Missing drawing`.
   3. Locked and the patch has keys other than locked/visible → Error `Drawing is locked`.
   4. `next={...prev,...patch}`. **`style` is replaced, not merged**, and `type` may change if the point count fits.
-  5. Validate. If `JSON.stringify(prev)===JSON.stringify(next)` → call `beforeMutation` only and return (no change, no undo entry).
-  6. Otherwise copy, validate, freeze, budget, mutate; a hidden selected drawing gets deselected.
+  5. Validate. If `JSON.stringify(prev)===JSON.stringify(next)` → call `beforeMutation` only and return (no change, no undo entry). **(M0a)** Key order is ignored: when the two texts have equal length, `prevText === JSON.stringify(canonicalDrawing(JSON.parse(nextText)))` also counts as no change. Each side is still serialized once (the getter/`toJSON` read-count contract).
+  6. Otherwise copy, `canonicalDrawing`, validate, freeze, budget, mutate; a hidden selected drawing gets deselected.
   - Note: the patch `{axisId:null}` serializes differently, so it creates a new identical object and an undo entry.
 - **`remove(id)`**: missing or locked → `false` (no throw); otherwise mutate, deselect, return `true`.
 - **Transactions** (`:23-26`):
@@ -1569,7 +1595,7 @@ The first failure wins:
    - binding check: in the API path, `model.validateDrawingBinding` throws directly; `Invalid drawing binding` is only reached by a falsy validator;
    - `validatePanel` → Error `Missing drawing panel`;
    - JSON copy; `styleDecoder` (API: `portableStyle(s,['color','fill'],true)`, which keeps 6/8-digit hex verbatim including uppercase and normalizes other colors; font trimmed);
-   - validate again; freeze.
+   - **(M0a)** `canonicalDrawing`; validate again; freeze. A document with another key order (for example the legacy fixture with shuffled keys) loads, and saving it again writes the canonical order, which for the legacy fixture is its original bytes.
 6. `budget`.
 7. Duplicate ids → TypeError `Duplicate drawing ids`.
 8. Active transaction → Error `Cannot load during a gesture`. This is checked after validation; load does not cancel the gesture.
@@ -1597,8 +1623,9 @@ Modes: translate `{deltaTimeMs, deltaPrice}`, delete, style (patch), visibility 
   - Σ points > maxPoints → RangeError `Drawing group edit point limit`.
   - **Locked** drawings reject every mode except visibility and duplicate → Error `Drawing is locked`.
   - Delete marks the drawing.
-  - Visibility changes only when `(before.visible!==false)!==visible`; a new `visible` key is appended.
-  - Style changes when any patch key is absent or differs (`Object.is`); `style={...prev,...patch}`, appended if `style` was absent.
+  - Visibility changes only when `(before.visible!==false)!==visible`. **(M0a)** The changed record is rebuilt with `orderedRecord(candidate, DRAWING_RECORD_KEYS)`, so a new `visible` key takes its canonical slot (before M0a it was appended).
+  - Style changes when any patch key is absent or differs (`Object.is`); `style={...prev,...patch}`. **(M0a)** After validation the style is reordered to `DRAWING_STYLE_KEYS` and the record to `DRAWING_RECORD_KEYS` (before M0a a new `style` was appended and the patch order kept). The `style:{...previous,...patch}` expression is unchanged in the source; the bundle mutation test looks for it.
+  - **(M0a)** Translated and duplicated records are rebuilt the same way, so a duplicate's `locked:false` takes its canonical slot. Anchor and style objects that did not change are shared, not copied.
   - Translate/duplicate with metadata:
     - every selected drawing must share `[panel, axisId??null, seriesId??null]`, else Error `Drawing group edit requires identical panel/axis/series binding`;
     - the binding must be live, else Error `Missing or mismatched drawing binding`;
@@ -1691,11 +1718,11 @@ Modes: translate `{deltaTimeMs, deltaPrice}`, delete, style (patch), visibility 
 #### 3.10.11 `drawingStylePatch(value)` (`drawing-style-patch.mjs:3-10`)
 1. Not a plain object → TypeError `Drawing style plain record required`.
 2. No own keys → TypeError `Drawing style nonempty defined patch required`.
-3. Each key: not one of `color/fill/width/font` (symbols included) → `Drawing style fields`; not enumerable data → `Drawing style own data fields required`; `undefined` or `null` value → `Drawing style nonempty defined patch required`.
+3. **(M0a)** Keys are walked in `canonicalKeys(value, ['color','fill','width','font'], Reflect.ownKeys(value))` order: allowed keys in that list order, then unknown string keys in UTF-16 order, then symbols. Each key: not one of `color/fill/width/font` (symbols included) → `Drawing style fields`; not enumerable data → `Drawing style own data fields required`; `undefined` or `null` value → `Drawing style nonempty defined patch required`. So `{fill:null, zeta:1}` reports the nonempty error and `{zeta:1, fill:null}` does too (before M0a the input order decided).
 4. `portableStyle(patch, ['color','fill'])`.
 5. `width` finite in `[0.1,50]`, else RangeError `Stroke width`.
 
-Key order follows the input.
+**(M0a)** The returned patch has the allowed-list order `color, fill, width, font`; group edits then store styles in `DRAWING_STYLE_KEYS` order (§3.10.6). Before M0a the key order followed the input.
 
 ---
 
@@ -2112,7 +2139,7 @@ The bridge sets no invalidate callback, so these sequences are observable only i
      4. A factory that mutated the params → TypeError `Indicator factory changed requested params` (X).
      5. Output names differ in order or content → TypeError `Indicator parameter update cannot change output schema`.
      6. The effective offset (own key value, else 0) per old output differs by `Object.is` → TypeError `Indicator parameter update cannot change plot offsets`.
-     7. **Commit**: `entries.set(id, replacement)` at the same position (`NativeCheckpointEntries` disposes and refunds the old map); `retireNativeEntryIfReplaced`; every series bound to `id` gets `rangeIndex=null; revision=undefined; dirtyFrom=0`.
+     7. **Commit**: `entries.set(id, replacement)` at the same position; every series bound to `id` gets `rangeIndex=null; revision=undefined; dirtyFrom=0`. **(M0a)** The `retireNativeEntryIfReplaced` call is gone (§3.8.6), and live engines no longer hold `NativeCheckpointEntries`, so nothing is disposed or refunded here. The replacement's params are in canonical order (§3.7.6).
      8. Return the new def metadata.
   - Built-in triggers for steps 5 and 6: vwap `deviation` presence toggles 1↔5 outputs (schema); ichimoku `displacement` changes, including 0↔-0 (offsets); pressure `shift` changes and 0↔-0 (offsets).
   - The replacement entry equals a fresh `add`: `revision 1` when n>0 (or 0 with `invalidated:true` when n=0), checkpoints `{0,256,…}`.
@@ -2157,15 +2184,15 @@ The bridge sets no invalidate callback, so these sequences are observable only i
   - Untouched keys keep their 6-digit defaults, so a partial theme mixes `#rrggbb` and `#rrggbbaa` strings.
 - **`setSymbol(s)`** (`:274-279`):
   1. `validateSymbol`, then `zonedParts(0, tz)`.
-  2. `model.symbol = frozen copy` (extra keys and the original timezone spelling kept); `precision = priceDecimals`.
+  2. `model.symbol = frozen copy` (**M0a**: in `SYMBOL_KEYS` order, extra keys after them in UTF-16 order; the original timezone spelling is kept); `precision = priceDecimals`.
   3. `priceFormatter = p => p.toFixed(priceDecimals)`.
-  4. `timeFormatter = t => `${y}-${m}-${d} ${h}:${mi}`` from `zonedParts` (seconds dropped; Android `%04d` years).
+  4. `timeFormatter = t => `${y}-${m}-${d} ${h}:${mi}`` from `zonedParts` (seconds dropped). **(M0a)** The year is always 4 digits on every platform, and a local year outside 1000..9999 throws `Time zone conversion year out of range` at format time (§3.5.2).
   5. `rememberSymbolFormatters`, `changed()`.
 - **`setVisibleRange`**, **`fit`**, **`zoom`**, **`pan`**: delegate to the model (§3.9.4) and call `changed()`.
 
 #### 3.13.9 `inspect()` (`:284`)
 `JSON.parse(JSON.stringify({view, theme, panels, axes, drawingTarget: controller?.drawingTarget ?? null, series: series.map(({rangeIndex, values, revision, dirtyFrom, ...s}) => ({...s, ...(values ? {valueCount: values.length} : {})})), symbol, storedBars, lastBar: length ? store.at(length-1) : null, drawings: items, selected, tool: controller?.tool ?? null, pointers: controller?.pointers.size ?? 0, gesture: controller?.gesture?.kind ?? null}))`.
-- Key order: `view, theme, panels, axes, drawingTarget, series, symbol (omitted when undefined), storedBars, lastBar, drawings, selected, tool, pointers, gesture`.
+- Key order: `view, theme, panels, axes, drawingTarget, series, symbol (omitted when undefined), storedBars, lastBar, drawings, selected, tool, pointers, gesture`. **(M0a)** The nested panels, axes, series, symbol, drawing target and drawings are in their canonical orders (§3.2, §3.9.2, §3.10.1), so `inspect()` no longer depends on the host's key order or on edit history.
 - The JSON round trip drops `undefined` and functions, turns NaN into `null` and `-0` into `0`.
 - Typed `visibleRange()` reads `view.from/to` (Swift `as? Double`, else `.javaScript 'Chart state has no visible range.'`).
 
@@ -2194,15 +2221,16 @@ The bridge sets no invalidate callback, so these sequences are observable only i
  source:{length, firstTime:number|null, lastTime:number|null},
  chart:{panels:[…PANEL_KEYS order, undefined dropped, no formatter],
         axes:[…AXIS_KEYS order, no formatter], theme:{…model order},
-        symbol:{…insertion order}|null, formatters:'default'|'symbol',
-        precision:int, axisWidth:number, view:{…insertion order}, follow:boolean},
- indicators:[{id, name, params:{…Object.keys order}, module?:{id,version,stateVersion,exportName,causal:true},
+        symbol:{…SYMBOL_KEYS order}|null, formatters:'default'|'symbol',
+        precision:int, axisWidth:number, view:{from, to}, follow:boolean},
+ indicators:[{id, name, params:{…declared order, §3.7.6}, module?:{id,version,stateVersion,exportName,causal:true},
               outputs:def.outputs, plotOffsets:def.plotOffsets??{}}],
  series:[…SERIES_KEYS order without values, undefined dropped],
- drawings:{schema:'aster.drawings', version:drawingDocumentVersion(items), drawings:items}}
+ drawings:{schema:'aster.drawings', version:drawingDocumentVersion(items), drawings:items (canonical order, §3.10.1)}}
 ```
-- Reference vector: `test/fixtures/legacy/aster-workspace-v1.json` (1316 chars). Node and vendored QuickJS reproduce it byte for byte.
-- Readers accept any key order. Validation walks JS key order, so key order decides which error wins.
+- **(M0a)** Before M0a, `symbol` and `view` kept insertion order and `params` kept `Object.keys` order, so the same chart could save different bytes depending on the host's key order (Swift dictionaries differ per process and even per dictionary instance). Now every record above has one canonical order.
+- Reference vector: `test/fixtures/legacy/aster-workspace-v1.json` (1316 chars). Node and vendored QuickJS reproduce it byte for byte. Its records are already in canonical order, so M0a did not change it.
+- Readers accept any key order. The bounded walk (§3.14.2) still visits keys in JS key order, so when a document has several walk errors (a non-finite number, a reserved key, …) the key order decides which one wins. Record checks built on `optionRecord` (`workspaceRecord` included) report the UTF-16-smallest unsupported field (§3.2, M0a).
 
 #### 3.14.2 Bounded walk and the size estimate (`workspaceWalk`, `:26-31`)
 - **Recursion** from depth 0, with shared counters. Per value:
@@ -2273,11 +2301,11 @@ The bridge sets no invalidate callback, so these sequences are observable only i
 
 #### 3.14.5 `installWorkspaceConfiguration(model, doc)` (`:61-67`)
 1. `new ChartAPI(model)`.
-2. Symbol: when not null and `formatters==='symbol'`, `api.setSymbol(symbol)` (rebuilds the formatters, sets precision); otherwise a frozen copy without formatters.
+2. Symbol: when not null and `formatters==='symbol'`, `api.setSymbol(symbol)` (rebuilds the formatters, sets precision); otherwise a frozen copy without formatters (**M0a**: `orderedRecord(symbol, SYMBOL_KEYS)`).
 3. `precision = doc.precision` (overrides `priceDecimals`).
 4. Add series (the native target passes `[]`).
-5. `drawings.items` = frozen copies in document order, colors **not** normalized, `-0` kept. Selection, undo/redo and serial are untouched.
-6. `view={...view}`, `follow`.
+5. `drawings.items` = frozen copies in document order, colors **not** normalized, `-0` kept. **(M0a)** Each copy goes through `canonicalDrawing`, so record, style and anchor keys come out in canonical order whatever the document's order. Selection, undo/redo and serial are untouched.
+6. `view = orderedRecord(view, ['from','to'])` (**M0a**; before: `{...view}`), `follow`.
 
 #### 3.14.6 `nativeWorkspacePreflight(api, text, binding)` (`native-workspace.mjs:10-26`, tier A as a public receipt, also used in restore admission)
 1. API, model and store checks (`Actual ChartAPI required`, `Chart disposed`, `Actual BarStore required`).
@@ -2292,7 +2320,8 @@ The bridge sets no invalidate callback, so these sequences are observable only i
    - outputs or offsets differ (`Object.is`) → TypeError `Workspace output schema/offset binding`;
    - `outputs*capacity*8 > 268435456` (live capacity) → RangeError `Workspace projected output byte limit`.
 8. Receipt:
-   - `{schema:'aster.workspace-preflight', version:1, status:'validated-only', restored:false, dataset:<binding in caller key order>, source:{length, firstTime, lastTime, version}, counts:{panels, axes, series, indicators, outputs, drawings}, projectedOutputBytes, outputByteLimit:268435456, modules:[descriptors deduped by name]}`.
+   - `{schema:'aster.workspace-preflight', version:1, status:'validated-only', restored:false, dataset:<binding in key, revision, adjustmentVersion, priceUnit, adjustment order>, source:{length, firstTime, lastTime, version}, counts:{panels, axes, series, indicators, outputs, drawings}, projectedOutputBytes, outputByteLimit:268435456, modules:[descriptors deduped by name]}`.
+   - **(M0a)** `workspaceBinding` now returns the binding in that fixed order, so the receipt's `dataset` (and the bar-replay session's binding) no longer follows the caller's key order.
    - Legacy-chart vector: `source {40, 1700000000000, 1700002340000, version 1}`, counts `{1,0,2,1,1,2}`, `projectedOutputBytes 512`.
 
 ---
@@ -2326,7 +2355,7 @@ Restore runs across two runtimes: **source** is the live engine, **target** is a
   - then `sum > maxBytes - bytes` → RangeError `Workspace source logical byte limit`.
   - Charged items:
     - each **unique ArrayBuffer**'s full `byteLength`, deduplicated by identity: store columns, store index trees, ingestion ring columns and kinds, indicator arrays, series values, block values, range-tree arrays;
-    - `NativeCheckpointMap` → `encodedBytes + size*128`;
+    - `NativeCheckpointMap` → `encodedBytes + size*128` (**M0a**: unreachable from a live source, because publish installs ordinary maps; before M0a this was the restored-engine case);
     - an ordinary checkpoint Map → `size*128` now plus record footprints later;
     - drawing frames: `[items, ...undo, ...redo]` (≤20001 frames → else RangeError `Workspace source drawing frame count`; each a ≤10000-element array → else TypeError `Workspace source drawing frame`), each unique frame `length*8`.
   - `retainedBytes` therefore depends on allocation history: 49152 before the first render and 73728 after, on the same chart (measured).
@@ -2337,7 +2366,7 @@ Restore runs across two runtimes: **source** is the live engine, **target** is a
   4. Charge each unique drawing's footprint (`Workspace source drawing` for non-objects).
   5. Not finished → `{phase:'admission', done: records+drawings, complete:false}`.
   6. Finished → build `metadataJSON`, run `plan = nativeWorkspaceTargetPlan(metadataJSON)` (the full target spec on the source side, so target-only limit errors appear **here**), `check`, set `phase='copy'`.
-  - Measured: nativeInit(600) with 4 drawing frames finished on the second step (`done:6` first). Sources holding only `NativeCheckpointMap`s finish on the first step with `done:0`.
+  - Measured: nativeInit(600) with 4 drawing frames finished on the second step (`done:6` first). **(M0a)** A restored engine used as a source now walks its records step by step like a fresh chart. Before M0a, sources holding only `NativeCheckpointMap`s (restored engines) finished on the first step with `done:0`.
 - **`metadataJSON`** (`:51`) = `safeCheckpointStringify({schema:'aster.native-workspace-target', version:1, [dataIngestion: save text], document: safeCheckpointStringify(parsed doc), datasetBinding, source:{length, maxBars, timeframeMs, timeOrigin, version, timeVersion}, size:{width,height}, retainedBytes, maxBytes})`. The document field is double-encoded.
 - **Bridge Step response on completion** (B:41): `{phase:'copy', done, complete:true, ticket, metadataJSON, plan, buffers: FIELDS.map((_,slot)=>({slot, length: store.length})), checkpoints:[]}`.
 - **`buffer(slot, offset, count, revision)`** (`:53`): requires phase `copy`, slot 0..5, `offset===` the slot's running offset, count 1..262144, `offset+count<=length`, else RangeError `Workspace source copy slice`. Returns a borrowed view over the live column, so the host copies it immediately.
@@ -2412,13 +2441,13 @@ Restore runs across two runtimes: **source** is the live engine, **target** is a
 #### 3.15.4 Post-publish state (must match; measured)
 - **Store**: `version`/`timeVersion` = source + 1 (2 → 3; a double restore gives 4). `capacity` is recomputed from 16. `maxBars`, `timeframeMs` and `timeOrigin` come from the source.
 - **Model** (from the document): panels, axes, theme, precision, axisWidth, symbol and formatters, view, follow, drawings, series, indicators. Indicator values are fresh full recomputes.
-- **Engine**: `entries` is a `NativeCheckpointEntries` with a 32 MiB shared budget (§3.8.5, D2).
+- **Engine** **(M0a)**: `entries` is an ordinary `Map`, and every entry's `checkpoints` is an ordinary `Map` holding the same records the target validated. The 32 MiB restore budget is released, so later appends, recalculation and source accounting match a fresh chart (§3.8.5). Before M0a, `entries` stayed a `NativeCheckpointEntries` with the shared 32 MiB budget (D2).
 - **Reset state**: `crosshair:null`; `drawings.selected:null`, `transaction:null`, `undoStack:[]`, `redoStack:[]`, `serial:0`.
   - `serial` 0 means later auto-ids can differ from the source. Example: after deleting `drawing-1` (serial 3), the source's next id is `drawing-4` but the restored engine's is `drawing-1`.
 - **Controller**: `tool:'select'`, `text:'Note'`, `drawingTarget:null`, magnet `{off,8}`, snap `{free,null}`, no pointers or gesture.
 - **`nativeSize`**: the captured size (e.g. 640×360).
 - **Ingestion**: a re-created session (epoch 0) whose `save()` equals the source's. The source session's epoch is +2 after the restore.
-- **Key order**: re-saving a restored model keeps the input key order for `view`, indicator params, drawing records/points/style and symbol. Theme, panels, series and dataset come back canonical. The canonical check ignores key order, so a reordered valid document still restores.
+- **Key order** **(M0a)**: re-saving a restored model writes every record in canonical order: `view`, indicator params, drawing records/points/style and symbol as well as theme, panels, series and dataset. Before M0a the first group kept the document's key order. The canonical check ignores key order, so a reordered valid document still restores; its re-save then differs from the input text.
 - **Round trip**: `save(restore(text)) === text` holds for every text produced by `saveWorkspace` (the legacy v1 fixture included).
 
 #### 3.15.5 Host job flows (stay in Swift/Java under Option A)
@@ -2439,7 +2468,7 @@ Restore runs across two runtimes: **source** is the live engine, **target** is a
 A Rust backend may replace the two-runtime protocol with "clone, compute on a worker, swap atomically". It must still reproduce:
 - the same validation errors (document, binding, extent, budgets);
 - the same failure conditions (stale on any source change, `busy`, `cancelled`, `timedOut`, `cleanupPending`);
-- the post-publish state of §3.15.4 (including D2 if not fixed in JS).
+- the post-publish state of §3.15.4. **(M0a)** D2 is fixed in JS, so the published engine holds ordinary checkpoint maps and no restore budget.
 Progress phase names are only visible in the advanced API. Typed restore exposes no progress.
 
 ---
@@ -2712,7 +2741,11 @@ Simple delegations (§1.2). `nativePointer`'s catch-all `cancel()` runs a **glob
 | `Unknown data event` | TE | `markets.mjs:207` | S |
 | `Invalid symbol metadata` | TE | `markets.mjs:30` | S |
 | `Timezone string, at most 128 characters required` | TE | `markets.mjs:9` | S |
-| `ISO date and HH:mm[:ss] required` | TE | `markets.mjs:21` | S (session calendars) |
+| `Time zone conversion requires a finite time` **(M0a)** | RE | `zonedParts` step 2 (§3.5.2) | S |
+| `Time zone conversion year out of range` **(M0a)** | RE | `zonedParts` steps 3 and 7; `shiftDate` (result year) | S |
+| `Unsupported time zone: ${tz.slice(0,64)}` **(M0a)** | RE | `zonedParts` step 5 (grammar, no `cause`) and step 6 (host failure kept as `cause`) | S |
+| `ISO date required` **(M0a)** | TE | `shiftDate` (strict date parser) | S (session calendars) |
+| `ISO date and HH:mm[:ss] required` | TE | `markets.mjs:21`; **(M0a)** also for nonexistent dates, `24:00` and fractional seconds on every engine | S (session calendars) |
 | `Nonexistent local time at DST boundary` | RE | `markets.mjs:25` | S |
 | `Ambiguous local time` | RE | `markets.mjs:26` | S |
 | `Ordered nonoverlapping sessions required` | RE | `markets.mjs:133` | S |
@@ -2809,8 +2842,8 @@ Simple delegations (§1.2). `nativePointer`'s catch-all `cancel()` runs a **glob
 
 | Message | Class | Where | Tier |
 |---|---|---|---|
-| `Native checkpoint record byte limit` | RE | `native-checkpoints.mjs:8`, `:10` | R (and post-restore S, D2) |
-| `Native checkpoint total byte limit` | RE | `:16`, `:18` | R (and post-restore S, D2) |
+| `Native checkpoint record byte limit` | RE | `native-checkpoints.mjs:8`, `:10` | R (before M0a also post-restore S, D2) |
+| `Native checkpoint total byte limit` | RE | `:16`, `:18` | R (before M0a also post-restore S, D2) |
 | `Native checkpoint Unicode` / `Native checkpoint plain state` / `Native checkpoint array shape` / `Native checkpoint reserved key` / `Native checkpoint own data fields` | TE | `:9` / `:10` | R |
 | `Native checkpoint state limit` | RE | `:10` | R |
 | `Native checkpoint serialization changed` / `Native checkpoint validator mutated state` / `Native checkpoint context` / `Native checkpoint entry ownership` | TE | `:13` / `:28`, `:35` / `:23` / `:44`, `:46` | X |
@@ -3049,7 +3082,7 @@ All validator messages from §4.2, §4.5, §4.7 and §4.8 also appear through wo
 | `Native workspace target not ready` | E | `:59` | R |
 | `Native workspace target does not import source UI` | E | `:60` | X |
 | `Native workspace target accessor` / `Native workspace factory changed metadata` | TE | `:16` / `:38` | X |
-| `Native workspace indicator binding`, `Native workspace target changed`, `Native workspace target entry changed`, `Native workspace target output binding`, `Native workspace target configuration changed` | E | `:17`, `:48`, `:58` | X |
+| `Native workspace indicator binding`, `Native workspace target changed`, `Native workspace target entry changed`, `Native workspace target output binding`, `Native workspace target configuration changed` | E | `:17`, `:48`, `:58`; **(M0a)** `entry changed` also from the `finish()` publish when an entry's `checkpoints` slot was replaced (§3.8.5) | X |
 | `Prepare step size` | RE | `native-workspace-target.mjs:49`; `prepare-state.mjs:32` | R |
 | `Prepare target slice` | RE | `prepare-state.mjs:29` | R |
 | `Prepare incomplete input` / `Prepare not started` | E | `:30` / `:32` | R |
@@ -3062,8 +3095,8 @@ All validator messages from §4.2, §4.5, §4.7 and §4.8 also appear through wo
 - **Calls before `nativeInit`**: `ReferenceError` (e.g. `nativeAPI is not defined`).
 - **Property reads on `null`/`undefined`**: `prepend` whose last element is null (`data.mjs:157`); `update`/`correction` without a bar (`markets.mjs:205-206`); `key.toLowerCase`; `nativeAsyncCheckpointImport` on a workspace target.
 - **Date**: `toISOString` on an invalid date (V8 `Invalid time value`, JSC `Invalid Date`, QuickJS `Date value is NaN`).
-- **Intl**: an invalid time zone (iOS `invalid time zone: <tz>`, V8 `Invalid time zone specified: <tz>`), and JSC's invalid-date `date value is not finite in DateTimeFormat formatToParts()`.
-- **Android shim**: RangeError `Invalid timezone/date`, IntE `Timezone bridge failed`, TE `time and timezone required` (`aster_jni.c:42-45`).
+- **Intl** **(M0a)**: no longer engine-specific on the stable surface. The core rejects bad names, non-finite times and out-of-range years before `Intl` runs, and rewrites any `Intl` failure as RangeError `Unsupported time zone: <tz>` (§3.5.2). The engine's own error (iOS `invalid time zone: <tz>`, V8 `Invalid time zone specified: <tz>`, JSC's `date value is not finite in DateTimeFormat formatToParts()`) survives only as `cause`, which hosts do not see in `String(error)`.
+- **Android shim** **(M0a)**: RangeError `Invalid timezone/date` and IntE `Timezone bridge failed` (`aster_jni.c:42-45`) are caught and rewritten the same way (original kept as `cause`). TE `time and timezone required` (argument count ≠ 2) cannot occur through the shim, which always passes two arguments.
 - **Host-generated messages** stay in Swift/Java and are not produced by the backend. Examples: Swift `BaroChartAsyncError.invalidProtocol(...)` strings, Java `JSONException`/`IllegalStateException` validation strings (`Workspace registration binding`, `Native packet …` decoder checks, …), and JNI failures (`Native argument size limit`, `QuickJS error`, …). The platform-consumers reader report lists them; §3.15.5 lists what they validate.
 
 
@@ -3208,21 +3241,21 @@ Host-side changes:
   - `BaroChartFrameRenderer` switches from the context probe to `backend.supports(.frameCache)`.
   - Typed `init(options:)` should not require a bundle URL when Rust is selected.
 - **Java**: swap the JNI `call`/`packet`/`readBuffer`/`writeBuffer`/`create`/`free` natives for Rust FFI functions with identical signatures. `invoke` and `scenePacket` stay as they are. `WorkspaceRestoreJob.Host.createTarget` calls `create(empty=true)`.
-- **Time zones**: pass a host callback (§3.5.2) so iOS keeps ICU behaviour and Android keeps java.time behaviour (D6).
+- **Time zones**: pass a host callback (§3.5.2) so iOS keeps ICU tz data and Android keeps java.time tz data (D6). **(M0a)** The callback only resolves names that passed the core's grammar check, for finite in-range times; the core turns any callback failure into `Unsupported time zone: <tz>` and does the year check and padding itself.
 - **Restore**:
   - Option A: keep the host job classes; the Rust backend implements the tier-R functions over two Rust engine instances.
   - Option B: add a native `restore_workspace(doc, binding, revision, cancel, progress)` and simplify the host jobs. Either way the observable contract in §3.15.4–3.15.6 holds.
 - **Capability routing**: if an engine needs a JS-only feature (custom indicator source, linked modules other than any ported one, async jobs not ported), the host either selects the JS backend for that engine at creation or surfaces a defined error. The first choice exists only when both backends ship (D12). Neither choice is a fallback after a Rust error.
 
 ### 6.5 Platform divergences to pin in differential tests
-- **Argument encoding**: iOS dictionaries arrive in random key order and may carry NaN; Android JSON keeps insertion order and never carries NaN (`org.json` rejects it first). Compare canonicalized key order when a host dictionary's order leaks into documents (params, symbol, drawing style).
+- **Argument encoding**: iOS dictionaries arrive in random key order and may carry NaN; Android JSON keeps insertion order and never carries NaN (`org.json` rejects it first). **Normalized in M0a** for saved and returned records: the core rewrites them in canonical order (§3.2), so params, symbol and drawing style no longer leak the host's order into documents, and the first reported unsupported field no longer depends on it. Differential tests can compare bytes directly. `DeterministicSaveTests` (Swift) pins typed saves to canonical literals, and M0 ran it in 10 separate processes.
 - **`__proto__` keys**: dropped or prototype-setting on iOS; an own key (`unsupported field __proto__`) on Android.
-- **Time zones**:
-  - year padding: iOS `'999'` vs Android `'0999'`;
-  - invalid zone text: iOS `invalid time zone: X`, Android `Invalid timezone/date`;
-  - invalid dates: iOS throws, Android maps them to 1970;
-  - zone ids: Android accepts `Z`/`UTC+9`;
-  - tzdata versions differ.
+- **Time zones** — **normalized in M0a** (§3.5.2): the core now decides each of these before the host is asked, so all platforms give the same result:
+  - year padding (was iOS `'999'` vs Android `'0999'`): local years outside 1000..9999 throw `Time zone conversion year out of range`, and years are always 4 digits;
+  - invalid zone text (was iOS `invalid time zone: X`, Android `Invalid timezone/date`): always `Unsupported time zone: X`, with the host error as `cause`;
+  - invalid times (was iOS throws, Android maps NaN to 1970): always `Time zone conversion requires a finite time`;
+  - zone ids (was Android accepting `Z`/`UTC+9`): the core rejects java.time-only names (`Z`, `UT`, `UTC±…`, `GMT±…`, `UT±…`) and anything outside the IANA-style grammar on every platform;
+  - still different: tzdata versions. Pin them in tests or avoid zones with recent rule changes.
 - **Lone surrogates**: preserved on iOS; replaced with `?` on Android (JNI UTF-8 conversion).
 - **`StaleSourceError` classification**: `javaScript` on iOS, `UNAVAILABLE` on Android. Ingestion budget classification uses the code on Swift and the message on Java.
 - **Typed crosshair parse**: Swift defaults missing fields (`0`/`''`); Java `getInt`/`getDouble` throw.
@@ -3240,17 +3273,17 @@ Host-side changes:
 | 2 | Error identity drift (class, name, message, code) | Hosts classify by prefix and regex. One wrong class or word changes the typed error code (e.g. `Duplicate drawing id` is `Error` in `add` but `TypeError` in group edits) | Generate the Rust error table from §4; differential tests compare the full `name: message`. |
 | 3 | IEEE evaluation-order and Math semantics (dyadic tree sums, Neumaier/Welford shapes, JS `min`/`max`/`sign`/`round`, no FMA) | Autoscale, volume buckets, indicator values and overflow decisions differ in the last bit; cascades into scene JSON | Keep expression shapes; `js_*` helpers; lint against `mul_add` and `f64::min/max`; run the readers' bit-exact corpora (7887 tree cases, 2933 indicator vectors). |
 | 4 | Engine-dependent transcendental functions (`log`, `exp`, `hypot`) | V8-based oracles differ from on-device JSC/QuickJS by up to 1 ulp | Use same-platform oracles, or port the engine algorithm; avoid exact-threshold fixtures (D5). |
-| 5 | Time zones and DST (ICU vs java.time; formatting; invalid inputs; tzdata versions) | Session studies, symbol time labels, accessibility time, calendar validation | A host callback seam (D6); pin tzdata in tests; port the three-sample `zonedEpoch` literally. |
-| 6 | Restored-engine checkpoint budget and provenance (D2) | The same data succeeds on a fresh chart and fails after restore (`Native checkpoint total byte limit`), and the error is classified `invalidArgument` | Decide before freezing oracles; preferably fix in JS (convert at publish), then port. |
+| 5 | Time zones and DST (ICU vs java.time; formatting; invalid inputs; tzdata versions) | Session studies, symbol time labels, accessibility time, calendar validation | A host callback seam (D6); pin tzdata in tests; port the three-sample `zonedEpoch` literally. **(M0a)** Formatting, invalid inputs, the name grammar and the year range are now fixed by the core contract (§3.5.2); tzdata versions remain. |
+| 6 | Restored-engine checkpoint budget and provenance (D2) | The same data succeeded on a fresh chart and failed after restore (`Native checkpoint total byte limit`), and the error was classified `invalidArgument` | **Resolved in M0a**: publish converts to ordinary maps (§3.8.5, §3.8.6). Port the fixed behaviour; keep the in-progress restore budget quirks (a)(b). |
 | 7 | Hidden identity semantics (undo commit identity, `SceneCache` identity keys, entry identity for async staleness, viewport/projection fingerprints, a new `nativeSize` object on every render) | Undo stack lengths, base/drawings null-protocol frames, restore staleness and gesture rollbacks differ | Model identities as generation counters exactly where JS compares objects; replay mutation scripts. |
 | 8 | Lazy calculation and failure timing (layout computes indicators; errors appear at read time; partial outputs stay written) | Errors surface on a different call, so hosts report them differently | Keep the dirty-marking plus calculate-on-read architecture; test failure points. |
-| 9 | Key-order semantics (array-index-first order, spread positions, `undefined` placeholders, Swift dictionary randomness) | Byte-different documents and inspect output; different first-error choice | An ordered map with JS key ordering; canonicalize host dictionaries in tests. |
+| 9 | Key-order semantics (array-index-first order, spread positions, `undefined` placeholders, Swift dictionary randomness) | Byte-different documents and inspect output; different first-error choice | An ordered map with JS key ordering. **(M0a)** Saved and returned records are canonical and `optionRecord` reports the UTF-16-smallest unsupported field, so host dictionary order no longer reaches documents; port `orderedRecord`/`canonicalKeys` exactly (§3.2), including integer-like keys first. |
 | 10 | Restore staleness on render, resize or pointer moves (`nativeSize` identity, crosshair and view identity in `sourceRefs`) | Touching or redrawing during a restore fails it | Keep the behaviour (or document it in Option B); hosts may block input during a restore. |
 | 11 | Unspecified tier-A modules if pulled into scope (`data-explorer.mjs`/`dataAt`, low-level ingestion queue messages, `resample`, async UI) | Implementations from guesswork | Spec them before implementing D1; otherwise reject with a defined error. |
 | 12 | JS-only features (custom and linked indicators, async/params jobs) | Engines that need them cannot use the Rust backend | Capability flags plus a host fallback to the JS backend; port `pressure` (D10). |
 | 13 | Dropping the X guards changes first-error precedence | A different message for multi-fault JSON inputs | Drop only guards that JSON or typed inputs cannot reach; keep the check order of reachable validators. |
 | 14 | Lone surrogates and WTF-16 | Panics or rejections in Rust where JS accepts | Use WTF-16 strings end to end (D7). |
-| 15 | Line-number drift | §3/§4 references go stale as the JS evolves | Treat this map as tied to the 2026-11-02 snapshot; regenerate after JS fixes (D2, D3, D9). |
+| 15 | Line-number drift | §3/§4 references go stale as the JS evolves | Treat this map as tied to the 2026-11-02 snapshot; regenerate after JS fixes (D2, D3, D9). **(M0a)** The M0a changes are described in the sections marked (M0a), but their line numbers were not regenerated. |
 | 16 | Adopting design-review shortcuts that break parity: structural document comparison, a 1-ulp indicator tolerance, quantized output, `floor(x+0.5)`, pinned portable math on device, `panic = "abort"` (Appendix D) | Silent drift from the JS oracle that the gates exist to catch; a panic that kills the host app | Treat Appendix D.2–D.3 as a do-not-adopt list; keep the byte-exact gates; check crate settings against §6.4. |
 | 17 | Transition cost: dual maintenance (the Qwen review estimates about 25% overhead) and binary size while both backends ship (GLM) | JS core changes land without their Rust twin, so the oracle moves under the port; the 3 MB per-ABI budget is exceeded | Mirror every JS core change behind the same parity gate, or freeze the core during the port; measure size early (track S2) and decide D12 on the numbers. |
 

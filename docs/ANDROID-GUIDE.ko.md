@@ -141,6 +141,14 @@ engine.setTheme(Theme.LIGHT)
 
 내장 지표 35종은 `IndicatorKind`, 드로잉 도구 16종은 `DrawingTool`에 있습니다. `rsi` 같은 패널은 `EngineOptions(panels, series, theme)`로 추가합니다. `updateSeries`와 `updateDrawing`은 `SeriesPatch`·`DrawingPatch`를 받습니다. 설정한 필드만 바뀌고, 시리즈 종류와 드로잉 도구는 바꿀 수 없습니다.
 
+## 심볼과 시간대
+
+```kotlin
+engine.setSymbol(Symbol.builder("AAPL", "XNAS", "America/New_York", "USD", 2, 0.01).build())
+```
+
+심볼의 시간대로 시간축 라벨을 만듭니다. `vwap`과 `pivots`의 세션 달력 시간대도 같은 규칙을 따릅니다. `America/New_York`, `Asia/Seoul` 같은 IANA 이름(대소문자 무시)이나 `+09:00`, `-05:30` 꼴의 고정 오프셋을 쓰세요. `Z`, `UT`, `UTC+9`, `GMT+0`, `GMT-03:00`처럼 일부 플랫폼만 받는 이름은 거절합니다. 기기의 시간대 데이터에 없는 이름도 거절합니다. 이때 `setSymbol`은 코드가 `INVALID_ARGUMENT`이고 메시지가 `Unsupported time zone: <이름>`인 `BaroChartException`을 던집니다. 지원하는 지역 날짜는 1000년부터 9999년까지입니다. 지역 날짜가 이 범위를 벗어난 시각을 표시하려 하면 `Time zone conversion year out of range`로 실패합니다. 타입 메서드는 이를 `INVALID_ARGUMENT` 코드로 던지고, 뷰는 그리는 중에 `OnChartErrorListener`로 알립니다. 웹·iOS·Android가 같은 규칙을 쓰므로, 결과는 플랫폼의 시간대 데이터가 다를 때만 달라집니다. 0.3.0 전에는 Android가 `Z`, `UTC+9`, `GMT+0`, `+0900` 같은 `java.time` 이름도 받았습니다. 이런 이름으로 저장한 작업공간은 이제 복원되지 않습니다.
+
 ## 저장과 복원
 
 작업공간에는 차트 설정, 지표, 시리즈, 드로잉이 저장되고 봉 데이터는 저장되지 않습니다. 저장할 때와 같은 봉 위에 복원해야 합니다. 데이터셋 바인딩이 다르거나 봉 범위가 바뀌면 거부됩니다.
