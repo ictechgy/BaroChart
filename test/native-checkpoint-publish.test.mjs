@@ -289,6 +289,30 @@ test('params publish leaves ordinary entries',t=>{
  assert.equal(run(source,'heldImport.budget.usedBytes'),0,'params staging budget must be released at publish');
 });
 
+test('params prepare and publish install staged records without decoding them',t=>{
+ // 게시 준비·게시는 소유 스레드 한 턴이다(iOS 메인 스레드, Android 소유 루퍼가 작업 모니터를 쥔 채 부른다).
+ // 레코드 해독은 레코드가 하나씩 도착하는 짧은 단계(nativeParamsSourceCheckpoint)에서 끝내야 하고,
+ // 이 한 턴은 스테이징한 레코드 양과 상관없이 레코드를 다시 해독하지 않는다(리뷰 C5)
+ const bars=3000,source=runtime(t),worker=runtime(t);
+ run(source,`nativeInit(${bars},{series:[]});nativeAPI.addIndicator('s','sma',{period:20});nativeAPI.addSeries({id:'s-line',type:'line',panel:'price',indicator:'s'});`);
+ const job=beginParams(source,'s',{period:50},1),descriptor=computeParams(source,worker,job);
+ importCheckpoints(source,worker,job,0,descriptor.checkpointCount);
+ while(!source.nativeParamsSourceValidate(job.ticket,PARAMS_CHUNK,REVISION).complete){/* 원본 쪽 출력 검증을 끝까지 진행한다 */}
+ worker.nativeParamsTargetDispose();
+ // safeCheckpointParse는 부를 때마다 컨텍스트의 JSON.parse를 쓰므로, 준비·게시 동안의 호출 수가 곧 레코드 해독 수다
+ run(source,'globalThis.ownerParses=0;globalThis.originalParse=JSON.parse;JSON.parse=function(...args){ownerParses++;return originalParse.apply(this,args);};');
+ let status;
+ try{source.nativeParamsSourcePrepare(job.ticket,REVISION);status=source.nativeParamsSourcePublish(job.ticket,REVISION);}
+ finally{run(source,'JSON.parse=originalParse;');}
+ assert.equal(status.status,'committed');assert.equal(descriptor.checkpointCount,Math.floor(bars/256)+1);
+ assert.equal(run(source,'ownerParses'),0,'prepare and publish must not decode staged checkpoint records');
+ // 게시된 레코드는 새로 계산한 sma(50)과 같고, 새 차트가 계산하며 넣는 것처럼 색인 오름차순으로 들어 있다
+ const fresh="(globalThis.oracle=new Aster.IndicatorEngine(nativeModel.store),oracle.add('x','sma',{period:50}),oracle.entries.get('x').checkpoints)";
+ assert.deepEqual(checkpointTexts(source,"nativeModel.indicators.entries.get('s').checkpoints"),checkpointTexts(source,fresh));run(source,'oracle.dispose()');
+ assert.deepEqual(JSON.parse(run(source,"JSON.stringify([...nativeModel.indicators.entries.get('s').checkpoints.keys()])")),Array.from({length:descriptor.checkpointCount},(_,i)=>i*256));
+ assertOrdinaryEntries(source,'params publish');assert.equal(run(source,'heldImport.budget.usedBytes'),0,'params staging budget must be released at publish');
+});
+
 /**
  * 원본 문서 맨 앞에 문서에만 있는 지표를 넣는다. 대상 계산 단계는 문서 순서로 계산하므로 이 지표가 먼저 돈다.
  * @param {string} text 원본 문서
