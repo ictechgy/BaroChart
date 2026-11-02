@@ -6,15 +6,13 @@
 //! - `num`: `Number#toString`, `toFixed`/`toPrecision`/`toExponential`,
 //!   `Math.round`/`min`/`max`/`sign`, `ToInt32`/`ToUint32`, `Object.is`
 //! - `math`: 엔진마다 다른 `Math.log`/`exp`/`hypot`(기기는 플랫폼 libm, wasm32는 호스트 import)
-//!
-//! 앞으로 들어올 모듈은 다음과 같다.
-//!
-//! - `string`: UTF-16 코드 단위로 세는 WTF-16 문자열과 JS 공백 표
-//! - `json`: 키 순서를 보존하는 `JsValue`와 손으로 쓴 파서·writer(무손실 모드 포함)
-//! - `date`, `error`: `Date.UTC`, `toISOString`, 엄격한 ISO 파서, 오류 값
+//! - `string`: UTF-16 코드 단위로 세는 WTF-16 문자열(`JsString`)과 JS 공백 표
+//! - `json`: 키 순서를 보존하는 `JsValue`·`JsObject`와 손으로 쓴 파서·writer(무손실 모드 포함, 재귀 없음)
+//! - `date`: `Date.UTC`, TimeClip, `toISOString`, 그레고리력 변환, M0 시간대 계약의 엄격한 ISO 파서
+//! - `error`: JS 오류 값(`JsError`: 이름, 메시지, 코드)
 //!
 //! 이식 코드는 Rust 표준의 실수 포맷(`{:.N}`·`{:e}`)과 `f64::min`/`max`/`round`/`signum`,
-//! `str::trim` 대신 이 커널을 부른다. 이 규칙은 `scripts/rust/check-bans.mjs`가 CI에서 검사한다.
+//! `str::trim`, serde 대신 이 커널을 부른다. 이 규칙은 `scripts/rust/check-bans.mjs`가 CI에서 검사한다.
 //!
 //! `unsafe`: 기기 타깃(iOS·macOS·Android)에서는 `forbid`다. wasm32 하네스 빌드만 `deny`로 두고,
 //! `math`의 호스트 import 블록 하나에서만 허용한다. Rust 2024에서 외부 함수 선언은 `unsafe extern`
@@ -24,5 +22,9 @@
 #![cfg_attr(target_arch = "wasm32", deny(unsafe_code))]
 #![warn(missing_docs)]
 
+pub mod date;
+pub mod error;
+pub mod json;
 pub mod math;
 pub mod num;
+pub mod string;

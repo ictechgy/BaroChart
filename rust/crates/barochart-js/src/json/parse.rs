@@ -1,0 +1,447 @@
+//! 손으로 쓴 JSON 파서. `JSON.parse` 의미(Standard)와 무손실 상위 집합(Lossless)을 읽는다(이식 지도 §3.1.3).
+//!
+//! - 공백은 SP·TAB·LF·CR만 받는다(JS 공백 표가 아니다).
+//! - 숫자는 문법을 먼저 확인한 뒤 `str::parse::<f64>`로 정확히 반올림한다. `1e400`은 Infinity, `-0`은 -0이다.
+//! - 문자열 이스케이프 `\uD800`은 단독 서로게이트로 받는다. 원문 바이트는 올바른 UTF-8이어야 한다.
+//! - 중복 키는 마지막 값이 이기고 처음 자리를 지킨다(`JsObject::insert`). `__proto__`는 평범한 키다.
+//! - 재귀하지 않는다. 만들고 있는 컨테이너를 힙 스택에 쌓으므로 깊이 100,000도 스레드 스택과 무관하다.
+//! - 오류는 `SyntaxError`다. 문구는 엔진마다 다르므로 이름만 계약이다(이식 지도 D8). 진단을 위해
+//!   `JSON: <바이트 위치> <이유>`(Lossless는 M0 BCJSON 형식 `BCJSON: <위치> <이유>`)로 쓴다. 위치는 입력의
+//!   바이트 위치라 비ASCII 문자 뒤에서는 JS 문자열 위치와 다르다.
+
+use super::{JsObject, JsValue, JsonMode};
+use crate::error::JsError;
+use crate::string::JsString;
+
+/// `JSON.parse(text)`(Standard) 또는 BCJSON 파싱(Lossless). 반복 구현이라 재귀가 없다.
+///
+/// Lossless는 M0 계획 Task 5의 BCJSON 문법이다: JSON에 값 토큰 `NaN`, `Infinity`, `-Infinity`, `undefined`를 더한다.
+/// `F64(<길이>,<해시>)` 토큰은 타입 배열을 JSON에 싣지 않는 M1 범위 밖이라 받지 않는다.
+/// - `text`: UTF-8 JSON 텍스트
+/// - `mode`: 문법
+/// - 반환: 값, 또는 `SyntaxError`
+pub fn parse_json(text: &[u8], mode: JsonMode) -> Result<JsValue, JsError> {
+    Parser {
+        text,
+        position: 0,
+        mode,
+    }
+    .parse_document()
+}
+
+/// 만들고 있는 컨테이너. 자식은 다 만든 뒤 붙이므로 프레임끼리는 서로를 품지 않는다.
+enum Frame {
+    /// 배열과 지금까지의 원소
+    Array(Vec<JsValue>),
+    /// 객체와, 값을 기다리는 멤버의 키
+    Object {
+        /// 지금까지의 멤버
+        object: JsObject,
+        /// 지금 읽는 값의 키
+        key: JsString,
+    },
+}
+
+/// 원소나 멤버 뒤에 온 구분자
+enum Separator {
+    /// `,`: 다음 원소·멤버가 이어진다
+    Next,
+    /// `]`·`}`: 컨테이너가 닫혔다
+    Close,
+}
+
+/// 입력 위치를 들고 다니는 파서 상태
+struct Parser<'a> {
+    /// 입력 바이트
+    text: &'a [u8],
+    /// 다음에 읽을 바이트 위치
+    position: usize,
+    /// 문법
+    mode: JsonMode,
+}
+
+impl Parser<'_> {
+    /// 문서 하나(앞뒤 공백 포함)를 읽는다. 값 뒤에 다른 글자가 있으면 오류다.
+    fn parse_document(&mut self) -> Result<JsValue, JsError> {
+        let mut stack: Vec<Frame> = Vec::new();
+        loop {
+            if let Some(value) = self.begin_value(&mut stack)?
+                && let Some(root) = self.complete_value(&mut stack, value)?
+            {
+                return self.finish_document(root);
+            }
+        }
+    }
+
+    /// 다 만든 값을 부모에 붙이고, 닫는 괄호가 이어지면 부모도 값으로 만들어 위로 올린다.
+    ///
+    /// - `stack`: 만들고 있는 컨테이너들
+    /// - `value`: 방금 다 만든 값
+    /// - 반환: 최상위 값이 끝났으면 그 값, 다음 원소·멤버를 읽어야 하면 `None`
+    fn complete_value(
+        &mut self,
+        stack: &mut Vec<Frame>,
+        mut value: JsValue,
+    ) -> Result<Option<JsValue>, JsError> {
+        loop {
+            let separator = match stack.last_mut() {
+                None => return Ok(Some(value)),
+                Some(Frame::Array(items)) => {
+                    items.push(value);
+                    self.separator(b']', "',' or ']' after an array element")?
+                }
+                Some(Frame::Object { object, key }) => {
+                    object.insert(std::mem::take(key), value);
+                    let separator = self.separator(b'}', "',' or '}' after an object member")?;
+                    if let Separator::Next = separator {
+                        *key = self.parse_key()?;
+                    }
+                    separator
+                }
+            };
+            match separator {
+                Separator::Next => return Ok(None),
+                Separator::Close => value = close_frame(stack.pop()),
+            }
+        }
+    }
+
+    /// 값 하나를 시작한다. 원시 값이나 빈 컨테이너면 다 만든 값을, 내용이 있는 컨테이너면 프레임을 쌓고 `None`을 돌려준다.
+    ///
+    /// - `stack`: 만들고 있는 컨테이너들
+    fn begin_value(&mut self, stack: &mut Vec<Frame>) -> Result<Option<JsValue>, JsError> {
+        self.skip_whitespace();
+        match self.peek() {
+            Some(b'[') => {
+                self.position += 1;
+                self.skip_whitespace();
+                if self.eat(b']') {
+                    return Ok(Some(JsValue::Array(Vec::new())));
+                }
+                stack.push(Frame::Array(Vec::new()));
+                Ok(None)
+            }
+            Some(b'{') => {
+                self.position += 1;
+                self.skip_whitespace();
+                if self.eat(b'}') {
+                    return Ok(Some(JsValue::Object(JsObject::new())));
+                }
+                let key = self.parse_key()?;
+                stack.push(Frame::Object {
+                    object: JsObject::new(),
+                    key,
+                });
+                Ok(None)
+            }
+            _ => self.parse_scalar().map(Some),
+        }
+    }
+
+    /// 최상위 값 뒤에는 공백만 올 수 있다.
+    ///
+    /// - `value`: 다 읽은 최상위 값
+    fn finish_document(&mut self, value: JsValue) -> Result<JsValue, JsError> {
+        self.skip_whitespace();
+        match self.peek() {
+            None => Ok(value),
+            Some(_) => Err(self.unexpected("the end of input after the JSON value")),
+        }
+    }
+
+    /// 원소·멤버 뒤의 `,` 또는 닫는 괄호를 읽는다.
+    ///
+    /// - `close`: 닫는 괄호(`]` 또는 `}`)
+    /// - `expected`: 오류 문구에 쓸 기대 내용
+    fn separator(&mut self, close: u8, expected: &str) -> Result<Separator, JsError> {
+        self.skip_whitespace();
+        if self.eat(b',') {
+            Ok(Separator::Next)
+        } else if self.eat(close) {
+            Ok(Separator::Close)
+        } else {
+            Err(self.unexpected(expected))
+        }
+    }
+
+    /// 객체 멤버의 키와 `:`를 읽는다.
+    fn parse_key(&mut self) -> Result<JsString, JsError> {
+        self.skip_whitespace();
+        if self.peek() != Some(b'"') {
+            return Err(self.unexpected("'\"' to start an object key"));
+        }
+        let key = self.parse_string()?;
+        self.skip_whitespace();
+        if !self.eat(b':') {
+            return Err(self.unexpected("':' after an object key"));
+        }
+        Ok(key)
+    }
+
+    /// 원시 값(문자열, 수, 리터럴, Lossless 토큰)을 읽는다.
+    fn parse_scalar(&mut self) -> Result<JsValue, JsError> {
+        let lossless = self.mode == JsonMode::Lossless;
+        match self.peek() {
+            Some(b'"') => self.parse_string().map(JsValue::String),
+            Some(b'-' | b'0'..=b'9') => self.parse_number().map(JsValue::Number),
+            Some(b't') => self.parse_literal("true", JsValue::Bool(true)),
+            Some(b'f') => self.parse_literal("false", JsValue::Bool(false)),
+            Some(b'n') => self.parse_literal("null", JsValue::Null),
+            Some(b'N') if lossless => self.parse_literal("NaN", JsValue::Number(f64::NAN)),
+            Some(b'I') if lossless => {
+                self.parse_literal("Infinity", JsValue::Number(f64::INFINITY))
+            }
+            Some(b'u') if lossless => self.parse_literal("undefined", JsValue::Undefined),
+            _ => Err(self.unexpected("a JSON value")),
+        }
+    }
+
+    /// 정해진 철자의 리터럴을 읽는다(`true`, `false`, `null`, Lossless의 `NaN`·`Infinity`·`undefined`).
+    ///
+    /// - `word`: 리터럴 철자
+    /// - `value`: 맞으면 돌려줄 값
+    fn parse_literal(&mut self, word: &str, value: JsValue) -> Result<JsValue, JsError> {
+        if self.eat_word(word) {
+            Ok(value)
+        } else {
+            Err(self.error(&format!("invalid literal; expected '{word}'")))
+        }
+    }
+
+    /// 수를 읽는다: `-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?`, Lossless는 `-Infinity`도 받는다.
+    ///
+    /// 문법을 확인한 텍스트만 `str::parse::<f64>`에 넘긴다(Rust 파서는 `+1`, `.5`, `inf` 같은 JSON 밖 형식도 받으므로).
+    fn parse_number(&mut self) -> Result<f64, JsError> {
+        let start = self.position;
+        if self.eat(b'-') && self.mode == JsonMode::Lossless && self.peek() == Some(b'I') {
+            return if self.eat_word("Infinity") {
+                Ok(f64::NEG_INFINITY)
+            } else {
+                Err(self.error("invalid literal; expected '-Infinity'"))
+            };
+        }
+        match self.peek() {
+            Some(b'0') => self.position += 1,
+            Some(b'1'..=b'9') => self.skip_digits(),
+            _ => return Err(self.unexpected("a digit")),
+        }
+        if self.eat(b'.') {
+            self.require_digits("a digit after '.'")?;
+        }
+        if matches!(self.peek(), Some(b'e' | b'E')) {
+            self.position += 1;
+            if matches!(self.peek(), Some(b'+' | b'-')) {
+                self.position += 1;
+            }
+            self.require_digits("a digit in the exponent")?;
+        }
+        // 문법을 확인한 ASCII라 UTF-8 변환과 f64 파싱은 실패하지 않는다. 실패하면 위치를 담아 SyntaxError로 알린다
+        let literal = std::str::from_utf8(&self.text[start..self.position])
+            .map_err(|_| self.error_at(start, "number is not ASCII"))?;
+        literal
+            .parse::<f64>()
+            .map_err(|_| self.error_at(start, "number does not parse as f64"))
+    }
+
+    /// 문자열을 읽는다. 여는 따옴표에 있을 때 부른다.
+    ///
+    /// 특수 바이트(따옴표, 역슬래시, C0 제어 문자) 사이의 구간을 한 번에 UTF-8로 검사해 UTF-16으로 옮긴다.
+    /// 특수 바이트는 모두 ASCII라 다중 바이트 문자 안에 나타나지 않으므로 구간 경계가 문자를 가르지 않는다.
+    fn parse_string(&mut self) -> Result<JsString, JsError> {
+        self.position += 1;
+        let mut units: Vec<u16> = Vec::new();
+        loop {
+            self.copy_raw_run(&mut units)?;
+            match self.text.get(self.position) {
+                None => return Err(self.error("unterminated string; expected '\"'")),
+                Some(b'"') => {
+                    self.position += 1;
+                    return Ok(JsString::from_utf16(units));
+                }
+                Some(b'\\') => self.parse_escape(&mut units)?,
+                Some(&control) => {
+                    return Err(self.error(&format!(
+                        "unescaped control character U+{control:04X} in a string; write it as \\u{control:04x}"
+                    )));
+                }
+            }
+        }
+    }
+
+    /// 다음 특수 바이트(따옴표, 역슬래시, C0 제어 문자) 앞까지의 원문 구간을 UTF-8로 검사해 코드 단위로 옮긴다.
+    ///
+    /// - `units`: 문자열 코드 단위
+    fn copy_raw_run(&mut self, units: &mut Vec<u16>) -> Result<(), JsError> {
+        let start = self.position;
+        while let Some(&byte) = self.text.get(self.position) {
+            if byte == b'"' || byte == b'\\' || byte < 0x20 {
+                break;
+            }
+            self.position += 1;
+        }
+        match std::str::from_utf8(&self.text[start..self.position]) {
+            Ok(run) => {
+                units.extend(run.encode_utf16());
+                Ok(())
+            }
+            Err(error) => Err(self.error_at(
+                start + error.valid_up_to(),
+                "invalid UTF-8 in a string; send UTF-8 text and write lone surrogates as \\uXXXX escapes",
+            )),
+        }
+    }
+
+    /// 역슬래시 이스케이프 하나를 읽어 코드 단위를 붙인다. 역슬래시에 있을 때 부른다.
+    ///
+    /// - `units`: 문자열 코드 단위
+    fn parse_escape(&mut self, units: &mut Vec<u16>) -> Result<(), JsError> {
+        let escape_start = self.position;
+        self.position += 1;
+        let unit = match self.text.get(self.position) {
+            Some(b'"') => 0x22,
+            Some(b'\\') => 0x5C,
+            Some(b'/') => 0x2F,
+            Some(b'b') => 0x08,
+            Some(b'f') => 0x0C,
+            Some(b'n') => 0x0A,
+            Some(b'r') => 0x0D,
+            Some(b't') => 0x09,
+            Some(b'u') => {
+                self.position += 1;
+                units.push(self.parse_hex4(escape_start)?);
+                return Ok(());
+            }
+            _ => {
+                return Err(self.error_at(
+                    escape_start,
+                    "invalid escape; use one of \\\" \\\\ \\/ \\b \\f \\n \\r \\t \\uXXXX",
+                ));
+            }
+        };
+        self.position += 1;
+        units.push(unit);
+        Ok(())
+    }
+
+    /// `\u` 뒤의 16진 숫자 네 개를 읽는다(대소문자 무관). 서로게이트도 검사 없이 그대로 받는다.
+    ///
+    /// - `escape_start`: 오류 위치로 쓸 역슬래시 위치
+    fn parse_hex4(&mut self, escape_start: usize) -> Result<u16, JsError> {
+        const REASON: &str = "invalid \\u escape; expected four hexadecimal digits";
+        let text = self.text;
+        let Some(digits) = text.get(self.position..self.position + 4) else {
+            return Err(self.error_at(escape_start, REASON));
+        };
+        let mut unit: u16 = 0;
+        for &digit in digits {
+            let Some(value) = char::from(digit).to_digit(16) else {
+                return Err(self.error_at(escape_start, REASON));
+            };
+            // to_digit(16)은 0..=15라 u16으로 줄여도 값이 같고, 네 자리라 0xFFFF를 넘지 않는다
+            unit = unit * 16 + value as u16;
+        }
+        self.position += 4;
+        Ok(unit)
+    }
+
+    /// 다음 바이트들이 `word`와 같으면 소비한다.
+    ///
+    /// - `word`: ASCII 철자
+    /// - 반환: 소비했으면 true
+    fn eat_word(&mut self, word: &str) -> bool {
+        let matched = self
+            .text
+            .get(self.position..)
+            .is_some_and(|rest| rest.starts_with(word.as_bytes()));
+        if matched {
+            self.position += word.len();
+        }
+        matched
+    }
+
+    /// 십진 숫자가 하나 이상 있어야 하는 자리를 읽는다.
+    ///
+    /// - `expected`: 숫자가 없을 때 오류 문구에 쓸 기대 내용
+    fn require_digits(&mut self, expected: &str) -> Result<(), JsError> {
+        if !self.peek().is_some_and(|byte| byte.is_ascii_digit()) {
+            return Err(self.unexpected(expected));
+        }
+        self.skip_digits();
+        Ok(())
+    }
+
+    /// 십진 숫자를 건너뛴다.
+    fn skip_digits(&mut self) {
+        while self.peek().is_some_and(|byte| byte.is_ascii_digit()) {
+            self.position += 1;
+        }
+    }
+
+    /// JSON 공백(SP·TAB·LF·CR)을 건너뛴다.
+    fn skip_whitespace(&mut self) {
+        while matches!(self.peek(), Some(b' ' | b'\t' | b'\n' | b'\r')) {
+            self.position += 1;
+        }
+    }
+
+    /// 다음 바이트가 `byte`면 소비한다.
+    ///
+    /// - 반환: 소비했으면 true
+    fn eat(&mut self, byte: u8) -> bool {
+        let matched = self.peek() == Some(byte);
+        if matched {
+            self.position += 1;
+        }
+        matched
+    }
+
+    /// 다음 바이트를 본다(소비하지 않는다).
+    fn peek(&self) -> Option<u8> {
+        self.text.get(self.position).copied()
+    }
+
+    /// 지금 위치에서 예상하지 못한 입력을 만난 오류. 보이는 ASCII는 글자로, 나머지는 16진 바이트로 적는다.
+    ///
+    /// - `expected`: 그 자리에 와야 했던 내용
+    fn unexpected(&self, expected: &str) -> JsError {
+        let found = match self.peek() {
+            None => String::from("end of input"),
+            Some(byte) if byte.is_ascii_graphic() => format!("'{}'", char::from(byte)),
+            Some(byte) => format!("byte 0x{byte:02x}"),
+        };
+        self.error(&format!("unexpected {found}; expected {expected}"))
+    }
+
+    /// 지금 위치의 `SyntaxError`
+    ///
+    /// - `reason`: 원인과 고칠 방향
+    fn error(&self, reason: &str) -> JsError {
+        self.error_at(self.position, reason)
+    }
+
+    /// 주어진 위치의 `SyntaxError`. 문구는 `JSON: <위치> <이유>` 또는 `BCJSON: <위치> <이유>`다.
+    ///
+    /// - `position`: 입력의 바이트 위치
+    /// - `reason`: 원인과 고칠 방향
+    fn error_at(&self, position: usize, reason: &str) -> JsError {
+        let prefix = match self.mode {
+            JsonMode::Standard => "JSON",
+            JsonMode::Lossless => "BCJSON",
+        };
+        JsError::new(
+            "SyntaxError",
+            JsString::from_str(&format!("{prefix}: {position} {reason}")),
+        )
+    }
+}
+
+/// 닫힌 프레임을 값으로 바꾼다.
+///
+/// - `frame`: 스택에서 꺼낸 프레임(호출하는 쪽이 방금 맨 위를 봤으므로 늘 있다)
+fn close_frame(frame: Option<Frame>) -> JsValue {
+    match frame {
+        Some(Frame::Array(items)) => JsValue::Array(items),
+        Some(Frame::Object { object, .. }) => JsValue::Object(object),
+        None => JsValue::Undefined,
+    }
+}
