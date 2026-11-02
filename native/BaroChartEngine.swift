@@ -106,8 +106,10 @@ private func asterResidentBytes() -> UInt64 {
     return code == KERN_SUCCESS ? UInt64(info.resident_size) : 0
 }
 private func asterInvoke(_ context: JSContext, _ name: String, _ args: [Any] = []) throws -> JSValue {
+    let trace = BaroChartTraceHooks.begin(context, name, args)
     guard let function = context.objectForKeyedSubscript(name), !function.isUndefined,
           let value = function.call(withArguments: args) else {throw BaroChartLowLevelError.javaScript("Missing function: \(name)")}
+    BaroChartTraceHooks.end(trace, context, value)
     if let exception = context.exception {
         context.exception = nil
         // Async begin/lease failures retain the same stable queue error code.
@@ -523,6 +525,7 @@ private final class BaroChartAsyncRuntime: BaroChartContextRuntime {
             try job.check()
             let start = asterClock()
             guard let vm = JSVirtualMachine(), let context = JSContext(virtualMachine: vm), let plan = job.plan else {throw BaroChartLowLevelError.unavailableContext}
+            BaroChartTraceHooks.attach(context)
             context.evaluateScript(bundle)
             if let exception = context.exception {context.exception = nil;throw BaroChartLowLevelError.javaScript(exception.toString() ?? "Bundle error")}
             _ = try asterInvoke(context,job.kind == .correction ? "nativeAsyncCreate" : "nativePrepareCreate",[plan.metadata]);job.metrics.workerInitMs = (asterClock()-start)*1000;job.sampleMemory()
@@ -542,7 +545,7 @@ private final class BaroChartAsyncRuntime: BaroChartContextRuntime {
                             try autoreleasepool {
                                 let target=try asterInvoke(context,"nativeAsyncTargetBuffer",[slot,at,count])
                                 let destination=try asterTypedBytes(target,context,count:count)
-                                field.withUnsafeBufferPointer {buffer in _=memcpy(destination,buffer.baseAddress!.advanced(by:at),count*8)}
+                                field.withUnsafeBufferPointer {buffer in _=memcpy(destination,buffer.baseAddress!.advanced(by:at),count*8);BaroChartTraceHooks.hostWrote(context,target,buffer.baseAddress!.advanced(by:at),count)}
                             }
                             let bytes=count*8;job.metrics.targetCopyMs += (asterClock()-copyStart)*1000;job.metrics.copiedBytes += bytes;job.metrics.maximumChunkBytes=max(job.metrics.maximumChunkBytes,bytes)
                             copied += bytes;offset += count;job.sampleMemory();job.report(BaroChartAsyncProgress(phase:"capture",done:copied,total:columns.retainedBytes))
@@ -564,7 +567,7 @@ private final class BaroChartAsyncRuntime: BaroChartContextRuntime {
                     try job.check()
                     let copyStart = asterClock(), target = try asterInvoke(context,"nativeAsyncTargetBuffer",[buffer.slot,at,count])
                     let destination = try asterTypedBytes(target,context,count:count)
-                    chunk.0.withUnsafeBytes {bytes in _ = memcpy(destination,bytes.baseAddress!,bytes.count)}
+                    chunk.0.withUnsafeBytes {bytes in _ = memcpy(destination,bytes.baseAddress!,bytes.count);BaroChartTraceHooks.hostWrote(context,target,bytes.baseAddress!,count)}
                     job.metrics.captureMs += chunk.1;job.metrics.targetCopyMs += (asterClock()-copyStart)*1000
                     job.metrics.copiedBytes += chunk.0.count;job.metrics.maximumChunkBytes = max(job.metrics.maximumChunkBytes,chunk.0.count)
                     copied += count * 8;offset += count;job.sampleMemory();job.report(BaroChartAsyncProgress(phase:"capture",done:copied,total:totalBytes))
@@ -893,6 +896,7 @@ private final class BaroChartWorkspaceRuntime: BaroChartContextRuntime {
     private func compute(_ job: BaroChartWorkspaceJob, _ plan: BaroChartWorkspaceDescriptor) throws -> Int {
         try job.check()
         guard let vm = JSVirtualMachine(), let context = JSContext(virtualMachine:vm) else {throw BaroChartLowLevelError.unavailableContext}
+        BaroChartTraceHooks.attach(context)
         ownedContext = context;context.evaluateScript(bundle)
         if let exception = context.exception {context.exception = nil;throw BaroChartLowLevelError.javaScript(exception.toString() ?? "Workspace bundle")}
         try job.check();try asterWorkspaceTrue(asterInvoke(context,"nativeWorkspaceTargetCreate",[plan.metadata]))
@@ -905,7 +909,7 @@ private final class BaroChartWorkspaceRuntime: BaroChartContextRuntime {
                 try autoreleasepool {
                     let target = try asterInvoke(context,"nativeAsyncTargetBuffer",[slot,offset,count])
                     let pointer = try asterTypedBytes(target,context,count:count)
-                    data.withUnsafeBytes {bytes in _ = memcpy(pointer,bytes.baseAddress!,data.count)}
+                    data.withUnsafeBytes {bytes in _ = memcpy(pointer,bytes.baseAddress!,data.count);BaroChartTraceHooks.hostWrote(context,target,bytes.baseAddress!,count)}
                 }
                 copied += data.count;offset += count;job.report(BaroChartAsyncProgress(phase:"capture",done:copied,total:plan.length*48))
             }
@@ -1220,6 +1224,7 @@ public final class BaroChartParamsJob {
     private func compute(bundle: String, plan: BaroChartParamsPlan) throws -> Int {
         try check()
         guard let context = JSContext(virtualMachine:JSVirtualMachine()) else {throw BaroChartLowLevelError.unavailableContext}
+        BaroChartTraceHooks.attach(context)
         context.evaluateScript(bundle)
         if let error = context.exception {context.exception = nil;throw BaroChartLowLevelError.javaScript(error.toString() ?? "Worker initialization")}
         try check();try asterWorkspaceTrue(asterInvoke(context,"nativeParamsTargetCreate",[plan.metadata]))
@@ -1236,7 +1241,7 @@ public final class BaroChartParamsJob {
                 try autoreleasepool {
                     let value = try asterInvoke(context,"nativeAsyncTargetBuffer",[slot,offset,count])
                     let pointer = try asterTypedBytes(value,context,count:count)
-                    data.withUnsafeBytes { bytes in pointer.copyMemory(from:bytes.baseAddress!,byteCount:data.count) }
+                    data.withUnsafeBytes { bytes in pointer.copyMemory(from:bytes.baseAddress!,byteCount:data.count);BaroChartTraceHooks.hostWrote(context,value,bytes.baseAddress!,count) }
                 }
                 copied += data.count;offset += count
             }
@@ -1279,7 +1284,7 @@ public final class BaroChartParamsJob {
                     // Arm and binary write execute in one owner turn; no queued write.
                     let value = try asterInvoke(source,"nativeAsyncTargetBuffer",[slot,at,count])
                     let pointer = try asterTypedBytes(value,source,count:count)
-                    data.withUnsafeBytes { bytes in pointer.copyMemory(from:bytes.baseAddress!,byteCount:data.count) };return true
+                    data.withUnsafeBytes { bytes in pointer.copyMemory(from:bytes.baseAddress!,byteCount:data.count);BaroChartTraceHooks.hostWrote(source,value,bytes.baseAddress!,count) };return true
                 }
                 copied += data.count;offset += count
             }
@@ -1411,6 +1416,7 @@ public final class BaroChartEngine {
     /// - Throws: ``BaroChartLowLevelError`` if the JavaScript context cannot be created or the bundle fails to load or initialize. Low-level API; prefer ``init(options:)``.
     public init(bundleURL: URL, count: Int = 0, options: [String: Any]? = nil) throws {
         guard let context = JSContext() else { throw BaroChartLowLevelError.unavailableContext }
+        BaroChartTraceHooks.attach(context)
         self.contextBacking = context
         self.bundleSource = try String(contentsOf: bundleURL, encoding: .utf8)
         // 스크립트 평가가 만드는 autorelease 임시 JSValue가 컨텍스트를 붙잡지 않도록 바로 비운다(call과 같은 이유)
@@ -1427,8 +1433,10 @@ public final class BaroChartEngine {
         // JSC가 호출마다 만드는 autorelease 임시 JSValue는 JSContext를 강하게 붙잡는다.
         // 호출자의 풀이 늦게 비워지면(백그라운드 소유 스레드, 한 런루프 턴 안의 반복) 닫힌 엔진의 컨텍스트가 쌓이므로 호출 단위로 비운다.
         return try autoreleasepool {
+            let trace = BaroChartTraceHooks.begin(context, name, arguments)
             guard let function = context.objectForKeyedSubscript(name), !function.isUndefined,
                   let value = function.call(withArguments: arguments) else { throw BaroChartLowLevelError.javaScript("Missing function: \(name)") }
+            BaroChartTraceHooks.end(trace, context, value)
             try checkException(); return value
         }
     }
@@ -1719,8 +1727,10 @@ public final class BaroChartEngine {
         defer {runtime?.releaseCaptureLease()}
         return try autoreleasepool { () throws -> ([String: Any], Bool) in
             guard let source = contextBacking else {throw BaroChartAsyncError.engineClosed}
+            let trace = BaroChartTraceHooks.begin(source, "nativeApplyUnchangedDataEvents", [events])
             guard let function = source.objectForKeyedSubscript("nativeApplyUnchangedDataEvents"), !function.isUndefined,
                   let value = function.call(withArguments: [events]) else {throw BaroChartLowLevelError.invalidScene}
+            BaroChartTraceHooks.end(trace, source, value)
             if let exception = source.exception {source.exception = nil;throw BaroChartLowLevelError.javaScript(exception.toString() ?? "Data batch error")}
             let object = value.toDictionary()
             if let exception = source.exception {source.exception = nil;throw BaroChartLowLevelError.javaScript(exception.toString() ?? "Data batch conversion error")}
@@ -1820,8 +1830,10 @@ public final class BaroChartEngine {
         defer {runtime?.releaseCaptureLease()}
         return try autoreleasepool { () throws -> [String: Any] in
             guard let source = contextBacking else {throw BaroChartAsyncError.engineClosed}
+            let trace = BaroChartTraceHooks.begin(source, "nativeDataExploration", [action, argument])
             guard let function = source.objectForKeyedSubscript("nativeDataExploration"), !function.isUndefined,
                   let value = function.call(withArguments: [action, argument]) else {throw BaroChartLowLevelError.invalidScene}
+            BaroChartTraceHooks.end(trace, source, value)
             if let exception = source.exception {
                 source.exception = nil
                 throw BaroChartLowLevelError.javaScript(exception.toString() ?? "Exploration error")
