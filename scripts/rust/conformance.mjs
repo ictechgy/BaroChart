@@ -53,8 +53,11 @@ export const SUITE_OPS=Object.freeze({
  date:['dateUtc','timeClip','toISOString','daysFromCivil','civilFromDays','parseIsoDate','parseIsoClock'],
 });
 
-/** 숫자 스위트의 값 원천(M1 계획 Task 4: 무작위 비트, 짧은 소수, 정확한 동률, 2^53 근처, 1e21·1e-7 경계, 부분정규수, 가격형 소수) */
-export const NUMBER_SOURCES=Object.freeze(['randomBits','shortDecimal','exactTie','near2p53','boundary','subnormal','priceDecimal','special']);
+/**
+ * 숫자 스위트의 값 원천(M1 계획 Task 4: 무작위 비트, 짧은 소수, 정확한 동률, 2^53 근처, 1e21·1e-7 경계, 부분정규수, 가격형 소수,
+ * 그리고 ±2^n 전부를 도는 2의 거듭제곱 스윕과 그 이웃(리뷰 C2))
+ */
+export const NUMBER_SOURCES=Object.freeze(['randomBits','shortDecimal','exactTie','near2p53','boundary','subnormal','priceDecimal','special','powerOfTwo']);
 
 /** jsonLossless의 carrier에서 특수 값(NaN, ±Infinity, undefined)을 나타내는 표지 객체의 키. 생성기의 키(4단위 이하)와 겹치지 않는다 */
 export const SENTINEL_KEY='\u0000bc:special';
@@ -316,7 +319,31 @@ function priceSource(random){
  return valueSource(Number(`${random.chance(0.2)?'-':''}${whole}.${random.digits(fraction)}`),{price:fraction});
 }
 
-/** 값 원천 이름 → 생성기 */
+/** 2의 거듭제곱 지수의 개수: 부분정규수 2^-1074부터 2^1023까지 */
+const POWER_OF_TWO_COUNT=2098;
+
+/** 지수를 도는 보폭. 2098(= 2 × 1049)과 서로소라 2098번에 모든 지수를 한 번씩 지나고, 작은 코퍼스에서도 범위 전체에 퍼진다 */
+const POWER_OF_TWO_STRIDE=1021;
+
+/**
+ * 2의 거듭제곱 원천: 순번 셋마다 지수 하나를 맡아 +2^n, -2^n, ±1~2 ulp 이웃(부호 무작위)을 낸다. 순번 3 × 2098개면 ±2^n 전부를 지난다.
+ * 무작위 비트로는 가수 0인 정규수가 나올 확률이 2^-52라 QuickJS가 최단이 아닌 자릿수를 쓰는 108값(커널 NumberDialect)이
+ * 어느 시드에도 들지 않았다(리뷰 C2). 숫자 스위트는 원천마다의 순번으로 결정적으로 돌고, 순번이 없는 곳(round·json)은 무작위 순번을 쓴다.
+ * @param {ReturnType<typeof createRandom>} random 난수 도구
+ * @param {number} [ordinal] 이 원천의 순번(스위트 안에서 이 원천이 나온 차례)
+ * @returns {object} 원천 값
+ */
+function powerOfTwoSource(random,ordinal=random.int(3*POWER_OF_TWO_COUNT)){
+ const exponent=-1074+(Math.floor(ordinal/3)*POWER_OF_TWO_STRIDE)%POWER_OF_TWO_COUNT,value=2**exponent;
+ if(ordinal%3===0)return valueSource(value);
+ if(ordinal%3===1)return valueSource(-value);
+ // 가장 작은 두 부분정규수 아래로는 0을 지나 음수 비트로 감기므로 위쪽 이웃만 쓴다
+ const step=random.range(1,2),below=exponent>-1073&&random.chance(0.5),neighbor=shiftBits(bitsHex(value),below?-step:step);
+ const bits=random.chance(0.5)?flipSign(neighbor):neighbor;
+ return {bits,value:numberFromBits(bits)};
+}
+
+/** 값 원천 이름 → 생성기(random, 순번). 순번은 숫자 스위트만 넘기고 powerOfTwo만 쓴다 */
 const SOURCE_GENERATORS=Object.freeze({
  randomBits:random=>wordsSource(random.uint32(),random.uint32()),
  shortDecimal:random=>valueSource(Number(`${random.chance(0.5)?'-':''}${random.digits(random.range(1,6))}e${random.range(-25,25)}`)),
@@ -326,6 +353,7 @@ const SOURCE_GENERATORS=Object.freeze({
  subnormal:random=>wordsSource(random.uint32()&0x800fffff,random.uint32()),
  priceDecimal:priceSource,
  special:random=>valueSource(random.pick(SPECIAL_NUMBERS)),
+ powerOfTwo:powerOfTwoSource,
 });
 
 /**
@@ -372,7 +400,7 @@ function exponentialDigits(random,source){
 }
 
 /**
- * 숫자 스위트 작업 하나. 값 원천은 색인 순서로 돌아가며 고른다.
+ * 숫자 스위트 작업 하나. 값 원천은 색인 순서로 돌아가며 고르고, 그 원천의 순번(색인 ÷ 원천 수)을 함께 넘긴다.
  * @param {ReturnType<typeof createRandom>} random 난수 도구
  * @param {number} index 스위트 안 색인
  * @param {(source: object) => object} build 원천 값 → 작업
@@ -380,7 +408,7 @@ function exponentialDigits(random,source){
  */
 function numberCase(random,index,build){
  const name=NUMBER_SOURCES[index%NUMBER_SOURCES.length];
- return {source:name,task:build(SOURCE_GENERATORS[name](random))};
+ return {source:name,task:build(SOURCE_GENERATORS[name](random,Math.floor(index/NUMBER_SOURCES.length)))};
 }
 
 /**

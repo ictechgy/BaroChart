@@ -93,7 +93,19 @@ test('every suite yields exactly count tasks, covers all of its operations and m
   assert.deepEqual([...new Set(cases.map(item=>item.task.op))].sort(),[...SUITE_OPS[suite]].sort(),suite);
   if(NUMBER_SUITES.includes(suite))assert.deepEqual([...new Set(cases.map(item=>item.source))].sort(),[...NUMBER_SOURCES].sort(),suite);
  }
- for(const name of ['randomBits','shortDecimal','exactTie','near2p53','boundary','subnormal','priceDecimal'])assert.ok(NUMBER_SOURCES.includes(name),name);
+ for(const name of ['randomBits','shortDecimal','exactTie','near2p53','boundary','subnormal','priceDecimal','powerOfTwo'])assert.ok(NUMBER_SOURCES.includes(name),name);
+});
+
+test('the number suites sweep every power of two ±2^n (n = -1074..1023), so engine differences there cannot hide',()=>{
+ // QuickJS는 정규수 2의 거듭제곱 54개 지수에서 최단이 아닌 자릿수를 쓴다(리뷰 C1·C2). 무작위 비트로는 그 값이 나오지 않으므로
+ // 원천마다 순번으로 지수를 도는 결정적 스윕이 있어야 한다. 원천 하나가 ±2^n과 이웃을 한 바퀴 도는 데 3 × 2098 차례가 든다
+ const count=NUMBER_SOURCES.length*3*2098;
+ for(const suite of ['number','exponential']){
+  const bits=new Set([...corpusCases({seed:3,count,suites:[suite]})].map(item=>item.task.x));
+  for(let exponent=-1074;exponent<=1023;exponent++){
+   for(const value of [2**exponent,-(2**exponent)])assert.ok(bits.has(bitsOf(value)),`${suite} corpus lacks ${Object.is(value,-0)?'-0':value<0?'-':''}2**${exponent}`);
+  }
+ }
 });
 
 test('the CLI prints the same corpus bytes as the module from a separate process',()=>{
