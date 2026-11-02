@@ -1,5 +1,7 @@
 # BaroChart Rust core porting map (stable surface)
 
+> **Scope update (2026-11-02).** The owner decided that the Rust backend reaches full parity with every low-level API except custom JS indicators. The advanced surface, the definitive scope lists and the corrections to this map are in [`2026-11-02-rust-core-porting-map-tier-a.md`](2026-11-02-rust-core-porting-map-tier-a.md) (§2 scope, §6 corrections). Where the two disagree, the tier-A document wins.
+
 - Date: 2026-11-02
 - Source snapshot: `/Users/jinhongan/BaroChart-review-20261023` (not a git checkout, so there is no commit id).
 - Oracle: `native/Resources/aster-core.js`, 588,614 UTF-16 units / 588,726 UTF-8 bytes. Readers confirmed it is byte-identical to a fresh `buildNativeBundle()` (`scripts/native-core-bundle.mjs`). So every `src/core/*` line reference below is valid for the shipped native core.
