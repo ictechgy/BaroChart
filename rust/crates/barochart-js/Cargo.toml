@@ -6,5 +6,7 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
-# 런타임 의존성은 워크스페이스 전체에서 ryu-js(=1.0.3)뿐이다. 숫자 포맷을 구현하는 Task 2에서 더한다.
+# 런타임 의존성은 워크스페이스 전체에서 ryu-js(=1.0.3)뿐이다(M1 계획 Global Constraints).
+# Number::toString의 최단 자릿수를 V8과 같게 내려고 쓰며, 버전을 고정한다(설계 §6.4).
 [dependencies]
+ryu-js = "=1.0.3"
