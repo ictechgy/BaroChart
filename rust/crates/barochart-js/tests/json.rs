@@ -6,8 +6,9 @@
 //! 계약이다(이식 지도 D8). Lossless는 M0 계획 Task 5의 BCJSON 문법에서 `F64` 토큰을 뺀 것이다.
 
 use barochart_js::json::{
-    JsObject, JsValue, JsonMode, parse_json, parse_json_utf16, stringify_json,
+    JsObject, JsValue, JsonMode, parse_json, parse_json_utf16, stringify_json, stringify_json_with,
 };
+use barochart_js::num::NumberDialect;
 use barochart_js::string::JsString;
 
 /// 텍스트를 파싱한다. 실패하면 입력과 오류를 보여 주며 멈춘다.
@@ -771,6 +772,41 @@ fn stringify_writes_numbers_like_js() {
         JsValue::Null,
     ]);
     assert_eq!(stringify(&flags, JsonMode::Standard), "[true,false,null]");
+}
+
+/// 숫자는 방언대로 쓴다: QuickJS(Android 오라클)의 `JSON.stringify([2 ** -24])`는 17자리다(V8·JSC는 16자리).
+///
+/// JSON 텍스트 길이가 문서 한도와 undo 가중치를 정하므로(설계 §6.4) 1바이트 차이도 동작을 바꿀 수 있다(리뷰 C1).
+/// 방언 인자가 없는 `stringify_json`은 이 빌드의 방언(`NumberDialect::PLATFORM`)을 쓴다.
+#[test]
+fn stringify_writes_numbers_in_the_given_dialect() {
+    let value = JsValue::Array(vec![
+        // 2 ** -24(비트 3e70000000000000)
+        JsValue::Number(f64::from_bits(0x3E70_0000_0000_0000)),
+        JsValue::Number(-0.0),
+        JsValue::Number(1.5),
+    ]);
+    let written =
+        |mode, dialect| match String::from_utf8(stringify_json_with(&value, mode, dialect)) {
+            Ok(text) => text,
+            Err(error) => panic!("{mode:?} {dialect:?} writer emitted invalid UTF-8: {error}"),
+        };
+    assert_eq!(
+        written(JsonMode::Standard, NumberDialect::QuickJs),
+        "[5.9604644775390625e-8,0,1.5]"
+    );
+    assert_eq!(
+        written(JsonMode::Lossless, NumberDialect::QuickJs),
+        "[5.9604644775390625e-8,-0,1.5]"
+    );
+    assert_eq!(
+        written(JsonMode::Standard, NumberDialect::Ecma),
+        "[5.960464477539063e-8,0,1.5]"
+    );
+    assert_eq!(
+        stringify(&value, JsonMode::Standard),
+        written(JsonMode::Standard, NumberDialect::PLATFORM)
+    );
 }
 
 /// 객체 안의 undefined는 키째 빠지고 배열 안의 undefined는 null이 된다.

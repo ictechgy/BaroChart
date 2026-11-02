@@ -4,7 +4,8 @@
 //! - 문자열 이스케이프는 `\"`, `\\`, `\b`, `\f`, `\n`, `\r`, `\t`, 나머지 C0는 소문자 `\u00xx`, 단독 서로게이트는
 //!   소문자 `\udxxx`다. `/`, DEL, U+2028/2029, 비ASCII는 원문 UTF-8로 쓴다(V8·JSC·QuickJS가 같다). 그래서 출력은
 //!   늘 올바른 UTF-8이다.
-//! - 유한한 수는 `Number::toString`(`num::number_to_string`)으로 쓴다.
+//! - 유한한 수는 `Number::toString`(`num::number_to_string_with`)으로 쓴다. 방언은 `stringify_json`이 이 빌드의
+//!   방언(`NumberDialect::PLATFORM`, Android는 QuickJS)이고, `stringify_json_with`로 고른다.
 //! - Standard: `-0`은 `0`, 비유한 수는 `null`, 객체 안의 `undefined`는 키째 빠지고 배열 안의 `undefined`는 `null`이다.
 //! - Lossless(BCJSON): `NaN`, `Infinity`, `-Infinity`, `-0`, `undefined`를 토큰으로 남긴다.
 //! - 재귀하지 않는다. 순회 상태를 힙 스택에 쌓으므로 깊이와 무관하게 스레드 스택을 일정하게 쓴다.
@@ -14,7 +15,7 @@ use std::slice;
 
 use super::object::{JsObject, ObjectIter};
 use super::{JsValue, JsonMode};
-use crate::num::number_to_string;
+use crate::num::{NumberDialect, number_to_string_with};
 use crate::string::JsString;
 
 /// 소문자 16진 숫자(`\uXXXX` 이스케이프는 소문자다)
@@ -25,13 +26,33 @@ const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
 /// 최상위 `undefined`: JS `JSON.stringify(undefined)`는 텍스트 없이 undefined를 돌려준다. 바이트를 돌려주는 이 함수는
 /// 표준 결과 인코딩(설계 §4.2, Android `aster_jni.c:60`이 undefined를 null로 바꾼 뒤 stringify하는 것)과 같게
 /// `null`을 쓴다. 텍스트가 없다는 사실이 필요한 호출자는 먼저 `JsValue::Undefined`인지 본다. Lossless는 `undefined`다.
+/// 숫자는 이 빌드의 방언(`NumberDialect::PLATFORM`)으로 쓴다. 다른 방언은 `stringify_json_with`로 고른다.
 /// - `value`: 쓸 값
 /// - `mode`: 문법
 /// - 반환: UTF-8 JSON 텍스트
 pub fn stringify_json(value: &JsValue, mode: JsonMode) -> Vec<u8> {
+    stringify_json_with(value, mode, NumberDialect::PLATFORM)
+}
+
+/// `stringify_json`과 같되 숫자를 주어진 방언으로 쓴다(QuickJS는 정규수 2의 거듭제곱 54개 지수에서 17자리).
+///
+/// - `value`: 쓸 값
+/// - `mode`: 문법
+/// - `dialect`: `Number::toString`의 방언
+/// - 반환: UTF-8 JSON 텍스트
+pub fn stringify_json_with(value: &JsValue, mode: JsonMode, dialect: NumberDialect) -> Vec<u8> {
     let mut out = Vec::new();
-    write_tree(&mut out, mode, value);
+    write_tree(&mut out, Style { mode, dialect }, value);
     out
+}
+
+/// 쓰기 방식: 문법과 숫자 방언
+#[derive(Clone, Copy)]
+struct Style {
+    /// 문법(Standard 또는 Lossless)
+    mode: JsonMode,
+    /// `Number::toString`의 방언
+    dialect: NumberDialect,
 }
 
 /// 객체 하나를 무손실 텍스트로 쓴다(`JsObject`의 Debug용).
@@ -44,7 +65,11 @@ pub(crate) fn object_to_lossless(object: &JsObject) -> Vec<u8> {
         entries: object.entries(),
         first: true,
     }];
-    drain_frames(&mut out, JsonMode::Lossless, &mut stack);
+    let style = Style {
+        mode: JsonMode::Lossless,
+        dialect: NumberDialect::PLATFORM,
+    };
+    drain_frames(&mut out, style, &mut stack);
     out
 }
 
@@ -69,20 +94,20 @@ enum WriteFrame<'a> {
 /// 값 하나와 그 안의 모든 값을 쓴다.
 ///
 /// - `out`: 출력
-/// - `mode`: 문법
+/// - `style`: 문법과 숫자 방언
 /// - `root`: 쓸 값
-fn write_tree(out: &mut Vec<u8>, mode: JsonMode, root: &JsValue) {
+fn write_tree(out: &mut Vec<u8>, style: Style, root: &JsValue) {
     let mut stack = Vec::new();
-    write_value(out, mode, root, &mut stack);
-    drain_frames(out, mode, &mut stack);
+    write_value(out, style, root, &mut stack);
+    drain_frames(out, style, &mut stack);
 }
 
 /// 스택이 빌 때까지 맨 위 컨테이너의 다음 원소·멤버를 쓰고, 끝나면 닫는다.
 ///
 /// - `out`: 출력
-/// - `mode`: 문법
+/// - `style`: 문법과 숫자 방언
 /// - `stack`: 쓰고 있는 컨테이너들(여는 괄호는 이미 썼다)
-fn drain_frames<'a>(out: &mut Vec<u8>, mode: JsonMode, stack: &mut Vec<WriteFrame<'a>>) {
+fn drain_frames<'a>(out: &mut Vec<u8>, style: Style, stack: &mut Vec<WriteFrame<'a>>) {
     while let Some(frame) = stack.last_mut() {
         let next = match frame {
             WriteFrame::Array { items, first } => match items.next() {
@@ -100,7 +125,7 @@ fn drain_frames<'a>(out: &mut Vec<u8>, mode: JsonMode, stack: &mut Vec<WriteFram
             WriteFrame::Object { entries, first } => {
                 // Standard는 undefined를 담은 멤버를 키째 건너뛴다
                 let member = entries.find(|(_, value)| {
-                    mode == JsonMode::Lossless || !matches!(value, JsValue::Undefined)
+                    style.mode == JsonMode::Lossless || !matches!(value, JsValue::Undefined)
                 });
                 match member {
                     Some((key, value)) => {
@@ -119,7 +144,7 @@ fn drain_frames<'a>(out: &mut Vec<u8>, mode: JsonMode, stack: &mut Vec<WriteFram
             }
         };
         match next {
-            Some(value) => write_value(out, mode, value, stack),
+            Some(value) => write_value(out, style, value, stack),
             None => {
                 stack.pop();
             }
@@ -132,24 +157,24 @@ fn drain_frames<'a>(out: &mut Vec<u8>, mode: JsonMode, stack: &mut Vec<WriteFram
 /// 객체 멤버의 `undefined`(Standard)는 `drain_frames`가 미리 건너뛰므로, 여기 오는 Standard `undefined`는
 /// 배열 원소이거나 최상위 값이고 둘 다 `null`로 쓴다.
 /// - `out`: 출력
-/// - `mode`: 문법
+/// - `style`: 문법과 숫자 방언
 /// - `value`: 쓸 값
 /// - `stack`: 쓰고 있는 컨테이너들
 fn write_value<'a>(
     out: &mut Vec<u8>,
-    mode: JsonMode,
+    style: Style,
     value: &'a JsValue,
     stack: &mut Vec<WriteFrame<'a>>,
 ) {
     match value {
-        JsValue::Undefined => out.extend_from_slice(match mode {
+        JsValue::Undefined => out.extend_from_slice(match style.mode {
             JsonMode::Standard => b"null".as_slice(),
             JsonMode::Lossless => b"undefined".as_slice(),
         }),
         JsValue::Null => out.extend_from_slice(b"null"),
         JsValue::Bool(true) => out.extend_from_slice(b"true"),
         JsValue::Bool(false) => out.extend_from_slice(b"false"),
-        JsValue::Number(number) => write_number(out, mode, *number),
+        JsValue::Number(number) => write_number(out, style, *number),
         JsValue::String(text) => write_string(out, text),
         JsValue::Array(items) => {
             out.push(b'[');
@@ -171,10 +196,10 @@ fn write_value<'a>(
 /// 수를 쓴다. Standard는 비유한 수를 `null`로, Lossless는 `NaN`·`Infinity`·`-Infinity`·`-0` 토큰으로 쓴다.
 ///
 /// - `out`: 출력
-/// - `mode`: 문법
+/// - `style`: 문법과 숫자 방언
 /// - `number`: 쓸 수
-fn write_number(out: &mut Vec<u8>, mode: JsonMode, number: f64) {
-    let token: &[u8] = match mode {
+fn write_number(out: &mut Vec<u8>, style: Style, number: f64) {
+    let token: &[u8] = match style.mode {
         JsonMode::Standard if !number.is_finite() => b"null",
         JsonMode::Lossless if number.is_nan() => b"NaN",
         JsonMode::Lossless if number == f64::INFINITY => b"Infinity",
@@ -182,7 +207,7 @@ fn write_number(out: &mut Vec<u8>, mode: JsonMode, number: f64) {
         JsonMode::Lossless if number == 0.0 && number.is_sign_negative() => b"-0",
         _ => {
             // Number::toString은 -0을 "0"으로 쓴다(Standard의 -0 → 0)
-            out.extend_from_slice(number_to_string(number).as_bytes());
+            out.extend_from_slice(number_to_string_with(number, style.dialect).as_bytes());
             return;
         }
     };

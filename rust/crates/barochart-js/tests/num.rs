@@ -3,16 +3,30 @@
 //! 기대값은 같은 JS 식을 V8(Node 22.20.0), JSC(macOS 시스템 `jsc`), QuickJS(`native/android/quickjs`
 //! 2026-06-04)에서 계산해 세 엔진이 모두 같은 값을 낸 것만 넣었다(2026-11-02 실측, 223식 전부 일치).
 //! 실패 문구의 JS 식이 그 원본이다. JS 식으로 만들 수 없는 NaN 페이로드 사례 하나만 ECMA-262 SameValue
-//! 정의로 정했다. 대량 대조는 Task 4의 대조 하네스가 맡는다.
+//! 정의로 정했다. 예외는 숫자 방언 시험이다: 정규수 2의 거듭제곱 54개 지수에서 QuickJS는 V8·JSC와 다른
+//! 자릿수를 쓰므로(리뷰 C1), 그 시험은 V8·JSC 값(`NumberDialect::Ecma`)과 QuickJS 값(`NumberDialect::QuickJs`)을
+//! 따로 적었다. 대량 대조는 Task 4의 대조 하네스가 맡는다(2의 거듭제곱 ±2^n 전부를 세 엔진과 대조한다).
 //!
 //! 이 파일도 `scripts/rust/check-bans.mjs`가 커널 규칙으로 검사한다. 그래서 Rust의 정밀도 형식으로
 //! 기대값을 만들지 않고, 문자열을 그대로 적는다.
 
 use barochart_js::math::{js_exp, js_hypot, js_log};
 use barochart_js::num::{
-    js_max, js_min, js_round, js_sign, number_to_string, same_value, to_exponential, to_fixed,
-    to_int32, to_precision, to_uint32,
+    NumberDialect, js_max, js_min, js_round, js_sign, number_to_string, number_to_string_with,
+    same_value, to_exponential, to_exponential_with, to_fixed, to_fixed_with, to_int32,
+    to_precision, to_uint32,
 };
+
+/// QuickJS 2026-06-04가 최단이 아닌 17자리를 쓰는 정규수 2의 거듭제곱 지수 54개(2026-11-02 실측).
+///
+/// `String(2 ** n)`을 n = -1074..=1023 전부에 대해 V8·JSC·QuickJS로 계산해 QuickJS만 다른 지수다(부호를 바꿔도
+/// 같다). V8과 JSC는 2,098개 모두 같았다. `toExponential()`과 `JSON.stringify`도 같은 54개에서 갈렸다.
+const QUICKJS_NON_SHORTEST_EXPONENTS: [i32; 54] = [
+    -1017, -1007, -957, -921, -808, -791, -788, -778, -705, -695, -662, -652, -645, -569, -549,
+    -509, -499, -496, -489, -383, -366, -296, -140, -97, -77, -44, -24, 89, 122, 132, 149, 172,
+    182, 275, 305, 345, 378, 398, 405, 481, 534, 544, 554, 574, 594, 710, 740, 803, 863, 890, 896,
+    956, 966, 976,
+];
 
 /// 두 f64가 `Object.is` 기준으로 같은지 단언한다. +0과 -0을 가르고, NaN끼리는 같다고 본다.
 ///
@@ -78,6 +92,160 @@ fn number_to_string_matches_js() {
     for &(x, expected) in cases {
         assert_eq!(number_to_string(x), expected, "String({x:?})");
     }
+}
+
+/// 문자열의 유효 숫자 개수(부호·소수점·지수를 빼고 앞의 0을 뺀 숫자)
+///
+/// - `text`: `Number::toString` 결과
+/// - 반환: 유효 숫자 개수
+fn significant_digits(text: &str) -> usize {
+    let mantissa = text.split('e').next().unwrap_or(text);
+    mantissa
+        .bytes()
+        .filter(u8::is_ascii_digit)
+        .skip_while(|&digit| digit == b'0')
+        .count()
+}
+
+/// 숫자 방언: QuickJS(Android 오라클)는 정규수 2의 거듭제곱 54개 지수에서 V8·JSC와 달리 17자리를 쓴다.
+///
+/// `String(x)`, `x.toExponential()`, |x| ≥ 1e21의 `x.toFixed(d)`가 같은 자릿수를 쓴다(세 엔진 실측).
+#[test]
+fn quickjs_dialect_writes_seventeen_digits_at_its_powers_of_two() {
+    let cases: &[(i32, &str, &str)] = &[
+        (-24, "5.960464477539063e-8", "5.9604644775390625e-8"),
+        (89, "6.189700196426902e+26", "6.1897001964269014e+26"),
+        (956, "6.090821257125e+287", "6.0908212571249994e+287"),
+        (-1017, "7.120236347223045e-307", "7.1202363472230444e-307"),
+        (976, "6.386688990511104e+293", "6.3866889905111034e+293"),
+    ];
+    for &(exponent, ecma, quickjs) in cases {
+        let x = power_of_two(exponent);
+        for (dialect, expected) in [
+            (NumberDialect::Ecma, ecma),
+            (NumberDialect::QuickJs, quickjs),
+        ] {
+            assert_eq!(
+                number_to_string_with(x, dialect),
+                expected,
+                "{dialect:?} String(2 ** {exponent})"
+            );
+            assert_eq!(
+                number_to_string_with(-x, dialect),
+                format!("-{expected}"),
+                "{dialect:?} String(-(2 ** {exponent}))"
+            );
+            assert_eq!(
+                to_exponential_with(x, None, dialect),
+                expected,
+                "{dialect:?} (2 ** {exponent}).toExponential()"
+            );
+        }
+    }
+    let large = power_of_two(89);
+    assert_eq!(
+        to_fixed_with(large, 2, NumberDialect::QuickJs),
+        "6.1897001964269014e+26",
+        "QuickJS (2 ** 89).toFixed(2)"
+    );
+    assert_eq!(
+        to_fixed_with(-large, 2, NumberDialect::QuickJs),
+        "-6.1897001964269014e+26",
+        "QuickJS (-(2 ** 89)).toFixed(2)"
+    );
+    assert_eq!(
+        to_fixed_with(large, 2, NumberDialect::Ecma),
+        "6.189700196426902e+26",
+        "V8 (2 ** 89).toFixed(2)"
+    );
+    // |x| < 1e21의 toFixed와 자릿수를 정한 toExponential은 방언과 무관하다
+    let small = power_of_two(-24);
+    assert_eq!(
+        to_fixed_with(small, 30, NumberDialect::QuickJs),
+        to_fixed_with(small, 30, NumberDialect::Ecma)
+    );
+    assert_eq!(
+        to_exponential_with(small, Some(20), NumberDialect::QuickJs),
+        to_exponential_with(small, Some(20), NumberDialect::Ecma)
+    );
+}
+
+/// 2의 거듭제곱 전부(부분정규수 포함)와 정규수 2의 거듭제곱의 ±1 ulp 이웃: QuickJS 방언은 실측 54개 지수에서만 ECMA와
+/// 다르고, 그 값은 17자리이며 원래 수로 되읽힌다. IEEE 반올림 구간이 비대칭인 곳(가수 0, 지수 필드 2 이상)만 갈린다.
+#[test]
+fn quickjs_dialect_differs_only_at_the_measured_powers_of_two() {
+    for exponent in -1074..=1023 {
+        let x = if exponent >= -1022 {
+            power_of_two(exponent)
+        } else {
+            f64::from_bits(1_u64 << (exponent + 1074))
+        };
+        for value in [x, -x] {
+            let ecma = number_to_string_with(value, NumberDialect::Ecma);
+            let quickjs = number_to_string_with(value, NumberDialect::QuickJs);
+            if QUICKJS_NON_SHORTEST_EXPONENTS.contains(&exponent) {
+                assert_ne!(
+                    quickjs, ecma,
+                    "2 ** {exponent} must differ between dialects"
+                );
+                assert_eq!(
+                    significant_digits(&quickjs),
+                    17,
+                    "QuickJS String(2 ** {exponent}) = {quickjs}"
+                );
+                assert!(
+                    significant_digits(&ecma) < 17,
+                    "V8 String(2 ** {exponent}) = {ecma}"
+                );
+                assert_eq!(
+                    quickjs.parse::<f64>(),
+                    Ok(value),
+                    "{quickjs} must read back as 2 ** {exponent}"
+                );
+            } else {
+                assert_eq!(
+                    quickjs, ecma,
+                    "String(2 ** {exponent}) is the same in V8, JSC and QuickJS"
+                );
+            }
+        }
+    }
+    for exponent in -1021..=1023 {
+        let bits = power_of_two(exponent).to_bits();
+        for neighbor in [f64::from_bits(bits - 1), f64::from_bits(bits + 1)] {
+            assert_eq!(
+                number_to_string_with(neighbor, NumberDialect::QuickJs),
+                number_to_string_with(neighbor, NumberDialect::Ecma),
+                "neighbor {neighbor:?} of 2 ** {exponent}"
+            );
+        }
+    }
+}
+
+/// 이 빌드의 방언은 같은 기기 JS 백엔드를 따른다(설계 §6.1): Android는 QuickJS, 그 밖(iOS·macOS JSC, wasm32 하네스
+/// V8)은 ECMA-262다. 방언 인자가 없는 함수는 이 방언을 쓴다.
+#[test]
+fn platform_dialect_follows_the_same_device_js_backend() {
+    let expected = if cfg!(target_os = "android") {
+        NumberDialect::QuickJs
+    } else {
+        NumberDialect::Ecma
+    };
+    assert_eq!(NumberDialect::PLATFORM, expected);
+    let small = power_of_two(-24);
+    let large = power_of_two(89);
+    assert_eq!(
+        number_to_string(small),
+        number_to_string_with(small, NumberDialect::PLATFORM)
+    );
+    assert_eq!(
+        to_exponential(small, None),
+        to_exponential_with(small, None, NumberDialect::PLATFORM)
+    );
+    assert_eq!(
+        to_fixed(large, 3),
+        to_fixed_with(large, 3, NumberDialect::PLATFORM)
+    );
 }
 
 /// `x.toFixed(d)`: 정확한 이진 값에서 동률이면 절댓값이 큰 쪽, 부호는 x < 0일 때만, |x| ≥ 1e21이면 `String(x)`

@@ -1,6 +1,9 @@
 //! `bc-conformance`: JS 의미 커널(`barochart-js`)을 JS 엔진과 대조하는 개발 전용 계산기(M1 계획 Task 4).
 //!
 //! 표준입력의 JSONL 작업을 한 줄씩 커널로 계산해, 같은 순서의 JSONL 결과 `{"r":"<결과>"}`를 표준출력에 쓴다.
+//! 숫자를 문자열로 쓰는 연산은 QuickJS 방언(`NumberDialect::QuickJs`, Android 빌드의 규칙)으로도 계산해, 결과가
+//! 다르면 `{"r":"<ECMA 결과>","q":"<QuickJS 결과>"}`로 쓴다. 하네스는 `r`을 V8·JSC와, `q`(없으면 `r`)를
+//! QuickJS와 비교한다(설계 §6.1: 같은 기기 JS 백엔드가 오라클, 리뷰 C1·C3).
 //! 작업을 만들고 결과를 V8·JSC·QuickJS의 기대값과 비교하는 쪽은 `scripts/rust/conformance.mjs`다.
 //! 작업 줄도 커널의 JSON 파서로 읽는다(serde를 쓰지 않는다, 설계 §7.2).
 //!
@@ -28,11 +31,11 @@ use barochart_js::date::{
     to_iso_string,
 };
 use barochart_js::json::{
-    JsObject, JsValue, JsonMode, parse_json, parse_json_utf16, stringify_json,
+    JsObject, JsValue, JsonMode, parse_json, parse_json_utf16, stringify_json, stringify_json_with,
 };
 use barochart_js::num::{
-    js_max, js_min, js_round, js_sign, number_to_string, same_value, to_exponential, to_fixed,
-    to_int32, to_precision, to_uint32,
+    NumberDialect, js_max, js_min, js_round, js_sign, number_to_string_with, same_value,
+    to_exponential_with, to_fixed_with, to_int32, to_precision, to_uint32,
 };
 use barochart_js::string::{JsString, is_js_whitespace};
 
@@ -52,38 +55,52 @@ const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
 /// 작업 하나의 결과: 정규 결과 문자열, 또는 작업이 잘못됐다는 이유
 type Outcome = Result<String, String>;
 
-/// 연산 하나: 작업 객체를 받아 결과를 낸다
-type Operation = fn(&JsObject) -> Outcome;
+/// 연산 구현. 숫자를 문자열로 쓰는 연산만 방언을 받는다.
+#[derive(Clone, Copy)]
+enum Operation {
+    /// 방언과 무관한 연산
+    Plain(fn(&JsObject) -> Outcome),
+    /// 숫자를 문자열로 쓰는 연산(`Number::toString`의 방언이 결과를 바꿀 수 있다)
+    Formatting(fn(&JsObject, NumberDialect) -> Outcome),
+}
+
+/// 작업 하나의 결과 줄: ECMA(V8·JSC) 결과와, 다르면 QuickJS 방언 결과
+struct Results {
+    /// ECMA-262 방언 결과(`r`)
+    ecma: String,
+    /// QuickJS 방언 결과가 ECMA와 다를 때만 그 값(`q`)
+    quickjs: Option<String>,
+}
 
 /// 연산 이름 → 구현. `scripts/rust/conformance.mjs`의 `SUITE_OPS`와 같은 이름을 쓴다.
 const OPERATIONS: &[(&str, Operation)] = &[
-    ("toString", op_to_string),
-    ("toFixed", op_to_fixed),
-    ("toPrecision", op_to_precision),
-    ("toExponential", op_to_exponential),
-    ("round", op_round),
-    ("sign", op_sign),
-    ("max", op_max),
-    ("min", op_min),
-    ("toInt32", op_to_int32),
-    ("toUint32", op_to_uint32),
-    ("objectIs", op_object_is),
-    ("json", op_json),
-    ("jsonLossless", op_json_lossless),
-    ("jsonUnits", op_json_units),
-    ("trim", op_trim),
-    ("toLowerCase", op_to_lower_case),
-    ("slice", op_slice),
-    ("length", op_length),
-    ("isWhitespace", op_is_whitespace),
-    ("quote", op_quote),
-    ("dateUtc", op_date_utc),
-    ("timeClip", op_time_clip),
-    ("toISOString", op_to_iso_string),
-    ("daysFromCivil", op_days_from_civil),
-    ("civilFromDays", op_civil_from_days),
-    ("parseIsoDate", op_parse_iso_date),
-    ("parseIsoClock", op_parse_iso_clock),
+    ("toString", Operation::Formatting(op_to_string)),
+    ("toFixed", Operation::Formatting(op_to_fixed)),
+    ("toPrecision", Operation::Plain(op_to_precision)),
+    ("toExponential", Operation::Formatting(op_to_exponential)),
+    ("round", Operation::Plain(op_round)),
+    ("sign", Operation::Plain(op_sign)),
+    ("max", Operation::Plain(op_max)),
+    ("min", Operation::Plain(op_min)),
+    ("toInt32", Operation::Plain(op_to_int32)),
+    ("toUint32", Operation::Plain(op_to_uint32)),
+    ("objectIs", Operation::Plain(op_object_is)),
+    ("json", Operation::Formatting(op_json)),
+    ("jsonLossless", Operation::Formatting(op_json_lossless)),
+    ("jsonUnits", Operation::Formatting(op_json_units)),
+    ("trim", Operation::Plain(op_trim)),
+    ("toLowerCase", Operation::Plain(op_to_lower_case)),
+    ("slice", Operation::Plain(op_slice)),
+    ("length", Operation::Plain(op_length)),
+    ("isWhitespace", Operation::Plain(op_is_whitespace)),
+    ("quote", Operation::Plain(op_quote)),
+    ("dateUtc", Operation::Plain(op_date_utc)),
+    ("timeClip", Operation::Plain(op_time_clip)),
+    ("toISOString", Operation::Plain(op_to_iso_string)),
+    ("daysFromCivil", Operation::Plain(op_days_from_civil)),
+    ("civilFromDays", Operation::Plain(op_civil_from_days)),
+    ("parseIsoDate", Operation::Plain(op_parse_iso_date)),
+    ("parseIsoClock", Operation::Plain(op_parse_iso_clock)),
 ];
 
 /// 인자가 없으면 작업을 계산하고, `--unicode-version`이면 std의 유니코드 판을 쓴다.
@@ -140,7 +157,7 @@ fn run(input: impl BufRead, mut output: impl Write) -> Result<(), String> {
 /// 작업 줄 하나(JSON 객체)를 읽어 계산한다.
 ///
 /// - `line`: 작업 줄의 바이트
-fn evaluate_line(line: &[u8]) -> Outcome {
+fn evaluate_line(line: &[u8]) -> Result<Results, String> {
     let task = parse_json(line, JsonMode::Standard)
         .map_err(|error| format!("the task is not JSON ({error})"))?;
     match &task {
@@ -149,38 +166,61 @@ fn evaluate_line(line: &[u8]) -> Outcome {
     }
 }
 
-/// 작업의 `op`로 연산을 찾아 계산한다.
+/// 작업의 `op`로 연산을 찾아 계산한다. 숫자를 쓰는 연산은 두 방언으로 계산한다.
 ///
 /// - `task`: 작업 객체
-fn evaluate(task: &JsObject) -> Outcome {
+fn evaluate(task: &JsObject) -> Result<Results, String> {
     let op = text_field(task, "op")?;
-    let (_, operation) = OPERATIONS
+    let &(_, operation) = OPERATIONS
         .iter()
         .find(|(name, _)| *name == op)
         .ok_or_else(|| format!("unknown op {op:?}"))?;
-    operation(task)
+    match operation {
+        Operation::Plain(compute) => Ok(Results {
+            ecma: compute(task)?,
+            quickjs: None,
+        }),
+        Operation::Formatting(compute) => {
+            let ecma = compute(task, NumberDialect::Ecma)?;
+            let quickjs = compute(task, NumberDialect::QuickJs)?;
+            Ok(Results {
+                quickjs: (quickjs != ecma).then_some(quickjs),
+                ecma,
+            })
+        }
+    }
 }
 
-/// 결과 줄 `{"r":"<결과>"}`를 쓴다. 문자열은 커널 writer로 이스케이프한다.
+/// 결과 줄 `{"r":"<결과>"}` 또는 `{"r":"<ECMA 결과>","q":"<QuickJS 결과>"}`를 쓴다. 문자열은 커널 writer로
+/// 이스케이프한다.
 ///
 /// - `output`: 결과를 쓸 곳
-/// - `result`: 정규 결과 문자열
-fn write_result(output: &mut impl Write, result: &str) -> io::Result<()> {
-    let text = JsValue::String(JsString::from_str(result));
+/// - `results`: 정규 결과 문자열들
+fn write_result(output: &mut impl Write, results: &Results) -> io::Result<()> {
+    let quote = |text: &str| {
+        stringify_json(
+            &JsValue::String(JsString::from_str(text)),
+            JsonMode::Standard,
+        )
+    };
     output.write_all(b"{\"r\":")?;
-    output.write_all(&stringify_json(&text, JsonMode::Standard))?;
+    output.write_all(&quote(&results.ecma))?;
+    if let Some(quickjs) = &results.quickjs {
+        output.write_all(b",\"q\":")?;
+        output.write_all(&quote(quickjs))?;
+    }
     output.write_all(b"}\n")
 }
 
 /// `Number::toString(x)`
-fn op_to_string(task: &JsObject) -> Outcome {
-    Ok(number_to_string(bits_field(task, "x")?))
+fn op_to_string(task: &JsObject, dialect: NumberDialect) -> Outcome {
+    Ok(number_to_string_with(bits_field(task, "x")?, dialect))
 }
 
 /// `x.toFixed(d)`
-fn op_to_fixed(task: &JsObject) -> Outcome {
+fn op_to_fixed(task: &JsObject, dialect: NumberDialect) -> Outcome {
     let digits = ranged_field(task, "d", 0..=MAX_DIGITS)?;
-    Ok(to_fixed(bits_field(task, "x")?, digits))
+    Ok(to_fixed_with(bits_field(task, "x")?, digits, dialect))
 }
 
 /// `x.toPrecision(p)`
@@ -190,12 +230,12 @@ fn op_to_precision(task: &JsObject) -> Outcome {
 }
 
 /// `x.toExponential(d)`. `d`가 없으면 JS의 undefined(최단 자릿수)다.
-fn op_to_exponential(task: &JsObject) -> Outcome {
+fn op_to_exponential(task: &JsObject, dialect: NumberDialect) -> Outcome {
     let digits = task
         .get(&JsString::from_str("d"))
         .map(|_| ranged_field(task, "d", 0..=MAX_DIGITS))
         .transpose()?;
-    Ok(to_exponential(bits_field(task, "x")?, digits))
+    Ok(to_exponential_with(bits_field(task, "x")?, digits, dialect))
 }
 
 /// `Math.round(x)`
@@ -234,33 +274,33 @@ fn op_object_is(task: &JsObject) -> Outcome {
 }
 
 /// `JSON.stringify(JSON.parse(text))`. 파싱 오류는 `E:SyntaxError`다.
-fn op_json(task: &JsObject) -> Outcome {
+fn op_json(task: &JsObject, dialect: NumberDialect) -> Outcome {
     let text = hex_bytes_field(task, "text")?;
     Ok(match parse_json(&text, JsonMode::Standard) {
-        Ok(value) => hex_of_bytes(&stringify_json(&value, JsonMode::Standard)),
+        Ok(value) => hex_of_bytes(&stringify_json_with(&value, JsonMode::Standard, dialect)),
         Err(error) => format!("E:{}", error.name),
     })
 }
 
 /// JS 문자열(UTF-16 코드 단위, 원문 단독 서로게이트 허용)에 `JSON.parse` 뒤 `JSON.stringify`. 파싱 오류는 `E:SyntaxError`다.
-fn op_json_units(task: &JsObject) -> Outcome {
+fn op_json_units(task: &JsObject, dialect: NumberDialect) -> Outcome {
     let text = units_field(task, "units")?;
     Ok(
         match parse_json_utf16(text.as_units(), JsonMode::Standard) {
-            Ok(value) => hex_of_bytes(&stringify_json(&value, JsonMode::Standard)),
+            Ok(value) => hex_of_bytes(&stringify_json_with(&value, JsonMode::Standard, dialect)),
             Err(error) => format!("E:{}", error.name),
         },
     )
 }
 
 /// 무손실(BCJSON) 텍스트를 읽어 표준 JSON과 무손실 텍스트로 다시 쓴다: `<표준 16진>,<무손실 16진>`.
-fn op_json_lossless(task: &JsObject) -> Outcome {
+fn op_json_lossless(task: &JsObject, dialect: NumberDialect) -> Outcome {
     let text = hex_bytes_field(task, "text")?;
     Ok(match parse_json(&text, JsonMode::Lossless) {
         Ok(value) => format!(
             "{},{}",
-            hex_of_bytes(&stringify_json(&value, JsonMode::Standard)),
-            hex_of_bytes(&stringify_json(&value, JsonMode::Lossless))
+            hex_of_bytes(&stringify_json_with(&value, JsonMode::Standard, dialect)),
+            hex_of_bytes(&stringify_json_with(&value, JsonMode::Lossless, dialect))
         ),
         Err(error) => format!("E:{}", error.name),
     })
@@ -589,6 +629,29 @@ mod tests {
             "{\"r\":\"22f09f988022\"}\n",
             "{\"r\":\"7b225c7564383364223a317d\"}\n",
             "{\"r\":\"E:SyntaxError\"}\n",
+        );
+        assert_eq!(results(input), Ok(String::from(expected)));
+    }
+
+    /// 숫자를 쓰는 연산은 QuickJS 방언 결과가 ECMA 결과와 다를 때만 `q`를 더한다(2 ** -24, 2 ** 89).
+    #[test]
+    fn adds_the_quickjs_dialect_result_only_when_it_differs() {
+        let input = concat!(
+            "{\"op\":\"toString\",\"x\":\"3e70000000000000\"}\n",
+            "{\"op\":\"toString\",\"x\":\"3ff0000000000000\"}\n",
+            "{\"op\":\"toFixed\",\"x\":\"4580000000000000\",\"d\":2}\n",
+            "{\"op\":\"toExponential\",\"x\":\"3e70000000000000\"}\n",
+            "{\"op\":\"toPrecision\",\"x\":\"3e70000000000000\",\"p\":3}\n",
+            "{\"op\":\"json\",\"text\":\"5b352e39363034363434373735333930363235652d385d\"}\n",
+        );
+        let expected = concat!(
+            "{\"r\":\"5.960464477539063e-8\",\"q\":\"5.9604644775390625e-8\"}\n",
+            "{\"r\":\"1\"}\n",
+            "{\"r\":\"6.189700196426902e+26\",\"q\":\"6.1897001964269014e+26\"}\n",
+            "{\"r\":\"5.960464477539063e-8\",\"q\":\"5.9604644775390625e-8\"}\n",
+            "{\"r\":\"5.96e-8\"}\n",
+            "{\"r\":\"5b352e393630343634343737353339303633652d385d\",",
+            "\"q\":\"5b352e39363034363434373735333930363235652d385d\"}\n",
         );
         assert_eq!(results(input), Ok(String::from(expected)));
     }

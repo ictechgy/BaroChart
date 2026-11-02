@@ -2,8 +2,11 @@
 //! `Math.round`/`max`/`min`/`sign`, `ToInt32`/`ToUint32`, `Object.is`
 //! (설계 §6.4, 이식 지도 §3.1.1·§5).
 //!
-//! - `Number::toString`은 ryu-js(=1.0.3)로 쓴다. V8과 대조해 불일치가 없었다. Rust std의 최단 자릿수는
+//! - `Number::toString`은 ryu-js(=1.0.3)로 쓴다. V8·JSC와 대조해 불일치가 없었다. Rust std의 최단 자릿수는
 //!   동률에서 V8과 다르고, `Display`는 `1e21`을 정수로, `1e-7`을 `0.0000001`로 쓴다.
+//! - 오라클은 같은 기기의 JS 백엔드다(설계 §6.1). QuickJS 2026-06-04(Android)는 정규수 2의 거듭제곱 54개 지수
+//!   (부호 포함 108값)에서 최단이 아닌 17자리를 쓰므로(`NumberDialect` 참고), Android 빌드는 그 규칙을 따른다.
+//!   방언은 `NumberDialect::PLATFORM`(Android는 QuickJS, 그 밖은 ECMA-262)이 정하고, `_with` 함수로 고를 수 있다.
 //! - 자릿수를 정하는 세 포맷은 `{:.766e}`로 얻은 정확한 십진 전개를 잘라, 버린 첫 자리가 5 이상이면
 //!   절댓값을 올린다. 전개가 정확하므로 이것이 ECMA-262의 '두 후보가 같으면 큰 쪽' 규칙이다.
 //!   Rust `{:.N}`은 동률을 짝수 쪽으로 보내고 `-0.00`을 내므로 쓰지 않는다.
@@ -26,6 +29,51 @@ const MIN_FIXED_EXPONENT: i64 = -6;
 /// -0의 비트. `Math.max`/`min`은 +0과 -0을 가른다
 const NEGATIVE_ZERO_BITS: u64 = 0x8000_0000_0000_0000;
 
+/// QuickJS `js_dtoa`(FORMAT_FREE, 10진)가 처음 시험하는 자릿수. 17자리면 어떤 f64도 왕복한다(`dtoa_max_digits_table`)
+const QUICKJS_MAX_DIGITS: usize = 17;
+
+/// f64 가수(52비트) 마스크
+const MANTISSA_MASK: u64 = (1 << 52) - 1;
+
+/// `Number::toString`이 고정 표기를 쓰는 소수점 위치 n의 상한(ECMA-262 Number::toString: `n ≤ 21`)
+const TO_STRING_MAX_POINT: i64 = 21;
+
+/// `Number::toString`이 `0.000…` 표기를 쓰는 소수점 위치 n의 하한(이보다 커야 한다: `-6 < n`)
+const TO_STRING_MIN_POINT: i64 = -6;
+
+/// 숫자를 문자열로 쓸 때 따르는 JS 엔진 방언(`Number::toString`이 최단 자릿수를 고르는 규칙).
+///
+/// 설계 §6.1은 같은 기기의 JS 백엔드를 오라클로 정한다(iOS는 JSC, Android는 QuickJS). 두 엔진은 한 곳에서 다르다.
+/// QuickJS 2026-06-04의 `js_dtoa`(FORMAT_FREE)는 17자리에서 시작해 자릿수를 하나씩 줄이며 가장 가까운(RNDN) 후보
+/// 하나만 왕복 검사하고, 처음 실패한 곳에서 멈춘다(`native/android/quickjs/dtoa.c` `js_dtoa`). IEEE 반올림 구간이
+/// 비대칭인 정규수 2의 거듭제곱(가수 0, 지수 필드 2 이상)에서는 가장 가까운 후보가 아래쪽의 좁은 반 구간 밖으로
+/// 나가 검사가 실패할 수 있다. 그래서 2,045개 가운데 54개 지수(부호 포함 108값)에서 최단(13~16자리)이 아닌
+/// 17자리를 쓴다(`2 ** -24` → `5.9604644775390625e-8`, V8·JSC는 `5.960464477539063e-8`, 2026-11-02 실측).
+/// 그 밖의 수는 두 방언이 같다. 구간이 대칭이면 가장 가까운 후보가 최단 후보와 같기 때문이다.
+///
+/// `String(x)`, 템플릿 문자열, `JSON.stringify`, `toExponential()`, `toPrecision(undefined)`, `|x| ≥ 1e21`의
+/// `toFixed`가 이 자릿수를 쓴다. JSON 텍스트 길이가 문서 한도와 undo 가중치를 정하므로(설계 §6.4) Android에서도
+/// 바이트가 같아야 한다.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NumberDialect {
+    /// ECMA-262 `Number::toString`: 왕복하는 가장 짧은 자릿수(V8, JSC; ryu-js)
+    Ecma,
+    /// QuickJS 2026-06-04(Android JS 백엔드): 정규수 2의 거듭제곱 54개 지수에서 17자리, 그 밖은 ECMA와 같다
+    QuickJs,
+}
+
+impl NumberDialect {
+    /// 이 빌드의 같은 기기 JS 백엔드 방언: Android는 QuickJS, 그 밖(iOS·macOS의 JSC, wasm32 하네스의 V8)은 ECMA-262.
+    ///
+    /// 방언 인자가 없는 함수(`number_to_string`, `to_fixed`, `to_exponential`, `json::stringify_json`)가 쓴다.
+    /// 다른 방언은 대조 하네스(`bc-conformance`)와 테스트가 `_with` 함수로 고른다.
+    pub const PLATFORM: NumberDialect = if cfg!(target_os = "android") {
+        NumberDialect::QuickJs
+    } else {
+        NumberDialect::Ecma
+    };
+}
+
 /// 십진 자릿수와 지수. 값은 `d0.d1d2… × 10^exponent`다.
 struct Decimal {
     /// 앞에서부터의 십진 자릿수(ASCII). 0이 아닌 수에서는 첫 자리가 0이 아니다
@@ -36,9 +84,24 @@ struct Decimal {
 
 /// ECMA-262 `Number::toString(x, 10)`. JS의 `String(x)`, 템플릿 문자열, `JSON.stringify`의 숫자와 같다.
 ///
+/// 이 빌드의 방언(`NumberDialect::PLATFORM`)을 쓴다. 다른 방언은 `number_to_string_with`로 고른다.
 /// - 최단 왕복 자릿수를 쓰고, `|x| >= 1e21` 또는 `|x| < 1e-6`이면 지수 표기(`1e+21`, `1.5e-7`)다.
 /// - `-0`은 `"0"`, NaN은 `"NaN"`, 무한대는 `"Infinity"`/`"-Infinity"`다.
 pub fn number_to_string(x: f64) -> String {
+    number_to_string_with(x, NumberDialect::PLATFORM)
+}
+
+/// `Number::toString(x, 10)`을 주어진 방언으로 쓴다.
+///
+/// - `x`: 쓸 수
+/// - `dialect`: ECMA-262(V8·JSC) 또는 QuickJS. QuickJS는 정규수 2의 거듭제곱에서만 다를 수 있다(`NumberDialect`)
+/// - 반환: JS 문자열과 같은 텍스트
+pub fn number_to_string_with(x: f64, dialect: NumberDialect) -> String {
+    if dialect == NumberDialect::QuickJs && has_asymmetric_rounding_interval(x) {
+        let mut text = sign_prefix(x);
+        push_to_string_layout(&mut text, &quickjs_shortest_decimal(x.abs()));
+        return text;
+    }
     ryu_js::Buffer::new().format(x).to_owned()
 }
 
@@ -49,13 +112,24 @@ pub fn number_to_string(x: f64) -> String {
 /// - 비유한 수와 `|x| >= 1e21`은 `number_to_string(x)`다.
 /// - 그 밖에는 `n / 10^digits - x`가 0에 가장 가까운 정수 n을 고르고, 둘이면 큰 n을 고른다
 ///   (`0.125` → `"0.13"`, `2.5` → `"3"`). 부호는 `x < 0`일 때만 붙는다(`-0` → `"0.00"`, `-1e-10` → `"-0.00"`).
+/// - 이 빌드의 방언을 쓴다(`|x| >= 1e21`의 `number_to_string`). 다른 방언은 `to_fixed_with`로 고른다.
 pub fn to_fixed(x: f64, digits: u32) -> String {
+    to_fixed_with(x, digits, NumberDialect::PLATFORM)
+}
+
+/// `Number.prototype.toFixed(digits)`를 주어진 방언으로 쓴다. 방언은 `|x| >= 1e21`(`Number::toString`)에서만 뜻이 있다.
+///
+/// - `x`: 쓸 수
+/// - `digits`: 0..=100
+/// - `dialect`: `Number::toString`의 방언
+/// - 반환: JS 문자열과 같은 텍스트
+pub fn to_fixed_with(x: f64, digits: u32, dialect: NumberDialect) -> String {
     debug_assert!(
         digits <= MAX_DIGITS,
         "toFixed digits {digits} is outside 0..=100; the caller must throw RangeError first"
     );
     if !x.is_finite() || x.abs() >= FIXED_NOTATION_LIMIT {
-        return number_to_string(x);
+        return number_to_string_with(x, dialect);
     }
     let mut text = sign_prefix(x);
     push_fixed(
@@ -96,9 +170,20 @@ pub fn to_precision(x: f64, precision: u32) -> String {
 /// - `Some(f)`는 유효 숫자 f+1자리로 반올림하고(동률은 큰 쪽), `None`은 `number_to_string`과 같은
 ///   최단 왕복 자릿수를 쓴다.
 /// - 지수 부호는 늘 쓴다(`0.00e+0`, `1.23e+2`). `±0`에는 부호를 붙이지 않는다.
+/// - 이 빌드의 방언을 쓴다(`None`의 최단 자릿수). 다른 방언은 `to_exponential_with`로 고른다.
 pub fn to_exponential(x: f64, digits: Option<u32>) -> String {
+    to_exponential_with(x, digits, NumberDialect::PLATFORM)
+}
+
+/// `Number.prototype.toExponential(digits)`를 주어진 방언으로 쓴다. 방언은 `None`(최단 자릿수)에서만 뜻이 있다.
+///
+/// - `x`: 쓸 수
+/// - `digits`: `Some(0..=100)` 또는 `None`(undefined)
+/// - `dialect`: 최단 자릿수의 방언
+/// - 반환: JS 문자열과 같은 텍스트
+pub fn to_exponential_with(x: f64, digits: Option<u32>, dialect: NumberDialect) -> String {
     if !x.is_finite() {
-        return number_to_string(x);
+        return number_to_string_with(x, dialect);
     }
     debug_assert!(
         digits.is_none_or(|count| count <= MAX_DIGITS),
@@ -107,7 +192,7 @@ pub fn to_exponential(x: f64, digits: Option<u32>) -> String {
     let decimal = match digits {
         Some(count) => rounded_or_zero(x, count as usize + 1),
         None if x == 0.0 => zero_decimal(1),
-        None => shortest_decimal(x.abs()),
+        None => shortest_decimal(x.abs(), dialect),
     };
     let mut text = sign_prefix(x);
     push_exponential(&mut text, &decimal);
@@ -291,10 +376,50 @@ fn scaled_integer_digits(magnitude: f64, fraction_digits: u32) -> Vec<u8> {
 /// - `length`: 남길 자릿수
 /// - 반환: 남긴 자릿수와, 올림이 맨 앞을 넘어 자릿수가 하나 늘었는지(`999` → `1000`)
 fn round_half_up(digits: &[u8], length: usize) -> (Vec<u8>, bool) {
-    let mut kept: Vec<u8> = (0..length).map(|index| digit_at(digits, index)).collect();
+    let kept: Vec<u8> = (0..length).map(|index| digit_at(digits, index)).collect();
     if digit_at(digits, length) < b'5' {
         return (kept, false);
     }
+    increment_digits(kept)
+}
+
+/// 정확한 전개를 유효 숫자 `length`자리로 RNDN 반올림한다(동률은 마지막 자리가 짝수인 쪽). 뒤의 0은 지운다.
+///
+/// QuickJS FORMAT_FREE가 후보를 만드는 반올림이다(`mul_pow_round(..., JS_RNDN)`). 올림이 맨 앞을 넘으면
+/// 지수를 1 올린다(`9.99…` → `1`).
+/// - `exact`: 0이 아닌 수의 정확한 십진 전개
+/// - `length`: 남길 유효 숫자 수(1 이상)
+fn round_half_even(exact: &Decimal, length: usize) -> Decimal {
+    let kept: Vec<u8> = (0..length)
+        .map(|index| digit_at(&exact.digits, index))
+        .collect();
+    let next = digit_at(&exact.digits, length);
+    let rest_is_zero = exact
+        .digits
+        .get(length + 1..)
+        .is_none_or(|rest| rest.iter().all(|&digit| digit == b'0'));
+    let last_is_odd = kept.last().is_some_and(|&digit| (digit - b'0') % 2 == 1);
+    let round_up = next > b'5' || (next == b'5' && (!rest_is_zero || last_is_odd));
+    let (mut digits, carried) = if round_up {
+        increment_digits(kept)
+    } else {
+        (kept, false)
+    };
+    digits.truncate(length);
+    while digits.len() > 1 && digits.last() == Some(&b'0') {
+        digits.pop();
+    }
+    Decimal {
+        digits,
+        exponent: exact.exponent + i64::from(carried),
+    }
+}
+
+/// 십진 자릿수를 1 올린다. 맨 앞을 넘으면 `1`을 앞에 붙인다(`999` → `1000`).
+///
+/// - `kept`: 올릴 자릿수(ASCII)
+/// - 반환: 올린 자릿수와, 자릿수가 하나 늘었는지
+fn increment_digits(mut kept: Vec<u8>) -> (Vec<u8>, bool) {
     for digit in kept.iter_mut().rev() {
         if *digit < b'9' {
             *digit += 1;
@@ -329,13 +454,18 @@ fn exact_decimal(magnitude: f64) -> Decimal {
     }
 }
 
-/// 0이 아닌 유한한 크기의 최단 왕복 자릿수와 지수를 얻는다(`number_to_string`과 같은 자릿수).
+/// 0이 아닌 유한한 크기의 최단 왕복 자릿수와 지수를 얻는다(`number_to_string_with`와 같은 자릿수).
 ///
 /// ryu-js 출력(`123.456`, `0.001234`, `1.5e-7`, `123456789012345680000`)에서 숫자만 모은 뒤,
 /// 앞의 0은 지수에 반영하고 뒤의 0(큰 정수의 자리 채움)은 버린다.
 /// ECMA-262 `toExponential(undefined)`의 n은 10으로 나누어떨어지지 않는다.
+/// QuickJS 방언의 정규수 2의 거듭제곱은 `quickjs_shortest_decimal`이다.
 /// - `magnitude`: 0보다 큰 유한한 수
-fn shortest_decimal(magnitude: f64) -> Decimal {
+/// - `dialect`: 최단 자릿수의 방언
+fn shortest_decimal(magnitude: f64, dialect: NumberDialect) -> Decimal {
+    if dialect == NumberDialect::QuickJs && has_asymmetric_rounding_interval(magnitude) {
+        return quickjs_shortest_decimal(magnitude);
+    }
     let mut buffer = ryu_js::Buffer::new();
     let text = buffer.format_finite(magnitude);
     let (mantissa, suffix) = text
@@ -354,6 +484,85 @@ fn shortest_decimal(magnitude: f64) -> Decimal {
     Decimal {
         digits,
         exponent: integer_length as i64 - leading_zeros as i64 + suffix - 1,
+    }
+}
+
+/// IEEE 반올림 구간이 비대칭인 수인지 본다: 가수가 0이고 지수 필드가 2 이상인 유한 정규수(±2^-1021..±2^1023).
+///
+/// 이런 수는 아래 이웃까지의 간격이 위 이웃까지의 절반이라 왕복하는 십진 구간이 x를 중심으로 대칭이 아니다.
+/// 지수 필드 1(2^-1022)은 아래 이웃(가장 큰 부분정규수)과의 간격이 같아 대칭이다.
+/// - `x`: 수
+fn has_asymmetric_rounding_interval(x: f64) -> bool {
+    let bits = x.to_bits();
+    let exponent_field = (bits >> 52) & 0x7FF;
+    bits & MANTISSA_MASK == 0 && (2..=2046).contains(&exponent_field)
+}
+
+/// QuickJS `js_dtoa`(FORMAT_FREE, 10진)가 고르는 자릿수와 지수를 얻는다.
+///
+/// 17자리 RNDN 후보(늘 왕복한다)에서 시작해, 지금 자릿수(뒤의 0을 지운 길이)보다 하나 짧은 RNDN 후보가 원래 수로
+/// 되읽히면 받아들이고 계속 줄인다. 처음 되읽히지 않는 곳에서 멈추고 마지막으로 받아들인 후보를 쓴다. 왕복 검사는
+/// 정확히 반올림하는 `str::parse::<f64>`다(QuickJS는 `mul_pow_round_to_d(..., JS_RNDN)`).
+/// - `magnitude`: 0보다 큰 유한한 수
+fn quickjs_shortest_decimal(magnitude: f64) -> Decimal {
+    let exact = exact_decimal(magnitude);
+    let mut found = round_half_even(&exact, QUICKJS_MAX_DIGITS);
+    while found.digits.len() > 1 {
+        let candidate = round_half_even(&exact, found.digits.len() - 1);
+        if decimal_value(&candidate) != Some(magnitude) {
+            break;
+        }
+        found = candidate;
+    }
+    found
+}
+
+/// 십진 자릿수와 지수가 나타내는 수를 정확히 반올림해 읽는다(왕복 검사용).
+///
+/// - `decimal`: 0이 아닌 자릿수와 지수(지수 절댓값은 400 미만이라 dec2flt의 지수 포화와 무관하다)
+/// - 반환: 읽은 수. 텍스트가 깨졌으면 `None`(이 모듈이 만든 자릿수라 실제로는 없다)
+fn decimal_value(decimal: &Decimal) -> Option<f64> {
+    let mut text = String::with_capacity(decimal.digits.len() + 8);
+    let (first, rest) = decimal
+        .digits
+        .split_at(std::cmp::min(1, decimal.digits.len()));
+    push_point_separated(&mut text, first, rest);
+    text.push('e');
+    text.push_str(&decimal.exponent.to_string());
+    text.parse::<f64>().ok()
+}
+
+/// `Number::toString`의 배치(ECMA-262 Number::toString 6~10단계)로 자릿수를 붙인다. 부호는 호출자가 붙인다.
+///
+/// 자릿수 개수를 k, 소수점 위치를 n(= 지수 + 1)이라 하면:
+/// - `k ≤ n ≤ 21`: 자릿수 뒤에 0을 n−k개(`1152921504606847000`)
+/// - `0 < n ≤ 21`: 앞 n자리 뒤에 소수점(`123.456`)
+/// - `-6 < n ≤ 0`: `0.` 뒤에 0을 −n개, 그다음 자릿수(`0.000001234`)
+/// - 그 밖: 지수 표기 `d.ddde±x`(`5.9604644775390625e-8`, `1e+21`)
+/// - `text`: 결과 문자열
+/// - `decimal`: 0이 아닌 수의 최단 자릿수(뒤의 0 없음)와 지수
+fn push_to_string_layout(text: &mut String, decimal: &Decimal) {
+    let count = i64::try_from(decimal.digits.len()).unwrap_or(i64::MAX);
+    let point = decimal.exponent + 1;
+    if count <= point && point <= TO_STRING_MAX_POINT {
+        push_ascii(text, &decimal.digits);
+        text.extend(std::iter::repeat_n(
+            '0',
+            usize::try_from(point - count).unwrap_or(0),
+        ));
+    } else if 0 < point && point <= TO_STRING_MAX_POINT {
+        let split = usize::try_from(point).unwrap_or(0);
+        let (integer_part, fraction_part) = decimal.digits.split_at(split);
+        push_point_separated(text, integer_part, fraction_part);
+    } else if TO_STRING_MIN_POINT < point && point <= 0 {
+        text.push_str("0.");
+        text.extend(std::iter::repeat_n(
+            '0',
+            usize::try_from(-point).unwrap_or(0),
+        ));
+        push_ascii(text, &decimal.digits);
+    } else {
+        push_exponential(text, decimal);
     }
 }
 

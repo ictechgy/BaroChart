@@ -18,7 +18,7 @@ mod write;
 pub use object::JsObject;
 pub use parse::{parse_json, parse_json_utf16};
 pub use value::JsValue;
-pub use write::stringify_json;
+pub use write::{stringify_json, stringify_json_with};
 
 /// JSON 문법 선택.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
