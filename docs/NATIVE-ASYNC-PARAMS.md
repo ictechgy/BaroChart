@@ -62,16 +62,21 @@ Descriptor-before-admission failures need a provisional reservation or an explic
 slot-only limitation, never an asserted zero-byte total bound.
 
 At publication admission, check other retained entries plus replacement
-checkpoints against 32 MiB, excluding the retiring target. The adopted map keeps
-its fixed remaining-budget allowance. Later growth or clearing of other entries
-does not redistribute that allowance: this is not a lifetime engine-wide limit.
+checkpoints against 32 MiB, excluding the retiring target. That remaining-budget
+allowance bounds only the staged records. The published entry holds an ordinary
+Map, as on a fresh chart, so later growth or clearing of any entry is not limited
+by it: this is not a lifetime engine-wide limit.
 A sustained shared ledger would require separate growth-accounting validation.
 This source admission contract also does not establish the host process memory
 cap or RSS; host job reservations and cleanup acknowledgment remain separate.
-Staging retains its own reservation until ownership transfer. Transfer/retirement
-must be callback-free and exception-free after publication begins. Ordinary and
-NativeCheckpointEntries source maps use the internal identity-gated ownership
-helpers; borrowed temporary engine maps do not own or retire the source entries.
+Staging retains its own reservation until ownership transfer. While staging, the
+owner keeps each record twice: the encoded text in the bounded staging map (for
+validation and its ledger) and the decoded copy that publication installs. The
+decoded copies, about the encoded bytes plus 32 bytes per JSON value, are not part
+of the static admission plan. Transfer/retirement must be callback-free and
+exception-free after publication begins. Ordinary and NativeCheckpointEntries
+source maps use the internal identity-gated ownership helpers; borrowed temporary
+engine maps do not own or retire the source entries.
 
 ## Staged acceptance
 
@@ -102,13 +107,18 @@ old input view after start or a returned output view. The final owner validator
 must revalidate every transferred output and checkpoint before publication.
 An isolated target does not prove source freshness or authenticate a result.
 
-Ordinary entry-map adoption uses a private map-keyed ownership registry. It keeps
-the original entries Map identity and does not claim borrowed candidate entries.
-Managed removal, disposal, sync/web params replacement retire only registered
-records after a successful map change. Direct replacement of engine.entries or
-Map intrinsics is outside this contract. NativeCheckpointEntries keeps its own
-existing ownership mechanism. Engine-wide result admission remains required in
-the source publication stage; this helper alone does not enforce that budget.
+Publication keeps the original entries Map identity and does not claim borrowed
+candidate entries. Each checkpoint record is decoded once, in the owner call that
+receives it (`nativeParamsSourceCheckpoint`), into a staged ordinary Map, while
+the bounded staging map validates and charges the same record. Prepare and
+publish install that Map without decoding or copying any record, so the
+publication turn costs the same for any checkpoint size, and then close the
+bounded map to refund its ledger. The live engine holds only ordinary checkpoint
+Maps, like a fresh chart, so there is no adoption registry to retire later.
+Direct replacement of engine.entries or Map intrinsics is outside this contract.
+NativeCheckpointEntries keeps its own existing ownership mechanism. Engine-wide
+result admission remains required in the source publication stage; this helper
+alone does not enforce that budget.
 
 Initial cloud verification: 229 related Node regressions passed, including the
 ordinary-map adoption lifecycle, existing checkpoint and parameter packet tests,

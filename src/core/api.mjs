@@ -15,7 +15,7 @@ import {saveStudySetup,loadStudySetup,setStudyParams} from './study-setup.mjs';
 import {DataIngestion,restoreDataIngestion,snapshotIngestionEvents,assertDataIngestionIdle} from './ingestion.mjs';
 import {IngestionError} from './ingestion-error.mjs';
 
-import {portableColor,portableFont,portableStyle,optionRecord,SERIES_KEYS,PANEL_KEYS,AXIS_KEYS,THEME_KEYS,RESOURCE_LIMITS,rememberSymbolFormatters,boundedText,sizeLimit} from './contracts.mjs';
+import {portableColor,portableFont,portableStyle,optionRecord,orderedRecord,SERIES_KEYS,PANEL_KEYS,AXIS_KEYS,THEME_KEYS,RESOURCE_LIMITS,rememberSymbolFormatters,boundedText,sizeLimit} from './contracts.mjs';
 export {portableColor,portableFont} from './contracts.mjs';
 const PRESENTATION_KEYS=new Set(['color','fill','upColor','downColor','width','visible','label']);
 function style(options,colors=['color','fill','upColor','downColor']) {return portableStyle(options,colors);}
@@ -174,7 +174,8 @@ export class ChartAPI {
    const presentation=this.seriesOptions(patch);if(presentation.label!==undefined)boundedText(presentation.label,256,'Series label');guard();
    if(indicator&&!entry)throw new Error(`Missing indicator: ${indicator}`);
    // The binding was already validated. Preserve its caches; only presentation changes.
-   const next={...current,...presentation};for(const key of Object.keys(next))if(!SERIES_KEYS.includes(key)&&!['rangeIndex','revision','dirtyFrom'].includes(key))delete next[key];guard();
+   // 새로 생기는 표시 키(label 등)도 SERIES_KEYS 자리에 오도록 정렬한다. 캐시 키는 뒤에 붙는다
+   const next=orderedRecord({...current,...presentation},SERIES_KEYS);for(const key of Object.keys(next))if(!SERIES_KEYS.includes(key)&&!['rangeIndex','revision','dirtyFrom'].includes(key))delete next[key];guard();
    series[index]=next;return this.changed();
   }
   const next={...current,...this.seriesOptions(patch)};

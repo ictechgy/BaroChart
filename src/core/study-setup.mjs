@@ -1,4 +1,3 @@
-import {retireNativeEntryIfReplaced} from './native-checkpoints.mjs';
 import {IndicatorEngine,requirePortableFactory} from './indicators.mjs';
 import {indicatorModule} from './indicator-modules.mjs';
 import {validateIndicatorParams} from './indicator-params.mjs';
@@ -42,7 +41,7 @@ export function setStudyParams(model,id,params,ownerGuard=null){
   if(entry.def.outputs.some(output=>!Object.is(offset(entry.def,output),offset(replacement.def,output))))throw new TypeError('Indicator parameter update cannot change plot offsets');
   const result=metadata(replacement.def);
   if(!current())throw new Error('Indicator params stale: owner changed during staging');if(ownerGuard!==null){if(typeof ownerGuard!=='function')throw new TypeError('Owner guard callback required');ownerGuard();}
-  entriesMap.set(id,replacement);retireNativeEntryIfReplaced(entriesMap,id);
+  entriesMap.set(id,replacement);
   for(const s of series)if(s.indicator===id){s.rangeIndex=null;s.revision=undefined;s.dirtyFrom=0;}
   return result;
  }finally{candidate.dispose();}

@@ -1,6 +1,5 @@
-import {retireNativeEntryIfReplaced,retireNativeEntriesAfterClear} from './native-checkpoints.mjs';
 import {registerStoreOwner,unregisterStoreOwner} from './store-owners.mjs';
-import {optionRecord,identifier,RESOURCE_LIMITS} from './contracts.mjs';
+import {optionRecord,identifier,orderedRecord,RESOURCE_LIMITS} from './contracts.mjs';
 import {validateIndicatorParams} from './indicator-params.mjs';
 import {portableIndicatorFactory,portableIndicatorFactories,requirePortableIndicator} from './indicator-modules.mjs';
 import './trusted-studies.mjs';
@@ -213,6 +212,21 @@ add('parabolicSAR',({step=.02,max=.2}={})=>{if(!Number.isFinite(step)||!Number.i
 
 const canonicalBuiltinIndicators=new Map(builtinIndicators);
 export function resolveIndicatorFactory(name){return canonicalBuiltinIndicators.get(name)??portableIndicatorFactory(name);}
+/**
+ * 지표 정의가 파라미터를 선언한 순서. 저장 params(지표 엔트리, aster.studies, aster.workspace)의 키 순서를 정한다.
+ * 내장은 팩토리 구조 분해 순서, vwap·pivots는 sessionStudyParams가 읽는 순서, 링크 모듈은 모듈 팩토리 선언 순서다.
+ * 팩토리를 고치면 이 목록도 함께 고친다(test/record-key-order.test.mjs가 구조 분해 선언과 대조한다).
+ */
+const indicatorParameterOrders=new Map(Object.entries({sma:['period','source'],vwma:['period'],ema:['period','source'],wma:['period'],rsi:['period'],atr:['period'],macd:['fast','slow','signal'],bollinger:['period','deviation'],donchian:['period'],aroon:['period'],stochastic:['period','smoothK','smoothD'],roc:['period'],williamsR:['period'],cci:['period'],obv:[],vwap:['calendar','anchorTime','sessionMs','kinds','source','deviation'],mfi:['period'],cmf:['period'],adx:['period'],dema:['period'],tema:['period'],hma:['period'],keltner:['period','atrPeriod','multiplier'],supertrend:['period','multiplier'],ichimoku:['conversion','base','span','displacement'],trix:['period'],ppo:['fast','slow','signal'],stochRSI:['period','stochPeriod','smoothK','smoothD'],adl:[],chaikin:['fast','slow'],forceIndex:['period'],volumeOscillator:['fast','slow'],vortex:['period'],pivots:['calendar','anchorTime','sessionMs','kinds'],parabolicSAR:['step','max'],'aster.volume-direction@1/pressure':['factor','shift']}));
+/**
+ * params를 그 지표 정의의 선언 순서로 담은 새 레코드를 돌려준다. 선언하지 않은 키는 UTF-16 오름차순으로 뒤에 붙는다.
+ * 정규 내장·링크 팩토리일 때만 선언 순서를 쓴다. 등록한 사용자 팩토리나 바꿔 끼운 팩토리는 선언을 알 수 없으므로 UTF-16 순서만 쓴다.
+ * @param {string} name 지표 이름
+ * @param {Function|undefined} factory 실제로 쓸 팩토리
+ * @param {object} params 검증된 params
+ * @returns {object} 정규 키 순서의 새 params
+ */
+export function orderedIndicatorParams(name,factory,params){return orderedRecord(params,factory!==undefined&&factory===resolveIndicatorFactory(name)?indicatorParameterOrders.get(name)??[]:[]);}
 export function requirePortableFactory(name,factory){const builtin=canonicalBuiltinIndicators.get(name);if(builtin&&factory===builtin)return null;return requirePortableIndicator(name,factory);}
 // Running calls reject recursion; a suspended generator may be superseded by
 // a new explicit calculation without leaving an abandoned iterator busy forever.
@@ -233,9 +247,9 @@ export class IndicatorEngine {
     identifier(id,'Indicator id');validateIndicatorParams(params);if(this.entries.size>=RESOURCE_LIMITS.maxIndicators)throw new RangeError('Indicator limit');
     if (this.entries.has(id)) throw new Error('Duplicate indicator id'); const make = this.registry.get(name); if (!make) throw new Error(`Unknown indicator: ${name}`);
     const def = make(params); if (!Array.isArray(def.outputs) || !def.outputs.length||def.outputs.length>32 || def.outputs.some(k=>typeof k!=='string'||!k||k.length>128||['__proto__','constructor','prototype'].includes(k)) || new Set(def.outputs).size!==def.outputs.length || typeof def.create !== 'function' || Object.entries(def.plotOffsets??{}).some(([k,v])=>!def.outputs.includes(k)||!Number.isInteger(v)||Math.abs(v)>10000)) throw new TypeError('Invalid indicator definition');
-    const entry={def,name,params:cloneState(params), dirty: 0, dirtyTo:this.store.length,invalidated:true,length: 0, arrays: [], checkpoints: new Map(), revision: 0};this.entries.set(id,entry);try{return this.get(id);}catch(error){if(this.entries.get(id)===entry){const entries=this.entries;entries.delete(id);retireNativeEntryIfReplaced(entries,id);}throw error;}
+    const entry={def,name,params:orderedIndicatorParams(name,make,cloneState(params)), dirty: 0, dirtyTo:this.store.length,invalidated:true,length: 0, arrays: [], checkpoints: new Map(), revision: 0};this.entries.set(id,entry);try{return this.get(id);}catch(error){if(this.entries.get(id)===entry)this.entries.delete(id);throw error;}
   }
-  remove(id) {const entries=this.entries;entries.delete(id);retireNativeEntryIfReplaced(entries,id);}
+  remove(id) {this.entries.delete(id);}
   get(id) {const task=this.calculate(id);let next;do{next=task.next();}while(!next.done);return next.value;}
   *calculate(id,chunkSize=4096) {
     if(!Number.isInteger(chunkSize)||chunkSize<1||chunkSize>65536)throw new RangeError('Calculation chunk size');
@@ -292,5 +306,5 @@ export class IndicatorEngine {
       if(!completed&&owned()&&!sameSource()){e.dirty=0;e.invalidated=true;}
     }
   }
-  dispose() {try{this.unsubscribe(); const entries=this.entries;entries.clear();retireNativeEntriesAfterClear(entries);}finally{unregisterStoreOwner(this);}}
+  dispose() {try{this.unsubscribe(); this.entries.clear();}finally{unregisterStoreOwner(this);}}
 }

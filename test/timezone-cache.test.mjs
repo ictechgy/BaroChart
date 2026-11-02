@@ -49,15 +49,16 @@ test('cache key folds case while actual Intl constructor receives the original v
   assert.equal(m.marketDate(timestamp,'AMERICA/NEW_YORK'),'2026-03-09');assert.equal(m.zonedEpoch('2026-03-09','09:30','aMeRiCa/nEw_yOrK'),timestamp);assert.equal(inputs.length,1);
  });
 });
-test('genuine Intl rejects Unicode Kelvin lookalike both cold and after ASCII zone warming',async()=>{
- const invalid='Asia/\u212Auala_Lumpur';
- assert.throws(()=>new Intl.DateTimeFormat('en-CA',{timeZone:invalid}),RangeError,'genuine Intl is the identifier authority');
- await timezoneCacheTracked((m,inputs)=>{for(let i=0;i<2;i++)assert.throws(()=>m.zonedParts(0,invalid),RangeError);assert.deepEqual(inputs,[invalid,invalid]);});
+// \uC2DC\uAC04\uB300 \uACC4\uC57D v1(M0 Task 2): ASCII \uBC16 \uC774\uB984\uC740 \uCF54\uC5B4 \uBB38\uBC95\uC774 Intl\uBCF4\uB2E4 \uBA3C\uC800 \uAC70\uC808\uD55C\uB2E4. genuine Intl\uB3C4 \uAC19\uC740 \uC774\uB984\uC744 \uAC70\uC808\uD55C\uB2E4.
+test('core grammar rejects Unicode Kelvin lookalike before Intl, both cold and after ASCII zone warming',async()=>{
+ const invalid='Asia/\u212Auala_Lumpur',unsupported={name:'RangeError',message:'Unsupported time zone: '+invalid};
+ assert.throws(()=>new Intl.DateTimeFormat('en-CA',{timeZone:invalid}),RangeError,'genuine Intl agrees with the core grammar');
+ await timezoneCacheTracked((m,inputs)=>{for(let i=0;i<2;i++)assert.throws(()=>m.zonedParts(0,invalid),unsupported);assert.deepEqual(inputs,[]);});
  await timezoneCacheTracked((m,inputs)=>{
   const stamp=Date.parse('2026-03-09T00:00:00Z'),expected={month:'03',day:'09',year:'2026',hour:'08',minute:'00',second:'00'};
   assert.deepEqual(m.zonedParts(stamp,'Asia/Kuala_Lumpur'),expected);m.zonedParts(stamp,'ASIA/KUALA_LUMPUR');assert.equal(inputs.length,1);
-  for(let i=0;i<2;i++)assert.throws(()=>m.zonedParts(0,invalid),RangeError,'warm valid spelling must not authorize Unicode lookalike');
-  assert.deepEqual(m.zonedParts(stamp,'asia/kuala_lumpur'),expected);assert.deepEqual(inputs,['Asia/Kuala_Lumpur',invalid,invalid]);
+  for(let i=0;i<2;i++)assert.throws(()=>m.zonedParts(0,invalid),unsupported,'warm valid spelling must not authorize Unicode lookalike');
+  assert.deepEqual(m.zonedParts(stamp,'asia/kuala_lumpur'),expected);assert.deepEqual(inputs,['Asia/Kuala_Lumpur']);
  });
 });
 test('nonstring/empty/oversized timezone keys reject without coercion or constructing Intl',async()=>{
@@ -67,11 +68,14 @@ test('nonstring/empty/oversized timezone keys reject without coercion or constru
   assert.equal(coercions,0);assert.equal(inputs.length,0);
  });
 });
-test('invalid zones do not evict valid cached zones; genuine Intl remains authoritative',async()=>{
+// 시간대 계약 v1(M0 Task 2): 공백·NUL이 든 이름은 코어 문법이 먼저 거절하고, 문법을 통과한 이름만 Intl이 판단한다.
+test('invalid zones do not evict valid cached zones; Intl decides only names that pass the core grammar',async()=>{
  await timezoneCacheTracked((m,inputs)=>{
   const zones=Intl.supportedValuesOf('timeZone').slice(0,32);for(const zone of zones)m.zonedParts(0,zone);const before=inputs.length;
-  for(const zone of ['Not/AZone','America/NoSuchCity',' UTC','UTC\0'])for(let i=0;i<2;i++)assert.throws(()=>m.zonedParts(0,zone),RangeError);
-  const attempted=inputs.length;assert.equal(attempted,before+8);m.zonedParts(0,zones[0]);assert.equal(inputs.length,attempted);
+  for(const zone of ['Not/AZone','America/NoSuchCity'])for(let i=0;i<2;i++)assert.throws(()=>m.zonedParts(0,zone),{name:'RangeError',message:'Unsupported time zone: '+zone});
+  assert.equal(inputs.length,before+4,'grammar-valid unknown names reach Intl on every attempt');
+  for(const zone of [' UTC','UTC\0'])for(let i=0;i<2;i++)assert.throws(()=>m.zonedParts(0,zone),{name:'RangeError',message:'Unsupported time zone: '+zone});
+  const attempted=inputs.length;assert.equal(attempted,before+4,'grammar-invalid names never construct Intl');m.zonedParts(0,zones[0]);assert.equal(inputs.length,attempted);
   assert.deepEqual(m.zonedParts(Date.parse('2026-01-01T00:00:00Z'),'UTC'),{month:'01',day:'01',year:'2026',hour:'00',minute:'00',second:'00'});
  });
 });

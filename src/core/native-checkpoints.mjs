@@ -35,8 +35,9 @@ export class NativeCheckpointMap {
  validateHistory(length){this.#check();const epoch=this.#epoch;if(!Number.isSafeInteger(length)||length<0||length>nativeCheckpointMaxIndex)throw new RangeError('Native checkpoint history length');const expected=length===0?0:Math.floor(length/this.#block)+1;if(this.size!==expected)throw new TypeError('Native checkpoint history count');let i=0;for(const index of this.keys()){if(index!==i++*this.#block)throw new TypeError('Native checkpoint history boundary');const text=this.#records.get(index),state=safeCheckpointParse(text);validateCheckpointState(this.#name,this.#params,state,index);if(nativeCheckpointText(state)!==text)throw new TypeError('Native checkpoint validator mutated state');this.#check(epoch);}this.#check(epoch);return this;}
 }
 
-// Only restored engines install this owner map. Retirement never mutates held
-// output vectors and never invokes a user-controlled cleanup callback.
+// 이 소유 Map은 게시 전 엔진만 쓴다: 복원 대상의 계산 단계와 격리된 params 작업 런타임이다.
+// 게시(finish)는 평범한 Map으로 바꿔 넘기므로 살아 있는 엔진에는 남지 않는다.
+// Retirement never mutates held output vectors and never invokes a user-controlled cleanup callback.
 const nativeCheckpointDispose=NativeCheckpointMap.prototype.dispose;
 function nativeEntryCheckpoints(entry){const value=entry&&Object.getOwnPropertyDescriptor(entry,'checkpoints')?.value;return nativeCheckpointMaps.has(value)?value:null;}
 export class NativeCheckpointEntries extends Map {
@@ -57,23 +58,46 @@ export function ownedCheckpointClear(map){
  ordinaryCheckpointHas.call(map,0);return ()=>ordinaryCheckpointClear.call(map);
 }
 
-// Entry-only native publication can preserve an ordinary entries Map identity.
-// The registry is keyed by that Map, never retained from a caller-held entry.
-// Direct replacement/mutation of engine.entries or Map intrinsics is unsupported.
-const nativeAdoptedOwners=new WeakMap(),nativeMapGet=Map.prototype.get,nativeMapSet=Map.prototype.set,nativeEntriesSet=NativeCheckpointEntries.prototype.set;
-export function retireNativeEntryIfReplaced(entries,id){
- const owner=nativeAdoptedOwners.get(entries),row=owner?.rows.get(id);if(!row||nativeMapGet.call(entries,id)===row.entry)return;
- owner.rows.delete(id);nativeCheckpointEntryOwners.delete(row.checkpoints);nativeCheckpointDispose.call(row.checkpoints);
-}
-export function retireNativeEntriesAfterClear(entries){
- const owner=nativeAdoptedOwners.get(entries);if(!owner)return;for(const [id]of owner.rows)retireNativeEntryIfReplaced(entries,id);
-}
-export function prepareNativeEntryCommit(entries,id,previous,entry){
+// 게시(복원 finish, params 커밋)는 검증을 마친 경계 레코드를 새 차트와 같은 평범한 Map으로 옮긴다(설계 §7.4-3, 이식 지도 D2).
+// 그래서 게시 뒤 엔진에는 경계 맵·공유 예산이 남지 않고, append·재계산·원본 회계가 새 차트와 같다.
+// 애플리케이션이 바꿀 수 있는 메서드 대신 모듈을 불러올 때 붙잡은 내장 메서드만 쓴다.
+const nativeMapGet=Map.prototype.get,nativeMapSet=Map.prototype.set,nativeMapSize=Object.getOwnPropertyDescriptor(Map.prototype,'size').get,nativeEntriesSet=NativeCheckpointEntries.prototype.set,nativeCheckpointKeys=NativeCheckpointMap.prototype.keys,nativeCheckpointGet=NativeCheckpointMap.prototype.get,nativeCheckpointSize=Object.getOwnPropertyDescriptor(NativeCheckpointMap.prototype,'size').get;
+/**
+ * 경계 맵의 레코드를 새 평범한 Map으로 복사한다. 원본 맵은 바꾸지 않는다. 복원 finish가 쓴다(작업 런타임·작업 스레드에서 돈다).
+ * 값은 get()과 같은 새 사본(safeCheckpointParse)이고, 새 차트가 계산하며 넣는 순서처럼 색인 오름차순으로 넣는다.
+ * 레코드마다 해독하므로 비용이 레코드 양에 비례한다. 그래서 소유(UI) 스레드에서 도는 params 게시는 이 함수를 쓰지 않고,
+ * 가져오기가 레코드를 받을 때마다 만들어 둔 Map을 설치한다(prepareNativeEntryCommit).
+ * 호출부는 사본을 다 만든 뒤에만 상태를 바꾼다. 여기서 실패하면 게시 전 상태가 그대로 남는다.
+ * @param {NativeCheckpointMap} map 닫히지 않은 실제 경계 맵(호출부가 소유를 확인한다)
+ * @returns {Map<number, object>} 같은 레코드를 담은 평범한 Map
+ */
+export function ordinaryCheckpointCopy(map){const copy=new Map();for(const index of nativeCheckpointKeys.call(map))nativeMapSet.call(copy,index,nativeCheckpointGet.call(map,index));return copy;}
+/**
+ * params 게시 커밋을 준비한다. 소유 엔진의 entries Map은 그대로 두고, 그 항목 하나만 평범한 체크포인트 Map을 단 엔트리로 바꿔 넣는다.
+ * 커밋은 iOS 메인 스레드·Android 소유 루퍼에서 한 턴에 돈다. 그래서 레코드를 해독하거나 복사하지 않고,
+ * NativeParamsImport가 레코드를 받을 때마다 만들어 둔 staged를 그대로 설치한 뒤 경계 맵을 닫는다(리뷰 C5). 준비와 커밋 모두 상수 시간 검사만 한다.
+ * engine.entries나 Map 내장 메서드를 직접 바꾸거나 고치는 것은 지원하지 않는다.
+ * @param {Map|NativeCheckpointEntries} entries 소유 엔진의 entries
+ * @param {string} id 바꿀 지표 id
+ * @param {object} previous 준비할 때 entries에 있던 엔트리(커밋 때도 같아야 한다)
+ * @param {object} entry 설치할 엔트리. checkpoints는 레코드를 검증·과금한 실제 경계 맵이어야 한다
+ * @param {Map<number, object>} staged entry.checkpoints와 같은 레코드를 색인 오름차순으로 담은 평범한 Map(NativeParamsImport.readyCheckpoints())
+ * @returns {() => void} 한 번만 쓸 수 있는 커밋 함수
+ */
+export function prepareNativeEntryCommit(entries,id,previous,entry,staged){
  const proto=Object.getPrototypeOf(entries);if(![Map.prototype,NativeCheckpointEntries.prototype].includes(proto)||Reflect.ownKeys(entries).length||nativeMapGet.call(entries,id)!==previous)throw new TypeError('Native params entry owner');
  const checkpoints=nativeEntryCheckpoints(entry);if(!checkpoints||nativeCheckpointRetired.has(checkpoints)||nativeCheckpointEntryOwners.has(checkpoints)||Object.getPrototypeOf(checkpoints)!==NativeCheckpointMap.prototype||Reflect.ownKeys(checkpoints).length)throw new TypeError('Native params checkpoint ownership');
- let owner=nativeAdoptedOwners.get(entries);if(proto===Map.prototype&&!owner){owner={token:{},rows:new Map()};nativeAdoptedOwners.set(entries,owner);}let used=false;
- return ()=>{if(used||nativeEntryCheckpoints(entry)!==checkpoints||nativeMapGet.call(entries,id)!==previous||nativeCheckpointRetired.has(checkpoints)||nativeCheckpointEntryOwners.has(checkpoints))throw new Error('Native params entry commit stale');used=true;
-  if(proto===NativeCheckpointEntries.prototype){nativeEntriesSet.call(entries,id,entry);return;}
-  nativeMapSet.call(entries,id,entry);retireNativeEntryIfReplaced(entries,id);owner.rows.set(id,{entry,checkpoints});nativeCheckpointEntryOwners.set(checkpoints,{owner:owner.token,id});
+ // 같은 레코드인지는 가져오기가 레코드를 받을 때 보장한다. 여기서는 평범한 Map인지와 레코드 수만 상수 시간에 확인한다
+ if(staged===null||typeof staged!=='object'||Object.getPrototypeOf(staged)!==Map.prototype||Reflect.ownKeys(staged).length||nativeMapSize.call(staged)!==nativeCheckpointSize.call(checkpoints))throw new TypeError('Native params checkpoint ownership');
+ let used=false;
+ return ()=>{if(used||nativeEntryCheckpoints(entry)!==checkpoints||nativeMapGet.call(entries,id)!==previous||nativeCheckpointRetired.has(checkpoints)||nativeCheckpointEntryOwners.has(checkpoints)||Reflect.ownKeys(staged).length||nativeMapSize.call(staged)!==nativeCheckpointSize.call(checkpoints))throw new Error('Native params entry commit stale');
+  used=true;
+  // 쓰기 금지 속성에 대입하면 모듈(엄격 모드)은 TypeError를 내고 번들(느슨한 모드)은 조용히 무시한다.
+  // 두 환경이 같은 오류를 내도록 먼저 확인하고, 대입 뒤에도 바뀌지 않았으면 설치하지 않는다. 여기까지 실패하면 엔트리·소유 Map·준비 원장이 모두 그대로다
+  if(!Object.getOwnPropertyDescriptor(entry,'checkpoints')?.writable)throw new Error('Native params entry commit stale');
+  entry.checkpoints=staged;if(Object.getOwnPropertyDescriptor(entry,'checkpoints')?.value!==staged)throw new Error('Native params entry commit stale');
+  if(proto===NativeCheckpointEntries.prototype)nativeEntriesSet.call(entries,id,entry);else nativeMapSet.call(entries,id,entry);
+  // 레코드는 이제 평범한 Map에 있으므로 준비용 경계 맵을 닫아 그 원장을 돌려준다
+  nativeCheckpointDispose.call(checkpoints);
  };
 }

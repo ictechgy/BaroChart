@@ -1,5 +1,6 @@
 import {validateIndicatorParams} from '../core/indicator-params.mjs';
 import {validateIndicatorModuleBinding} from '../core/indicator-modules.mjs';
+import {orderedIndicatorParams,resolveIndicatorFactory} from '../core/indicators.mjs';
 import {LazyCheckpoints} from './checkpoint-codec.mjs';
 import {paramRecord,paramVector,paramLength,paramSame,paramList,PARAM_CHECKPOINT_BYTES,PARAM_RECORD_BYTES} from './indicator-params-protocol.mjs';
 export async function validateIndicatorParamsPacket(packet,expected,context){
@@ -20,5 +21,7 @@ export async function validateIndicatorParamsPacket(packet,expected,context){
  for(let j=0;j<vectors.length;j++){const from=vectors[j],to=new Float64Array(b.capacity);arrays.push(to);for(let start=0;start<b.capacity;start+=16384){const end=Math.min(b.capacity,start+16384);for(let i=start;i<end;i++){const v=from[i];if(i>=b.length?!Number.isNaN(v):v===Infinity||v===-Infinity)throw new TypeError('Parameter output finite/NaN tail');to[i]=v;}done+=end-start;context.progress('validate',done,total);await context.yield();}}
  for(const [key,Type,n] of [['indices',Uint32Array,count],['offsets',Uint32Array,count+1],['bytes',Uint8Array,bytes]]){const to=new Type(n);clean[key]=to;for(let start=0;start<n;start+=16384){const end=Math.min(n,start+16384);for(let i=start;i<end;i++)to[i]=cp[key][i];done+=end-start;context.progress('validate',done,total);await context.yield();}}
  const lazy=new LazyCheckpoints(clean);await lazy.validateAsync(b.length,b.checkpointSize,b.name,wanted.params,{signal:expected.signal,maxRecordsPerSlice:32,maxSliceMs:1,checkOwner:()=>{context.check();context.current();context.check();context.guard();},yieldTask:()=>context.yield(),onProgress:({completed})=>context.progress('validate',done+completed,total)});context.check();context.current();
- return {def:expected.def,name:b.name,params:{...wanted.params},arrays,checkpoints:lazy,revision:r.revision,computedFrom:0,computedUntil:b.length,dirty:b.length,dirtyTo:0,invalidated:false,length:b.length};
+ // 호출자(setIndicatorParamsAsync·prepareWorkspaceAsync)는 paramDefinition으로 정규 팩토리를 이미 강제한다.
+ // 그래서 동기 IndicatorEngine.add처럼 선언 순서로 담아, 호스트나 옛 문서의 키 순서가 엔트리와 저장 문서에 남지 않게 한다
+ return {def:expected.def,name:b.name,params:orderedIndicatorParams(b.name,resolveIndicatorFactory(b.name),wanted.params),arrays,checkpoints:lazy,revision:r.revision,computedFrom:0,computedUntil:b.length,dirty:b.length,dirtyTo:0,invalidated:false,length:b.length};
 }

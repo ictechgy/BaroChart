@@ -1,8 +1,57 @@
 export const RESOURCE_LIMITS=Object.freeze({maxBars:4194304,maxCanvasDimension:16384,maxCanvasPixels:33554432,maxDrawings:10000,maxDrawingPoints:200000,maxDocumentChars:8388608,maxHistoryBytes:33554432,maxPanels:32,maxAxes:64,maxSeries:256,maxIndicators:128});
+/** 허용 목록에 있어도 자기 키로는 받지 않는 예약 이름. 프로토타입을 바꾸는 키를 레코드에 남기지 않는다. */
+const RESERVED_RECORD_KEYS=['__proto__','constructor','prototype'];
+/** 순회 중 덮어쓴 Object.prototype 메서드에 흔들리지 않도록 처음 값을 잡아 둔다. */
+const recordEnumerable=Object.prototype.propertyIsEnumerable;
+/**
+ * 두 문자열을 UTF-16 코드 단위 순서로 비교한다. 기본 sort와 같은 순서지만 기준을 코드에 드러내
+ * Rust 이식 때 바이트·코드 포인트 순서와 헷갈리지 않게 한다.
+ * @param {string} a 앞 문자열
+ * @param {string} b 뒤 문자열
+ * @returns {number} a가 앞이면 음수, 같으면 0, 뒤면 양수
+ */
+function utf16Ascending(a,b){return a<b?-1:a>b?1:0;}
+/**
+ * 키 배열을 정규 순서로 늘어놓는다.
+ * @param {readonly (string|symbol)[]} keys 늘어놓을 키(자기 키 목록)
+ * @param {readonly string[]} allowed 앞자리를 정하는 키 목록
+ * @returns {(string|symbol)[]} allowed에 있는 키(그 순서) → 나머지 문자열 키(UTF-16 오름차순) → 심볼 키(원래 순서)
+ */
+function canonicalKeyOrder(keys,allowed){
+ const present=new Set(keys),placed=new Set(),ordered=[],rest=[],symbols=[];
+ for(const key of allowed)if(present.has(key)&&!placed.has(key)){placed.add(key);ordered.push(key);}
+ for(const key of keys){if(typeof key==='symbol')symbols.push(key);else if(!placed.has(key))rest.push(key);}
+ return ordered.concat(rest.sort(utf16Ascending),symbols);
+}
+/**
+ * 검증 순회용 키 배열을 돌려준다. 입력 키 순서와 상관없이 같은 배열이 나오므로,
+ * 여러 필드가 함께 틀려도 먼저 보고할 필드가 하나로 정해진다.
+ * @param {object} value 검사할 레코드
+ * @param {readonly string[]} allowed 허용 키 목록. 이 순서가 앞자리를 정한다
+ * @param {readonly (string|symbol)[]} [keys=Object.keys(value)] 순회할 키. Reflect.ownKeys로 검사하는 검증기는 그 결과를 넘긴다
+ * @returns {(string|symbol)[]} allowed에 있는 키(그 순서) → 허용되지 않은 문자열 키(UTF-16 오름차순) → 심볼 키
+ */
+export function canonicalKeys(value,allowed,keys=Object.keys(value)){return canonicalKeyOrder(keys,allowed);}
+/**
+ * keys 순서를 앞에 둔 새 평범한 객체를 만든다. 저장 문서와 반환값의 키 순서를 입력 키 순서와 무관하게 고정한다.
+ * - keys에 있는 자기 열거 키를 그 순서대로 먼저 담는다. 값이 undefined인 키도 자리를 유지한다.
+ * - 나머지 자기 열거 문자열 키는 UTF-16 코드 단위 오름차순으로, 심볼 키는 원래 순서로 뒤에 붙인다.
+ * 객체 펼치기({...value})처럼 getter를 한 번씩 읽고 원본은 바꾸지 않는다. `__proto__`도 평범한 자기 키로 옮긴다.
+ * 정수 모양 키는 JS 규칙대로 항상 맨 앞(오름차순)에 온다.
+ * @param {object} value 원본 레코드
+ * @param {readonly string[]} keys 앞자리를 정하는 키 목록
+ * @returns {object} 정규 순서의 새 평범한 객체
+ */
+export function orderedRecord(value,keys){
+ const own=Reflect.ownKeys(value).filter(key=>recordEnumerable.call(value,key));
+ return Object.fromEntries(canonicalKeyOrder(own,keys).map(key=>[key,value[key]]));
+}
 export function optionRecord(value,keys,label='Options') {
  if(!value||typeof value!=='object'||Array.isArray(value))throw new TypeError(`${label}: object required`);
  const prototype=Object.getPrototypeOf(value);if(prototype!==Object.prototype&&prototype!==null)throw new TypeError(`${label}: plain object required`);
- for(const key of Object.keys(value))if(['__proto__','constructor','prototype'].includes(key)||!keys.includes(key))throw new TypeError(`${label}: unsupported field ${key.slice(0,64)}`);
+ const own=Object.keys(value);
+ // 틀린 키가 있을 때만 정규 순서(허용 키 → 나머지 UTF-16 오름차순)로 다시 본다. 예약 이름은 허용 목록에 있어도 나머지로 보낸다
+ if(own.some(key=>RESERVED_RECORD_KEYS.includes(key)||!keys.includes(key)))for(const key of canonicalKeys(value,keys.filter(key=>!RESERVED_RECORD_KEYS.includes(key)),own))if(RESERVED_RECORD_KEYS.includes(key)||!keys.includes(key))throw new TypeError(`${label}: unsupported field ${key.slice(0,64)}`);
  return value;
 }
 export function boundedText(value,max=128,label='Text',empty=false) {if(typeof value!=='string'||value.length>max||!empty&&!value.length)throw new TypeError(`${label}: string limit ${max}`);return value;}
@@ -12,6 +61,8 @@ export const PANEL_KEYS=['id','weight','label','scale','inverted','padding','ran
 export const AXIS_KEYS=['id','panel','side','scale','inverted','padding','range','base','precision','tickFormat','prefix','suffix','label','visible','width','formatter'];
 export const SERIES_KEYS=['id','type','panel','source','values','indicator','output','color','fill','width','baseline','offset','upColor','downColor','visible','axisId','symbolId','label'];
 export const THEME_KEYS=['background','grid','text','up','down','crosshair','font'];
+/** 심볼 레코드의 정규 키 순서. 작업공간 검증기의 허용 목록 순서(필수 8개, 선택 2개)와 같다. */
+export const SYMBOL_KEYS=['id','exchange','timezone','currency','volumeUnit','priceDecimals','tickSize','adjustment','provider','adjustmentVersion'];
 // Only callbacks installed by ChartAPI.setSymbol can be recreated in a new VM.
 // A symbol object alone must not silently authorize replacement of custom callbacks.
 const symbolFormatterRecords=new WeakMap();

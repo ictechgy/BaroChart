@@ -1,10 +1,59 @@
 // Generated from src/core; run npm run build:native.
 (function(){
 const RESOURCE_LIMITS=Object.freeze({maxBars:4194304,maxCanvasDimension:16384,maxCanvasPixels:33554432,maxDrawings:10000,maxDrawingPoints:200000,maxDocumentChars:8388608,maxHistoryBytes:33554432,maxPanels:32,maxAxes:64,maxSeries:256,maxIndicators:128});
+/** 허용 목록에 있어도 자기 키로는 받지 않는 예약 이름. 프로토타입을 바꾸는 키를 레코드에 남기지 않는다. */
+const RESERVED_RECORD_KEYS=['__proto__','constructor','prototype'];
+/** 순회 중 덮어쓴 Object.prototype 메서드에 흔들리지 않도록 처음 값을 잡아 둔다. */
+const recordEnumerable=Object.prototype.propertyIsEnumerable;
+/**
+ * 두 문자열을 UTF-16 코드 단위 순서로 비교한다. 기본 sort와 같은 순서지만 기준을 코드에 드러내
+ * Rust 이식 때 바이트·코드 포인트 순서와 헷갈리지 않게 한다.
+ * @param {string} a 앞 문자열
+ * @param {string} b 뒤 문자열
+ * @returns {number} a가 앞이면 음수, 같으면 0, 뒤면 양수
+ */
+function utf16Ascending(a,b){return a<b?-1:a>b?1:0;}
+/**
+ * 키 배열을 정규 순서로 늘어놓는다.
+ * @param {readonly (string|symbol)[]} keys 늘어놓을 키(자기 키 목록)
+ * @param {readonly string[]} allowed 앞자리를 정하는 키 목록
+ * @returns {(string|symbol)[]} allowed에 있는 키(그 순서) → 나머지 문자열 키(UTF-16 오름차순) → 심볼 키(원래 순서)
+ */
+function canonicalKeyOrder(keys,allowed){
+ const present=new Set(keys),placed=new Set(),ordered=[],rest=[],symbols=[];
+ for(const key of allowed)if(present.has(key)&&!placed.has(key)){placed.add(key);ordered.push(key);}
+ for(const key of keys){if(typeof key==='symbol')symbols.push(key);else if(!placed.has(key))rest.push(key);}
+ return ordered.concat(rest.sort(utf16Ascending),symbols);
+}
+/**
+ * 검증 순회용 키 배열을 돌려준다. 입력 키 순서와 상관없이 같은 배열이 나오므로,
+ * 여러 필드가 함께 틀려도 먼저 보고할 필드가 하나로 정해진다.
+ * @param {object} value 검사할 레코드
+ * @param {readonly string[]} allowed 허용 키 목록. 이 순서가 앞자리를 정한다
+ * @param {readonly (string|symbol)[]} [keys=Object.keys(value)] 순회할 키. Reflect.ownKeys로 검사하는 검증기는 그 결과를 넘긴다
+ * @returns {(string|symbol)[]} allowed에 있는 키(그 순서) → 허용되지 않은 문자열 키(UTF-16 오름차순) → 심볼 키
+ */
+function canonicalKeys(value,allowed,keys=Object.keys(value)){return canonicalKeyOrder(keys,allowed);}
+/**
+ * keys 순서를 앞에 둔 새 평범한 객체를 만든다. 저장 문서와 반환값의 키 순서를 입력 키 순서와 무관하게 고정한다.
+ * - keys에 있는 자기 열거 키를 그 순서대로 먼저 담는다. 값이 undefined인 키도 자리를 유지한다.
+ * - 나머지 자기 열거 문자열 키는 UTF-16 코드 단위 오름차순으로, 심볼 키는 원래 순서로 뒤에 붙인다.
+ * 객체 펼치기({...value})처럼 getter를 한 번씩 읽고 원본은 바꾸지 않는다. `__proto__`도 평범한 자기 키로 옮긴다.
+ * 정수 모양 키는 JS 규칙대로 항상 맨 앞(오름차순)에 온다.
+ * @param {object} value 원본 레코드
+ * @param {readonly string[]} keys 앞자리를 정하는 키 목록
+ * @returns {object} 정규 순서의 새 평범한 객체
+ */
+function orderedRecord(value,keys){
+ const own=Reflect.ownKeys(value).filter(key=>recordEnumerable.call(value,key));
+ return Object.fromEntries(canonicalKeyOrder(own,keys).map(key=>[key,value[key]]));
+}
 function optionRecord(value,keys,label='Options') {
  if(!value||typeof value!=='object'||Array.isArray(value))throw new TypeError(`${label}: object required`);
  const prototype=Object.getPrototypeOf(value);if(prototype!==Object.prototype&&prototype!==null)throw new TypeError(`${label}: plain object required`);
- for(const key of Object.keys(value))if(['__proto__','constructor','prototype'].includes(key)||!keys.includes(key))throw new TypeError(`${label}: unsupported field ${key.slice(0,64)}`);
+ const own=Object.keys(value);
+ // 틀린 키가 있을 때만 정규 순서(허용 키 → 나머지 UTF-16 오름차순)로 다시 본다. 예약 이름은 허용 목록에 있어도 나머지로 보낸다
+ if(own.some(key=>RESERVED_RECORD_KEYS.includes(key)||!keys.includes(key)))for(const key of canonicalKeys(value,keys.filter(key=>!RESERVED_RECORD_KEYS.includes(key)),own))if(RESERVED_RECORD_KEYS.includes(key)||!keys.includes(key))throw new TypeError(`${label}: unsupported field ${key.slice(0,64)}`);
  return value;
 }
 function boundedText(value,max=128,label='Text',empty=false) {if(typeof value!=='string'||value.length>max||!empty&&!value.length)throw new TypeError(`${label}: string limit ${max}`);return value;}
@@ -14,6 +63,8 @@ const PANEL_KEYS=['id','weight','label','scale','inverted','padding','range','ba
 const AXIS_KEYS=['id','panel','side','scale','inverted','padding','range','base','precision','tickFormat','prefix','suffix','label','visible','width','formatter'];
 const SERIES_KEYS=['id','type','panel','source','values','indicator','output','color','fill','width','baseline','offset','upColor','downColor','visible','axisId','symbolId','label'];
 const THEME_KEYS=['background','grid','text','up','down','crosshair','font'];
+/** 심볼 레코드의 정규 키 순서. 작업공간 검증기의 허용 목록 순서(필수 8개, 선택 2개)와 같다. */
+const SYMBOL_KEYS=['id','exchange','timezone','currency','volumeUnit','priceDecimals','tickSize','adjustment','provider','adjustmentVersion'];
 // Only callbacks installed by ChartAPI.setSymbol can be recreated in a new VM.
 // A symbol object alone must not silently authorize replacement of custom callbacks.
 const symbolFormatterRecords=new WeakMap();
@@ -412,22 +463,150 @@ class BlockRangeIndex {
 // and fold ASCII identifier case without depending on resolvedOptions (QuickJS's
 // native timezone bridge exposes only formatToParts).
 const formatters = new Map(),MARKET_TIMEZONE_FORMATTER_LIMIT=32;
-function zonedParts(time, timezone) {
-  if(typeof timezone!=='string'||!timezone.length||timezone.length>128)throw new TypeError('Timezone string, at most 128 characters required');
-  const key=timezone.replace(/[A-Z]/g,char=>char.toLowerCase());let fmt=formatters.get(key);
-  if(!fmt)fmt=new Intl.DateTimeFormat('en-CA', {timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'});
-  const result=Object.fromEntries(fmt.formatToParts(new Date(time)).filter(p => p.type !== 'literal').map(p => [p.type, p.value]));
+// 시간대 계약 v1(설계 §7.4-2). 시각·이름·연도 검사와 오류 문구를 코어가 정해, V8(웹)·JSC(iOS)·
+// QuickJS shim+java.time(Android)이 같은 입력에 같은 답과 같은 오류를 내게 한다.
+// 시각 범위는 지원 연도(1000~9999)를 앞뒤로 하루씩 넓힌 것이다. 지역 시각의 연도는 변환 뒤에 다시 본다.
+const MARKET_TIME_MIN=-30610310400000,MARKET_TIME_MAX=253402387199999;
+// ±HH:MM 고정 오프셋. Intl을 부르지 않고 코어가 산술로 계산한다
+const MARKET_FIXED_OFFSET=/^([+-])([01]\d|2[0-3]):([0-5]\d)$/;
+// 호스트로 넘길 수 있는 IANA 꼴 이름의 문법. ASCII 밖 글자, 공백, 빈 경로 조각은 호스트까지 가지 않는다
+const MARKET_ZONE_NAME=/^[A-Za-z][A-Za-z0-9_+\-]*(?:\/[A-Za-z0-9_+\-]+)*$/;
+// java.time만 받고 IANA·ICU는 거절하는 이름(Z, UT, UTC±…, GMT±…, UT±…)이다. 대소문자를 가리지 않는다.
+// 맨 UT는 Android 호스트가 캐시 상태에 따라 소문자 ut까지 받게 되므로 함께 막는다.
+const MARKET_HOST_ONLY_ZONE=/^(?:z|ut|(?:utc|gmt|ut)[+\-].*)$/i;
+
+/**
+ * 지원하지 않는 시간대 오류를 만든다. 문구에는 이름의 앞 64 UTF-16 단위만 담는다.
+ * 호스트(Intl·java.time)가 실패한 경우에만 원래 오류를 cause로 남긴다. 문법에서 거절한 이름에는 cause가 없다.
+ * @param {string} timezone 받은 이름
+ * @param {unknown} [cause] 호스트가 던진 원래 오류
+ * @returns {RangeError} 던질 오류
+ */
+function unsupportedTimeZone(timezone,cause){return new RangeError(`Unsupported time zone: ${timezone.slice(0,64)}`,cause===undefined?undefined:{cause});}
+/**
+ * 지원 연도(1000~9999)인지 확인한다. 범위 밖이면 iOS('999')와 Android('0999')가 다르게 쓰던 값을 내지 않고 거절한다.
+ * @param {number} year 그레고리력 연도(NaN이면 범위 밖으로 본다)
+ * @returns {number} 받은 연도
+ */
+function supportedMarketYear(year){if(!(year>=1000&&year<=9999))throw new RangeError('Time zone conversion year out of range');return year;}
+/**
+ * 지역 시각 성분을 계약 형식으로 만든다. 연도는 4자리, 나머지는 2자리로 0을 채우고 키 순서를 고정한다.
+ * @param {number} year 연도(지원 범위를 여기서 확인한다)
+ * @param {number|string} month 월
+ * @param {number|string} day 일
+ * @param {number|string} hour 시(00~23)
+ * @param {number|string} minute 분
+ * @param {number|string} second 초
+ * @returns {{year: string, month: string, day: string, hour: string, minute: string, second: string}} 지역 시각
+ */
+function zonedPartsRecord(year,month,day,hour,minute,second){
+  const two=value=>String(value).padStart(2,'0');
+  return {year:String(supportedMarketYear(year)),month:two(month),day:two(day),hour:two(hour),minute:two(minute),second:two(second)};
+}
+/**
+ * ±HH:MM 고정 오프셋의 지역 시각을 Intl 없이 계산한다.
+ * Intl처럼 시각을 먼저 Date의 정수 밀리초로 자른 뒤 오프셋을 더해, 소수 밀리초에서도 같은 순간을 본다.
+ * @param {number} time 범위 검사를 통과한 UTC epoch ms
+ * @param {RegExpExecArray} offset MARKET_FIXED_OFFSET 일치 결과
+ * @returns {ReturnType<typeof zonedPartsRecord>} 지역 시각
+ */
+function fixedOffsetZonedParts(time,offset){
+  const local=new Date(new Date(time).getTime()+(offset[1]==='-'?-1:1)*(Number(offset[2])*60+Number(offset[3]))*60000);
+  return zonedPartsRecord(local.getUTCFullYear(),local.getUTCMonth()+1,local.getUTCDate(),local.getUTCHours(),local.getUTCMinutes(),local.getUTCSeconds());
+}
+/**
+ * 이름 있는 시간대의 지역 시각을 호스트 Intl(Android는 java.time shim)로 계산한다.
+ * 포매터 생성이나 formatToParts 실패는 모두 같은 Unsupported 오류로 바꾸고, 캐시는 호출 전체가 성공했을 때만 갱신한다.
+ * @param {number} time 범위 검사를 통과한 UTC epoch ms
+ * @param {string} timezone 문법 검사를 통과한 이름(원래 철자 그대로 호스트에 넘긴다)
+ * @returns {ReturnType<typeof zonedPartsRecord>} 지역 시각
+ */
+function intlZonedParts(time,timezone){
+  const key=timezone.replace(/[A-Z]/g,char=>char.toLowerCase());let fmt=formatters.get(key),values;
+  try{
+    if(!fmt)fmt=new Intl.DateTimeFormat('en-CA', {timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'});
+    values=Object.fromEntries(fmt.formatToParts(new Date(time)).filter(p => p.type !== 'literal').map(p => [p.type, p.value]));
+  }catch(error){throw unsupportedTimeZone(timezone,error);}
+  const result=zonedPartsRecord(Number(values.year),values.month,values.day,values.hour,values.minute,values.second);
   // The native shim can reject a zone at formatToParts, after construction.
   // Failed calls neither insert nor refresh/evict successful cached entries.
+  // 연도 범위로 실패한 호출도 실패한 호출이다(위 zonedPartsRecord가 먼저 던진다).
   formatters.delete(key);formatters.set(key,fmt);if(formatters.size>MARKET_TIMEZONE_FORMATTER_LIMIT)formatters.delete(formatters.keys().next().value);
   return result;
 }
+/**
+ * Converts a UTC instant to local calendar parts in a time zone (time zone contract v1).
+ * Accepts ASCII IANA-style names, case-insensitively, and fixed offsets `±HH:MM`. Host-only names such as `Z`,
+ * `UT` and `UTC+9` are rejected. The local year must be 1000 through 9999.
+ * @param {number} time finite UTC epoch milliseconds
+ * @param {string} timezone time zone name of 1..128 UTF-16 code units
+ * @returns {{year: string, month: string, day: string, hour: string, minute: string, second: string}} zero-padded parts
+ * @throws {TypeError} when the time zone is not a string of 1..128 code units
+ * @throws {RangeError} `Time zone conversion requires a finite time`, `Time zone conversion year out of range` or
+ *   `Unsupported time zone: <name>`; a host failure is kept as `cause`
+ */
+function zonedParts(time, timezone) {
+  if(typeof timezone!=='string'||!timezone.length||timezone.length>128)throw new TypeError('Timezone string, at most 128 characters required');
+  if(!Number.isFinite(time))throw new RangeError('Time zone conversion requires a finite time');
+  if(time<MARKET_TIME_MIN||time>MARKET_TIME_MAX)throw new RangeError('Time zone conversion year out of range');
+  const offset=MARKET_FIXED_OFFSET.exec(timezone);if(offset)return fixedOffsetZonedParts(time,offset);
+  if(!MARKET_ZONE_NAME.test(timezone)||MARKET_HOST_ONLY_ZONE.test(timezone))throw unsupportedTimeZone(timezone);
+  return intlZonedParts(time,timezone);
+}
+/**
+ * 엄격한 ISO 날짜 YYYY-MM-DD를 읽는다. 연도 1000~9999, 월 1~12, 일은 그레고리력 월 길이(윤년 포함) 이내다.
+ * Date.parse는 엔진마다 2026-02-30을 다르게 다뤄(JSC는 NaN, V8·QuickJS는 3월로 넘김) 쓰지 않는다.
+ * @param {unknown} date 날짜 문자열
+ * @returns {[number, number, number]|null} [연, 월, 일], 틀리면 null
+ */
+function parseMarketDate(date){
+  const match=typeof date==='string'?/^(\d{4})-(\d{2})-(\d{2})$/.exec(date):null;if(!match)return null;
+  const year=Number(match[1]),month=Number(match[2]),day=Number(match[3]),leap=year%4===0&&(year%100!==0||year%400===0);
+  return year>=1000&&month>=1&&month<=12&&day>=1&&day<=[31,leap?29:28,31,30,31,30,31,31,30,31,30,31][month-1]?[year,month,day]:null;
+}
+/**
+ * 엄격한 시각 HH:mm 또는 HH:mm:ss를 읽는다. 시 00~23, 분·초 00~59다(24:00과 소수 초는 받지 않는다).
+ * @param {unknown} clock 시각 문자열
+ * @returns {[number, number, number]|null} [시, 분, 초], 틀리면 null
+ */
+function parseMarketClock(clock){
+  const match=typeof clock==='string'?/^(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(clock):null;if(!match)return null;
+  const hour=Number(match[1]),minute=Number(match[2]),second=Number(match[3]??0);
+  return hour<=23&&minute<=59&&second<=59?[hour,minute,second]:null;
+}
 function marketDate(time, timezone) {const p = zonedParts(time, timezone); return `${p.year}-${p.month}-${p.day}`;}
-function shiftDate(date, days) {return new Date(Date.parse(`${date}T12:00:00Z`) + days * 86400000).toISOString().slice(0, 10);}
+/**
+ * Moves a strict ISO date (`YYYY-MM-DD`, years 1000 through 9999) by whole days with Gregorian arithmetic.
+ * @param {string} date ISO calendar date
+ * @param {number} days days to add; negative values move back
+ * @returns {string} the shifted ISO date
+ * @throws {TypeError} `ISO date required` for a malformed or nonexistent date
+ * @throws {RangeError} `Time zone conversion year out of range` when the result leaves years 1000 through 9999
+ */
+function shiftDate(date, days) {
+  const parts=parseMarketDate(date);if(!parts)throw new TypeError('ISO date required');
+  // 정오(UTC)에서 날짜만큼 옮긴 뒤 UTC 날짜를 읽는다. 결과 연도도 지원 범위여야 한다(10000년을 잘라 쓰지 않는다)
+  const shifted=new Date(Date.UTC(parts[0],parts[1]-1,parts[2],12)+days*86400000),year=supportedMarketYear(shifted.getUTCFullYear());
+  return `${year}-${String(shifted.getUTCMonth()+1).padStart(2,'0')}-${String(shifted.getUTCDate()).padStart(2,'0')}`;
+}
+/**
+ * Resolves a local wall-clock time in a time zone to UTC epoch milliseconds.
+ * The date and clock are parsed strictly (`YYYY-MM-DD`, `HH:mm` or `HH:mm:ss`). For a repeated clock, `ambiguity`
+ * picks the `earlier` (default) or `later` instant, or `reject`s it.
+ * @param {string} date ISO calendar date, years 1000 through 9999
+ * @param {string} clock local wall-clock time
+ * @param {string} timezone time zone name accepted by {@link zonedParts}
+ * @param {'earlier'|'later'|'reject'} [ambiguity] repeated-clock policy
+ * @returns {number} UTC epoch milliseconds
+ * @throws {TypeError} `ISO date and HH:mm[:ss] required`
+ * @throws {RangeError} `Nonexistent local time at DST boundary`, `Ambiguous local time` or a {@link zonedParts} error
+ */
 function zonedEpoch(date, clock, timezone, ambiguity = 'earlier') {
-  const iso = `${date}T${clock.length === 5 ? clock + ':00' : clock}`, naive = Date.parse(iso + 'Z'); if (!Number.isFinite(naive)) throw new TypeError('ISO date and HH:mm[:ss] required');
+  const day=parseMarketDate(date),time=parseMarketClock(clock);if(!day||!time)throw new TypeError('ISO date and HH:mm[:ss] required');
+  const iso = `${date}T${clock.length === 5 ? clock + ':00' : clock}`, naive = Date.UTC(day[0], day[1] - 1, day[2], time[0], time[1], time[2]);
   const offsets = new Set();
-  for (const d of [-1, 0, 1]) {const t = naive + d * 86400000, p = zonedParts(t, timezone), local = Date.parse(`${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}Z`); offsets.add(local - t);}
+  // 세 표본(앞날·당일·다음날)과 후보 정렬 규칙은 그대로다(이식 지도 §3.5.3). 지역 시각만 Date.UTC로 되돌린다
+  for (const d of [-1, 0, 1]) {const t = naive + d * 86400000, p = zonedParts(t, timezone), local = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour), Number(p.minute), Number(p.second)); offsets.add(local - t);}
   const candidates = [...offsets].map(offset => naive - offset).filter(t => {const p = zonedParts(t, timezone); return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}` === iso;}).sort((a, b) => a - b);
   if (!candidates.length) throw new RangeError('Nonexistent local time at DST boundary');
   if (candidates.length > 1 && ambiguity === 'reject') throw new RangeError('Ambiguous local time');
@@ -435,7 +614,8 @@ function zonedEpoch(date, clock, timezone, ambiguity = 'earlier') {
 }
 function validateSymbol(symbol) {
   if (!symbol || ['id', 'exchange', 'timezone', 'currency', 'volumeUnit'].some(k => typeof symbol[k] !== 'string' || !symbol[k]) || !Number.isInteger(symbol.priceDecimals) || symbol.priceDecimals < 0 || symbol.priceDecimals > 18 || !Number.isFinite(symbol.tickSize) || symbol.tickSize <= 0 || !['raw', 'split', 'total-return'].includes(symbol.adjustment)) throw new TypeError('Invalid symbol metadata');
-  zonedParts(0, symbol.timezone); return Object.freeze({...symbol});
+  // 호스트 객체 키 순서(Swift Dictionary 등)가 inspect()와 작업공간에 남지 않도록 검증기 허용 목록 순서로 담는다
+  zonedParts(0, symbol.timezone); return Object.freeze(orderedRecord(symbol,SYMBOL_KEYS));
 }
 function formatPrice(value, symbol) {return value.toFixed(symbol.priceDecimals);}
 function boundedDenseArray(value,max,label,exactLength){
@@ -1153,6 +1333,21 @@ add('parabolicSAR',({step=.02,max=.2}={})=>{if(!Number.isFinite(step)||!Number.i
 
 const canonicalBuiltinIndicators=new Map(builtinIndicators);
 function resolveIndicatorFactory(name){return canonicalBuiltinIndicators.get(name)??portableIndicatorFactory(name);}
+/**
+ * 지표 정의가 파라미터를 선언한 순서. 저장 params(지표 엔트리, aster.studies, aster.workspace)의 키 순서를 정한다.
+ * 내장은 팩토리 구조 분해 순서, vwap·pivots는 sessionStudyParams가 읽는 순서, 링크 모듈은 모듈 팩토리 선언 순서다.
+ * 팩토리를 고치면 이 목록도 함께 고친다(test/record-key-order.test.mjs가 구조 분해 선언과 대조한다).
+ */
+const indicatorParameterOrders=new Map(Object.entries({sma:['period','source'],vwma:['period'],ema:['period','source'],wma:['period'],rsi:['period'],atr:['period'],macd:['fast','slow','signal'],bollinger:['period','deviation'],donchian:['period'],aroon:['period'],stochastic:['period','smoothK','smoothD'],roc:['period'],williamsR:['period'],cci:['period'],obv:[],vwap:['calendar','anchorTime','sessionMs','kinds','source','deviation'],mfi:['period'],cmf:['period'],adx:['period'],dema:['period'],tema:['period'],hma:['period'],keltner:['period','atrPeriod','multiplier'],supertrend:['period','multiplier'],ichimoku:['conversion','base','span','displacement'],trix:['period'],ppo:['fast','slow','signal'],stochRSI:['period','stochPeriod','smoothK','smoothD'],adl:[],chaikin:['fast','slow'],forceIndex:['period'],volumeOscillator:['fast','slow'],vortex:['period'],pivots:['calendar','anchorTime','sessionMs','kinds'],parabolicSAR:['step','max'],'aster.volume-direction@1/pressure':['factor','shift']}));
+/**
+ * params를 그 지표 정의의 선언 순서로 담은 새 레코드를 돌려준다. 선언하지 않은 키는 UTF-16 오름차순으로 뒤에 붙는다.
+ * 정규 내장·링크 팩토리일 때만 선언 순서를 쓴다. 등록한 사용자 팩토리나 바꿔 끼운 팩토리는 선언을 알 수 없으므로 UTF-16 순서만 쓴다.
+ * @param {string} name 지표 이름
+ * @param {Function|undefined} factory 실제로 쓸 팩토리
+ * @param {object} params 검증된 params
+ * @returns {object} 정규 키 순서의 새 params
+ */
+function orderedIndicatorParams(name,factory,params){return orderedRecord(params,factory!==undefined&&factory===resolveIndicatorFactory(name)?indicatorParameterOrders.get(name)??[]:[]);}
 function requirePortableFactory(name,factory){const builtin=canonicalBuiltinIndicators.get(name);if(builtin&&factory===builtin)return null;return requirePortableIndicator(name,factory);}
 // Running calls reject recursion; a suspended generator may be superseded by
 // a new explicit calculation without leaving an abandoned iterator busy forever.
@@ -1173,9 +1368,9 @@ class IndicatorEngine {
     identifier(id,'Indicator id');validateIndicatorParams(params);if(this.entries.size>=RESOURCE_LIMITS.maxIndicators)throw new RangeError('Indicator limit');
     if (this.entries.has(id)) throw new Error('Duplicate indicator id'); const make = this.registry.get(name); if (!make) throw new Error(`Unknown indicator: ${name}`);
     const def = make(params); if (!Array.isArray(def.outputs) || !def.outputs.length||def.outputs.length>32 || def.outputs.some(k=>typeof k!=='string'||!k||k.length>128||['__proto__','constructor','prototype'].includes(k)) || new Set(def.outputs).size!==def.outputs.length || typeof def.create !== 'function' || Object.entries(def.plotOffsets??{}).some(([k,v])=>!def.outputs.includes(k)||!Number.isInteger(v)||Math.abs(v)>10000)) throw new TypeError('Invalid indicator definition');
-    const entry={def,name,params:cloneState(params), dirty: 0, dirtyTo:this.store.length,invalidated:true,length: 0, arrays: [], checkpoints: new Map(), revision: 0};this.entries.set(id,entry);try{return this.get(id);}catch(error){if(this.entries.get(id)===entry){const entries=this.entries;entries.delete(id);retireNativeEntryIfReplaced(entries,id);}throw error;}
+    const entry={def,name,params:orderedIndicatorParams(name,make,cloneState(params)), dirty: 0, dirtyTo:this.store.length,invalidated:true,length: 0, arrays: [], checkpoints: new Map(), revision: 0};this.entries.set(id,entry);try{return this.get(id);}catch(error){if(this.entries.get(id)===entry)this.entries.delete(id);throw error;}
   }
-  remove(id) {const entries=this.entries;entries.delete(id);retireNativeEntryIfReplaced(entries,id);}
+  remove(id) {this.entries.delete(id);}
   get(id) {const task=this.calculate(id);let next;do{next=task.next();}while(!next.done);return next.value;}
   *calculate(id,chunkSize=4096) {
     if(!Number.isInteger(chunkSize)||chunkSize<1||chunkSize>65536)throw new RangeError('Calculation chunk size');
@@ -1232,7 +1427,7 @@ class IndicatorEngine {
       if(!completed&&owned()&&!sameSource()){e.dirty=0;e.invalidated=true;}
     }
   }
-  dispose() {try{this.unsubscribe(); const entries=this.entries;entries.clear();retireNativeEntriesAfterClear(entries);}finally{unregisterStoreOwner(this);}}
+  dispose() {try{this.unsubscribe(); this.entries.clear();}finally{unregisterStoreOwner(this);}}
 }
 
 // Chart annotations only: no position sizing, orders, fills or account state.
@@ -1274,6 +1469,33 @@ function validateDrawingDocumentVersion(d,version){
 
 // Shared structural validation; callers retain their existing copy/commit policy.
 const DRAWING_TYPES = ['trendline', 'horizontal', 'fibonacci', 'rectangle', 'ellipse', 'text', 'ray', 'extendedline', 'channel', 'fibextension', 'fibfan', 'fibtimezones', 'freehand', 'measurement', 'longposition', 'shortposition'];
+/** 저장 드로잉의 정규 키 순서. 레거시 픽스처 순서(id…text) 뒤에 나머지를 허용 목록 순서로 둔다. */
+const DRAWING_RECORD_KEYS=['id','panel','locked','style','type','points','text','visible','axisId','seriesId'];
+/** 드로잉 스타일의 정규 키 순서. 레거시 픽스처 순서(color, width) 뒤에 나머지를 허용 목록 순서로 둔다. */
+const DRAWING_STYLE_KEYS=['color','width','fill','font'];
+/** 앵커의 정규 키 순서. */
+const DRAWING_POINT_KEYS=['time','price'];
+/**
+ * 앵커를 정규 키 순서의 새 객체로 만든다.
+ * 앵커는 한 문서에 20만 개까지 있으므로, 자기 열거 키가 time·price뿐인 검증된 앵커는 범용 정렬 없이 바로 만든다.
+ * 이 지름길이 버리는 심볼 키는 호출자가 하는 JSON 복사(또는 이미 JSON에서 온 입력)에서 어차피 남지 않는다.
+ * @param {object} point 검증된 앵커
+ * @returns {object} {time, price} 순서의 새 앵커
+ */
+function canonicalDrawingPoint(point){const keys=Object.keys(point);return keys.length===2&&keys.includes('time')&&keys.includes('price')?{time:point.time,price:point.price}:orderedRecord(point,DRAWING_POINT_KEYS);}
+/**
+ * 드로잉 레코드를 정규 키 순서의 새 레코드로 만든다. 스타일과 앵커도 새 객체로 정렬하고, 값은 그대로 옮긴다.
+ * 평범한 객체로 다시 만들기 때문에 검증을 마친 레코드나 JSON 복사본에만 쓴다. 검증 전에 쓰면 프로토타입 검사를 건너뛰게 된다.
+ * 객체가 아닌 앵커·스타일(toJSON이 바꾼 값 등)은 그대로 두어, 뒤이은 validateDrawing이 원래 오류 문구로 거절하게 한다.
+ * @param {object} d 검증된 드로잉 레코드
+ * @returns {object} 정규 키 순서의 새 드로잉 레코드
+ */
+function canonicalDrawing(d){
+ const record=value=>!!value&&typeof value==='object'&&!Array.isArray(value),next=orderedRecord(d,DRAWING_RECORD_KEYS);
+ if(Array.isArray(next.points))next.points=next.points.map(point=>record(point)?canonicalDrawingPoint(point):point);
+ if(record(next.style))next.style=orderedRecord(next.style,DRAWING_STYLE_KEYS);
+ return next;
+}
 function drawingPointCount(type) {return isPositionDrawing(type)?4:['horizontal','text'].includes(type)?1:['channel','fibextension'].includes(type)?3:2;}
 function validateDrawing(d) {
   optionRecord(d,['id','type','panel','points','style','text','locked','visible','axisId','seriesId'],'Drawing');identifier(d.id,'Drawing id');identifier(d.panel,'Drawing panel');for(const key of ['axisId','seriesId'])if(d[key]!==undefined&&d[key]!==null)identifier(d[key],'Drawing '+key);
@@ -1311,15 +1533,18 @@ class DrawingStore {
   // default current items and retain their existing transaction grouping.
   // Validate the JSON-normalized copy too: nested getters/toJSON may change
   // values after the initial caller-shape check but before publication.
-  add(input,{items=this.items,beforeMutation=null}={}){optionRecord(input,['id','type','panel','points','style','text','locked','visible','axisId','seriesId'],'Drawing');let id=input.id,serial=this.serial;if(!id){do{id=`drawing-${++serial}`;}while(items.some(d=>d.id===id));}const d={id,panel:'price',locked:false,style:{color:'#f5b85a',width:1.5},...input,id};validateDrawing(d);const copy=copyDrawing(d);validateDrawing(copy);frozenDrawing(copy);if(items.some(x=>x.id===id))throw new Error('Duplicate drawing id');const next=[...items,copy];this.budget(next);beforeMutation?.();this.mutate(()=>{this.items=next;});this.serial=serial;if(copy.visible!==false)this.selected=id;return id;}
-  edit(id,patch,{items=this.items,beforeMutation=null}={}){optionRecord(patch,['type','panel','points','style','text','locked','visible','axisId','seriesId'],'Drawing patch');const i=items.findIndex(x=>x.id===id);if(i<0)throw new Error('Missing drawing');const previous=items[i];if(previous.locked&&Object.keys(patch).some(k=>!['locked','visible'].includes(k)))throw new Error('Drawing is locked');const next={...previous,...patch};validateDrawing(next);if(JSON.stringify(previous)===JSON.stringify(next)){beforeMutation?.();return;}const copy=copyDrawing(next);validateDrawing(copy);frozenDrawing(copy);const changed=items.slice();changed[i]=copy;this.budget(changed);beforeMutation?.();this.mutate(()=>{this.items=changed;if(copy.visible===false&&this.selected===id)this.selected=null;});}
+  // 저장 레코드는 JSON 복사본을 정규 키 순서로 다시 담는다(canonicalDrawing). edit의 같음 비교도 키 순서를 빼고 본다:
+  // 비교·복사 직렬화는 지금처럼 한 번씩 하고(getter/toJSON 계약 유지), 그 결과만 정렬한다.
+  // 키 순서만 다르면 JSON 길이가 같으므로, 길이가 같을 때만 정렬한 사본으로 다시 비교한다.
+  add(input,{items=this.items,beforeMutation=null}={}){optionRecord(input,['id','type','panel','points','style','text','locked','visible','axisId','seriesId'],'Drawing');let id=input.id,serial=this.serial;if(!id){do{id=`drawing-${++serial}`;}while(items.some(d=>d.id===id));}const d={id,panel:'price',locked:false,style:{color:'#f5b85a',width:1.5},...input,id};validateDrawing(d);const copy=canonicalDrawing(copyDrawing(d));validateDrawing(copy);frozenDrawing(copy);if(items.some(x=>x.id===id))throw new Error('Duplicate drawing id');const next=[...items,copy];this.budget(next);beforeMutation?.();this.mutate(()=>{this.items=next;});this.serial=serial;if(copy.visible!==false)this.selected=id;return id;}
+  edit(id,patch,{items=this.items,beforeMutation=null}={}){optionRecord(patch,['type','panel','points','style','text','locked','visible','axisId','seriesId'],'Drawing patch');const i=items.findIndex(x=>x.id===id);if(i<0)throw new Error('Missing drawing');const previous=items[i];if(previous.locked&&Object.keys(patch).some(k=>!['locked','visible'].includes(k)))throw new Error('Drawing is locked');const next={...previous,...patch};validateDrawing(next);const previousText=JSON.stringify(previous),nextText=JSON.stringify(next);if(previousText===nextText||previousText.length===nextText.length&&previousText===JSON.stringify(canonicalDrawing(JSON.parse(nextText)))){beforeMutation?.();return;}const copy=canonicalDrawing(copyDrawing(next));validateDrawing(copy);frozenDrawing(copy);const changed=items.slice();changed[i]=copy;this.budget(changed);beforeMutation?.();this.mutate(()=>{this.items=changed;if(copy.visible===false&&this.selected===id)this.selected=null;});}
   remove(id,{items=this.items,beforeMutation=null}={}){const d=items.find(x=>x.id===id);if(!d||d.locked)return false;const next=items.filter(x=>x.id!==id);beforeMutation?.();this.mutate(()=>{this.items=next;});if(this.selected===id)this.selected=null;return true;}
   undo(){if(this.transaction)this.cancel();if(!this.undoStack.length)return false;this.redoStack.push(this.items.slice());this.items=this.undoStack.pop().slice();this.selected=null;this.trim();return true;}
   redo(){if(this.transaction)this.cancel();if(!this.redoStack.length)return false;this.undoStack.push(this.items.slice());this.items=this.redoStack.pop().slice();this.selected=null;this.trim();return true;}
   save(){if(this.transaction)throw new Error('Commit or cancel before saving');return drawingDocument(this.items,this.maxDocumentChars);}
   load(text,{styleDecoder=null,validatePanel=null,validateBinding=null}={}) {
     boundedText(text,this.maxDocumentChars,'Drawing document',true);const doc=JSON.parse(text);optionRecord(doc,['schema','version','drawings'],'Drawing document');if(doc.schema!=='aster.drawings'||![1,2,3,4].includes(doc.version)||!Array.isArray(doc.drawings)||doc.drawings.length>this.maxDrawings)throw new TypeError('Unsupported drawing document');
-    const items=doc.drawings.map(d=>{validateDrawing(d);validateDrawingDocumentVersion(d,doc.version);if(validateBinding&&!validateBinding(d))throw new Error('Invalid drawing binding');if(validatePanel&&!validatePanel(d.panel))throw new Error('Missing drawing panel');const next=copyDrawing(d);if(styleDecoder&&next.style)next.style=styleDecoder(next.style);validateDrawing(next);return frozenDrawing(next);});this.budget(items);if(new Set(items.map(d=>d.id)).size!==items.length)throw new TypeError('Duplicate drawing ids');if(this.transaction)throw new Error('Cannot load during a gesture');drawingDocument(items,this.maxDocumentChars);this.mutate(()=>{this.items=items;});this.selected=null;
+    const items=doc.drawings.map(d=>{validateDrawing(d);validateDrawingDocumentVersion(d,doc.version);if(validateBinding&&!validateBinding(d))throw new Error('Invalid drawing binding');if(validatePanel&&!validatePanel(d.panel))throw new Error('Missing drawing panel');const copy=copyDrawing(d);if(styleDecoder&&copy.style)copy.style=styleDecoder(copy.style);const next=canonicalDrawing(copy);validateDrawing(next);return frozenDrawing(next);});this.budget(items);if(new Set(items.map(d=>d.id)).size!==items.length)throw new TypeError('Duplicate drawing ids');if(this.transaction)throw new Error('Cannot load during a gesture');drawingDocument(items,this.maxDocumentChars);this.mutate(()=>{this.items=items;});this.selected=null;
   }
 }
 
@@ -1621,7 +1846,8 @@ function axisStateGuard(snapshot){managedArrayGuard(snapshot,'Axis owner',RESOUR
 function cloneSeriesPlacement(series,panel,axisId){
   const descriptors=Object.getOwnPropertyDescriptors(series);for(const descriptor of Object.values(descriptors))if(!Object.hasOwn(descriptor,'value'))throw new TypeError('Series own data fields required');
   const panelDescriptor=descriptors.panel,axisDescriptor=descriptors.axisId;descriptors.panel={value:panel,writable:true,enumerable:panelDescriptor?.enumerable??true,configurable:true};descriptors.axisId={value:axisId,writable:true,enumerable:axisDescriptor?.enumerable??true,configurable:true};
-  return Object.create(Object.getPrototypeOf(series),descriptors);
+  // 새로 생기는 axisId도 SERIES_KEYS 자리에 오도록 서술자를 정규 순서로 정의한다(inspect()가 배치 변경 이력과 무관해진다)
+  return Object.create(Object.getPrototypeOf(series),orderedRecord(descriptors,SERIES_KEYS));
 }
 function cloneDrawingTarget(target,panel,axisId){
   const descriptors=Object.getOwnPropertyDescriptors(target);for(const descriptor of Object.values(descriptors))if(!Object.hasOwn(descriptor,'value'))throw new TypeError('Drawing target own data fields required');
@@ -1656,11 +1882,12 @@ class ChartModel {
     // follow the tail like append, or retain an explicitly unfollowed view.
     panels.forEach(p => this.addPanel(p));if(!Array.isArray(axes))throw new TypeError('Axes array required');axes.forEach(a=>this.addAxis(a));this.indicators=new IndicatorEngine(store);try{this.drawings=new DrawingStore(); this.unsubscribe = store._subscribeInternal(({kind, from, added, appended}) => {if(kind==='compact')return;if (kind === 'prepend' && store.length > added) {this.view.from += added; this.view.to += added;} else if (kind === 'reset') this.fit(); if ((kind === 'append'||kind==='batch'&&appended>0||kind==='prepend'&&added>0&&store.length===added) && this.follow) {const span = this.view.to - this.view.from; this.view.to = store.length + this.forwardOffset() - .5; this.view.from = this.view.to - span;} for (const s of this.series) s.dirtyFrom = Math.min(s.dirtyFrom ?? Infinity, from);});registerStoreOwner(this,store,'model');}catch(error){try{this.indicators.dispose();}catch{}throw error;}
   }
-  addPanel(options,{ownerGuard=null}={}) {optionRecord(options,PANEL_KEYS,'Panel');identifier(options.id,'Panel id');if(this.panels.length>=RESOURCE_LIMITS.maxPanels)throw new RangeError('Panel limit');if (!options?.id || this.panels.some(p => p.id === options.id) || !Number.isFinite(options.weight ?? 1) || (options.weight ?? 1) <= 0) throw new Error('Unique panel id and positive weight'); const p = {weight: 1, scale: 'linear', inverted: false, padding: .08, ...options}; this.validatePanel(p);if(this.drawings?.transaction)throw new Error('Panel layout change during drawing transaction');runOwnerGuard(ownerGuard); this.panels.push(p); return p.id;}
+  // 패널·축 레코드는 허용 목록(PANEL_KEYS·AXIS_KEYS) 순서로 담아 inspect()와 작업공간 문서의 키 순서를 입력 키 순서와 무관하게 고정한다
+  addPanel(options,{ownerGuard=null}={}) {optionRecord(options,PANEL_KEYS,'Panel');identifier(options.id,'Panel id');if(this.panels.length>=RESOURCE_LIMITS.maxPanels)throw new RangeError('Panel limit');if (!options?.id || this.panels.some(p => p.id === options.id) || !Number.isFinite(options.weight ?? 1) || (options.weight ?? 1) <= 0) throw new Error('Unique panel id and positive weight'); const p = orderedRecord({weight: 1, scale: 'linear', inverted: false, padding: .08, ...options},PANEL_KEYS); this.validatePanel(p);if(this.drawings?.transaction)throw new Error('Panel layout change during drawing transaction');runOwnerGuard(ownerGuard); this.panels.push(p); return p.id;}
   validatePanel(p) {if(p.axisVisible!==undefined&&typeof p.axisVisible!=='boolean'||p.axisSide!==undefined&&!['left','right'].includes(p.axisSide))throw new TypeError('Panel axis visibility/side');if(typeof p.inverted!=='boolean'||p.label!==undefined&&typeof p.label!=='string'||p.formatter!==undefined&&typeof p.formatter!=='function'||p.range&&(!Array.isArray(p.range)||p.range.length!==2))throw new TypeError('Panel label, inverted, formatter or range');if(p.label!==undefined)boundedText(p.label,256,'Panel label');if (!Number.isFinite(p.weight) || p.weight <= 0 || p.base !== undefined && !Number.isFinite(p.base) || !['linear', 'log', 'percent'].includes(p.scale) || !Number.isFinite(p.padding) || p.padding < 0 || p.padding > 1 || p.precision !== undefined && (!Number.isInteger(p.precision) || p.precision < 0 || p.precision > 18) || (p.range && (!Number.isFinite(p.range[0]) || !Number.isFinite(p.range[1]) || p.range[0] >= p.range[1] || p.scale === 'log' && p.range[0] <= 0)) || p.scale === 'percent' && p.base === 0) throw new RangeError('Panel scale/range');}
   drawingProjectionChange(previous,next,keys){return keys.some(key=>Array.isArray(previous[key])&&Array.isArray(next[key])?previous[key].length!==next[key].length||previous[key].some((v,i)=>!Object.is(v,next[key][i])):!Object.is(previous[key],next[key]));}
   drawingMarginsChange(panels=this.panels,axes=this.axes){const before=axisStripWidths(this.panels,this.axes,this.axisWidth),after=axisStripWidths(panels,axes,this.axisWidth);return before.some((value,index)=>value!==after[index]);}
-  setPanel(id, patch,{ownerGuard=null}={}) {optionRecord(patch,PANEL_KEYS.filter(k=>k!=='id'),'Panel patch');const i=this.panels.findIndex(p=>p.id===id);if(i<0)throw new Error('Missing panel');const previous=this.panels[i],next={...previous,...patch};this.validatePanel(next);if(this.drawings?.transaction&&(this.drawingProjectionChange(previous,next,['weight'])||this.drawingMarginsChange(this.panels.map((p,j)=>j===i?next:p))||this.drawingProjectionChange(previous,next,['scale','inverted','padding','range','base','axisVisible','axisSide'])&&[...this.drawings.items,...this.drawings.transaction].some(d=>d.panel===id)))throw new Error('Panel projection change during drawing transaction');runOwnerGuard(ownerGuard);this.panels[i]=next;}
+  setPanel(id, patch,{ownerGuard=null}={}) {optionRecord(patch,PANEL_KEYS.filter(k=>k!=='id'),'Panel patch');const i=this.panels.findIndex(p=>p.id===id);if(i<0)throw new Error('Missing panel');const previous=this.panels[i],next=orderedRecord({...previous,...patch},PANEL_KEYS);this.validatePanel(next);if(this.drawings?.transaction&&(this.drawingProjectionChange(previous,next,['weight'])||this.drawingMarginsChange(this.panels.map((p,j)=>j===i?next:p))||this.drawingProjectionChange(previous,next,['scale','inverted','padding','range','base','axisVisible','axisSide'])&&[...this.drawings.items,...this.drawings.transaction].some(d=>d.panel===id)))throw new Error('Panel projection change during drawing transaction');runOwnerGuard(ownerGuard);this.panels[i]=next;}
   setPanelOrder(ids,{owner=null,controller=null,ownerGuard=null}={}) {
     const disposedDescriptor=Object.getOwnPropertyDescriptor(this,'disposed');if(disposedDescriptor&&!Object.hasOwn(disposedDescriptor,'value'))throw new TypeError('Chart disposed own data slot required');if(disposedDescriptor?.value)throw new Error('Chart disposed');
     const drawings=ownData(this,'drawings','Chart'),snapshot={...managedPanels(this),drawings},requested=strictArrayValues(ids,'Panel order');
@@ -1741,8 +1968,8 @@ class ChartModel {
     if(a.scale==='percent'&&(!Number.isFinite(a.base)||a.base===0))throw new RangeError('Independent percent axis requires an explicit nonzero base');
     return true;
   }
-  addAxis(options,{ownerGuard=null}={}) {optionRecord(options,AXIS_KEYS,'Axis');if(this.axes.length>=RESOURCE_LIMITS.maxAxes)throw new RangeError('Axis limit');if(this.axes.some(a=>a.id===options.id))throw new Error('Duplicate axis');const a={side:'right',scale:'linear',inverted:false,padding:.08,visible:true,tickFormat:'fixed',...options};this.validateAxis(a);if(this.drawings?.transaction&&this.drawingMarginsChange(this.panels,[...this.axes,a]))throw new Error('Axis layout change during drawing transaction');runOwnerGuard(ownerGuard);this.axes.push(a);return a.id;}
-  setAxis(id,patch,{ownerGuard=null}={}) {optionRecord(patch,AXIS_KEYS.filter(k=>k!=='id'&&k!=='panel'),'Axis patch');const i=this.axes.findIndex(a=>a.id===id);if(i<0)throw new Error('Missing axis');const previous=this.axes[i],a={...previous,...patch};this.validateAxis(a);if(this.drawings?.transaction&&(this.drawingMarginsChange(this.panels,this.axes.map((axis,j)=>j===i?a:axis))||this.drawingProjectionChange(previous,a,['scale','inverted','padding','range','base','width','side','visible'])&&[...this.drawings.items,...this.drawings.transaction].some(d=>d.axisId===id)))throw new Error('Axis projection change during drawing transaction');runOwnerGuard(ownerGuard);this.axes[i]=a;}
+  addAxis(options,{ownerGuard=null}={}) {optionRecord(options,AXIS_KEYS,'Axis');if(this.axes.length>=RESOURCE_LIMITS.maxAxes)throw new RangeError('Axis limit');if(this.axes.some(a=>a.id===options.id))throw new Error('Duplicate axis');const a=orderedRecord({side:'right',scale:'linear',inverted:false,padding:.08,visible:true,tickFormat:'fixed',...options},AXIS_KEYS);this.validateAxis(a);if(this.drawings?.transaction&&this.drawingMarginsChange(this.panels,[...this.axes,a]))throw new Error('Axis layout change during drawing transaction');runOwnerGuard(ownerGuard);this.axes.push(a);return a.id;}
+  setAxis(id,patch,{ownerGuard=null}={}) {optionRecord(patch,AXIS_KEYS.filter(k=>k!=='id'&&k!=='panel'),'Axis patch');const i=this.axes.findIndex(a=>a.id===id);if(i<0)throw new Error('Missing axis');const previous=this.axes[i],a=orderedRecord({...previous,...patch},AXIS_KEYS);this.validateAxis(a);if(this.drawings?.transaction&&(this.drawingMarginsChange(this.panels,this.axes.map((axis,j)=>j===i?a:axis))||this.drawingProjectionChange(previous,a,['scale','inverted','padding','range','base','width','side','visible'])&&[...this.drawings.items,...this.drawings.transaction].some(d=>d.axisId===id)))throw new Error('Axis projection change during drawing transaction');runOwnerGuard(ownerGuard);this.axes[i]=a;}
   removeAxis(id,{ownerGuard=null,controller=null}={}) {
     const disposedDescriptor=Object.getOwnPropertyDescriptor(this,'disposed');if(disposedDescriptor&&!Object.hasOwn(disposedDescriptor,'value'))throw new TypeError('Chart disposed own data slot required');if(disposedDescriptor?.value)throw new Error('Chart disposed');identifier(id,'Axis id');
     const panels=ownData(this,'panels','Chart'),panelState=managedPanels(this),axes=ownData(this,'axes','Chart'),axisState=axisStateSnapshot(axes),index=axisState.records.findIndex(axis=>axis.id===id),series=ownData(this,'series','Chart'),seriesState=seriesStateSnapshot(series);
@@ -1782,7 +2009,8 @@ class ChartModel {
     if (options.values && (!(options.values instanceof Float64Array) || options.values.length !== this.store.length)) throw new TypeError('Values must be aligned Float64Array');
     const data = options.indicator ? this.indicators.get(options.indicator) : null;if(options.source!==undefined&&!['time','open','high','low','close','volume'].includes(options.source))throw new TypeError('Series source');if(data&&options.output!==undefined&&!Object.hasOwn(data.outputs,options.output))throw new Error('Missing indicator output');const output=options.output??(data?Object.keys(data.outputs)[0]:undefined),offset=options.offset??(data&&Object.hasOwn(data.plotOffsets,output)?data.plotOffsets[output]:0);
     if (!Number.isInteger(offset) || Math.abs(offset) > 10000 || ['candles','ohlc'].includes(options.type) && offset !== 0) throw new RangeError('Series plot offset');
-    return {color:'#7898ff',width:['candles','ohlc'].includes(options.type)?1:1.5,...options,offset,dirtyFrom:0};
+    // inspect()와 작업공간에 같은 순서가 나오도록 허용 목록(SERIES_KEYS) 순서로 담는다. 런타임 캐시 dirtyFrom은 뒤에 붙는다
+    return orderedRecord({color:'#7898ff',width:['candles','ohlc'].includes(options.type)?1:1.5,...options,offset,dirtyFrom:0},SERIES_KEYS);
   }
   addSeries(options,{ownerGuard=null}={}){if(this.series.length>=RESOURCE_LIMITS.maxSeries)throw new RangeError('Series limit');if(this.series.some(s=>s.id===options?.id))throw new Error('Duplicate series');const validated=this.normalizedSeries(options);runOwnerGuard(ownerGuard);this.series.push(validated);return validated.id;}
   removeSeries(id) {this.series = this.series.filter(s => s.id !== id);}
@@ -2013,7 +2241,8 @@ class InteractionController {
   layout() {interactionActive(this);const {width, height} = this.size();interactionActive(this);const layout=createLayout(this.model, width, height);interactionActive(this);return layout;}
   drawingProjection(layout,panel,axisId){interactionActive(this);const axis=layout.axis(panel,axisId);return axis?[axis.left,axis.right,axis.top,axis.bottom,axis.min,axis.max,axis.scale,axis.inverted,axis.base,this.model.view.from,this.model.view.to,this.model.store.geometryIdentity,this.model.store.timeVersion]:null;}
   setTool(tool,{notify=true}={}) {interactionActive(this);if (tool !== 'select' && !DRAWING_TYPES.includes(tool)) throw new Error('Unknown drawing tool'); this.cancel({notify:false}); this.tool = tool; if(notify)this.invalidate();}
-  setDrawingTarget(target,{notify=true}={}){interactionActive(this);if(target!==null){optionRecord(target,['panel','axisId','seriesId'],'Drawing target');const next={panel:'price',...target};identifier(next.panel,'Drawing target panel');if(next.seriesId!=null&&next.axisId===undefined){const s=this.model.series.find(s=>s.id===next.seriesId);if(s)next.axisId=s.axisId??null;}this.model.validateDrawingBinding(next);this.cancel({notify:false});this.drawingTarget=next;}else{this.cancel({notify:false});this.drawingTarget=null;}if(notify)this.invalidate();}
+  // 대상 레코드는 검증기 허용 목록 순서(panel, axisId, seriesId)로 담는다. inspect()가 입력 키 순서와 무관해진다
+  setDrawingTarget(target,{notify=true}={}){interactionActive(this);if(target!==null){optionRecord(target,['panel','axisId','seriesId'],'Drawing target');const next={panel:'price',...target};identifier(next.panel,'Drawing target panel');if(next.seriesId!=null&&next.axisId===undefined){const s=this.model.series.find(s=>s.id===next.seriesId);if(s)next.axisId=s.axisId??null;}this.model.validateDrawingBinding(next);this.cancel({notify:false});this.drawingTarget=orderedRecord(next,['panel','axisId','seriesId']);}else{this.cancel({notify:false});this.drawingTarget=null;}if(notify)this.invalidate();}
   down(id, x, y, hitTolerance = 8) {
     interactionActive(this);
     if(!Number.isFinite(hitTolerance)||hitTolerance<1||hitTolerance>32)throw new RangeError('Pointer hit tolerance must be 1..32 logical pixels');
@@ -2326,8 +2555,9 @@ class NativeCheckpointMap {
  validateHistory(length){this.#check();const epoch=this.#epoch;if(!Number.isSafeInteger(length)||length<0||length>nativeCheckpointMaxIndex)throw new RangeError('Native checkpoint history length');const expected=length===0?0:Math.floor(length/this.#block)+1;if(this.size!==expected)throw new TypeError('Native checkpoint history count');let i=0;for(const index of this.keys()){if(index!==i++*this.#block)throw new TypeError('Native checkpoint history boundary');const text=this.#records.get(index),state=safeCheckpointParse(text);validateCheckpointState(this.#name,this.#params,state,index);if(nativeCheckpointText(state)!==text)throw new TypeError('Native checkpoint validator mutated state');this.#check(epoch);}this.#check(epoch);return this;}
 }
 
-// Only restored engines install this owner map. Retirement never mutates held
-// output vectors and never invokes a user-controlled cleanup callback.
+// 이 소유 Map은 게시 전 엔진만 쓴다: 복원 대상의 계산 단계와 격리된 params 작업 런타임이다.
+// 게시(finish)는 평범한 Map으로 바꿔 넘기므로 살아 있는 엔진에는 남지 않는다.
+// Retirement never mutates held output vectors and never invokes a user-controlled cleanup callback.
 const nativeCheckpointDispose=NativeCheckpointMap.prototype.dispose;
 function nativeEntryCheckpoints(entry){const value=entry&&Object.getOwnPropertyDescriptor(entry,'checkpoints')?.value;return nativeCheckpointMaps.has(value)?value:null;}
 class NativeCheckpointEntries extends Map {
@@ -2348,24 +2578,47 @@ function ownedCheckpointClear(map){
  ordinaryCheckpointHas.call(map,0);return ()=>ordinaryCheckpointClear.call(map);
 }
 
-// Entry-only native publication can preserve an ordinary entries Map identity.
-// The registry is keyed by that Map, never retained from a caller-held entry.
-// Direct replacement/mutation of engine.entries or Map intrinsics is unsupported.
-const nativeAdoptedOwners=new WeakMap(),nativeMapGet=Map.prototype.get,nativeMapSet=Map.prototype.set,nativeEntriesSet=NativeCheckpointEntries.prototype.set;
-function retireNativeEntryIfReplaced(entries,id){
- const owner=nativeAdoptedOwners.get(entries),row=owner?.rows.get(id);if(!row||nativeMapGet.call(entries,id)===row.entry)return;
- owner.rows.delete(id);nativeCheckpointEntryOwners.delete(row.checkpoints);nativeCheckpointDispose.call(row.checkpoints);
-}
-function retireNativeEntriesAfterClear(entries){
- const owner=nativeAdoptedOwners.get(entries);if(!owner)return;for(const [id]of owner.rows)retireNativeEntryIfReplaced(entries,id);
-}
-function prepareNativeEntryCommit(entries,id,previous,entry){
+// 게시(복원 finish, params 커밋)는 검증을 마친 경계 레코드를 새 차트와 같은 평범한 Map으로 옮긴다(설계 §7.4-3, 이식 지도 D2).
+// 그래서 게시 뒤 엔진에는 경계 맵·공유 예산이 남지 않고, append·재계산·원본 회계가 새 차트와 같다.
+// 애플리케이션이 바꿀 수 있는 메서드 대신 모듈을 불러올 때 붙잡은 내장 메서드만 쓴다.
+const nativeMapGet=Map.prototype.get,nativeMapSet=Map.prototype.set,nativeMapSize=Object.getOwnPropertyDescriptor(Map.prototype,'size').get,nativeEntriesSet=NativeCheckpointEntries.prototype.set,nativeCheckpointKeys=NativeCheckpointMap.prototype.keys,nativeCheckpointGet=NativeCheckpointMap.prototype.get,nativeCheckpointSize=Object.getOwnPropertyDescriptor(NativeCheckpointMap.prototype,'size').get;
+/**
+ * 경계 맵의 레코드를 새 평범한 Map으로 복사한다. 원본 맵은 바꾸지 않는다. 복원 finish가 쓴다(작업 런타임·작업 스레드에서 돈다).
+ * 값은 get()과 같은 새 사본(safeCheckpointParse)이고, 새 차트가 계산하며 넣는 순서처럼 색인 오름차순으로 넣는다.
+ * 레코드마다 해독하므로 비용이 레코드 양에 비례한다. 그래서 소유(UI) 스레드에서 도는 params 게시는 이 함수를 쓰지 않고,
+ * 가져오기가 레코드를 받을 때마다 만들어 둔 Map을 설치한다(prepareNativeEntryCommit).
+ * 호출부는 사본을 다 만든 뒤에만 상태를 바꾼다. 여기서 실패하면 게시 전 상태가 그대로 남는다.
+ * @param {NativeCheckpointMap} map 닫히지 않은 실제 경계 맵(호출부가 소유를 확인한다)
+ * @returns {Map<number, object>} 같은 레코드를 담은 평범한 Map
+ */
+function ordinaryCheckpointCopy(map){const copy=new Map();for(const index of nativeCheckpointKeys.call(map))nativeMapSet.call(copy,index,nativeCheckpointGet.call(map,index));return copy;}
+/**
+ * params 게시 커밋을 준비한다. 소유 엔진의 entries Map은 그대로 두고, 그 항목 하나만 평범한 체크포인트 Map을 단 엔트리로 바꿔 넣는다.
+ * 커밋은 iOS 메인 스레드·Android 소유 루퍼에서 한 턴에 돈다. 그래서 레코드를 해독하거나 복사하지 않고,
+ * NativeParamsImport가 레코드를 받을 때마다 만들어 둔 staged를 그대로 설치한 뒤 경계 맵을 닫는다(리뷰 C5). 준비와 커밋 모두 상수 시간 검사만 한다.
+ * engine.entries나 Map 내장 메서드를 직접 바꾸거나 고치는 것은 지원하지 않는다.
+ * @param {Map|NativeCheckpointEntries} entries 소유 엔진의 entries
+ * @param {string} id 바꿀 지표 id
+ * @param {object} previous 준비할 때 entries에 있던 엔트리(커밋 때도 같아야 한다)
+ * @param {object} entry 설치할 엔트리. checkpoints는 레코드를 검증·과금한 실제 경계 맵이어야 한다
+ * @param {Map<number, object>} staged entry.checkpoints와 같은 레코드를 색인 오름차순으로 담은 평범한 Map(NativeParamsImport.readyCheckpoints())
+ * @returns {() => void} 한 번만 쓸 수 있는 커밋 함수
+ */
+function prepareNativeEntryCommit(entries,id,previous,entry,staged){
  const proto=Object.getPrototypeOf(entries);if(![Map.prototype,NativeCheckpointEntries.prototype].includes(proto)||Reflect.ownKeys(entries).length||nativeMapGet.call(entries,id)!==previous)throw new TypeError('Native params entry owner');
  const checkpoints=nativeEntryCheckpoints(entry);if(!checkpoints||nativeCheckpointRetired.has(checkpoints)||nativeCheckpointEntryOwners.has(checkpoints)||Object.getPrototypeOf(checkpoints)!==NativeCheckpointMap.prototype||Reflect.ownKeys(checkpoints).length)throw new TypeError('Native params checkpoint ownership');
- let owner=nativeAdoptedOwners.get(entries);if(proto===Map.prototype&&!owner){owner={token:{},rows:new Map()};nativeAdoptedOwners.set(entries,owner);}let used=false;
- return ()=>{if(used||nativeEntryCheckpoints(entry)!==checkpoints||nativeMapGet.call(entries,id)!==previous||nativeCheckpointRetired.has(checkpoints)||nativeCheckpointEntryOwners.has(checkpoints))throw new Error('Native params entry commit stale');used=true;
-  if(proto===NativeCheckpointEntries.prototype){nativeEntriesSet.call(entries,id,entry);return;}
-  nativeMapSet.call(entries,id,entry);retireNativeEntryIfReplaced(entries,id);owner.rows.set(id,{entry,checkpoints});nativeCheckpointEntryOwners.set(checkpoints,{owner:owner.token,id});
+ // 같은 레코드인지는 가져오기가 레코드를 받을 때 보장한다. 여기서는 평범한 Map인지와 레코드 수만 상수 시간에 확인한다
+ if(staged===null||typeof staged!=='object'||Object.getPrototypeOf(staged)!==Map.prototype||Reflect.ownKeys(staged).length||nativeMapSize.call(staged)!==nativeCheckpointSize.call(checkpoints))throw new TypeError('Native params checkpoint ownership');
+ let used=false;
+ return ()=>{if(used||nativeEntryCheckpoints(entry)!==checkpoints||nativeMapGet.call(entries,id)!==previous||nativeCheckpointRetired.has(checkpoints)||nativeCheckpointEntryOwners.has(checkpoints)||Reflect.ownKeys(staged).length||nativeMapSize.call(staged)!==nativeCheckpointSize.call(checkpoints))throw new Error('Native params entry commit stale');
+  used=true;
+  // 쓰기 금지 속성에 대입하면 모듈(엄격 모드)은 TypeError를 내고 번들(느슨한 모드)은 조용히 무시한다.
+  // 두 환경이 같은 오류를 내도록 먼저 확인하고, 대입 뒤에도 바뀌지 않았으면 설치하지 않는다. 여기까지 실패하면 엔트리·소유 Map·준비 원장이 모두 그대로다
+  if(!Object.getOwnPropertyDescriptor(entry,'checkpoints')?.writable)throw new Error('Native params entry commit stale');
+  entry.checkpoints=staged;if(Object.getOwnPropertyDescriptor(entry,'checkpoints')?.value!==staged)throw new Error('Native params entry commit stale');
+  if(proto===NativeCheckpointEntries.prototype)nativeEntriesSet.call(entries,id,entry);else nativeMapSet.call(entries,id,entry);
+  // 레코드는 이제 평범한 Map에 있으므로 준비용 경계 맵을 닫아 그 원장을 돌려준다
+  nativeCheckpointDispose.call(checkpoints);
  };
 }
 
@@ -2541,7 +2794,7 @@ function setStudyParams(model,id,params,ownerGuard=null){
   if(entry.def.outputs.some(output=>!Object.is(offset(entry.def,output),offset(replacement.def,output))))throw new TypeError('Indicator parameter update cannot change plot offsets');
   const result=metadata(replacement.def);
   if(!current())throw new Error('Indicator params stale: owner changed during staging');if(ownerGuard!==null){if(typeof ownerGuard!=='function')throw new TypeError('Owner guard callback required');ownerGuard();}
-  entriesMap.set(id,replacement);retireNativeEntryIfReplaced(entriesMap,id);
+  entriesMap.set(id,replacement);
   for(const s of series)if(s.indicator===id){s.rangeIndex=null;s.revision=undefined;s.dirtyFrom=0;}
   return result;
  }finally{candidate.dispose();}
@@ -2751,7 +3004,8 @@ function drawingStylePatch(value){
  if(!value||![Object.prototype,null].includes(Object.getPrototypeOf(value)))throw new TypeError('Drawing style plain record required');
  const patch=Object.create(null),keys=Reflect.ownKeys(value);
  if(!keys.length)throw new TypeError('Drawing style nonempty defined patch required');
- for(const key of keys){if(!['color','fill','width','font'].includes(key))throw new TypeError('Drawing style fields');const d=Object.getOwnPropertyDescriptor(value,key);if(!d?.enumerable||!Object.hasOwn(d,'value'))throw new TypeError('Drawing style own data fields required');if(d.value===undefined||d.value===null)throw new TypeError('Drawing style nonempty defined patch required');patch[key]=d.value;}
+ // 허용 키를 먼저, 모르는 키는 UTF-16 순으로 본다. 빈 값과 모르는 필드가 섞여도 보고할 오류가 입력 순서와 상관없이 하나로 정해진다
+ for(const key of canonicalKeys(value,['color','fill','width','font'],keys)){if(!['color','fill','width','font'].includes(key))throw new TypeError('Drawing style fields');const d=Object.getOwnPropertyDescriptor(value,key);if(!d?.enumerable||!Object.hasOwn(d,'value'))throw new TypeError('Drawing style own data fields required');if(d.value===undefined||d.value===null)throw new TypeError('Drawing style nonempty defined patch required');patch[key]=d.value;}
  const normalized=portableStyle(patch,['color','fill']);if(Object.hasOwn(normalized,'width')&&(!Number.isFinite(normalized.width)||normalized.width<.1||normalized.width>50))throw new RangeError('Stroke width');
  return normalized;
 }
@@ -2818,12 +3072,13 @@ function drawingGroupEdit(api,ids,options,remove,styleEdit=false,visibilityEdit=
   if(!selected.has(before.id))continue;
   if(before.locked&&!visibilityEdit&&!duplicateEdit)throw new Error('Drawing is locked');
   if(remove){next[i]=null;changed++;continue;}
-  if(visibilityEdit){if((before.visible!==false)!==options){const candidate={...before,visible:options,points:translationSlot(items[i],'points')};if(before.style!==undefined)candidate.style=translationSlot(items[i],'style');validateDrawing(candidate);next[i]=translationFrozen(candidate);changed++;if(!options&&s.selected===before.id)clearSelected=true;}continue;}
-  if(styleEdit){const previous=before.style??{},different=Object.keys(patch).some(key=>!Object.hasOwn(previous,key)||!Object.is(previous[key],patch[key]));if(different){const candidate={...before,points:translationSlot(items[i],'points'),style:{...previous,...patch}};validateDrawing(candidate);next[i]=translationFrozen(candidate);changed++;}continue;}
+  // 새로 넣는 visible·style·locked도 정규 자리에 오도록 최상위와 스타일 키를 정렬한다(앵커·스타일 객체는 그대로 공유)
+  if(visibilityEdit){if((before.visible!==false)!==options){const candidate={...before,visible:options,points:translationSlot(items[i],'points')};if(before.style!==undefined)candidate.style=translationSlot(items[i],'style');validateDrawing(candidate);next[i]=translationFrozen(orderedRecord(candidate,DRAWING_RECORD_KEYS));changed++;if(!options&&s.selected===before.id)clearSelected=true;}continue;}
+  if(styleEdit){const previous=before.style??{},different=Object.keys(patch).some(key=>!Object.hasOwn(previous,key)||!Object.is(previous[key],patch[key]));if(different){const candidate={...before,points:translationSlot(items[i],'points'),style:{...previous,...patch}};validateDrawing(candidate);candidate.style=orderedRecord(candidate.style,DRAWING_STYLE_KEYS);next[i]=translationFrozen(orderedRecord(candidate,DRAWING_RECORD_KEYS));changed++;}continue;}
   if(metadata){const b=[before.panel,before.axisId??null,before.seriesId??null];if(binding&&b.some((v,j)=>v!==binding[j]))throw new Error('Drawing group edit requires identical panel/axis/series binding');binding=b;
   if(!panels.some(p=>p.id===b[0])||b[1]!==null&&!axes.some(p=>p.id===b[1]&&p.panel===b[0])||b[2]!==null&&!series.some(p=>p.id===b[2]&&p.panel===b[0]&&(p.axisId??null)===b[1]))throw new Error('Missing or mismatched drawing binding');}
   let moved=false;const anchors=before.points.map(p=>{const time=o.deltaTimeMs===0?p.time:p.time+o.deltaTimeMs,price=o.deltaPrice===0?p.price:p.price+o.deltaPrice;if(time!==p.time||price!==p.price)moved=true;return {time,price};});
-  const candidate={...before,points:duplicateEdit&&!metadata?translationSlot(items[i],'points'):anchors,...(duplicateEdit?{locked:false}:{})};if(before.style!==undefined)candidate.style=translationSlot(items[i],'style');validateDrawing(candidate);if(duplicateEdit){pendingCopies.push(candidate);changed++;}else if(moved){next[i]=translationFrozen(candidate);changed++;}
+  const candidate={...before,points:duplicateEdit&&!metadata?translationSlot(items[i],'points'):anchors,...(duplicateEdit?{locked:false}:{})};if(before.style!==undefined)candidate.style=translationSlot(items[i],'style');validateDrawing(candidate);const ordered=orderedRecord(candidate,DRAWING_RECORD_KEYS);if(duplicateEdit){pendingCopies.push(ordered);changed++;}else if(moved){next[i]=translationFrozen(ordered);changed++;}
  }
  if(keys.some(id=>!seen.has(id)))throw new Error('Missing drawing');if(items.length>s.maxDrawings||points>s.maxPoints||text>1000000)throw new RangeError('Drawing group edit resource limit');
  if(duplicateEdit){
@@ -3013,7 +3268,8 @@ class ChartAPI {
    const presentation=this.seriesOptions(patch);if(presentation.label!==undefined)boundedText(presentation.label,256,'Series label');guard();
    if(indicator&&!entry)throw new Error(`Missing indicator: ${indicator}`);
    // The binding was already validated. Preserve its caches; only presentation changes.
-   const next={...current,...presentation};for(const key of Object.keys(next))if(!SERIES_KEYS.includes(key)&&!['rangeIndex','revision','dirtyFrom'].includes(key))delete next[key];guard();
+   // 새로 생기는 표시 키(label 등)도 SERIES_KEYS 자리에 오도록 정렬한다. 캐시 키는 뒤에 붙는다
+   const next=orderedRecord({...current,...presentation},SERIES_KEYS);for(const key of Object.keys(next))if(!SERIES_KEYS.includes(key)&&!['rangeIndex','revision','dirtyFrom'].includes(key))delete next[key];guard();
    series[index]=next;return this.changed();
   }
   const next={...current,...this.seriesOptions(patch)};
@@ -3174,9 +3430,10 @@ function replayList(value,max){if(!Array.isArray(value)||Object.getPrototypeOf(v
 function replaySource(bars){const refs=replayList(bars,replayLimit),columns=Object.fromEntries(FIELDS.map(k=>[k,new Float64Array(refs.length)]));let previous=-Infinity;for(let i=0;i<refs.length;i++){const bar=replayRecord(refs[i],FIELDS);validateBar(bar,previous);previous=bar.time;for(const key of FIELDS)columns[key][i]=bar[key];}
  // Reject ordinary row/array changes during capture; no getter is ever invoked.
  if(bars.length!==refs.length)throw new Error('Replay source changed during capture');for(let i=0;i<refs.length;i++){if(Object.getOwnPropertyDescriptor(bars,String(i))?.value!==refs[i])throw new Error('Replay source changed during capture');const bar=replayRecord(refs[i],FIELDS);if(FIELDS.some(key=>!Object.is(bar[key],columns[key][i])))throw new Error('Replay source changed during capture');}return columns;}
-function replayOptions(value,total){const o=replayRecord(value,['initialCount','visibleBars','priceScale','inverted','volume','theme','indicators']),initialCount=replayInteger(o.initialCount??0,0,total,'initial count'),visibleBars=replayInteger(o.visibleBars??200,1,2048,'visible bars'),priceScale=o.priceScale??'linear',inverted=o.inverted??false,volume=o.volume??false;if(!['linear','log'].includes(priceScale)||typeof inverted!=='boolean'||typeof volume!=='boolean')throw new TypeError('Replay price scale/inverted/volume');for(const k of Object.keys(o))if(o[k]===undefined||o[k]===null)throw new TypeError('Replay options must be defined');const theme=portableStyle(replayRecord(o.theme??{},THEME_KEYS),['background','grid','text','up','down','crosshair']);const ids=new Set(),indicators=replayList(o.indicators??[],4).map(input=>{const s=replayRecord(input,['id','kind','period','color']);identifier(s.id,'Replay study id');if(ids.has(s.id)||!replayFactories.has(s.kind))throw new TypeError('Replay unique study id and sma/ema/rsi kind required');ids.add(s.id);replayInteger(s.period,1,256,'study period');if(Object.hasOwn(s,'color')&&typeof s.color!=='string')throw new TypeError('Replay study color');return Object.freeze({...s,...portableStyle({color:s.color??'#7898ff'},['color'])});});return Object.freeze({initialCount,visibleBars,priceScale,inverted,volume,theme:Object.freeze(theme),indicators:Object.freeze(indicators)});}
+// 세션 문서에 호스트 객체 키 순서가 남지 않도록 테마·지표·북마크는 허용 목록 순서로 담는다
+function replayOptions(value,total){const o=replayRecord(value,['initialCount','visibleBars','priceScale','inverted','volume','theme','indicators']),initialCount=replayInteger(o.initialCount??0,0,total,'initial count'),visibleBars=replayInteger(o.visibleBars??200,1,2048,'visible bars'),priceScale=o.priceScale??'linear',inverted=o.inverted??false,volume=o.volume??false;if(!['linear','log'].includes(priceScale)||typeof inverted!=='boolean'||typeof volume!=='boolean')throw new TypeError('Replay price scale/inverted/volume');for(const k of Object.keys(o))if(o[k]===undefined||o[k]===null)throw new TypeError('Replay options must be defined');const theme=orderedRecord(portableStyle(replayRecord(o.theme??{},THEME_KEYS),['background','grid','text','up','down','crosshair']),THEME_KEYS);const ids=new Set(),indicators=replayList(o.indicators??[],4).map(input=>{const s=replayRecord(input,['id','kind','period','color']);identifier(s.id,'Replay study id');if(ids.has(s.id)||!replayFactories.has(s.kind))throw new TypeError('Replay unique study id and sma/ema/rsi kind required');ids.add(s.id);replayInteger(s.period,1,256,'study period');if(Object.hasOwn(s,'color')&&typeof s.color!=='string')throw new TypeError('Replay study color');return Object.freeze(orderedRecord({...s,...portableStyle({color:s.color??'#7898ff'},['color'])},['id','kind','period','color']));});return Object.freeze({initialCount,visibleBars,priceScale,inverted,volume,theme:Object.freeze(theme),indicators:Object.freeze(indicators)});}
 function replayComplete(value,keys){const r=replayRecord(value,keys);if(keys.some(k=>!Object.hasOwn(r,k)))throw new TypeError('Replay session missing field');return r;}
-function replayBookmark(value,total){const b=replayComplete(value,['id','label','count']);identifier(b.id,'Replay bookmark id');boundedText(b.label,128,'Replay bookmark label');replayInteger(b.count,0,total,'bookmark count');return Object.freeze(b);}
+function replayBookmark(value,total){const b=replayComplete(value,['id','label','count']);identifier(b.id,'Replay bookmark id');boundedText(b.label,128,'Replay bookmark label');replayInteger(b.count,0,total,'bookmark count');return Object.freeze(orderedRecord(b,['id','label','count']));}
 function replaySession(text){if(typeof text!=='string'||text.length>262144)throw new RangeError('Replay session text limit');const d=replayComplete(workspaceSnapshot(safeCheckpointParse(text)),['schema','version','dataset','total','options','count','bookmarks']);if(d.schema!=='barochart.replay-session'||d.version!==1)throw new TypeError('Replay session schema/version');d.dataset=workspaceBinding(d.dataset);replayInteger(d.total,0,replayLimit,'source total');replayInteger(d.count,0,d.total,'session count');replayComplete(d.options,['initialCount','visibleBars','priceScale','inverted','volume','theme','indicators']);d.options=replayOptions(d.options,d.total);const ids=new Set();d.bookmarks=replayList(d.bookmarks,128).map(row=>{const b=replayBookmark(row,d.total);if(ids.has(b.id))throw new TypeError('Duplicate replay bookmark');ids.add(b.id);return b;});return d;}
 // Frames deliberately omit layout closures and include detached finite data only.
 function replayData(value,depth=0){if(depth>12)throw new RangeError('Replay frame depth');if(value===null||typeof value==='string'||typeof value==='boolean')return value;if(typeof value==='number'){if(!Number.isFinite(value))throw new RangeError('Replay frame finite values required');return value;}if(Array.isArray(value))return value.map(v=>replayData(v,depth+1));if(value&&Object.getPrototypeOf(value)===Object.prototype){const out={};for(const key of Reflect.ownKeys(value)){const d=Object.getOwnPropertyDescriptor(value,key);if(typeof key!=='string'||!d?.enumerable||!Object.hasOwn(d,'value'))throw new TypeError('Replay frame data required');if(d.value!==undefined)out[key]=replayData(d.value,depth+1);}return out;}throw new TypeError('Replay frame data required');}
@@ -3257,7 +3514,8 @@ function workspaceWalk(value,copy){let nodes=0,chars=0,bytes=0;const ancestors=n
 // Only parser-owned plain data may use the no-copy walk; external snapshots
 // always detach. Both modes perform the identical complete bounded validation.
 function workspaceSnapshot(value){return workspaceWalk(value,true);}
-function workspaceBinding(value){const b=workspaceSnapshot(value);workspaceRecord(b,workspaceBindingKeys);for(const k of workspaceBindingKeys)boundedText(b[k],128,'Workspace dataset '+k);if(!['raw','split','total-return'].includes(b.adjustment))throw new TypeError('Workspace adjustment');return b;}
+// 사전 점검 영수증과 리플레이 세션에도 호출자 키 순서가 남지 않도록 정해진 키 순서로 돌려준다
+function workspaceBinding(value){const b=workspaceSnapshot(value);workspaceRecord(b,workspaceBindingKeys);for(const k of workspaceBindingKeys)boundedText(b[k],128,'Workspace dataset '+k);if(!['raw','split','total-return'].includes(b.adjustment))throw new TypeError('Workspace adjustment');return orderedRecord(b,workspaceBindingKeys);}
 function workspaceBindingSame(a,b){return workspaceBindingKeys.every(k=>a[k]===b[k]);}
 function validateWorkspaceDocument(doc){
  workspaceRecord(doc,['schema','version','dataset','source','chart','indicators','series','drawings']);if(doc.schema!=='aster.workspace'||doc.version!==1)throw new TypeError('Workspace schema/version');workspaceBinding(doc.dataset);
@@ -3287,11 +3545,12 @@ function saveWorkspace(chart,datasetBinding){
  validateWorkspaceDocument(doc);const text=safeCheckpointStringify(doc);readWorkspaceDocument(text);if(model.disposed||chart.model!==model||model.store!==store||store.version!==version||store.columns!==columns||store.length!==length||model.drawings.transaction||controller&&(controller.gesture||controller.pointers?.size))throw new Error('Workspace owner changed during save');return text;
 }
 function installWorkspaceConfiguration(model,doc){
- const c=doc.chart,api=new ChartAPI(model);if(c.symbol!==null){if(c.formatters==='symbol')api.setSymbol(c.symbol);else model.symbol=Object.freeze({...c.symbol});}model.precision=c.precision;
+ // 문서 키 순서와 상관없이 새 차트와 같은 정규 순서로 심볼·드로잉·view를 담는다
+ const c=doc.chart,api=new ChartAPI(model);if(c.symbol!==null){if(c.formatters==='symbol')api.setSymbol(c.symbol);else model.symbol=Object.freeze(orderedRecord(c.symbol,SYMBOL_KEYS));}model.precision=c.precision;
  for(const s of doc.series)model.addSeries({...s});
  // Metadata validation already checked every anchor. Preserve exact finite
  // coordinates rather than nearest-bar snapping or another JSON normalization.
- model.drawings.items=doc.drawings.drawings.map(d=>Object.freeze({...d,points:Object.freeze(d.points.map(p=>Object.freeze({...p}))),...(d.style?{style:Object.freeze({...d.style})}:{})}));model.view={...c.view};model.follow=c.follow;return model;
+ model.drawings.items=doc.drawings.drawings.map(d=>{const next=canonicalDrawing(d);for(const p of next.points)Object.freeze(p);Object.freeze(next.points);if(next.style)Object.freeze(next.style);return Object.freeze(next);});model.view=orderedRecord(c.view,['from','to']);model.follow=c.follow;return model;
 }
 
 // Native read-only metadata preflight. This is not calculation or restoration.
@@ -3460,7 +3719,8 @@ class NativeWorkspacePrepared extends PreparedData {
  initialize(){
   this.assertActive();if(this.length&&(this.columns.time[0]!==this.workspace.source.firstTime||this.columns.time[this.length-1]!==this.workspace.source.lastTime))throw new TypeError('Native workspace target source extent');
   const m=this.metadata;this.model=new ChartModel({store:this.store,panels:m.panels,axes:m.axes,theme:m.theme,precision:m.precision,axisWidth:m.axisWidth,visibleBars:this.input.visibleBars});this.model.indicators.maxOutputBytes=m.maxOutputBytes;this.model.indicators.entries=new NativeCheckpointEntries();this.workspaceEntryMap=this.model.indicators.entries;this.workspaceColumnRefs=FIELDS.map(k=>this.columns[k]);
-  for(const study of this.workspace.indicators){const factory=resolveIndicatorFactory(study.name);requirePortableFactory(study.name,factory);const params={...study.params},def=factory(params),layout=workspaceSnapshot({outputs:def.outputs,plotOffsets:def.plotOffsets??{}});this.assertActive();if(!nativeTargetEqual(params,study.params)||!nativeTargetEqual(layout,{outputs:study.outputs,plotOffsets:study.plotOffsets}))throw new TypeError('Native workspace target factory binding');const checkpoints=new NativeCheckpointMap(study.name,study.params,{budget:this.checkpointBudget}),entry={def,name:study.name,params:{...study.params},dirty:0,dirtyTo:this.length,invalidated:true,length:0,arrays:[],checkpoints,revision:0};this.model.indicators.entries.set(study.id,entry);this.workspaceEntries.push([study.id,entry,factory]);}
+  // 문서 키 순서와 상관없이 새 차트와 같은 선언 순서 params를 엔트리에 담는다
+  for(const study of this.workspace.indicators){const factory=resolveIndicatorFactory(study.name);requirePortableFactory(study.name,factory);const params={...study.params},def=factory(params),layout=workspaceSnapshot({outputs:def.outputs,plotOffsets:def.plotOffsets??{}});this.assertActive();if(!nativeTargetEqual(params,study.params)||!nativeTargetEqual(layout,{outputs:study.outputs,plotOffsets:study.plotOffsets}))throw new TypeError('Native workspace target factory binding');const checkpoints=new NativeCheckpointMap(study.name,study.params,{budget:this.checkpointBudget}),entry={def,name:study.name,params:orderedIndicatorParams(study.name,factory,study.params),dirty:0,dirtyTo:this.length,invalidated:true,length:0,arrays:[],checkpoints,revision:0};this.model.indicators.entries.set(study.id,entry);this.workspaceEntries.push([study.id,entry,factory,checkpoints]);}
   this.guardTarget();
  }
  guardTarget(metadata=true){this.assertActive();if(!this.model)return;if(this.model.disposed||this.model.store!==this.store||this.store.columns!==this.columns||this.store.version!==this.metadata.version||this.store.timeVersion!==this.metadata.timeVersion||this.store.length!==this.length||this.store.capacity!==this.capacity||this.model.indicators.entries!==this.workspaceEntryMap||this.model.indicators.entries.size!==this.workspaceEntries.length)throw new Error('Native workspace target changed');for(let i=0;i<this.workspaceEntries.length;i++){const [id,entry,factory]=this.workspaceEntries[i],study=this.workspace.indicators[i];if(this.model.indicators.entries.get(id)!==entry||this.model.indicators.registry.get(study.name)!==factory||!nativeTargetEqual(entry.params,study.params))throw new Error('Native workspace target entry changed');if(metadata){const layout=workspaceSnapshot({outputs:entry.def.outputs,plotOffsets:entry.def.plotOffsets??{}});if(!nativeTargetEqual(layout,{outputs:study.outputs,plotOffsets:study.plotOffsets}))throw new Error('Native workspace target output binding');}}this.assertActive();if(this.model.disposed||this.model.store!==this.store||this.store.version!==this.metadata.version||this.store.timeVersion!==this.metadata.timeVersion||this.store.columns!==this.columns||this.store.length!==this.length||this.store.capacity!==this.capacity||this.model.indicators.entries!==this.workspaceEntryMap||this.workspaceEntries.some(([id,e])=>this.workspaceEntryMap.get(id)!==e)||FIELDS.some((k,i)=>this.columns[k]!==this.workspaceColumnRefs[i]))throw new Error('Native workspace target changed');}
@@ -3474,7 +3734,13 @@ class NativeWorkspacePrepared extends PreparedData {
  }
  readySnapshot(){const m=this.model;return {dataIngestion:m.dataIngestion,ingestionEpoch:m.dataIngestion?.epoch,panels:[...m.panels],axes:[...m.axes],series:[...m.series],seriesValues:m.series.map(e=>e.values),theme:m.theme,symbol:m.symbol,priceFormatter:m.priceFormatter,timeFormatter:m.timeFormatter,precision:m.precision,axisWidth:m.axisWidth,view:m.view,from:m.view.from,to:m.view.to,follow:m.follow,drawings:m.drawings,items:m.drawings.items,selected:m.drawings.selected,serial:m.drawings.serial};}
  guardReady(){this.guardTarget(false);const a=this.readyBinding,b=this.readySnapshot();if(!a||Object.keys(a).some(k=>['panels','axes','series','seriesValues'].includes(k)?a[k].length!==b[k].length||a[k].some((v,i)=>v!==b[k][i]):!Object.is(a[k],b[k]))||this.model.drawings.transaction||this.model.drawings.undoStack.length||this.model.drawings.redoStack.length)throw new Error('Native workspace target configuration changed');}
- finish(){this.assertActive();try{if(arguments.length||this.phase!=='workspace-ready')throw new Error('Native workspace target not ready');this.guardReady();const result={model:this.model,size:{...this.workspaceSize},plan:this.plan};this.transferred=true;this.model=null;this.columns={};this.store=null;this.task=null;this.workspace=null;this.workspaceIngestion=null;this.normalizedWorkspace=null;this.workspaceText=null;this.workspaceEntries=[];this.workspaceEntryMap=null;this.workspaceColumnRefs=[];this.checkIterator=null;this.readyBinding=null;return result;}catch(error){this.dispose();throw error;}}
+ finish(){this.assertActive();try{if(arguments.length||this.phase!=='workspace-ready')throw new Error('Native workspace target not ready');this.guardReady();
+  // 게시 직후 엔진이 새 차트와 같은 회계를 쓰도록 공유 예산 컨테이너를 같은 레코드의 평범한 Map으로 바꾼다(설계 §7.4-3, 이식 지도 D2).
+  // 사본을 모두 만든 뒤에만 엔트리와 엔진을 바꾸고, 경계 맵을 닫아 공유 예산을 돌려준 다음 넘긴다. 실패하면 catch가 대상을 버려 게시하지 않는다.
+  const copies=this.workspaceEntries.map(([id,entry,,checkpoints])=>{if(Object.getOwnPropertyDescriptor(entry,'checkpoints')?.value!==checkpoints)throw new Error('Native workspace target entry changed');return [id,entry,ordinaryCheckpointCopy(checkpoints)];}),entries=new Map();
+  for(const [id,entry,checkpoints] of copies){entry.checkpoints=checkpoints;entries.set(id,entry);}
+  this.model.indicators.entries=entries;NativeCheckpointEntries.prototype.clear.call(this.workspaceEntryMap);
+  const result={model:this.model,size:{...this.workspaceSize},plan:this.plan};this.transferred=true;this.model=null;this.columns={};this.store=null;this.task=null;this.workspace=null;this.workspaceIngestion=null;this.normalizedWorkspace=null;this.workspaceText=null;this.workspaceEntries=[];this.workspaceEntryMap=null;this.workspaceColumnRefs=[];this.checkIterator=null;this.readyBinding=null;return result;}catch(error){this.dispose();throw error;}}
  finishUI(){this.dispose();throw new Error('Native workspace target does not import source UI');}
  dispose(){if(this.closed)return;this.closed=true;try{if(!this.transferred){try{super.dispose();}finally{if(this.workspaceEntryMap)NativeCheckpointEntries.prototype.clear.call(this.workspaceEntryMap);}}}finally{this.model=null;this.columns={};this.store=null;this.task=null;this.workspace=null;this.workspaceIngestion=null;this.normalizedWorkspace=null;this.workspaceText=null;this.workspaceEntries=[];this.workspaceEntryMap=null;this.workspaceColumnRefs=[];this.checkIterator=null;this.readyBinding=null;}}
 }
@@ -3568,6 +3834,8 @@ class NativeParamsTarget {
 
 // Detached owner-runtime staging. Does not publish or inspect a live model.
 const nativeImportSame=(a,b)=>Object.keys(a).length===Object.keys(b).length&&Object.keys(a).every(k=>Object.hasOwn(b,k)&&Object.is(a[k],b[k]));
+// 게시용 평범한 Map에 레코드를 넣을 때는 애플리케이션이 바꿀 수 있는 메서드 대신 모듈을 불러올 때 붙잡은 내장 메서드를 쓴다
+const nativeImportMapSet=Map.prototype.set;
 class NativeParamsImport {
  constructor(text,expected,def,{checkpointBytes=NATIVE_CHECKPOINT_TOTAL_BYTES}={}){
   if(typeof text!=='string'||text.length>131072)throw new RangeError('Native params result metadata limit');const r=safeCheckpointParse(text);optionRecord(r,['schema','version','registration','id','name','params','module','outputs','plotOffsets','length','capacity','checkpointCount','checkpointBytes','plan'],'Native params result');
@@ -3576,22 +3844,33 @@ class NativeParamsImport {
   validateIndicatorParams(r.params);if(!nativeImportSame(r.params,expected.params))throw new TypeError('Native params result parameters');validateIndicatorModuleBinding(r.name,r.module);
   if(!Array.isArray(r.outputs)||r.outputs.length<1||r.outputs.length>32||r.outputs.length!==expected.outputs.length||r.outputs.some((k,i)=>k!==expected.outputs[i])||!nativeImportSame(r.plotOffsets,expected.plotOffsets))throw new TypeError('Native params result output binding');
   if(r.outputs.length*r.capacity*8>268435456)throw new RangeError('Native params result output byte limit');const count=r.length?Math.floor(r.length/256)+1:0;if(r.checkpointCount!==count||!Number.isSafeInteger(r.checkpointBytes)||r.checkpointBytes<0||r.checkpointBytes>checkpointBytes)throw new RangeError('Native params result checkpoint budget');
-  this.budget=new NativeCheckpointBudget(checkpointBytes);this.checkpoints=new NativeCheckpointMap(r.name,expected.params,{budget:this.budget});this.binding={...expected,params:{...expected.params},outputs:[...expected.outputs],plotOffsets:{...expected.plotOffsets}};this.def=def;this.create=def.create;this.phase='receive';this.closed=false;this.transferred=false;this.at=0;this.output=0;this.ordinal=0;this.expectedCheckpointBytes=r.checkpointBytes;this.checkpointCount=count;this.received=r.outputs.map(()=>0);this.arrays=r.outputs.map(()=>null);this.entry=null;
+  // checkpoints(경계 맵)는 레코드를 검증하고 원장에 과금한다. ordinaryCheckpoints는 같은 레코드를 해독한 상태로 담아 게시 때 그대로 설치할 평범한 Map이다
+  this.budget=new NativeCheckpointBudget(checkpointBytes);this.checkpoints=new NativeCheckpointMap(r.name,expected.params,{budget:this.budget});this.ordinaryCheckpoints=new Map();this.binding={...expected,params:{...expected.params},outputs:[...expected.outputs],plotOffsets:{...expected.plotOffsets}};this.def=def;this.create=def.create;this.phase='receive';this.closed=false;this.transferred=false;this.at=0;this.output=0;this.ordinal=0;this.expectedCheckpointBytes=r.checkpointBytes;this.checkpointCount=count;this.received=r.outputs.map(()=>0);this.arrays=r.outputs.map(()=>null);this.entry=null;
  }
  active(){if(this.closed)throw new Error('Native params import closed');}
  guard(){this.active();const b=this.binding;if(this.def.create!==this.create||this.def.outputs.length!==b.outputs.length||this.def.outputs.some((k,i)=>k!==b.outputs[i])||!nativeImportSame(this.def.plotOffsets??{},b.plotOffsets))throw new Error('Native params import definition changed');this.active();}
  target(slot,offset,count){this.active();if(this.phase!=='receive'||!Number.isInteger(slot)||slot<0||slot>=this.arrays.length||offset!==this.received[slot]||!Number.isSafeInteger(count)||count<1||count>16384||offset+count>this.binding.capacity)throw new RangeError('Native params result slice');if(this.arrays[slot]===null)this.arrays[slot]=new Float64Array(this.binding.capacity);this.received[slot]+=count;return this.arrays[slot].subarray(offset,offset+count);}
- checkpoint(index,text){this.active();try{this.guard();if(this.phase!=='receive'||this.ordinal>=this.checkpointCount||index!==this.ordinal*256||typeof text!=='string'||text.length*2>NATIVE_CHECKPOINT_RECORD_BYTES)throw new RangeError('Native params result checkpoint record');const state=safeCheckpointParse(text);this.checkpoints.set(index,state);this.guard();this.ordinal++;if(this.budget.usedBytes>this.expectedCheckpointBytes)throw new RangeError('Native params checkpoint declared bytes');return true;}catch(error){this.dispose();throw error;}}
+ // 레코드 하나를 받는 짧은 소유자 단계다. 해독도 여기서 한 번만 한다(리뷰 C5).
+ // set()은 state를 정규 문자열로 바꿔 저장하고 그 문자열을 따로 해독해 검증할 뿐, state는 읽기만 하고 붙잡지 않는다.
+ // 그래서 state는 get(index)가 돌려줄 새 사본과 같은 레코드이고, 다른 곳에서 참조하지 않는다.
+ // 이것을 색인 오름차순(도착 순서)으로 평범한 Map에 담아 두면 게시는 레코드를 다시 해독하지 않고 상수 시간에 끝난다
+ checkpoint(index,text){this.active();try{this.guard();if(this.phase!=='receive'||this.ordinal>=this.checkpointCount||index!==this.ordinal*256||typeof text!=='string'||text.length*2>NATIVE_CHECKPOINT_RECORD_BYTES)throw new RangeError('Native params result checkpoint record');const state=safeCheckpointParse(text);this.checkpoints.set(index,state);nativeImportMapSet.call(this.ordinaryCheckpoints,index,state);this.guard();this.ordinal++;if(this.budget.usedBytes>this.expectedCheckpointBytes)throw new RangeError('Native params checkpoint declared bytes');return true;}catch(error){this.dispose();throw error;}}
  start(){this.guard();if(this.phase!=='receive'||this.received.some(n=>n!==this.binding.capacity)||this.ordinal!==this.checkpointCount||this.budget.usedBytes!==this.expectedCheckpointBytes)throw new Error('Native params result incomplete');this.phase='validate';return true;}
  step(maxValues=16384){this.active();try{if(!Number.isSafeInteger(maxValues)||maxValues<1||maxValues>16384)throw new RangeError('Native params validation work size');this.guard();if(this.phase==='ready')return {phase:'ready',done:1,total:1,complete:true};if(this.phase!=='validate')throw new Error('Native params result not started');const b=this.binding;let remaining=maxValues;
   while(this.output<this.arrays.length&&remaining){const a=this.arrays[this.output],end=Math.min(b.capacity,this.at+remaining);for(;this.at<end;this.at++,remaining--){const v=a[this.at];if(this.at>=b.length?!Number.isNaN(v):v===Infinity||v===-Infinity)throw new TypeError('Native params result finite/NaN tail');}if(this.at===b.capacity){this.at=0;this.output++;}}
   if(this.output<this.arrays.length)return {phase:'validate',done:this.output*b.capacity+this.at,total:this.arrays.length*b.capacity,complete:false};this.guard();this.entry={def:this.def,name:b.name,params:{...b.params},arrays:this.arrays,checkpoints:this.checkpoints,revision:b.length?1:0,computedFrom:0,computedUntil:b.length,dirty:b.length,dirtyTo:0,invalidated:false,length:b.length};this.phase='ready';return {phase:'ready',done:1,total:1,complete:true};
  }catch(error){this.dispose();throw error;}}
  readyEntry(){this.guard();if(this.phase!=='ready')throw new Error('Native params result not ready');return this.entry;}
- // Only call after callback-free adoption has succeeded. This drops wrapper
- // references without disposing the now-live checkpoint ledger or held outputs.
+ /**
+  * 레코드를 받으며 만들어 둔 게시용 평범한 Map을 돌려준다. readyEntry()의 경계 맵과 같은 색인·레코드를 색인 오름차순으로 담는다.
+  * 게시 커밋(prepareNativeEntryCommit)이 이 Map을 그대로 엔트리에 설치하므로 소유 스레드의 게시 한 턴에서 레코드를 다시 해독하지 않는다.
+  * @returns {Map<number, object>} 해독한 체크포인트 레코드
+  */
+ readyCheckpoints(){this.guard();if(this.phase!=='ready')throw new Error('Native params result not ready');return this.ordinaryCheckpoints;}
+ // 콜백 없는 게시 커밋이 성공한 뒤에만 부른다. 커밋이 이미 ordinaryCheckpoints를 엔트리에 설치하고
+ // 준비용 경계 맵(과 그 원장)을 닫았으므로, 여기서는 이제 엔진 것이 된 출력 벡터와 Map을 건드리지 않고 참조만 놓는다.
  releasePublished(){this.transferred=true;this.closed=true;this.drop();}
- drop(){this.arrays=[];this.entry=null;this.def=null;this.create=null;this.binding=null;this.checkpoints=null;this.received=[];}
+ drop(){this.arrays=[];this.entry=null;this.def=null;this.create=null;this.binding=null;this.checkpoints=null;this.ordinaryCheckpoints=null;this.received=[];}
  dispose(){if(this.closed)return;this.closed=true;try{if(!this.transferred)this.checkpoints.dispose();}finally{this.drop();}}
 }
 
@@ -3625,7 +3904,8 @@ class NativeParamsCapture {
    const old=this.previous.def,oldLayout={outputs:[...old.outputs],plotOffsets:{...old.plotOffsets}};this.check(revision);this.noop=npParamsSame(this.previous.params,this.params);if(this.noop){this.layout=oldLayout;this.phase='noop';return;}
    const name=this.previous.name,factory=this.engine.registry.get(name);requirePortableFactory(name,factory);if(resolveIndicatorFactory(name)!==factory)throw new TypeError('Native params linked factory');const probe=new IndicatorEngine({length:0,capacity:0,columns:{},_subscribeInternal:()=>()=>{}});let candidate;try{probe.registry.set(name,factory);probe.add(id,name,{...this.params});candidate=probe.entries.get(id);if(!npParamsSame(candidate.params,this.params))throw new TypeError('Native params factory changed params');this.def=candidate.def;}finally{probe.dispose();}
    this.layout={outputs:[...this.def.outputs],plotOffsets:{...this.def.plotOffsets}};const offset=(a,k)=>Object.hasOwn(a,k)?a[k]:0;if(oldLayout.outputs.length!==this.layout.outputs.length||oldLayout.outputs.some((k,i)=>k!==this.layout.outputs[i]||!Object.is(offset(oldLayout.plotOffsets,k),offset(this.layout.plotOffsets,k))))throw new TypeError('Native params output schema/offset change');this.create=this.def.create;this.check(revision);
-   const s=m.store;npInteger(s.length,4194304,'source length');if(!Number.isSafeInteger(s.capacity)||s.capacity<16||s.capacity<s.length||s.capacity>4194304||(s.capacity&(s.capacity-1)))throw new RangeError('Native params source capacity');const module=indicatorModule(name);this.binding={schema:'aster.native-params-target',version:1,registration,id,name,params:{...this.params},...(module?{module}:{}),length:s.length,capacity:s.capacity,...this.layout,maxBytes};this.metadataJSON=safeCheckpointStringify(this.binding);this.check(revision);
+   // 대상 런타임에 넘기는 params는 후보 엔진이 선언 순서로 담은 사본을 쓴다. 호스트 객체 키 순서가 게시될 엔트리에 남지 않는다
+   const s=m.store;npInteger(s.length,4194304,'source length');if(!Number.isSafeInteger(s.capacity)||s.capacity<16||s.capacity<s.length||s.capacity>4194304||(s.capacity&(s.capacity-1)))throw new RangeError('Native params source capacity');const module=indicatorModule(name);this.binding={schema:'aster.native-params-target',version:1,registration,id,name,params:{...candidate.params},...(module?{module}:{}),length:s.length,capacity:s.capacity,...this.layout,maxBytes};this.metadataJSON=safeCheckpointStringify(this.binding);this.check(revision);
    const outputs=[...this.entries].reduce((sum,[key,e])=>sum+(key===id?this.layout.outputs.length:e.def.outputs.length),0);if(outputs*s.capacity*8>this.engine.maxOutputBytes)throw new RangeError('Native params total output byte limit');
    const seen=new Set(),put=a=>{if(!a)return;const buffer=npBuffer.call(a),bytes=npBytes.call(buffer);if(!seen.has(buffer)){seen.add(buffer);this.sourceBytes+=bytes;}};for(const k of FIELDS){const a=npSlot(s.columns,k);if(npTag.call(a)!=='Float64Array'||npLength.call(a)<s.length)throw new TypeError('Native params source vector');put(a);}const tree=t=>{if(t)for(const k of ['min','max','sum'])put(t[k]);};tree(s.index);
    for(const [key,e]of this.entries){for(const a of e.arrays)put(a);const cp=e.checkpoints;if(cp instanceof NativeCheckpointMap){const bytes=npEncoded.call(cp);this.oldCheckpointBytes+=bytes+npNativeSize.call(cp)*128;if(key!==id)this.otherCheckpointBytes+=bytes;}else{npMapSize.call(cp);this.records.push({map:cp,target:key===id});}}
@@ -3644,7 +3924,7 @@ class NativeParamsCapture {
  checkpoint(index,text,revision){this.check(revision);try{const result=this.stage.checkpoint(index,text);this.check(revision);return result;}catch(error){this.dispose();throw error;}}
  validate(maxValues,revision){this.check(revision);try{if(this.phase==='receive'){this.stage.start();this.phase='validate';}if(this.phase!=='validate')throw new Error('Native params validation phase');const result=this.stage.step(maxValues);this.check(revision);return result;}catch(error){this.dispose();throw error;}}
  // Host must have acknowledged worker-runtime cleanup before calling prepare.
- prepare(revision){this.check(revision);try{const entry=this.noop?null:this.stage.readyEntry();if(!this.noop){if(this.def.create!==this.create)throw new Error('Native params definition changed');this.commitEntry=prepareNativeEntryCommit(this.entries,this.id,this.previous,entry);this.dependents=[];for(let i=0;i<this.model.series.length;i++){const s=npSlot(this.model.series,String(i));if(npSlot(s,'indicator',true)===this.id)this.dependents.push(s);}npWritableCaches(this.dependents);}
+ prepare(revision){this.check(revision);try{const entry=this.noop?null:this.stage.readyEntry();if(!this.noop){if(this.def.create!==this.create)throw new Error('Native params definition changed');this.commitEntry=prepareNativeEntryCommit(this.entries,this.id,this.previous,entry,this.stage.readyCheckpoints());this.dependents=[];for(let i=0;i<this.model.series.length;i++){const s=npSlot(this.model.series,String(i));if(npSlot(s,'indicator',true)===this.id)this.dependents.push(s);}npWritableCaches(this.dependents);}
    const release=this.lease,session=this.session,epoch=this.leaseEpoch;release?.();this.lease=null;if(session)this.leaseEpoch=epoch+1;if(session&&(session.closed||session.leased||session.epoch!==epoch+1))throw new Error('Native params stale ingestion release');this.check(revision);assertDataIngestionIdle(this.model);this.receipt={schema:'aster.native-params-published',version:1,registration:this.registration,status:this.noop?'unchanged':'committed',id:this.id,outputs:[...this.layout.outputs],plotOffsets:{...this.layout.plotOffsets}};this.phase='armed';return true;
   }catch(error){this.dispose();throw error;}}
  // No user callbacks or host awaits are allowed between this final owner check

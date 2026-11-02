@@ -15,7 +15,7 @@ const EXPECTED_SCENARIOS=Object.freeze([
  'finished source capture rejects reuse','source listeners and undetached columns survive','source-to-target canonical save',
  'fractional view and drawing anchors','target transient UI reset','owned target columns match source',
  'empty ingestion policy cursor and pause preserved','restored ema/value','restored rsi/value',
- 'restored bounded native checkpoint ownership','encoded source accounting avoids decode','encoded capture cleanup preserves owner',
+ 'restored ordinary checkpoint ownership','restored source accounting matches fresh source','restored capture cleanup preserves owner',
  'target wrapper preserves returned ownership','source mutation stays independent','corrected ema/value','corrected rsi/value',
  'target correction stays independent','empty source admission','empty source-to-target canonical save','empty ema/value','empty rsi/value',
  'empty source ingestion state preserved','empty source cleanup and target ownership','combined budget exact boundary',
