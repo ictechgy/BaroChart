@@ -1,8 +1,8 @@
 import {drawingStylePatch} from './drawing-style-patch.mjs';
 import {DrawingStore} from './drawings.mjs';
 import {drawingDocumentVersion} from './position-drawing.mjs';
-import {validateDrawing} from './drawing-validation.mjs';
-import {identifier,RESOURCE_LIMITS} from './contracts.mjs';
+import {validateDrawing,DRAWING_RECORD_KEYS,DRAWING_STYLE_KEYS} from './drawing-validation.mjs';
+import {identifier,orderedRecord,RESOURCE_LIMITS} from './contracts.mjs';
 
 const translationStringify=JSON.stringify,translationDefine=Object.defineProperty;
 function translationSlot(object,key,required=false){const d=Object.getOwnPropertyDescriptor(object,key);if(!d){if(required)throw new TypeError('Drawing group edit missing '+key);return undefined;}if(!Object.hasOwn(d,'value'))throw new TypeError('Drawing group edit own data properties required');return d.value;}
@@ -65,12 +65,13 @@ function drawingGroupEdit(api,ids,options,remove,styleEdit=false,visibilityEdit=
   if(!selected.has(before.id))continue;
   if(before.locked&&!visibilityEdit&&!duplicateEdit)throw new Error('Drawing is locked');
   if(remove){next[i]=null;changed++;continue;}
-  if(visibilityEdit){if((before.visible!==false)!==options){const candidate={...before,visible:options,points:translationSlot(items[i],'points')};if(before.style!==undefined)candidate.style=translationSlot(items[i],'style');validateDrawing(candidate);next[i]=translationFrozen(candidate);changed++;if(!options&&s.selected===before.id)clearSelected=true;}continue;}
-  if(styleEdit){const previous=before.style??{},different=Object.keys(patch).some(key=>!Object.hasOwn(previous,key)||!Object.is(previous[key],patch[key]));if(different){const candidate={...before,points:translationSlot(items[i],'points'),style:{...previous,...patch}};validateDrawing(candidate);next[i]=translationFrozen(candidate);changed++;}continue;}
+  // 새로 넣는 visible·style·locked도 정규 자리에 오도록 최상위와 스타일 키를 정렬한다(앵커·스타일 객체는 그대로 공유)
+  if(visibilityEdit){if((before.visible!==false)!==options){const candidate={...before,visible:options,points:translationSlot(items[i],'points')};if(before.style!==undefined)candidate.style=translationSlot(items[i],'style');validateDrawing(candidate);next[i]=translationFrozen(orderedRecord(candidate,DRAWING_RECORD_KEYS));changed++;if(!options&&s.selected===before.id)clearSelected=true;}continue;}
+  if(styleEdit){const previous=before.style??{},different=Object.keys(patch).some(key=>!Object.hasOwn(previous,key)||!Object.is(previous[key],patch[key]));if(different){const candidate={...before,points:translationSlot(items[i],'points'),style:{...previous,...patch}};validateDrawing(candidate);candidate.style=orderedRecord(candidate.style,DRAWING_STYLE_KEYS);next[i]=translationFrozen(orderedRecord(candidate,DRAWING_RECORD_KEYS));changed++;}continue;}
   if(metadata){const b=[before.panel,before.axisId??null,before.seriesId??null];if(binding&&b.some((v,j)=>v!==binding[j]))throw new Error('Drawing group edit requires identical panel/axis/series binding');binding=b;
   if(!panels.some(p=>p.id===b[0])||b[1]!==null&&!axes.some(p=>p.id===b[1]&&p.panel===b[0])||b[2]!==null&&!series.some(p=>p.id===b[2]&&p.panel===b[0]&&(p.axisId??null)===b[1]))throw new Error('Missing or mismatched drawing binding');}
   let moved=false;const anchors=before.points.map(p=>{const time=o.deltaTimeMs===0?p.time:p.time+o.deltaTimeMs,price=o.deltaPrice===0?p.price:p.price+o.deltaPrice;if(time!==p.time||price!==p.price)moved=true;return {time,price};});
-  const candidate={...before,points:duplicateEdit&&!metadata?translationSlot(items[i],'points'):anchors,...(duplicateEdit?{locked:false}:{})};if(before.style!==undefined)candidate.style=translationSlot(items[i],'style');validateDrawing(candidate);if(duplicateEdit){pendingCopies.push(candidate);changed++;}else if(moved){next[i]=translationFrozen(candidate);changed++;}
+  const candidate={...before,points:duplicateEdit&&!metadata?translationSlot(items[i],'points'):anchors,...(duplicateEdit?{locked:false}:{})};if(before.style!==undefined)candidate.style=translationSlot(items[i],'style');validateDrawing(candidate);const ordered=orderedRecord(candidate,DRAWING_RECORD_KEYS);if(duplicateEdit){pendingCopies.push(ordered);changed++;}else if(moved){next[i]=translationFrozen(ordered);changed++;}
  }
  if(keys.some(id=>!seen.has(id)))throw new Error('Missing drawing');if(items.length>s.maxDrawings||points>s.maxPoints||text>1000000)throw new RangeError('Drawing group edit resource limit');
  if(duplicateEdit){

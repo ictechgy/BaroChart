@@ -4,13 +4,13 @@ import {ChartAPI} from './api.mjs';
 import {ChartModel} from './model.mjs';
 import {BarStore} from './data.mjs';
 import {DrawingStore} from './drawings.mjs';
-import {validateDrawing} from './drawing-validation.mjs';
+import {validateDrawing,canonicalDrawing} from './drawing-validation.mjs';
 import {requirePortableFactory} from './indicators.mjs';
 import {indicatorModule,validateIndicatorModuleBinding} from './indicator-modules.mjs';
 import {validateIndicatorParams} from './indicator-params.mjs';
 import {validateSymbol} from './markets.mjs';
 import {safeCheckpointParse,safeCheckpointStringify} from './checkpoint-validation.mjs';
-import {optionRecord,identifier,boundedText,sizeLimit,PANEL_KEYS,AXIS_KEYS,SERIES_KEYS,THEME_KEYS,RESOURCE_LIMITS,portableStyle,hasPortableFormatters} from './contracts.mjs';
+import {optionRecord,identifier,boundedText,sizeLimit,orderedRecord,PANEL_KEYS,AXIS_KEYS,SERIES_KEYS,THEME_KEYS,SYMBOL_KEYS,RESOURCE_LIMITS,portableStyle,hasPortableFormatters} from './contracts.mjs';
 export const WORKSPACE_CHARS=2097152,WORKSPACE_BYTES=4194304;
 const workspaceBindingKeys=['key','revision','adjustmentVersion','priceUnit','adjustment'];
 const workspaceSymbolKeys=['id','exchange','timezone','currency','volumeUnit','priceDecimals','tickSize','adjustment'];
@@ -29,7 +29,8 @@ function workspaceWalk(value,copy){let nodes=0,chars=0,bytes=0;const ancestors=n
 // Only parser-owned plain data may use the no-copy walk; external snapshots
 // always detach. Both modes perform the identical complete bounded validation.
 export function workspaceSnapshot(value){return workspaceWalk(value,true);}
-export function workspaceBinding(value){const b=workspaceSnapshot(value);workspaceRecord(b,workspaceBindingKeys);for(const k of workspaceBindingKeys)boundedText(b[k],128,'Workspace dataset '+k);if(!['raw','split','total-return'].includes(b.adjustment))throw new TypeError('Workspace adjustment');return b;}
+// 사전 점검 영수증과 리플레이 세션에도 호출자 키 순서가 남지 않도록 정해진 키 순서로 돌려준다
+export function workspaceBinding(value){const b=workspaceSnapshot(value);workspaceRecord(b,workspaceBindingKeys);for(const k of workspaceBindingKeys)boundedText(b[k],128,'Workspace dataset '+k);if(!['raw','split','total-return'].includes(b.adjustment))throw new TypeError('Workspace adjustment');return orderedRecord(b,workspaceBindingKeys);}
 export function workspaceBindingSame(a,b){return workspaceBindingKeys.every(k=>a[k]===b[k]);}
 export function validateWorkspaceDocument(doc){
  workspaceRecord(doc,['schema','version','dataset','source','chart','indicators','series','drawings']);if(doc.schema!=='aster.workspace'||doc.version!==1)throw new TypeError('Workspace schema/version');workspaceBinding(doc.dataset);
@@ -59,9 +60,10 @@ export function saveWorkspace(chart,datasetBinding){
  validateWorkspaceDocument(doc);const text=safeCheckpointStringify(doc);readWorkspaceDocument(text);if(model.disposed||chart.model!==model||model.store!==store||store.version!==version||store.columns!==columns||store.length!==length||model.drawings.transaction||controller&&(controller.gesture||controller.pointers?.size))throw new Error('Workspace owner changed during save');return text;
 }
 export function installWorkspaceConfiguration(model,doc){
- const c=doc.chart,api=new ChartAPI(model);if(c.symbol!==null){if(c.formatters==='symbol')api.setSymbol(c.symbol);else model.symbol=Object.freeze({...c.symbol});}model.precision=c.precision;
+ // 문서 키 순서와 상관없이 새 차트와 같은 정규 순서로 심볼·드로잉·view를 담는다
+ const c=doc.chart,api=new ChartAPI(model);if(c.symbol!==null){if(c.formatters==='symbol')api.setSymbol(c.symbol);else model.symbol=Object.freeze(orderedRecord(c.symbol,SYMBOL_KEYS));}model.precision=c.precision;
  for(const s of doc.series)model.addSeries({...s});
  // Metadata validation already checked every anchor. Preserve exact finite
  // coordinates rather than nearest-bar snapping or another JSON normalization.
- model.drawings.items=doc.drawings.drawings.map(d=>Object.freeze({...d,points:Object.freeze(d.points.map(p=>Object.freeze({...p}))),...(d.style?{style:Object.freeze({...d.style})}:{})}));model.view={...c.view};model.follow=c.follow;return model;
+ model.drawings.items=doc.drawings.drawings.map(d=>{const next=canonicalDrawing(d);for(const p of next.points)Object.freeze(p);Object.freeze(next.points);if(next.style)Object.freeze(next.style);return Object.freeze(next);});model.view=orderedRecord(c.view,['from','to']);model.follow=c.follow;return model;
 }

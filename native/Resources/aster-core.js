@@ -1,10 +1,59 @@
 // Generated from src/core; run npm run build:native.
 (function(){
 const RESOURCE_LIMITS=Object.freeze({maxBars:4194304,maxCanvasDimension:16384,maxCanvasPixels:33554432,maxDrawings:10000,maxDrawingPoints:200000,maxDocumentChars:8388608,maxHistoryBytes:33554432,maxPanels:32,maxAxes:64,maxSeries:256,maxIndicators:128});
+/** 허용 목록에 있어도 자기 키로는 받지 않는 예약 이름. 프로토타입을 바꾸는 키를 레코드에 남기지 않는다. */
+const RESERVED_RECORD_KEYS=['__proto__','constructor','prototype'];
+/** 순회 중 덮어쓴 Object.prototype 메서드에 흔들리지 않도록 처음 값을 잡아 둔다. */
+const recordEnumerable=Object.prototype.propertyIsEnumerable;
+/**
+ * 두 문자열을 UTF-16 코드 단위 순서로 비교한다. 기본 sort와 같은 순서지만 기준을 코드에 드러내
+ * Rust 이식 때 바이트·코드 포인트 순서와 헷갈리지 않게 한다.
+ * @param {string} a 앞 문자열
+ * @param {string} b 뒤 문자열
+ * @returns {number} a가 앞이면 음수, 같으면 0, 뒤면 양수
+ */
+function utf16Ascending(a,b){return a<b?-1:a>b?1:0;}
+/**
+ * 키 배열을 정규 순서로 늘어놓는다.
+ * @param {readonly (string|symbol)[]} keys 늘어놓을 키(자기 키 목록)
+ * @param {readonly string[]} allowed 앞자리를 정하는 키 목록
+ * @returns {(string|symbol)[]} allowed에 있는 키(그 순서) → 나머지 문자열 키(UTF-16 오름차순) → 심볼 키(원래 순서)
+ */
+function canonicalKeyOrder(keys,allowed){
+ const present=new Set(keys),placed=new Set(),ordered=[],rest=[],symbols=[];
+ for(const key of allowed)if(present.has(key)&&!placed.has(key)){placed.add(key);ordered.push(key);}
+ for(const key of keys){if(typeof key==='symbol')symbols.push(key);else if(!placed.has(key))rest.push(key);}
+ return ordered.concat(rest.sort(utf16Ascending),symbols);
+}
+/**
+ * 검증 순회용 키 배열을 돌려준다. 입력 키 순서와 상관없이 같은 배열이 나오므로,
+ * 여러 필드가 함께 틀려도 먼저 보고할 필드가 하나로 정해진다.
+ * @param {object} value 검사할 레코드
+ * @param {readonly string[]} allowed 허용 키 목록. 이 순서가 앞자리를 정한다
+ * @param {readonly (string|symbol)[]} [keys=Object.keys(value)] 순회할 키. Reflect.ownKeys로 검사하는 검증기는 그 결과를 넘긴다
+ * @returns {(string|symbol)[]} allowed에 있는 키(그 순서) → 허용되지 않은 문자열 키(UTF-16 오름차순) → 심볼 키
+ */
+function canonicalKeys(value,allowed,keys=Object.keys(value)){return canonicalKeyOrder(keys,allowed);}
+/**
+ * keys 순서를 앞에 둔 새 평범한 객체를 만든다. 저장 문서와 반환값의 키 순서를 입력 키 순서와 무관하게 고정한다.
+ * - keys에 있는 자기 열거 키를 그 순서대로 먼저 담는다. 값이 undefined인 키도 자리를 유지한다.
+ * - 나머지 자기 열거 문자열 키는 UTF-16 코드 단위 오름차순으로, 심볼 키는 원래 순서로 뒤에 붙인다.
+ * 객체 펼치기({...value})처럼 getter를 한 번씩 읽고 원본은 바꾸지 않는다. `__proto__`도 평범한 자기 키로 옮긴다.
+ * 정수 모양 키는 JS 규칙대로 항상 맨 앞(오름차순)에 온다.
+ * @param {object} value 원본 레코드
+ * @param {readonly string[]} keys 앞자리를 정하는 키 목록
+ * @returns {object} 정규 순서의 새 평범한 객체
+ */
+function orderedRecord(value,keys){
+ const own=Reflect.ownKeys(value).filter(key=>recordEnumerable.call(value,key));
+ return Object.fromEntries(canonicalKeyOrder(own,keys).map(key=>[key,value[key]]));
+}
 function optionRecord(value,keys,label='Options') {
  if(!value||typeof value!=='object'||Array.isArray(value))throw new TypeError(`${label}: object required`);
  const prototype=Object.getPrototypeOf(value);if(prototype!==Object.prototype&&prototype!==null)throw new TypeError(`${label}: plain object required`);
- for(const key of Object.keys(value))if(['__proto__','constructor','prototype'].includes(key)||!keys.includes(key))throw new TypeError(`${label}: unsupported field ${key.slice(0,64)}`);
+ const own=Object.keys(value);
+ // 틀린 키가 있을 때만 정규 순서(허용 키 → 나머지 UTF-16 오름차순)로 다시 본다. 예약 이름은 허용 목록에 있어도 나머지로 보낸다
+ if(own.some(key=>RESERVED_RECORD_KEYS.includes(key)||!keys.includes(key)))for(const key of canonicalKeys(value,keys.filter(key=>!RESERVED_RECORD_KEYS.includes(key)),own))if(RESERVED_RECORD_KEYS.includes(key)||!keys.includes(key))throw new TypeError(`${label}: unsupported field ${key.slice(0,64)}`);
  return value;
 }
 function boundedText(value,max=128,label='Text',empty=false) {if(typeof value!=='string'||value.length>max||!empty&&!value.length)throw new TypeError(`${label}: string limit ${max}`);return value;}
@@ -14,6 +63,8 @@ const PANEL_KEYS=['id','weight','label','scale','inverted','padding','range','ba
 const AXIS_KEYS=['id','panel','side','scale','inverted','padding','range','base','precision','tickFormat','prefix','suffix','label','visible','width','formatter'];
 const SERIES_KEYS=['id','type','panel','source','values','indicator','output','color','fill','width','baseline','offset','upColor','downColor','visible','axisId','symbolId','label'];
 const THEME_KEYS=['background','grid','text','up','down','crosshair','font'];
+/** 심볼 레코드의 정규 키 순서. 작업공간 검증기의 허용 목록 순서(필수 8개, 선택 2개)와 같다. */
+const SYMBOL_KEYS=['id','exchange','timezone','currency','volumeUnit','priceDecimals','tickSize','adjustment','provider','adjustmentVersion'];
 // Only callbacks installed by ChartAPI.setSymbol can be recreated in a new VM.
 // A symbol object alone must not silently authorize replacement of custom callbacks.
 const symbolFormatterRecords=new WeakMap();
@@ -435,7 +486,8 @@ function zonedEpoch(date, clock, timezone, ambiguity = 'earlier') {
 }
 function validateSymbol(symbol) {
   if (!symbol || ['id', 'exchange', 'timezone', 'currency', 'volumeUnit'].some(k => typeof symbol[k] !== 'string' || !symbol[k]) || !Number.isInteger(symbol.priceDecimals) || symbol.priceDecimals < 0 || symbol.priceDecimals > 18 || !Number.isFinite(symbol.tickSize) || symbol.tickSize <= 0 || !['raw', 'split', 'total-return'].includes(symbol.adjustment)) throw new TypeError('Invalid symbol metadata');
-  zonedParts(0, symbol.timezone); return Object.freeze({...symbol});
+  // 호스트 객체 키 순서(Swift Dictionary 등)가 inspect()와 작업공간에 남지 않도록 검증기 허용 목록 순서로 담는다
+  zonedParts(0, symbol.timezone); return Object.freeze(orderedRecord(symbol,SYMBOL_KEYS));
 }
 function formatPrice(value, symbol) {return value.toFixed(symbol.priceDecimals);}
 function boundedDenseArray(value,max,label,exactLength){
@@ -1153,6 +1205,21 @@ add('parabolicSAR',({step=.02,max=.2}={})=>{if(!Number.isFinite(step)||!Number.i
 
 const canonicalBuiltinIndicators=new Map(builtinIndicators);
 function resolveIndicatorFactory(name){return canonicalBuiltinIndicators.get(name)??portableIndicatorFactory(name);}
+/**
+ * 지표 정의가 파라미터를 선언한 순서. 저장 params(지표 엔트리, aster.studies, aster.workspace)의 키 순서를 정한다.
+ * 내장은 팩토리 구조 분해 순서, vwap·pivots는 sessionStudyParams가 읽는 순서, 링크 모듈은 모듈 팩토리 선언 순서다.
+ * 팩토리를 고치면 이 목록도 함께 고친다(test/record-key-order.test.mjs가 구조 분해 선언과 대조한다).
+ */
+const indicatorParameterOrders=new Map(Object.entries({sma:['period','source'],vwma:['period'],ema:['period','source'],wma:['period'],rsi:['period'],atr:['period'],macd:['fast','slow','signal'],bollinger:['period','deviation'],donchian:['period'],aroon:['period'],stochastic:['period','smoothK','smoothD'],roc:['period'],williamsR:['period'],cci:['period'],obv:[],vwap:['calendar','anchorTime','sessionMs','kinds','source','deviation'],mfi:['period'],cmf:['period'],adx:['period'],dema:['period'],tema:['period'],hma:['period'],keltner:['period','atrPeriod','multiplier'],supertrend:['period','multiplier'],ichimoku:['conversion','base','span','displacement'],trix:['period'],ppo:['fast','slow','signal'],stochRSI:['period','stochPeriod','smoothK','smoothD'],adl:[],chaikin:['fast','slow'],forceIndex:['period'],volumeOscillator:['fast','slow'],vortex:['period'],pivots:['calendar','anchorTime','sessionMs','kinds'],parabolicSAR:['step','max'],'aster.volume-direction@1/pressure':['factor','shift']}));
+/**
+ * params를 그 지표 정의의 선언 순서로 담은 새 레코드를 돌려준다. 선언하지 않은 키는 UTF-16 오름차순으로 뒤에 붙는다.
+ * 정규 내장·링크 팩토리일 때만 선언 순서를 쓴다. 등록한 사용자 팩토리나 바꿔 끼운 팩토리는 선언을 알 수 없으므로 UTF-16 순서만 쓴다.
+ * @param {string} name 지표 이름
+ * @param {Function|undefined} factory 실제로 쓸 팩토리
+ * @param {object} params 검증된 params
+ * @returns {object} 정규 키 순서의 새 params
+ */
+function orderedIndicatorParams(name,factory,params){return orderedRecord(params,factory!==undefined&&factory===resolveIndicatorFactory(name)?indicatorParameterOrders.get(name)??[]:[]);}
 function requirePortableFactory(name,factory){const builtin=canonicalBuiltinIndicators.get(name);if(builtin&&factory===builtin)return null;return requirePortableIndicator(name,factory);}
 // Running calls reject recursion; a suspended generator may be superseded by
 // a new explicit calculation without leaving an abandoned iterator busy forever.
@@ -1173,7 +1240,7 @@ class IndicatorEngine {
     identifier(id,'Indicator id');validateIndicatorParams(params);if(this.entries.size>=RESOURCE_LIMITS.maxIndicators)throw new RangeError('Indicator limit');
     if (this.entries.has(id)) throw new Error('Duplicate indicator id'); const make = this.registry.get(name); if (!make) throw new Error(`Unknown indicator: ${name}`);
     const def = make(params); if (!Array.isArray(def.outputs) || !def.outputs.length||def.outputs.length>32 || def.outputs.some(k=>typeof k!=='string'||!k||k.length>128||['__proto__','constructor','prototype'].includes(k)) || new Set(def.outputs).size!==def.outputs.length || typeof def.create !== 'function' || Object.entries(def.plotOffsets??{}).some(([k,v])=>!def.outputs.includes(k)||!Number.isInteger(v)||Math.abs(v)>10000)) throw new TypeError('Invalid indicator definition');
-    const entry={def,name,params:cloneState(params), dirty: 0, dirtyTo:this.store.length,invalidated:true,length: 0, arrays: [], checkpoints: new Map(), revision: 0};this.entries.set(id,entry);try{return this.get(id);}catch(error){if(this.entries.get(id)===entry){const entries=this.entries;entries.delete(id);retireNativeEntryIfReplaced(entries,id);}throw error;}
+    const entry={def,name,params:orderedIndicatorParams(name,make,cloneState(params)), dirty: 0, dirtyTo:this.store.length,invalidated:true,length: 0, arrays: [], checkpoints: new Map(), revision: 0};this.entries.set(id,entry);try{return this.get(id);}catch(error){if(this.entries.get(id)===entry){const entries=this.entries;entries.delete(id);retireNativeEntryIfReplaced(entries,id);}throw error;}
   }
   remove(id) {const entries=this.entries;entries.delete(id);retireNativeEntryIfReplaced(entries,id);}
   get(id) {const task=this.calculate(id);let next;do{next=task.next();}while(!next.done);return next.value;}
@@ -1274,6 +1341,33 @@ function validateDrawingDocumentVersion(d,version){
 
 // Shared structural validation; callers retain their existing copy/commit policy.
 const DRAWING_TYPES = ['trendline', 'horizontal', 'fibonacci', 'rectangle', 'ellipse', 'text', 'ray', 'extendedline', 'channel', 'fibextension', 'fibfan', 'fibtimezones', 'freehand', 'measurement', 'longposition', 'shortposition'];
+/** 저장 드로잉의 정규 키 순서. 레거시 픽스처 순서(id…text) 뒤에 나머지를 허용 목록 순서로 둔다. */
+const DRAWING_RECORD_KEYS=['id','panel','locked','style','type','points','text','visible','axisId','seriesId'];
+/** 드로잉 스타일의 정규 키 순서. 레거시 픽스처 순서(color, width) 뒤에 나머지를 허용 목록 순서로 둔다. */
+const DRAWING_STYLE_KEYS=['color','width','fill','font'];
+/** 앵커의 정규 키 순서. */
+const DRAWING_POINT_KEYS=['time','price'];
+/**
+ * 앵커를 정규 키 순서의 새 객체로 만든다.
+ * 앵커는 한 문서에 20만 개까지 있으므로, 자기 열거 키가 time·price뿐인 검증된 앵커는 범용 정렬 없이 바로 만든다.
+ * 이 지름길이 버리는 심볼 키는 호출자가 하는 JSON 복사(또는 이미 JSON에서 온 입력)에서 어차피 남지 않는다.
+ * @param {object} point 검증된 앵커
+ * @returns {object} {time, price} 순서의 새 앵커
+ */
+function canonicalDrawingPoint(point){const keys=Object.keys(point);return keys.length===2&&keys.includes('time')&&keys.includes('price')?{time:point.time,price:point.price}:orderedRecord(point,DRAWING_POINT_KEYS);}
+/**
+ * 드로잉 레코드를 정규 키 순서의 새 레코드로 만든다. 스타일과 앵커도 새 객체로 정렬하고, 값은 그대로 옮긴다.
+ * 평범한 객체로 다시 만들기 때문에 검증을 마친 레코드나 JSON 복사본에만 쓴다. 검증 전에 쓰면 프로토타입 검사를 건너뛰게 된다.
+ * 객체가 아닌 앵커·스타일(toJSON이 바꾼 값 등)은 그대로 두어, 뒤이은 validateDrawing이 원래 오류 문구로 거절하게 한다.
+ * @param {object} d 검증된 드로잉 레코드
+ * @returns {object} 정규 키 순서의 새 드로잉 레코드
+ */
+function canonicalDrawing(d){
+ const record=value=>!!value&&typeof value==='object'&&!Array.isArray(value),next=orderedRecord(d,DRAWING_RECORD_KEYS);
+ if(Array.isArray(next.points))next.points=next.points.map(point=>record(point)?canonicalDrawingPoint(point):point);
+ if(record(next.style))next.style=orderedRecord(next.style,DRAWING_STYLE_KEYS);
+ return next;
+}
 function drawingPointCount(type) {return isPositionDrawing(type)?4:['horizontal','text'].includes(type)?1:['channel','fibextension'].includes(type)?3:2;}
 function validateDrawing(d) {
   optionRecord(d,['id','type','panel','points','style','text','locked','visible','axisId','seriesId'],'Drawing');identifier(d.id,'Drawing id');identifier(d.panel,'Drawing panel');for(const key of ['axisId','seriesId'])if(d[key]!==undefined&&d[key]!==null)identifier(d[key],'Drawing '+key);
@@ -1311,15 +1405,18 @@ class DrawingStore {
   // default current items and retain their existing transaction grouping.
   // Validate the JSON-normalized copy too: nested getters/toJSON may change
   // values after the initial caller-shape check but before publication.
-  add(input,{items=this.items,beforeMutation=null}={}){optionRecord(input,['id','type','panel','points','style','text','locked','visible','axisId','seriesId'],'Drawing');let id=input.id,serial=this.serial;if(!id){do{id=`drawing-${++serial}`;}while(items.some(d=>d.id===id));}const d={id,panel:'price',locked:false,style:{color:'#f5b85a',width:1.5},...input,id};validateDrawing(d);const copy=copyDrawing(d);validateDrawing(copy);frozenDrawing(copy);if(items.some(x=>x.id===id))throw new Error('Duplicate drawing id');const next=[...items,copy];this.budget(next);beforeMutation?.();this.mutate(()=>{this.items=next;});this.serial=serial;if(copy.visible!==false)this.selected=id;return id;}
-  edit(id,patch,{items=this.items,beforeMutation=null}={}){optionRecord(patch,['type','panel','points','style','text','locked','visible','axisId','seriesId'],'Drawing patch');const i=items.findIndex(x=>x.id===id);if(i<0)throw new Error('Missing drawing');const previous=items[i];if(previous.locked&&Object.keys(patch).some(k=>!['locked','visible'].includes(k)))throw new Error('Drawing is locked');const next={...previous,...patch};validateDrawing(next);if(JSON.stringify(previous)===JSON.stringify(next)){beforeMutation?.();return;}const copy=copyDrawing(next);validateDrawing(copy);frozenDrawing(copy);const changed=items.slice();changed[i]=copy;this.budget(changed);beforeMutation?.();this.mutate(()=>{this.items=changed;if(copy.visible===false&&this.selected===id)this.selected=null;});}
+  // 저장 레코드는 JSON 복사본을 정규 키 순서로 다시 담는다(canonicalDrawing). edit의 같음 비교도 키 순서를 빼고 본다:
+  // 비교·복사 직렬화는 지금처럼 한 번씩 하고(getter/toJSON 계약 유지), 그 결과만 정렬한다.
+  // 키 순서만 다르면 JSON 길이가 같으므로, 길이가 같을 때만 정렬한 사본으로 다시 비교한다.
+  add(input,{items=this.items,beforeMutation=null}={}){optionRecord(input,['id','type','panel','points','style','text','locked','visible','axisId','seriesId'],'Drawing');let id=input.id,serial=this.serial;if(!id){do{id=`drawing-${++serial}`;}while(items.some(d=>d.id===id));}const d={id,panel:'price',locked:false,style:{color:'#f5b85a',width:1.5},...input,id};validateDrawing(d);const copy=canonicalDrawing(copyDrawing(d));validateDrawing(copy);frozenDrawing(copy);if(items.some(x=>x.id===id))throw new Error('Duplicate drawing id');const next=[...items,copy];this.budget(next);beforeMutation?.();this.mutate(()=>{this.items=next;});this.serial=serial;if(copy.visible!==false)this.selected=id;return id;}
+  edit(id,patch,{items=this.items,beforeMutation=null}={}){optionRecord(patch,['type','panel','points','style','text','locked','visible','axisId','seriesId'],'Drawing patch');const i=items.findIndex(x=>x.id===id);if(i<0)throw new Error('Missing drawing');const previous=items[i];if(previous.locked&&Object.keys(patch).some(k=>!['locked','visible'].includes(k)))throw new Error('Drawing is locked');const next={...previous,...patch};validateDrawing(next);const previousText=JSON.stringify(previous),nextText=JSON.stringify(next);if(previousText===nextText||previousText.length===nextText.length&&previousText===JSON.stringify(canonicalDrawing(JSON.parse(nextText)))){beforeMutation?.();return;}const copy=canonicalDrawing(copyDrawing(next));validateDrawing(copy);frozenDrawing(copy);const changed=items.slice();changed[i]=copy;this.budget(changed);beforeMutation?.();this.mutate(()=>{this.items=changed;if(copy.visible===false&&this.selected===id)this.selected=null;});}
   remove(id,{items=this.items,beforeMutation=null}={}){const d=items.find(x=>x.id===id);if(!d||d.locked)return false;const next=items.filter(x=>x.id!==id);beforeMutation?.();this.mutate(()=>{this.items=next;});if(this.selected===id)this.selected=null;return true;}
   undo(){if(this.transaction)this.cancel();if(!this.undoStack.length)return false;this.redoStack.push(this.items.slice());this.items=this.undoStack.pop().slice();this.selected=null;this.trim();return true;}
   redo(){if(this.transaction)this.cancel();if(!this.redoStack.length)return false;this.undoStack.push(this.items.slice());this.items=this.redoStack.pop().slice();this.selected=null;this.trim();return true;}
   save(){if(this.transaction)throw new Error('Commit or cancel before saving');return drawingDocument(this.items,this.maxDocumentChars);}
   load(text,{styleDecoder=null,validatePanel=null,validateBinding=null}={}) {
     boundedText(text,this.maxDocumentChars,'Drawing document',true);const doc=JSON.parse(text);optionRecord(doc,['schema','version','drawings'],'Drawing document');if(doc.schema!=='aster.drawings'||![1,2,3,4].includes(doc.version)||!Array.isArray(doc.drawings)||doc.drawings.length>this.maxDrawings)throw new TypeError('Unsupported drawing document');
-    const items=doc.drawings.map(d=>{validateDrawing(d);validateDrawingDocumentVersion(d,doc.version);if(validateBinding&&!validateBinding(d))throw new Error('Invalid drawing binding');if(validatePanel&&!validatePanel(d.panel))throw new Error('Missing drawing panel');const next=copyDrawing(d);if(styleDecoder&&next.style)next.style=styleDecoder(next.style);validateDrawing(next);return frozenDrawing(next);});this.budget(items);if(new Set(items.map(d=>d.id)).size!==items.length)throw new TypeError('Duplicate drawing ids');if(this.transaction)throw new Error('Cannot load during a gesture');drawingDocument(items,this.maxDocumentChars);this.mutate(()=>{this.items=items;});this.selected=null;
+    const items=doc.drawings.map(d=>{validateDrawing(d);validateDrawingDocumentVersion(d,doc.version);if(validateBinding&&!validateBinding(d))throw new Error('Invalid drawing binding');if(validatePanel&&!validatePanel(d.panel))throw new Error('Missing drawing panel');const copy=copyDrawing(d);if(styleDecoder&&copy.style)copy.style=styleDecoder(copy.style);const next=canonicalDrawing(copy);validateDrawing(next);return frozenDrawing(next);});this.budget(items);if(new Set(items.map(d=>d.id)).size!==items.length)throw new TypeError('Duplicate drawing ids');if(this.transaction)throw new Error('Cannot load during a gesture');drawingDocument(items,this.maxDocumentChars);this.mutate(()=>{this.items=items;});this.selected=null;
   }
 }
 
@@ -1621,7 +1718,8 @@ function axisStateGuard(snapshot){managedArrayGuard(snapshot,'Axis owner',RESOUR
 function cloneSeriesPlacement(series,panel,axisId){
   const descriptors=Object.getOwnPropertyDescriptors(series);for(const descriptor of Object.values(descriptors))if(!Object.hasOwn(descriptor,'value'))throw new TypeError('Series own data fields required');
   const panelDescriptor=descriptors.panel,axisDescriptor=descriptors.axisId;descriptors.panel={value:panel,writable:true,enumerable:panelDescriptor?.enumerable??true,configurable:true};descriptors.axisId={value:axisId,writable:true,enumerable:axisDescriptor?.enumerable??true,configurable:true};
-  return Object.create(Object.getPrototypeOf(series),descriptors);
+  // 새로 생기는 axisId도 SERIES_KEYS 자리에 오도록 서술자를 정규 순서로 정의한다(inspect()가 배치 변경 이력과 무관해진다)
+  return Object.create(Object.getPrototypeOf(series),orderedRecord(descriptors,SERIES_KEYS));
 }
 function cloneDrawingTarget(target,panel,axisId){
   const descriptors=Object.getOwnPropertyDescriptors(target);for(const descriptor of Object.values(descriptors))if(!Object.hasOwn(descriptor,'value'))throw new TypeError('Drawing target own data fields required');
@@ -1656,11 +1754,12 @@ class ChartModel {
     // follow the tail like append, or retain an explicitly unfollowed view.
     panels.forEach(p => this.addPanel(p));if(!Array.isArray(axes))throw new TypeError('Axes array required');axes.forEach(a=>this.addAxis(a));this.indicators=new IndicatorEngine(store);try{this.drawings=new DrawingStore(); this.unsubscribe = store._subscribeInternal(({kind, from, added, appended}) => {if(kind==='compact')return;if (kind === 'prepend' && store.length > added) {this.view.from += added; this.view.to += added;} else if (kind === 'reset') this.fit(); if ((kind === 'append'||kind==='batch'&&appended>0||kind==='prepend'&&added>0&&store.length===added) && this.follow) {const span = this.view.to - this.view.from; this.view.to = store.length + this.forwardOffset() - .5; this.view.from = this.view.to - span;} for (const s of this.series) s.dirtyFrom = Math.min(s.dirtyFrom ?? Infinity, from);});registerStoreOwner(this,store,'model');}catch(error){try{this.indicators.dispose();}catch{}throw error;}
   }
-  addPanel(options,{ownerGuard=null}={}) {optionRecord(options,PANEL_KEYS,'Panel');identifier(options.id,'Panel id');if(this.panels.length>=RESOURCE_LIMITS.maxPanels)throw new RangeError('Panel limit');if (!options?.id || this.panels.some(p => p.id === options.id) || !Number.isFinite(options.weight ?? 1) || (options.weight ?? 1) <= 0) throw new Error('Unique panel id and positive weight'); const p = {weight: 1, scale: 'linear', inverted: false, padding: .08, ...options}; this.validatePanel(p);if(this.drawings?.transaction)throw new Error('Panel layout change during drawing transaction');runOwnerGuard(ownerGuard); this.panels.push(p); return p.id;}
+  // 패널·축 레코드는 허용 목록(PANEL_KEYS·AXIS_KEYS) 순서로 담아 inspect()와 작업공간 문서의 키 순서를 입력 키 순서와 무관하게 고정한다
+  addPanel(options,{ownerGuard=null}={}) {optionRecord(options,PANEL_KEYS,'Panel');identifier(options.id,'Panel id');if(this.panels.length>=RESOURCE_LIMITS.maxPanels)throw new RangeError('Panel limit');if (!options?.id || this.panels.some(p => p.id === options.id) || !Number.isFinite(options.weight ?? 1) || (options.weight ?? 1) <= 0) throw new Error('Unique panel id and positive weight'); const p = orderedRecord({weight: 1, scale: 'linear', inverted: false, padding: .08, ...options},PANEL_KEYS); this.validatePanel(p);if(this.drawings?.transaction)throw new Error('Panel layout change during drawing transaction');runOwnerGuard(ownerGuard); this.panels.push(p); return p.id;}
   validatePanel(p) {if(p.axisVisible!==undefined&&typeof p.axisVisible!=='boolean'||p.axisSide!==undefined&&!['left','right'].includes(p.axisSide))throw new TypeError('Panel axis visibility/side');if(typeof p.inverted!=='boolean'||p.label!==undefined&&typeof p.label!=='string'||p.formatter!==undefined&&typeof p.formatter!=='function'||p.range&&(!Array.isArray(p.range)||p.range.length!==2))throw new TypeError('Panel label, inverted, formatter or range');if(p.label!==undefined)boundedText(p.label,256,'Panel label');if (!Number.isFinite(p.weight) || p.weight <= 0 || p.base !== undefined && !Number.isFinite(p.base) || !['linear', 'log', 'percent'].includes(p.scale) || !Number.isFinite(p.padding) || p.padding < 0 || p.padding > 1 || p.precision !== undefined && (!Number.isInteger(p.precision) || p.precision < 0 || p.precision > 18) || (p.range && (!Number.isFinite(p.range[0]) || !Number.isFinite(p.range[1]) || p.range[0] >= p.range[1] || p.scale === 'log' && p.range[0] <= 0)) || p.scale === 'percent' && p.base === 0) throw new RangeError('Panel scale/range');}
   drawingProjectionChange(previous,next,keys){return keys.some(key=>Array.isArray(previous[key])&&Array.isArray(next[key])?previous[key].length!==next[key].length||previous[key].some((v,i)=>!Object.is(v,next[key][i])):!Object.is(previous[key],next[key]));}
   drawingMarginsChange(panels=this.panels,axes=this.axes){const before=axisStripWidths(this.panels,this.axes,this.axisWidth),after=axisStripWidths(panels,axes,this.axisWidth);return before.some((value,index)=>value!==after[index]);}
-  setPanel(id, patch,{ownerGuard=null}={}) {optionRecord(patch,PANEL_KEYS.filter(k=>k!=='id'),'Panel patch');const i=this.panels.findIndex(p=>p.id===id);if(i<0)throw new Error('Missing panel');const previous=this.panels[i],next={...previous,...patch};this.validatePanel(next);if(this.drawings?.transaction&&(this.drawingProjectionChange(previous,next,['weight'])||this.drawingMarginsChange(this.panels.map((p,j)=>j===i?next:p))||this.drawingProjectionChange(previous,next,['scale','inverted','padding','range','base','axisVisible','axisSide'])&&[...this.drawings.items,...this.drawings.transaction].some(d=>d.panel===id)))throw new Error('Panel projection change during drawing transaction');runOwnerGuard(ownerGuard);this.panels[i]=next;}
+  setPanel(id, patch,{ownerGuard=null}={}) {optionRecord(patch,PANEL_KEYS.filter(k=>k!=='id'),'Panel patch');const i=this.panels.findIndex(p=>p.id===id);if(i<0)throw new Error('Missing panel');const previous=this.panels[i],next=orderedRecord({...previous,...patch},PANEL_KEYS);this.validatePanel(next);if(this.drawings?.transaction&&(this.drawingProjectionChange(previous,next,['weight'])||this.drawingMarginsChange(this.panels.map((p,j)=>j===i?next:p))||this.drawingProjectionChange(previous,next,['scale','inverted','padding','range','base','axisVisible','axisSide'])&&[...this.drawings.items,...this.drawings.transaction].some(d=>d.panel===id)))throw new Error('Panel projection change during drawing transaction');runOwnerGuard(ownerGuard);this.panels[i]=next;}
   setPanelOrder(ids,{owner=null,controller=null,ownerGuard=null}={}) {
     const disposedDescriptor=Object.getOwnPropertyDescriptor(this,'disposed');if(disposedDescriptor&&!Object.hasOwn(disposedDescriptor,'value'))throw new TypeError('Chart disposed own data slot required');if(disposedDescriptor?.value)throw new Error('Chart disposed');
     const drawings=ownData(this,'drawings','Chart'),snapshot={...managedPanels(this),drawings},requested=strictArrayValues(ids,'Panel order');
@@ -1741,8 +1840,8 @@ class ChartModel {
     if(a.scale==='percent'&&(!Number.isFinite(a.base)||a.base===0))throw new RangeError('Independent percent axis requires an explicit nonzero base');
     return true;
   }
-  addAxis(options,{ownerGuard=null}={}) {optionRecord(options,AXIS_KEYS,'Axis');if(this.axes.length>=RESOURCE_LIMITS.maxAxes)throw new RangeError('Axis limit');if(this.axes.some(a=>a.id===options.id))throw new Error('Duplicate axis');const a={side:'right',scale:'linear',inverted:false,padding:.08,visible:true,tickFormat:'fixed',...options};this.validateAxis(a);if(this.drawings?.transaction&&this.drawingMarginsChange(this.panels,[...this.axes,a]))throw new Error('Axis layout change during drawing transaction');runOwnerGuard(ownerGuard);this.axes.push(a);return a.id;}
-  setAxis(id,patch,{ownerGuard=null}={}) {optionRecord(patch,AXIS_KEYS.filter(k=>k!=='id'&&k!=='panel'),'Axis patch');const i=this.axes.findIndex(a=>a.id===id);if(i<0)throw new Error('Missing axis');const previous=this.axes[i],a={...previous,...patch};this.validateAxis(a);if(this.drawings?.transaction&&(this.drawingMarginsChange(this.panels,this.axes.map((axis,j)=>j===i?a:axis))||this.drawingProjectionChange(previous,a,['scale','inverted','padding','range','base','width','side','visible'])&&[...this.drawings.items,...this.drawings.transaction].some(d=>d.axisId===id)))throw new Error('Axis projection change during drawing transaction');runOwnerGuard(ownerGuard);this.axes[i]=a;}
+  addAxis(options,{ownerGuard=null}={}) {optionRecord(options,AXIS_KEYS,'Axis');if(this.axes.length>=RESOURCE_LIMITS.maxAxes)throw new RangeError('Axis limit');if(this.axes.some(a=>a.id===options.id))throw new Error('Duplicate axis');const a=orderedRecord({side:'right',scale:'linear',inverted:false,padding:.08,visible:true,tickFormat:'fixed',...options},AXIS_KEYS);this.validateAxis(a);if(this.drawings?.transaction&&this.drawingMarginsChange(this.panels,[...this.axes,a]))throw new Error('Axis layout change during drawing transaction');runOwnerGuard(ownerGuard);this.axes.push(a);return a.id;}
+  setAxis(id,patch,{ownerGuard=null}={}) {optionRecord(patch,AXIS_KEYS.filter(k=>k!=='id'&&k!=='panel'),'Axis patch');const i=this.axes.findIndex(a=>a.id===id);if(i<0)throw new Error('Missing axis');const previous=this.axes[i],a=orderedRecord({...previous,...patch},AXIS_KEYS);this.validateAxis(a);if(this.drawings?.transaction&&(this.drawingMarginsChange(this.panels,this.axes.map((axis,j)=>j===i?a:axis))||this.drawingProjectionChange(previous,a,['scale','inverted','padding','range','base','width','side','visible'])&&[...this.drawings.items,...this.drawings.transaction].some(d=>d.axisId===id)))throw new Error('Axis projection change during drawing transaction');runOwnerGuard(ownerGuard);this.axes[i]=a;}
   removeAxis(id,{ownerGuard=null,controller=null}={}) {
     const disposedDescriptor=Object.getOwnPropertyDescriptor(this,'disposed');if(disposedDescriptor&&!Object.hasOwn(disposedDescriptor,'value'))throw new TypeError('Chart disposed own data slot required');if(disposedDescriptor?.value)throw new Error('Chart disposed');identifier(id,'Axis id');
     const panels=ownData(this,'panels','Chart'),panelState=managedPanels(this),axes=ownData(this,'axes','Chart'),axisState=axisStateSnapshot(axes),index=axisState.records.findIndex(axis=>axis.id===id),series=ownData(this,'series','Chart'),seriesState=seriesStateSnapshot(series);
@@ -1782,7 +1881,8 @@ class ChartModel {
     if (options.values && (!(options.values instanceof Float64Array) || options.values.length !== this.store.length)) throw new TypeError('Values must be aligned Float64Array');
     const data = options.indicator ? this.indicators.get(options.indicator) : null;if(options.source!==undefined&&!['time','open','high','low','close','volume'].includes(options.source))throw new TypeError('Series source');if(data&&options.output!==undefined&&!Object.hasOwn(data.outputs,options.output))throw new Error('Missing indicator output');const output=options.output??(data?Object.keys(data.outputs)[0]:undefined),offset=options.offset??(data&&Object.hasOwn(data.plotOffsets,output)?data.plotOffsets[output]:0);
     if (!Number.isInteger(offset) || Math.abs(offset) > 10000 || ['candles','ohlc'].includes(options.type) && offset !== 0) throw new RangeError('Series plot offset');
-    return {color:'#7898ff',width:['candles','ohlc'].includes(options.type)?1:1.5,...options,offset,dirtyFrom:0};
+    // inspect()와 작업공간에 같은 순서가 나오도록 허용 목록(SERIES_KEYS) 순서로 담는다. 런타임 캐시 dirtyFrom은 뒤에 붙는다
+    return orderedRecord({color:'#7898ff',width:['candles','ohlc'].includes(options.type)?1:1.5,...options,offset,dirtyFrom:0},SERIES_KEYS);
   }
   addSeries(options,{ownerGuard=null}={}){if(this.series.length>=RESOURCE_LIMITS.maxSeries)throw new RangeError('Series limit');if(this.series.some(s=>s.id===options?.id))throw new Error('Duplicate series');const validated=this.normalizedSeries(options);runOwnerGuard(ownerGuard);this.series.push(validated);return validated.id;}
   removeSeries(id) {this.series = this.series.filter(s => s.id !== id);}
@@ -2013,7 +2113,8 @@ class InteractionController {
   layout() {interactionActive(this);const {width, height} = this.size();interactionActive(this);const layout=createLayout(this.model, width, height);interactionActive(this);return layout;}
   drawingProjection(layout,panel,axisId){interactionActive(this);const axis=layout.axis(panel,axisId);return axis?[axis.left,axis.right,axis.top,axis.bottom,axis.min,axis.max,axis.scale,axis.inverted,axis.base,this.model.view.from,this.model.view.to,this.model.store.geometryIdentity,this.model.store.timeVersion]:null;}
   setTool(tool,{notify=true}={}) {interactionActive(this);if (tool !== 'select' && !DRAWING_TYPES.includes(tool)) throw new Error('Unknown drawing tool'); this.cancel({notify:false}); this.tool = tool; if(notify)this.invalidate();}
-  setDrawingTarget(target,{notify=true}={}){interactionActive(this);if(target!==null){optionRecord(target,['panel','axisId','seriesId'],'Drawing target');const next={panel:'price',...target};identifier(next.panel,'Drawing target panel');if(next.seriesId!=null&&next.axisId===undefined){const s=this.model.series.find(s=>s.id===next.seriesId);if(s)next.axisId=s.axisId??null;}this.model.validateDrawingBinding(next);this.cancel({notify:false});this.drawingTarget=next;}else{this.cancel({notify:false});this.drawingTarget=null;}if(notify)this.invalidate();}
+  // 대상 레코드는 검증기 허용 목록 순서(panel, axisId, seriesId)로 담는다. inspect()가 입력 키 순서와 무관해진다
+  setDrawingTarget(target,{notify=true}={}){interactionActive(this);if(target!==null){optionRecord(target,['panel','axisId','seriesId'],'Drawing target');const next={panel:'price',...target};identifier(next.panel,'Drawing target panel');if(next.seriesId!=null&&next.axisId===undefined){const s=this.model.series.find(s=>s.id===next.seriesId);if(s)next.axisId=s.axisId??null;}this.model.validateDrawingBinding(next);this.cancel({notify:false});this.drawingTarget=orderedRecord(next,['panel','axisId','seriesId']);}else{this.cancel({notify:false});this.drawingTarget=null;}if(notify)this.invalidate();}
   down(id, x, y, hitTolerance = 8) {
     interactionActive(this);
     if(!Number.isFinite(hitTolerance)||hitTolerance<1||hitTolerance>32)throw new RangeError('Pointer hit tolerance must be 1..32 logical pixels');
@@ -2751,7 +2852,8 @@ function drawingStylePatch(value){
  if(!value||![Object.prototype,null].includes(Object.getPrototypeOf(value)))throw new TypeError('Drawing style plain record required');
  const patch=Object.create(null),keys=Reflect.ownKeys(value);
  if(!keys.length)throw new TypeError('Drawing style nonempty defined patch required');
- for(const key of keys){if(!['color','fill','width','font'].includes(key))throw new TypeError('Drawing style fields');const d=Object.getOwnPropertyDescriptor(value,key);if(!d?.enumerable||!Object.hasOwn(d,'value'))throw new TypeError('Drawing style own data fields required');if(d.value===undefined||d.value===null)throw new TypeError('Drawing style nonempty defined patch required');patch[key]=d.value;}
+ // 허용 키를 먼저, 모르는 키는 UTF-16 순으로 본다. 빈 값과 모르는 필드가 섞여도 보고할 오류가 입력 순서와 상관없이 하나로 정해진다
+ for(const key of canonicalKeys(value,['color','fill','width','font'],keys)){if(!['color','fill','width','font'].includes(key))throw new TypeError('Drawing style fields');const d=Object.getOwnPropertyDescriptor(value,key);if(!d?.enumerable||!Object.hasOwn(d,'value'))throw new TypeError('Drawing style own data fields required');if(d.value===undefined||d.value===null)throw new TypeError('Drawing style nonempty defined patch required');patch[key]=d.value;}
  const normalized=portableStyle(patch,['color','fill']);if(Object.hasOwn(normalized,'width')&&(!Number.isFinite(normalized.width)||normalized.width<.1||normalized.width>50))throw new RangeError('Stroke width');
  return normalized;
 }
@@ -2818,12 +2920,13 @@ function drawingGroupEdit(api,ids,options,remove,styleEdit=false,visibilityEdit=
   if(!selected.has(before.id))continue;
   if(before.locked&&!visibilityEdit&&!duplicateEdit)throw new Error('Drawing is locked');
   if(remove){next[i]=null;changed++;continue;}
-  if(visibilityEdit){if((before.visible!==false)!==options){const candidate={...before,visible:options,points:translationSlot(items[i],'points')};if(before.style!==undefined)candidate.style=translationSlot(items[i],'style');validateDrawing(candidate);next[i]=translationFrozen(candidate);changed++;if(!options&&s.selected===before.id)clearSelected=true;}continue;}
-  if(styleEdit){const previous=before.style??{},different=Object.keys(patch).some(key=>!Object.hasOwn(previous,key)||!Object.is(previous[key],patch[key]));if(different){const candidate={...before,points:translationSlot(items[i],'points'),style:{...previous,...patch}};validateDrawing(candidate);next[i]=translationFrozen(candidate);changed++;}continue;}
+  // 새로 넣는 visible·style·locked도 정규 자리에 오도록 최상위와 스타일 키를 정렬한다(앵커·스타일 객체는 그대로 공유)
+  if(visibilityEdit){if((before.visible!==false)!==options){const candidate={...before,visible:options,points:translationSlot(items[i],'points')};if(before.style!==undefined)candidate.style=translationSlot(items[i],'style');validateDrawing(candidate);next[i]=translationFrozen(orderedRecord(candidate,DRAWING_RECORD_KEYS));changed++;if(!options&&s.selected===before.id)clearSelected=true;}continue;}
+  if(styleEdit){const previous=before.style??{},different=Object.keys(patch).some(key=>!Object.hasOwn(previous,key)||!Object.is(previous[key],patch[key]));if(different){const candidate={...before,points:translationSlot(items[i],'points'),style:{...previous,...patch}};validateDrawing(candidate);candidate.style=orderedRecord(candidate.style,DRAWING_STYLE_KEYS);next[i]=translationFrozen(orderedRecord(candidate,DRAWING_RECORD_KEYS));changed++;}continue;}
   if(metadata){const b=[before.panel,before.axisId??null,before.seriesId??null];if(binding&&b.some((v,j)=>v!==binding[j]))throw new Error('Drawing group edit requires identical panel/axis/series binding');binding=b;
   if(!panels.some(p=>p.id===b[0])||b[1]!==null&&!axes.some(p=>p.id===b[1]&&p.panel===b[0])||b[2]!==null&&!series.some(p=>p.id===b[2]&&p.panel===b[0]&&(p.axisId??null)===b[1]))throw new Error('Missing or mismatched drawing binding');}
   let moved=false;const anchors=before.points.map(p=>{const time=o.deltaTimeMs===0?p.time:p.time+o.deltaTimeMs,price=o.deltaPrice===0?p.price:p.price+o.deltaPrice;if(time!==p.time||price!==p.price)moved=true;return {time,price};});
-  const candidate={...before,points:duplicateEdit&&!metadata?translationSlot(items[i],'points'):anchors,...(duplicateEdit?{locked:false}:{})};if(before.style!==undefined)candidate.style=translationSlot(items[i],'style');validateDrawing(candidate);if(duplicateEdit){pendingCopies.push(candidate);changed++;}else if(moved){next[i]=translationFrozen(candidate);changed++;}
+  const candidate={...before,points:duplicateEdit&&!metadata?translationSlot(items[i],'points'):anchors,...(duplicateEdit?{locked:false}:{})};if(before.style!==undefined)candidate.style=translationSlot(items[i],'style');validateDrawing(candidate);const ordered=orderedRecord(candidate,DRAWING_RECORD_KEYS);if(duplicateEdit){pendingCopies.push(ordered);changed++;}else if(moved){next[i]=translationFrozen(ordered);changed++;}
  }
  if(keys.some(id=>!seen.has(id)))throw new Error('Missing drawing');if(items.length>s.maxDrawings||points>s.maxPoints||text>1000000)throw new RangeError('Drawing group edit resource limit');
  if(duplicateEdit){
@@ -3013,7 +3116,8 @@ class ChartAPI {
    const presentation=this.seriesOptions(patch);if(presentation.label!==undefined)boundedText(presentation.label,256,'Series label');guard();
    if(indicator&&!entry)throw new Error(`Missing indicator: ${indicator}`);
    // The binding was already validated. Preserve its caches; only presentation changes.
-   const next={...current,...presentation};for(const key of Object.keys(next))if(!SERIES_KEYS.includes(key)&&!['rangeIndex','revision','dirtyFrom'].includes(key))delete next[key];guard();
+   // 새로 생기는 표시 키(label 등)도 SERIES_KEYS 자리에 오도록 정렬한다. 캐시 키는 뒤에 붙는다
+   const next=orderedRecord({...current,...presentation},SERIES_KEYS);for(const key of Object.keys(next))if(!SERIES_KEYS.includes(key)&&!['rangeIndex','revision','dirtyFrom'].includes(key))delete next[key];guard();
    series[index]=next;return this.changed();
   }
   const next={...current,...this.seriesOptions(patch)};
@@ -3174,9 +3278,10 @@ function replayList(value,max){if(!Array.isArray(value)||Object.getPrototypeOf(v
 function replaySource(bars){const refs=replayList(bars,replayLimit),columns=Object.fromEntries(FIELDS.map(k=>[k,new Float64Array(refs.length)]));let previous=-Infinity;for(let i=0;i<refs.length;i++){const bar=replayRecord(refs[i],FIELDS);validateBar(bar,previous);previous=bar.time;for(const key of FIELDS)columns[key][i]=bar[key];}
  // Reject ordinary row/array changes during capture; no getter is ever invoked.
  if(bars.length!==refs.length)throw new Error('Replay source changed during capture');for(let i=0;i<refs.length;i++){if(Object.getOwnPropertyDescriptor(bars,String(i))?.value!==refs[i])throw new Error('Replay source changed during capture');const bar=replayRecord(refs[i],FIELDS);if(FIELDS.some(key=>!Object.is(bar[key],columns[key][i])))throw new Error('Replay source changed during capture');}return columns;}
-function replayOptions(value,total){const o=replayRecord(value,['initialCount','visibleBars','priceScale','inverted','volume','theme','indicators']),initialCount=replayInteger(o.initialCount??0,0,total,'initial count'),visibleBars=replayInteger(o.visibleBars??200,1,2048,'visible bars'),priceScale=o.priceScale??'linear',inverted=o.inverted??false,volume=o.volume??false;if(!['linear','log'].includes(priceScale)||typeof inverted!=='boolean'||typeof volume!=='boolean')throw new TypeError('Replay price scale/inverted/volume');for(const k of Object.keys(o))if(o[k]===undefined||o[k]===null)throw new TypeError('Replay options must be defined');const theme=portableStyle(replayRecord(o.theme??{},THEME_KEYS),['background','grid','text','up','down','crosshair']);const ids=new Set(),indicators=replayList(o.indicators??[],4).map(input=>{const s=replayRecord(input,['id','kind','period','color']);identifier(s.id,'Replay study id');if(ids.has(s.id)||!replayFactories.has(s.kind))throw new TypeError('Replay unique study id and sma/ema/rsi kind required');ids.add(s.id);replayInteger(s.period,1,256,'study period');if(Object.hasOwn(s,'color')&&typeof s.color!=='string')throw new TypeError('Replay study color');return Object.freeze({...s,...portableStyle({color:s.color??'#7898ff'},['color'])});});return Object.freeze({initialCount,visibleBars,priceScale,inverted,volume,theme:Object.freeze(theme),indicators:Object.freeze(indicators)});}
+// 세션 문서에 호스트 객체 키 순서가 남지 않도록 테마·지표·북마크는 허용 목록 순서로 담는다
+function replayOptions(value,total){const o=replayRecord(value,['initialCount','visibleBars','priceScale','inverted','volume','theme','indicators']),initialCount=replayInteger(o.initialCount??0,0,total,'initial count'),visibleBars=replayInteger(o.visibleBars??200,1,2048,'visible bars'),priceScale=o.priceScale??'linear',inverted=o.inverted??false,volume=o.volume??false;if(!['linear','log'].includes(priceScale)||typeof inverted!=='boolean'||typeof volume!=='boolean')throw new TypeError('Replay price scale/inverted/volume');for(const k of Object.keys(o))if(o[k]===undefined||o[k]===null)throw new TypeError('Replay options must be defined');const theme=orderedRecord(portableStyle(replayRecord(o.theme??{},THEME_KEYS),['background','grid','text','up','down','crosshair']),THEME_KEYS);const ids=new Set(),indicators=replayList(o.indicators??[],4).map(input=>{const s=replayRecord(input,['id','kind','period','color']);identifier(s.id,'Replay study id');if(ids.has(s.id)||!replayFactories.has(s.kind))throw new TypeError('Replay unique study id and sma/ema/rsi kind required');ids.add(s.id);replayInteger(s.period,1,256,'study period');if(Object.hasOwn(s,'color')&&typeof s.color!=='string')throw new TypeError('Replay study color');return Object.freeze(orderedRecord({...s,...portableStyle({color:s.color??'#7898ff'},['color'])},['id','kind','period','color']));});return Object.freeze({initialCount,visibleBars,priceScale,inverted,volume,theme:Object.freeze(theme),indicators:Object.freeze(indicators)});}
 function replayComplete(value,keys){const r=replayRecord(value,keys);if(keys.some(k=>!Object.hasOwn(r,k)))throw new TypeError('Replay session missing field');return r;}
-function replayBookmark(value,total){const b=replayComplete(value,['id','label','count']);identifier(b.id,'Replay bookmark id');boundedText(b.label,128,'Replay bookmark label');replayInteger(b.count,0,total,'bookmark count');return Object.freeze(b);}
+function replayBookmark(value,total){const b=replayComplete(value,['id','label','count']);identifier(b.id,'Replay bookmark id');boundedText(b.label,128,'Replay bookmark label');replayInteger(b.count,0,total,'bookmark count');return Object.freeze(orderedRecord(b,['id','label','count']));}
 function replaySession(text){if(typeof text!=='string'||text.length>262144)throw new RangeError('Replay session text limit');const d=replayComplete(workspaceSnapshot(safeCheckpointParse(text)),['schema','version','dataset','total','options','count','bookmarks']);if(d.schema!=='barochart.replay-session'||d.version!==1)throw new TypeError('Replay session schema/version');d.dataset=workspaceBinding(d.dataset);replayInteger(d.total,0,replayLimit,'source total');replayInteger(d.count,0,d.total,'session count');replayComplete(d.options,['initialCount','visibleBars','priceScale','inverted','volume','theme','indicators']);d.options=replayOptions(d.options,d.total);const ids=new Set();d.bookmarks=replayList(d.bookmarks,128).map(row=>{const b=replayBookmark(row,d.total);if(ids.has(b.id))throw new TypeError('Duplicate replay bookmark');ids.add(b.id);return b;});return d;}
 // Frames deliberately omit layout closures and include detached finite data only.
 function replayData(value,depth=0){if(depth>12)throw new RangeError('Replay frame depth');if(value===null||typeof value==='string'||typeof value==='boolean')return value;if(typeof value==='number'){if(!Number.isFinite(value))throw new RangeError('Replay frame finite values required');return value;}if(Array.isArray(value))return value.map(v=>replayData(v,depth+1));if(value&&Object.getPrototypeOf(value)===Object.prototype){const out={};for(const key of Reflect.ownKeys(value)){const d=Object.getOwnPropertyDescriptor(value,key);if(typeof key!=='string'||!d?.enumerable||!Object.hasOwn(d,'value'))throw new TypeError('Replay frame data required');if(d.value!==undefined)out[key]=replayData(d.value,depth+1);}return out;}throw new TypeError('Replay frame data required');}
@@ -3257,7 +3362,8 @@ function workspaceWalk(value,copy){let nodes=0,chars=0,bytes=0;const ancestors=n
 // Only parser-owned plain data may use the no-copy walk; external snapshots
 // always detach. Both modes perform the identical complete bounded validation.
 function workspaceSnapshot(value){return workspaceWalk(value,true);}
-function workspaceBinding(value){const b=workspaceSnapshot(value);workspaceRecord(b,workspaceBindingKeys);for(const k of workspaceBindingKeys)boundedText(b[k],128,'Workspace dataset '+k);if(!['raw','split','total-return'].includes(b.adjustment))throw new TypeError('Workspace adjustment');return b;}
+// 사전 점검 영수증과 리플레이 세션에도 호출자 키 순서가 남지 않도록 정해진 키 순서로 돌려준다
+function workspaceBinding(value){const b=workspaceSnapshot(value);workspaceRecord(b,workspaceBindingKeys);for(const k of workspaceBindingKeys)boundedText(b[k],128,'Workspace dataset '+k);if(!['raw','split','total-return'].includes(b.adjustment))throw new TypeError('Workspace adjustment');return orderedRecord(b,workspaceBindingKeys);}
 function workspaceBindingSame(a,b){return workspaceBindingKeys.every(k=>a[k]===b[k]);}
 function validateWorkspaceDocument(doc){
  workspaceRecord(doc,['schema','version','dataset','source','chart','indicators','series','drawings']);if(doc.schema!=='aster.workspace'||doc.version!==1)throw new TypeError('Workspace schema/version');workspaceBinding(doc.dataset);
@@ -3287,11 +3393,12 @@ function saveWorkspace(chart,datasetBinding){
  validateWorkspaceDocument(doc);const text=safeCheckpointStringify(doc);readWorkspaceDocument(text);if(model.disposed||chart.model!==model||model.store!==store||store.version!==version||store.columns!==columns||store.length!==length||model.drawings.transaction||controller&&(controller.gesture||controller.pointers?.size))throw new Error('Workspace owner changed during save');return text;
 }
 function installWorkspaceConfiguration(model,doc){
- const c=doc.chart,api=new ChartAPI(model);if(c.symbol!==null){if(c.formatters==='symbol')api.setSymbol(c.symbol);else model.symbol=Object.freeze({...c.symbol});}model.precision=c.precision;
+ // 문서 키 순서와 상관없이 새 차트와 같은 정규 순서로 심볼·드로잉·view를 담는다
+ const c=doc.chart,api=new ChartAPI(model);if(c.symbol!==null){if(c.formatters==='symbol')api.setSymbol(c.symbol);else model.symbol=Object.freeze(orderedRecord(c.symbol,SYMBOL_KEYS));}model.precision=c.precision;
  for(const s of doc.series)model.addSeries({...s});
  // Metadata validation already checked every anchor. Preserve exact finite
  // coordinates rather than nearest-bar snapping or another JSON normalization.
- model.drawings.items=doc.drawings.drawings.map(d=>Object.freeze({...d,points:Object.freeze(d.points.map(p=>Object.freeze({...p}))),...(d.style?{style:Object.freeze({...d.style})}:{})}));model.view={...c.view};model.follow=c.follow;return model;
+ model.drawings.items=doc.drawings.drawings.map(d=>{const next=canonicalDrawing(d);for(const p of next.points)Object.freeze(p);Object.freeze(next.points);if(next.style)Object.freeze(next.style);return Object.freeze(next);});model.view=orderedRecord(c.view,['from','to']);model.follow=c.follow;return model;
 }
 
 // Native read-only metadata preflight. This is not calculation or restoration.
@@ -3460,7 +3567,8 @@ class NativeWorkspacePrepared extends PreparedData {
  initialize(){
   this.assertActive();if(this.length&&(this.columns.time[0]!==this.workspace.source.firstTime||this.columns.time[this.length-1]!==this.workspace.source.lastTime))throw new TypeError('Native workspace target source extent');
   const m=this.metadata;this.model=new ChartModel({store:this.store,panels:m.panels,axes:m.axes,theme:m.theme,precision:m.precision,axisWidth:m.axisWidth,visibleBars:this.input.visibleBars});this.model.indicators.maxOutputBytes=m.maxOutputBytes;this.model.indicators.entries=new NativeCheckpointEntries();this.workspaceEntryMap=this.model.indicators.entries;this.workspaceColumnRefs=FIELDS.map(k=>this.columns[k]);
-  for(const study of this.workspace.indicators){const factory=resolveIndicatorFactory(study.name);requirePortableFactory(study.name,factory);const params={...study.params},def=factory(params),layout=workspaceSnapshot({outputs:def.outputs,plotOffsets:def.plotOffsets??{}});this.assertActive();if(!nativeTargetEqual(params,study.params)||!nativeTargetEqual(layout,{outputs:study.outputs,plotOffsets:study.plotOffsets}))throw new TypeError('Native workspace target factory binding');const checkpoints=new NativeCheckpointMap(study.name,study.params,{budget:this.checkpointBudget}),entry={def,name:study.name,params:{...study.params},dirty:0,dirtyTo:this.length,invalidated:true,length:0,arrays:[],checkpoints,revision:0};this.model.indicators.entries.set(study.id,entry);this.workspaceEntries.push([study.id,entry,factory]);}
+  // 문서 키 순서와 상관없이 새 차트와 같은 선언 순서 params를 엔트리에 담는다
+  for(const study of this.workspace.indicators){const factory=resolveIndicatorFactory(study.name);requirePortableFactory(study.name,factory);const params={...study.params},def=factory(params),layout=workspaceSnapshot({outputs:def.outputs,plotOffsets:def.plotOffsets??{}});this.assertActive();if(!nativeTargetEqual(params,study.params)||!nativeTargetEqual(layout,{outputs:study.outputs,plotOffsets:study.plotOffsets}))throw new TypeError('Native workspace target factory binding');const checkpoints=new NativeCheckpointMap(study.name,study.params,{budget:this.checkpointBudget}),entry={def,name:study.name,params:orderedIndicatorParams(study.name,factory,study.params),dirty:0,dirtyTo:this.length,invalidated:true,length:0,arrays:[],checkpoints,revision:0};this.model.indicators.entries.set(study.id,entry);this.workspaceEntries.push([study.id,entry,factory]);}
   this.guardTarget();
  }
  guardTarget(metadata=true){this.assertActive();if(!this.model)return;if(this.model.disposed||this.model.store!==this.store||this.store.columns!==this.columns||this.store.version!==this.metadata.version||this.store.timeVersion!==this.metadata.timeVersion||this.store.length!==this.length||this.store.capacity!==this.capacity||this.model.indicators.entries!==this.workspaceEntryMap||this.model.indicators.entries.size!==this.workspaceEntries.length)throw new Error('Native workspace target changed');for(let i=0;i<this.workspaceEntries.length;i++){const [id,entry,factory]=this.workspaceEntries[i],study=this.workspace.indicators[i];if(this.model.indicators.entries.get(id)!==entry||this.model.indicators.registry.get(study.name)!==factory||!nativeTargetEqual(entry.params,study.params))throw new Error('Native workspace target entry changed');if(metadata){const layout=workspaceSnapshot({outputs:entry.def.outputs,plotOffsets:entry.def.plotOffsets??{}});if(!nativeTargetEqual(layout,{outputs:study.outputs,plotOffsets:study.plotOffsets}))throw new Error('Native workspace target output binding');}}this.assertActive();if(this.model.disposed||this.model.store!==this.store||this.store.version!==this.metadata.version||this.store.timeVersion!==this.metadata.timeVersion||this.store.columns!==this.columns||this.store.length!==this.length||this.store.capacity!==this.capacity||this.model.indicators.entries!==this.workspaceEntryMap||this.workspaceEntries.some(([id,e])=>this.workspaceEntryMap.get(id)!==e)||FIELDS.some((k,i)=>this.columns[k]!==this.workspaceColumnRefs[i]))throw new Error('Native workspace target changed');}
@@ -3625,7 +3733,8 @@ class NativeParamsCapture {
    const old=this.previous.def,oldLayout={outputs:[...old.outputs],plotOffsets:{...old.plotOffsets}};this.check(revision);this.noop=npParamsSame(this.previous.params,this.params);if(this.noop){this.layout=oldLayout;this.phase='noop';return;}
    const name=this.previous.name,factory=this.engine.registry.get(name);requirePortableFactory(name,factory);if(resolveIndicatorFactory(name)!==factory)throw new TypeError('Native params linked factory');const probe=new IndicatorEngine({length:0,capacity:0,columns:{},_subscribeInternal:()=>()=>{}});let candidate;try{probe.registry.set(name,factory);probe.add(id,name,{...this.params});candidate=probe.entries.get(id);if(!npParamsSame(candidate.params,this.params))throw new TypeError('Native params factory changed params');this.def=candidate.def;}finally{probe.dispose();}
    this.layout={outputs:[...this.def.outputs],plotOffsets:{...this.def.plotOffsets}};const offset=(a,k)=>Object.hasOwn(a,k)?a[k]:0;if(oldLayout.outputs.length!==this.layout.outputs.length||oldLayout.outputs.some((k,i)=>k!==this.layout.outputs[i]||!Object.is(offset(oldLayout.plotOffsets,k),offset(this.layout.plotOffsets,k))))throw new TypeError('Native params output schema/offset change');this.create=this.def.create;this.check(revision);
-   const s=m.store;npInteger(s.length,4194304,'source length');if(!Number.isSafeInteger(s.capacity)||s.capacity<16||s.capacity<s.length||s.capacity>4194304||(s.capacity&(s.capacity-1)))throw new RangeError('Native params source capacity');const module=indicatorModule(name);this.binding={schema:'aster.native-params-target',version:1,registration,id,name,params:{...this.params},...(module?{module}:{}),length:s.length,capacity:s.capacity,...this.layout,maxBytes};this.metadataJSON=safeCheckpointStringify(this.binding);this.check(revision);
+   // 대상 런타임에 넘기는 params는 후보 엔진이 선언 순서로 담은 사본을 쓴다. 호스트 객체 키 순서가 게시될 엔트리에 남지 않는다
+   const s=m.store;npInteger(s.length,4194304,'source length');if(!Number.isSafeInteger(s.capacity)||s.capacity<16||s.capacity<s.length||s.capacity>4194304||(s.capacity&(s.capacity-1)))throw new RangeError('Native params source capacity');const module=indicatorModule(name);this.binding={schema:'aster.native-params-target',version:1,registration,id,name,params:{...candidate.params},...(module?{module}:{}),length:s.length,capacity:s.capacity,...this.layout,maxBytes};this.metadataJSON=safeCheckpointStringify(this.binding);this.check(revision);
    const outputs=[...this.entries].reduce((sum,[key,e])=>sum+(key===id?this.layout.outputs.length:e.def.outputs.length),0);if(outputs*s.capacity*8>this.engine.maxOutputBytes)throw new RangeError('Native params total output byte limit');
    const seen=new Set(),put=a=>{if(!a)return;const buffer=npBuffer.call(a),bytes=npBytes.call(buffer);if(!seen.has(buffer)){seen.add(buffer);this.sourceBytes+=bytes;}};for(const k of FIELDS){const a=npSlot(s.columns,k);if(npTag.call(a)!=='Float64Array'||npLength.call(a)<s.length)throw new TypeError('Native params source vector');put(a);}const tree=t=>{if(t)for(const k of ['min','max','sum'])put(t[k]);};tree(s.index);
    for(const [key,e]of this.entries){for(const a of e.arrays)put(a);const cp=e.checkpoints;if(cp instanceof NativeCheckpointMap){const bytes=npEncoded.call(cp);this.oldCheckpointBytes+=bytes+npNativeSize.call(cp)*128;if(key!==id)this.otherCheckpointBytes+=bytes;}else{npMapSize.call(cp);this.records.push({map:cp,target:key===id});}}

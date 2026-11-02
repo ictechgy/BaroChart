@@ -1,5 +1,5 @@
 import {FIELDS, validateBar} from './data.mjs';
-import {RESOURCE_LIMITS} from './contracts.mjs';
+import {RESOURCE_LIMITS,SYMBOL_KEYS,orderedRecord} from './contracts.mjs';
 
 // Shared per module/runtime, independent of chart lifetime. Keep reuse bounded
 // and fold ASCII identifier case without depending on resolvedOptions (QuickJS's
@@ -28,7 +28,8 @@ export function zonedEpoch(date, clock, timezone, ambiguity = 'earlier') {
 }
 export function validateSymbol(symbol) {
   if (!symbol || ['id', 'exchange', 'timezone', 'currency', 'volumeUnit'].some(k => typeof symbol[k] !== 'string' || !symbol[k]) || !Number.isInteger(symbol.priceDecimals) || symbol.priceDecimals < 0 || symbol.priceDecimals > 18 || !Number.isFinite(symbol.tickSize) || symbol.tickSize <= 0 || !['raw', 'split', 'total-return'].includes(symbol.adjustment)) throw new TypeError('Invalid symbol metadata');
-  zonedParts(0, symbol.timezone); return Object.freeze({...symbol});
+  // 호스트 객체 키 순서(Swift Dictionary 등)가 inspect()와 작업공간에 남지 않도록 검증기 허용 목록 순서로 담는다
+  zonedParts(0, symbol.timezone); return Object.freeze(orderedRecord(symbol,SYMBOL_KEYS));
 }
 export function formatPrice(value, symbol) {return value.toFixed(symbol.priceDecimals);}
 function boundedDenseArray(value,max,label,exactLength){

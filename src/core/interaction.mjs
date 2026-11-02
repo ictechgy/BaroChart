@@ -2,7 +2,7 @@ import {isPositionDrawing,positionPointsValid,positionHandlePoints,initialPositi
 import {nearestVisibleOHLC} from './ohlc-snap.mjs';
 import {crosshairSnapOptions,capturePointerCrosshair,updatePointerCrosshair,releasePointerCrosshair} from './crosshair-snap.mjs';
 import {createLayout} from './model.mjs';
-import {optionRecord,identifier} from './contracts.mjs';
+import {optionRecord,identifier,orderedRecord} from './contracts.mjs';
 import {drawingHitTest, DRAWING_TYPES, drawingPointCount} from './drawings.mjs';
 
 const interactionOwners=new WeakMap();
@@ -52,7 +52,8 @@ export class InteractionController {
   layout() {interactionActive(this);const {width, height} = this.size();interactionActive(this);const layout=createLayout(this.model, width, height);interactionActive(this);return layout;}
   drawingProjection(layout,panel,axisId){interactionActive(this);const axis=layout.axis(panel,axisId);return axis?[axis.left,axis.right,axis.top,axis.bottom,axis.min,axis.max,axis.scale,axis.inverted,axis.base,this.model.view.from,this.model.view.to,this.model.store.geometryIdentity,this.model.store.timeVersion]:null;}
   setTool(tool,{notify=true}={}) {interactionActive(this);if (tool !== 'select' && !DRAWING_TYPES.includes(tool)) throw new Error('Unknown drawing tool'); this.cancel({notify:false}); this.tool = tool; if(notify)this.invalidate();}
-  setDrawingTarget(target,{notify=true}={}){interactionActive(this);if(target!==null){optionRecord(target,['panel','axisId','seriesId'],'Drawing target');const next={panel:'price',...target};identifier(next.panel,'Drawing target panel');if(next.seriesId!=null&&next.axisId===undefined){const s=this.model.series.find(s=>s.id===next.seriesId);if(s)next.axisId=s.axisId??null;}this.model.validateDrawingBinding(next);this.cancel({notify:false});this.drawingTarget=next;}else{this.cancel({notify:false});this.drawingTarget=null;}if(notify)this.invalidate();}
+  // 대상 레코드는 검증기 허용 목록 순서(panel, axisId, seriesId)로 담는다. inspect()가 입력 키 순서와 무관해진다
+  setDrawingTarget(target,{notify=true}={}){interactionActive(this);if(target!==null){optionRecord(target,['panel','axisId','seriesId'],'Drawing target');const next={panel:'price',...target};identifier(next.panel,'Drawing target panel');if(next.seriesId!=null&&next.axisId===undefined){const s=this.model.series.find(s=>s.id===next.seriesId);if(s)next.axisId=s.axisId??null;}this.model.validateDrawingBinding(next);this.cancel({notify:false});this.drawingTarget=orderedRecord(next,['panel','axisId','seriesId']);}else{this.cancel({notify:false});this.drawingTarget=null;}if(notify)this.invalidate();}
   down(id, x, y, hitTolerance = 8) {
     interactionActive(this);
     if(!Number.isFinite(hitTolerance)||hitTolerance<1||hitTolerance>32)throw new RangeError('Pointer hit tolerance must be 1..32 logical pixels');
