@@ -22,6 +22,16 @@ pub mod indicator_params;
 pub mod indicator_registry;
 /// 지표 정의와 고정 출력 행 타입을 다룬다.
 pub mod indicator_types;
+/// 평균 계열 지표의 계산 상태다.
+pub mod indicators_average;
+/// 모멘텀과 범위 계열 지표의 계산 상태다.
+pub mod indicators_momentum;
+/// 거래량 계열 지표의 계산 상태다.
+pub mod indicators_volume;
+/// 시장 시각과 세션 달력을 다룬다.
+pub mod markets;
+/// 세션 VWAP와 Pivots 계산을 다룬다.
+pub mod session_studies;
 
 use barochart_js::error::JsError;
 use barochart_js::string::JsString;
