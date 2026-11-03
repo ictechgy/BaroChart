@@ -7,7 +7,7 @@
   "v8": "12.4.254.21-node.33",
   "icu": "77.1",
   "tz": "2025b",
-  "scope": "A0 scaffold capability census; implemented nativeInit is count-only until data/model integration",
+  "scope": "M2a: nativeInit owns seeded data and preserves original count including -0; full model/options/indicators remain M3/M4",
   "functions": [
     {
       "name": "nativeAsyncBegin",

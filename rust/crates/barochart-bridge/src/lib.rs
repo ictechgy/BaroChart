@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 use barochart_core::Engine;
+use barochart_core::data::{ColumnInputs, NumericColumn, seeded_columns};
 use barochart_js::error::JsError;
 use barochart_js::json::{JsObject, JsValue};
 use barochart_js::string::JsString;
@@ -104,8 +105,8 @@ fn params_abort(_: &mut Engine, args: &[JsValue]) -> Result<JsValue, JsError> {
     Ok(JsValue::Null)
 }
 
-// M1b의 count 왕복 프로토타입이다. 초기 옵션/개수 오류 순서는 JS 진입점과 같게 두되 아직 모델은 만들지 않는다.
-fn native_init(_: &mut Engine, args: &[JsValue]) -> Result<JsValue, JsError> {
+// 데이터 후보만 이 단계에서 만든다. 전체 options/장면/지표 모델은 후속 단계에서 같은 후보에 연결한다.
+fn native_init(engine: &mut Engine, args: &[JsValue]) -> Result<JsValue, JsError> {
     if let Some(options) = args.get(1)
         && !matches!(
             options,
@@ -117,6 +118,7 @@ fn native_init(_: &mut Engine, args: &[JsValue]) -> Result<JsValue, JsError> {
             JsString::from_str("Chart options object"),
         ));
     }
+    let mut data = engine.stage_empty_data()?;
     let count = match args.first() {
         None | Some(JsValue::Undefined) => 100_000.0,
         Some(JsValue::Number(value)) => *value,
@@ -125,6 +127,19 @@ fn native_init(_: &mut Engine, args: &[JsValue]) -> Result<JsValue, JsError> {
     if !count.is_finite() || !(0.0..=4_194_304.0).contains(&count) || count.fract() != 0.0 {
         return Err(count_error());
     }
+    let columns = seeded_columns(count as usize, 42)?;
+    data.store_mut().set_columns(
+        &ColumnInputs {
+            time: NumericColumn::F64(&columns.time),
+            open: NumericColumn::F64(&columns.open),
+            high: NumericColumn::F64(&columns.high),
+            low: NumericColumn::F64(&columns.low),
+            close: NumericColumn::F64(&columns.close),
+            volume: NumericColumn::F64(&columns.volume),
+        },
+        Some(count as usize),
+    )?;
+    engine.install_data_state(data);
     Ok(JsValue::Number(count))
 }
 

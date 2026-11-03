@@ -91,7 +91,7 @@ fn store_capacity_versions_bytes_and_serial_are_owner_scoped() {
     let input = (0..17)
         .map(|index| bar(T + index as f64 * 60_000.0, index as f64, 1.0))
         .collect();
-    let mut first = ModelDataState::new(StoreOptions::default(), input).unwrap();
+    let first = ModelDataState::new(StoreOptions::default(), input).unwrap();
     assert_eq!(first.store().serial(), 1.0);
     assert_eq!(first.store().length(), 17);
     assert_eq!(first.store().capacity(), 32);
@@ -100,8 +100,6 @@ fn store_capacity_versions_bytes_and_serial_are_owner_scoped() {
     assert_eq!(first.store().bytes(), 96 * 32);
     assert_eq!(first.store().columns().time.len(), 32);
     assert_eq!(first.store().index().size(), 32);
-    assert_eq!(first.take_serial(), 2.0);
-    assert_eq!(first.take_serial(), 3.0);
 
     let second = ModelDataState::new(StoreOptions::default(), Vec::new()).unwrap();
     assert_eq!(

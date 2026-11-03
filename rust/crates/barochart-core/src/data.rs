@@ -1118,18 +1118,25 @@ impl<T> Committed<T> {
     }
 }
 
-/// 엔진별 store serial과 현재 store를 소유한다.
+/// 현재 모델의 store를 소유한다. 네이티브 런타임의 serial 흐름은 Engine이 보존한다.
 pub struct ModelDataState {
     store: BarStore,
-    next_serial: f64,
 }
 
 impl ModelDataState {
     /// 첫 store를 serial 1로 만든다.
     pub fn new(options: StoreOptions, bars: Vec<Bar>) -> Result<Self, JsError> {
+        Self::with_serial(1.0, options, bars)
+    }
+
+    /// 엔진이 소비한 store identity로 후보 상태를 만든다.
+    pub(crate) fn with_serial(
+        serial: f64,
+        options: StoreOptions,
+        bars: Vec<Bar>,
+    ) -> Result<Self, JsError> {
         Ok(Self {
-            store: BarStore::new(1.0, options, bars)?,
-            next_serial: 2.0,
+            store: BarStore::new(serial, options, bars)?,
         })
     }
 
@@ -1141,13 +1148,6 @@ impl ModelDataState {
     /// store를 배타적으로 빌린다. 향후 ingestion 필드는 별도 field borrow로 추가한다.
     pub fn store_mut(&mut self) -> &mut BarStore {
         &mut self.store
-    }
-
-    /// 다음 store serial을 JS Number 덧셈 규칙으로 소비한다.
-    pub fn take_serial(&mut self) -> f64 {
-        let serial = self.next_serial;
-        self.next_serial += 1.0;
-        serial
     }
 }
 

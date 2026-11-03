@@ -113,7 +113,7 @@ fn echo_keeps_missing_and_negative_zero_values() {
 }
 
 #[test]
-fn prototype_init_returns_a_validated_count_without_pretending_to_build_a_model() {
+fn init_returns_the_original_count_and_stages_owned_seeded_data() {
     let mut engine = engine();
     for count in [0.0_f64, -0.0, 1.0, 4_194_304.0] {
         let value = call(
@@ -145,6 +145,55 @@ fn prototype_init_returns_a_validated_count_without_pretending_to_build_a_model(
     .unwrap_err();
     assert_eq!(error.name, "TypeError");
     assert_eq!(error.message, JsString::from_str("Chart options object"));
+}
+
+#[test]
+fn init_owns_seed42_and_preserves_old_data_while_failed_staging_consumes_a_serial() {
+    let mut engine = engine();
+    assert!(engine.data_state().is_none());
+    call(
+        &mut engine,
+        "nativeInit",
+        &[JsValue::Number(3.0), JsValue::Null],
+    )
+    .unwrap();
+    let data = engine.data_state().unwrap();
+    let store = data.store();
+    assert_eq!(
+        (
+            store.length(),
+            store.capacity(),
+            store.version(),
+            store.time_version(),
+            store.serial()
+        ),
+        (3, 16, 2.0, 2.0, 1.0)
+    );
+    let expected = barochart_core::data::seeded_columns(3, 42).unwrap();
+    let columns = store.columns().clone();
+    assert_eq!(&columns.time[..3], &expected.time);
+    assert_eq!(&columns.open[..3], &expected.open);
+    assert_eq!(&columns.high[..3], &expected.high);
+    assert_eq!(&columns.low[..3], &expected.low);
+    assert_eq!(&columns.close[..3], &expected.close);
+    assert_eq!(&columns.volume[..3], &expected.volume);
+    call(&mut engine, "nativeInit", &[JsValue::Number(f64::NAN)]).unwrap_err();
+    assert_eq!(engine.data_state().unwrap().store().columns(), &columns);
+    assert_eq!(engine.data_state().unwrap().store().serial(), 1.0);
+    call(&mut engine, "nativeInit", &[JsValue::Number(-0.0)]).unwrap();
+    assert_eq!(engine.data_state().unwrap().store().serial(), 3.0);
+    call(
+        &mut engine,
+        "nativeInit",
+        &[JsValue::Number(0.0), JsValue::Bool(false)],
+    )
+    .unwrap_err();
+    call(&mut engine, "nativeInit", &[JsValue::Number(0.0)]).unwrap();
+    assert_eq!(engine.data_state().unwrap().store().serial(), 4.0);
+
+    let mut other = self::engine();
+    call(&mut other, "nativeInit", &[JsValue::Number(0.0)]).unwrap();
+    assert_eq!(other.data_state().unwrap().store().serial(), 1.0);
 }
 
 #[test]
