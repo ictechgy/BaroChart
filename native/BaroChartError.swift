@@ -92,6 +92,7 @@ extension BaroChartError {
     }
 
     private static func classifyScript(_ text: String) -> (Code, String) {
+        if text.hasPrefix("UnavailableError: ") { return (.unavailable, String(text.dropFirst(18))) }
         // TypeError는 형식·길이 검증("string limit 128" 포함)이라 항상 잘못된 인수다.
         if text.hasPrefix("TypeError: ") { return (.invalidArgument, String(text.dropFirst(11))) }
         // RangeError 중 sizeLimit(": limit N")·예산 메시지만 자원 한도 초과로 본다.

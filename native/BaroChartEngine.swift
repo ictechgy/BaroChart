@@ -1385,6 +1385,36 @@ public final class BaroChartEngine {
         }
         _ = try call("nativeInit", [count, options as Any? ?? NSNull()])
     }
+
+    /// Internal backend selector for conformance tests and the later Rust rollout. Public creation stays JavaScript-backed.
+    init(options: [String: Any]? = nil, runtimeBackend: BaroChartRuntimeBackend) throws {
+        guard let runtime = BaroChartRuntimeFactory.makeEngineRuntime(like: runtimeBackend) else {throw BaroChartLowLevelError.unavailableContext}
+        contextBacking = runtime
+        switch runtimeBackend {
+        case .javaScript:
+            #if SWIFT_PACKAGE
+            guard let bundleURL = Bundle.module.url(forResource: "aster-core", withExtension: "js") else {throw BaroChartLowLevelError.invalidScene}
+            #else
+            throw BaroChartLowLevelError.invalidScene
+            #endif
+            bundleSource = try String(contentsOf: bundleURL, encoding: .utf8)
+            try autoreleasepool {
+                if let exception = runtime.evaluateBundle(bundleSource) {throw BaroChartLowLevelError.javaScript(exception.toString() ?? "Unknown JS error")}
+            }
+        case .rust:
+            bundleSource = ""
+        }
+        let outcome = runtime.perform("nativeInit", [0, options as Any? ?? NSNull()])
+        switch outcome {
+        case .returned: break
+        case .missing: throw BaroChartLowLevelError.javaScript("Missing function: nativeInit")
+        case .rejected(let error): throw error
+        case .threw(let error):
+            let name = error.forProperty("name")?.toString() ?? "Error"
+            let message = error.forProperty("message")?.toString() ?? error.toString() ?? "Unknown error"
+            throw BaroChartLowLevelError.javaScript("\(name): \(message)")
+        }
+    }
     /// Calls a global function of the core bundle by name and returns its JavaScript result. Owner thread only; throws ``BaroChartLowLevelError`` for a wrong thread or a missing function, and ``BaroChartAsyncError`` for a closed engine. Advanced low-level API.
     @discardableResult public func call(_ name: String, _ arguments: [Any] = []) throws -> JSValue {
         guard Thread.current === owner else {throw BaroChartLowLevelError.wrongThread}

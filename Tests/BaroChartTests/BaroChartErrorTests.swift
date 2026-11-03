@@ -33,6 +33,12 @@ final class BaroChartErrorTests: XCTestCase {
         XCTAssertEqual(code { try BaroChartError.mapping { try engine.addSeries(["id": "x", "type": "bogus", "panel": "price"]) } }, .javaScript)
     }
 
+    func testUnavailableRustErrorMapsToUnavailable() {
+        let error = BaroChartError.wrap(BaroChartLowLevelError.javaScript("UnavailableError: nativeFoo is not available in the Rust backend"))
+        XCTAssertEqual(error.code, .unavailable)
+        XCTAssertEqual(error.message, "nativeFoo is not available in the Rust backend")
+    }
+
     func testLimitRangeErrorMapsToBudgetExceeded() {
         XCTAssertEqual(BaroChartError.wrap(BaroChartLowLevelError.javaScript("RangeError: Bars: limit 4194304")).code, .budgetExceeded)
     }
