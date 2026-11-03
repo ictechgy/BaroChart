@@ -80,6 +80,19 @@ public class RustRuntimeTest {
         });
     }
 
+    @Test public void unknownFunctionKeepsQuickJsHostText() {
+        requireRust();
+        TestSupport.onMain(() -> {
+            BaroChartEngine engine = engine();
+            try {
+                engine.invoke("__not_a_native_function");
+                fail("Unknown function must fail");
+            } catch (IllegalStateException error) {
+                assertEquals("TypeError: not a function", error.getMessage());
+            } finally { engine.close(); }
+        });
+    }
+
     @Test public void unavailablePrefixWinsOverSubstringClassifiers() {
         BaroChartException error = typed(new IllegalStateException(
             "UnavailableError: Indicator module requires the javaScript backend: my.cancel-budget@1/x"));

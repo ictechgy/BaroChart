@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {existsSync} from 'node:fs';
 import {readFile} from 'node:fs/promises';
-import vm from 'node:vm';
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {parseLossless, stringifyLossless} from '../trace/bcjson.mjs';
@@ -231,14 +230,12 @@ export async function createWasmHarness({targetDirectory = join(ROOT, 'artifacts
       }
     },
     async compare(name, args) {
-      const source = await readFile(join(ROOT, 'native/Resources/aster-core.js'), 'utf8');
-      const context = vm.createContext({Intl});
-      vm.runInContext(source, context, {timeout: 5_000});
-      const callable = context[name];
-      assert.equal(typeof callable, 'function', `VM function missing: ${name}`);
-      const javascript = Reflect.apply(callable, context, args);
+      const {createJavaScriptOracle} = await import('./core-conformance.mjs');
+      const oracle = await createJavaScriptOracle();
+      const expected = oracle.call(name, args);
+      const javascript = expected.value;
       const rust = await harness.call(name, args);
-      return {javascript, rust, equal: rust.status === 0 && stringifyLossless(rust.value) === stringifyLossless(javascript)};
+      return {javascript, rust, equal: rust.status === expected.status && stringifyLossless(rust.status === 0 ? rust.value : rust.error) === stringifyLossless(expected.status === 0 ? javascript : expected.error)};
     },
     dispose() {
       if (disposePromise) return disposePromise;

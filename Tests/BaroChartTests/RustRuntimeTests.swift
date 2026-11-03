@@ -142,6 +142,15 @@ final class RustRuntimeTests: XCTestCase {
         }
     }
 
+    func testUnknownFunctionKeepsTheJavaScriptHostMissingOutcome() throws {
+        let runtime = try XCTUnwrap(BaroChartRuntimeFactory.makeRustEngineRuntime())
+        guard case .missing = runtime.perform("__not_a_native_function", []) else {
+            return XCTFail("Undefined names must retain the missing outcome")
+        }
+        XCTAssertTrue(runtime.supports("nativeSelfTest"))
+        XCTAssertFalse(runtime.supports("__not_a_native_function"))
+    }
+
     func testIsolatedRuntimeUsesRequestedRustBackend() throws {
         let runtime = try XCTUnwrap(BaroChartRuntimeFactory.makeIsolated(like: .rust))
         if case .rust = runtime.backend {} else {XCTFail("Isolated runtime changed backend")}

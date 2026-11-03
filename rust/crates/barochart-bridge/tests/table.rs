@@ -1,4 +1,4 @@
-use barochart_bridge::{FUNCTIONS, call, supports};
+use barochart_bridge::{FUNCTIONS, FunctionStatus, call, supports};
 use barochart_core::{Engine, Host, HostError};
 use barochart_js::json::JsValue;
 use barochart_js::string::JsString;
@@ -19,11 +19,22 @@ fn engine() -> Engine {
 }
 
 #[test]
-fn the_table_is_the_only_supports_source_and_only_init_is_ready() {
-    assert_eq!(FUNCTIONS.len(), 1);
-    assert_eq!(FUNCTIONS[0].0, "nativeInit");
-    assert!(supports("nativeInit"));
-    for name in ["nativeCommand", "nativeSceneJSON", "", "missing"] {
+fn the_table_covers_every_defined_name_without_claiming_pending_handlers() {
+    assert_eq!(FUNCTIONS.len(), 100);
+    for pair in FUNCTIONS.windows(2) {
+        assert!(pair[0].name < pair[1].name);
+    }
+    for entry in FUNCTIONS {
+        assert!(supports(entry.name));
+        assert_eq!(
+            entry.handler.is_some(),
+            entry.status == FunctionStatus::Implemented
+                || entry.name == "nativeRegisterIndicatorSource"
+        );
+    }
+    assert!(supports("nativeCommand"));
+    assert!(supports("nativeSceneJSON"));
+    for name in ["", "missing", "NativeInit"] {
         assert!(!supports(name));
     }
 }
@@ -34,9 +45,71 @@ fn unavailable_names_have_the_documented_error() {
     assert_eq!(error.name, "UnavailableError");
     assert_eq!(
         error.message,
-        JsString::from_str("nativeCommand is not available in the Rust backend yet")
+        JsString::from_str("nativeCommand is not available in the Rust backend")
     );
     assert_eq!(error.code, None);
+}
+
+#[test]
+fn custom_source_is_rejected_before_any_model_or_argument_validation() {
+    let error = call(&mut engine(), "nativeRegisterIndicatorSource", &[]).unwrap_err();
+    assert_eq!(error.name, "UnavailableError");
+    assert_eq!(
+        error.message,
+        JsString::from_str("Indicator source registration requires the javaScript backend")
+    );
+    assert_eq!(error.code.as_deref(), Some("JAVASCRIPT_BACKEND_REQUIRED"));
+}
+
+#[test]
+fn cleanup_accepts_vacant_slots_and_keeps_registration_validation() {
+    let mut engine = engine();
+    for name in [
+        "nativeReleaseFrameCache",
+        "nativeReleaseFrameCaches",
+        "nativeAsyncRelease",
+    ] {
+        assert!(matches!(
+            call(&mut engine, name, &[]),
+            Ok(JsValue::Bool(true))
+        ));
+    }
+    for (name, message) in [
+        ("nativeWorkspaceSourceAbort", "Workspace registration"),
+        ("nativeParamsSourceAbort", "Params registration"),
+        ("nativeParamsSourceStatus", "Params registration"),
+    ] {
+        let value = call(&mut engine, name, &[JsValue::Number(1.0)]).unwrap();
+        if name == "nativeWorkspaceSourceAbort" {
+            assert!(matches!(value, JsValue::Bool(false)));
+        } else {
+            assert!(matches!(value, JsValue::Null));
+        }
+        for args in [
+            vec![],
+            vec![JsValue::Number(-0.0)],
+            vec![JsValue::Number(9_007_199_254_740_992.0)],
+            vec![JsValue::String(JsString::from_str("1"))],
+        ] {
+            let error = call(&mut engine, name, &args).unwrap_err();
+            assert_eq!(error.name, "RangeError");
+            assert_eq!(error.message, JsString::from_str(message));
+        }
+    }
+}
+
+#[test]
+fn echo_keeps_missing_and_negative_zero_values() {
+    assert!(matches!(
+        call(&mut engine(), "nativeEcho", &[]),
+        Ok(JsValue::Undefined)
+    ));
+    let JsValue::Number(value) =
+        call(&mut engine(), "nativeEcho", &[JsValue::Number(-0.0)]).unwrap()
+    else {
+        panic!("number expected")
+    };
+    assert_eq!(value.to_bits(), (-0.0_f64).to_bits());
 }
 
 #[test]

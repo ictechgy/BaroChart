@@ -34,7 +34,7 @@ test('WASM harness compares nativeInit with the Node VM and reports staged unava
   assert.equal(unavailable.status, 2);
   assert.deepEqual(unavailable.error, {
     name: 'UnavailableError',
-    message: 'nativeSelfTest is not available in the Rust backend yet',
+    message: 'nativeSelfTest is not available in the Rust backend',
     code: null,
   });
   assert.equal((await harness.call('__bcMathForTest', ['log', 2])).status, 2, 'release build must not expose debug probes');

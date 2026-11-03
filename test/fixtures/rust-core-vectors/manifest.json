@@ -1,0 +1,1500 @@
+{
+  "schema": "aster.rust-native-manifest",
+  "version": 1,
+  "oracleCommit": "87598ca492e6a7273b60b629c0cf9f2456268853",
+  "bundleSha256": "007ac99f8553b5912ef0c32ec392b5d30d196daf97bb17181c183004258ef512",
+  "node": "v22.20.0",
+  "v8": "12.4.254.21-node.33",
+  "icu": "77.1",
+  "tz": "2025b",
+  "scope": "A0 scaffold capability census; implemented nativeInit is count-only until data/model integration",
+  "functions": [
+    {
+      "name": "nativeAsyncBegin",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 5
+      }
+    },
+    {
+      "name": "nativePrepareBegin",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 6
+      }
+    },
+    {
+      "name": "nativeDataAsyncBegin",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 7
+      }
+    },
+    {
+      "name": "nativeReleaseDataIngestion",
+      "status": "implemented",
+      "handler": "release_ingestion",
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 13
+      }
+    },
+    {
+      "name": "nativePrepareCreate",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 14
+      }
+    },
+    {
+      "name": "nativeWorkspaceTargetCreate",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 25
+      }
+    },
+    {
+      "name": "nativeWorkspaceTargetFinish",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 34
+      }
+    },
+    {
+      "name": "nativeWorkspaceTargetDispose",
+      "status": "reject",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 35
+      }
+    },
+    {
+      "name": "nativeWorkspaceSourceBegin",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 40
+      }
+    },
+    {
+      "name": "nativeWorkspaceSourceStep",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 41
+      }
+    },
+    {
+      "name": "nativeWorkspaceSourceCheck",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 42
+      }
+    },
+    {
+      "name": "nativeWorkspaceSourceBuffer",
+      "status": "reject",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 43
+      }
+    },
+    {
+      "name": "nativeWorkspaceSourceFinish",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 44
+      }
+    },
+    {
+      "name": "nativeWorkspaceSourceDispose",
+      "status": "reject",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 45
+      }
+    },
+    {
+      "name": "nativeWorkspaceSourceAbort",
+      "status": "implemented",
+      "handler": "workspace_abort",
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 47
+      }
+    },
+    {
+      "name": "nativeAsyncCheck",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 48
+      }
+    },
+    {
+      "name": "nativeAsyncBuffer",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 49
+      }
+    },
+    {
+      "name": "nativeAsyncCheckpoint",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 50
+      }
+    },
+    {
+      "name": "nativeAsyncUI",
+      "status": "reject",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 51
+      }
+    },
+    {
+      "name": "nativeAsyncUIBegin",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 52
+      }
+    },
+    {
+      "name": "nativeAsyncUINext",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 53
+      }
+    },
+    {
+      "name": "nativeAsyncUICheck",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 54
+      }
+    },
+    {
+      "name": "nativeAsyncRelease",
+      "status": "implemented",
+      "handler": "release_true",
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 55
+      }
+    },
+    {
+      "name": "nativeAsyncCreate",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 56
+      }
+    },
+    {
+      "name": "nativeAsyncTargetBuffer",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 57
+      }
+    },
+    {
+      "name": "nativeAsyncCheckpointImport",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 58
+      }
+    },
+    {
+      "name": "nativeAsyncStart",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 59
+      }
+    },
+    {
+      "name": "nativeAsyncStep",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 60
+      }
+    },
+    {
+      "name": "nativeAsyncUIImportBegin",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 61
+      }
+    },
+    {
+      "name": "nativeAsyncUIImportChunk",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 62
+      }
+    },
+    {
+      "name": "nativeAsyncUIImportEnd",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 63
+      }
+    },
+    {
+      "name": "nativeAsyncFinish",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 64
+      }
+    },
+    {
+      "name": "nativeIndicatorBuffer",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 65
+      }
+    },
+    {
+      "name": "nativeInit",
+      "status": "implemented",
+      "handler": "native_init",
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 66
+      }
+    },
+    {
+      "name": "nativeSetData",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 80
+      }
+    },
+    {
+      "name": "nativeDataEvent",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 81
+      }
+    },
+    {
+      "name": "nativeEcho",
+      "status": "implemented",
+      "handler": "native_echo",
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 82
+      }
+    },
+    {
+      "name": "nativeCommand",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 83
+      }
+    },
+    {
+      "name": "nativeSaveWorkspace",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 85
+      }
+    },
+    {
+      "name": "nativePreflightWorkspace",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 86
+      }
+    },
+    {
+      "name": "nativeDataIngestionCommand",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 90
+      }
+    },
+    {
+      "name": "nativeRegisterIndicatorSource",
+      "status": "reject",
+      "handler": "reject_source",
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 95
+      }
+    },
+    {
+      "name": "nativeGestureKind",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 96
+      }
+    },
+    {
+      "name": "nativeThemeFont",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 97
+      }
+    },
+    {
+      "name": "nativeAccessibility",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 98
+      }
+    },
+    {
+      "name": "nativeIndicator",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 99
+      }
+    },
+    {
+      "name": "nativeAccessibilityText",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 100
+      }
+    },
+    {
+      "name": "nativeAnalysisDemo",
+      "status": "reject",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 105
+      }
+    },
+    {
+      "name": "nativeAnalysisReload",
+      "status": "reject",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 118
+      }
+    },
+    {
+      "name": "nativeStudyVerification",
+      "status": "reject",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 122
+      }
+    },
+    {
+      "name": "nativeView",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 136
+      }
+    },
+    {
+      "name": "nativeFit",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 137
+      }
+    },
+    {
+      "name": "nativeAddPanel",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 138
+      }
+    },
+    {
+      "name": "nativeSetPanel",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 139
+      }
+    },
+    {
+      "name": "nativeAddSeries",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 140
+      }
+    },
+    {
+      "name": "nativeRemoveSeries",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 141
+      }
+    },
+    {
+      "name": "nativeTheme",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 142
+      }
+    },
+    {
+      "name": "nativeInspect",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 143
+      }
+    },
+    {
+      "name": "nativeSceneJSON",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 144
+      }
+    },
+    {
+      "name": "nativeResize",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 145
+      }
+    },
+    {
+      "name": "nativePointer",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 146
+      }
+    },
+    {
+      "name": "nativeTool",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 147
+      }
+    },
+    {
+      "name": "nativeWheel",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 148
+      }
+    },
+    {
+      "name": "nativeKey",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 149
+      }
+    },
+    {
+      "name": "nativeSave",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 150
+      }
+    },
+    {
+      "name": "nativeLoad",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 151
+      }
+    },
+    {
+      "name": "nativePublicationOrderSelfTest",
+      "status": "reject",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 153
+      }
+    },
+    {
+      "name": "nativeSelfTest",
+      "status": "reject",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 163
+      }
+    },
+    {
+      "name": "nativeExtendedSelfTest",
+      "status": "reject",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 173
+      }
+    },
+    {
+      "name": "nativeHardeningSelfTest",
+      "status": "reject",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 184
+      }
+    },
+    {
+      "name": "nativeBenchmarkEvent",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 189
+      }
+    },
+    {
+      "name": "nativeBenchmarkDigest",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 190
+      }
+    },
+    {
+      "name": "nativeRenderFrameJSON",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 195
+      }
+    },
+    {
+      "name": "nativeScenePacket",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 196
+      }
+    },
+    {
+      "name": "nativeReleaseFrameCache",
+      "status": "implemented",
+      "handler": "release_true",
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 202
+      }
+    },
+    {
+      "name": "nativeReleaseFrameCaches",
+      "status": "implemented",
+      "handler": "release_true",
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 203
+      }
+    },
+    {
+      "name": "nativeComparisonDemo",
+      "status": "reject",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 207
+      }
+    },
+    {
+      "name": "nativeComparisonReadout",
+      "status": "reject",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 215
+      }
+    },
+    {
+      "name": "nativeComparisonAction",
+      "status": "reject",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 216
+      }
+    },
+    {
+      "name": "nativeAxesSelfTest",
+      "status": "reject",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 229
+      }
+    },
+    {
+      "name": "nativeHoverExit",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/bridge.mjs",
+        "line": 237
+      }
+    },
+    {
+      "name": "nativeParamsSourceBegin",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/params-bridge.mjs",
+        "line": 11
+      }
+    },
+    {
+      "name": "nativeParamsSourceStep",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/params-bridge.mjs",
+        "line": 17
+      }
+    },
+    {
+      "name": "nativeParamsSourceCheck",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/params-bridge.mjs",
+        "line": 18
+      }
+    },
+    {
+      "name": "nativeParamsSourceReceive",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/params-bridge.mjs",
+        "line": 19
+      }
+    },
+    {
+      "name": "nativeParamsSourceArmWrite",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/params-bridge.mjs",
+        "line": 21
+      }
+    },
+    {
+      "name": "nativeParamsSourceCheckpoint",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/params-bridge.mjs",
+        "line": 23
+      }
+    },
+    {
+      "name": "nativeParamsSourceValidate",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/params-bridge.mjs",
+        "line": 24
+      }
+    },
+    {
+      "name": "nativeParamsSourcePrepare",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/params-bridge.mjs",
+        "line": 25
+      }
+    },
+    {
+      "name": "nativeParamsSourcePublish",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/params-bridge.mjs",
+        "line": 26
+      }
+    },
+    {
+      "name": "nativeParamsSourceStatus",
+      "status": "implemented",
+      "handler": "params_abort",
+      "source": {
+        "path": "examples/native/params-bridge.mjs",
+        "line": 27
+      }
+    },
+    {
+      "name": "nativeParamsSourceAbort",
+      "status": "implemented",
+      "handler": "params_abort",
+      "source": {
+        "path": "examples/native/params-bridge.mjs",
+        "line": 28
+      }
+    },
+    {
+      "name": "nativeParamsTargetCreate",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/params-bridge.mjs",
+        "line": 29
+      }
+    },
+    {
+      "name": "nativeParamsTargetStart",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/params-bridge.mjs",
+        "line": 31
+      }
+    },
+    {
+      "name": "nativeParamsTargetStep",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/params-bridge.mjs",
+        "line": 32
+      }
+    },
+    {
+      "name": "nativeParamsTargetDescriptor",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/params-bridge.mjs",
+        "line": 33
+      }
+    },
+    {
+      "name": "nativeParamsTargetCheckpoint",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/params-bridge.mjs",
+        "line": 34
+      }
+    },
+    {
+      "name": "nativeParamsTargetDispose",
+      "status": "reject",
+      "handler": null,
+      "source": {
+        "path": "examples/native/params-bridge.mjs",
+        "line": 35
+      }
+    },
+    {
+      "name": "nativeDataExploration",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/exploration-bridge.mjs",
+        "line": 6
+      }
+    },
+    {
+      "name": "nativeApplyUnchangedDataEvents",
+      "status": "pending",
+      "handler": null,
+      "source": {
+        "path": "examples/native/batch-bridge.mjs",
+        "line": 6
+      }
+    }
+  ],
+  "commands": [
+    {
+      "name": "compactData",
+      "maxArguments": 1,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "setData",
+      "maxArguments": 1,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "setColumns",
+      "maxArguments": 2,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "applyDataEvent",
+      "maxArguments": 1,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "applyDataEvents",
+      "maxArguments": 1,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "configureDataIngestion",
+      "maxArguments": 1,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "enqueueDataEvents",
+      "maxArguments": 1,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "drainDataEvents",
+      "maxArguments": 1,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "pauseDataIngestion",
+      "maxArguments": 0,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "resumeDataIngestion",
+      "maxArguments": 0,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "cancelDataEvents",
+      "maxArguments": 0,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "dataIngestionStats",
+      "maxArguments": 0,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "saveDataIngestion",
+      "maxArguments": 0,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "loadDataIngestion",
+      "maxArguments": 1,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "addPanel",
+      "maxArguments": 1,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "setPanel",
+      "maxArguments": 2,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "setPanelOrder",
+      "maxArguments": 1,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "removePanel",
+      "maxArguments": 1,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "addAxis",
+      "maxArguments": 1,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "setAxis",
+      "maxArguments": 2,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "removeAxis",
+      "maxArguments": 1,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "setDrawingTarget",
+      "maxArguments": 1,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "setDrawingMagnet",
+      "maxArguments": 1,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "setCrosshairSnap",
+      "maxArguments": 1,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "crosshairSnapshot",
+      "maxArguments": 2,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "crosshairValues",
+      "maxArguments": 2,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "dataAt",
+      "maxArguments": 2,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "addSeries",
+      "maxArguments": 1,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "setSeries",
+      "maxArguments": 2,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "setSeriesValues",
+      "maxArguments": 2,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "removeSeries",
+      "maxArguments": 1,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "addIndicator",
+      "maxArguments": 3,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "setIndicatorParams",
+      "maxArguments": 2,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "setIndicatorPlacement",
+      "maxArguments": 2,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "removeIndicator",
+      "maxArguments": 1,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "indicatorValues",
+      "maxArguments": 2,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "indicatorValueAt",
+      "maxArguments": 4,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "registerIndicatorModule",
+      "maxArguments": 2,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "saveStudies",
+      "maxArguments": 0,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "loadStudies",
+      "maxArguments": 1,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "addDrawing",
+      "maxArguments": 1,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "positionMetrics",
+      "maxArguments": 1,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "editDrawing",
+      "maxArguments": 2,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "translateDrawings",
+      "maxArguments": 2,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "setDrawingsStyle",
+      "maxArguments": 2,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "setDrawingVisibility",
+      "maxArguments": 2,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "setDrawingsVisibility",
+      "maxArguments": 2,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "duplicateDrawing",
+      "maxArguments": 2,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "duplicateDrawings",
+      "maxArguments": 2,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "deleteDrawings",
+      "maxArguments": 1,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "deleteDrawing",
+      "maxArguments": 1,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "selectDrawing",
+      "maxArguments": 1,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "saveDrawings",
+      "maxArguments": 0,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "loadDrawings",
+      "maxArguments": 1,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "undo",
+      "maxArguments": 0,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "redo",
+      "maxArguments": 0,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "setTool",
+      "maxArguments": 1,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "setText",
+      "maxArguments": 1,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "setTheme",
+      "maxArguments": 1,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "setSymbol",
+      "maxArguments": 1,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "setVisibleRange",
+      "maxArguments": 2,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "fit",
+      "maxArguments": 0,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "zoom",
+      "maxArguments": 2,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "pan",
+      "maxArguments": 1,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    },
+    {
+      "name": "inspect",
+      "maxArguments": 0,
+      "status": "pending",
+      "source": {
+        "path": "src/core/api.mjs",
+        "line": 75
+      }
+    }
+  ]
+}

@@ -341,6 +341,7 @@ final class BaroChartRustCoreRuntime: BaroChartCoreRuntime {
     func perform(_ name: String, _ arguments: [Any]) -> BaroChartCoreOutcome {
         guard let engine else {return BaroChartRustStatusDecoder.outcome(status: BC_CLOSED.rawValue, value: nil)}
         if let error = BaroChartArgumentDepth.rejection(for: arguments) {return .rejected(error)}
+        guard supports(name) else {return .missing}
         guard let values = RustValueRealm.current() else {return .rejected(BaroChartLowLevelError.unavailableContext)}
         do {
             let args = RustJSON.array(try arguments.map(RustJSON.from)).encoded(lossless: true)
