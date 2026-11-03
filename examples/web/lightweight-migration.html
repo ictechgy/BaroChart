@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en" data-example="lightweight-migration">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lightweight Charts migration example · BaroChart</title>
+  <style>
+    :root { color-scheme: light dark; font: 16px/1.5 system-ui, sans-serif; }
+    body { margin: 0 auto; max-width: 960px; padding: 24px; }
+    #chart { height: 420px; min-height: 320px; }
+    button { min-height: 44px; padding: 0 16px; }
+    .note { color: #687080; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Migrate a Lightweight Charts candle feed</h1>
+    <p>This local example converts numeric Unix seconds to UTC milliseconds and keeps volume explicit.</p>
+    <div id="chart" aria-label="BaroChart candlestick chart"></div>
+    <button id="update-last" type="button">Update latest bar</button>
+    <p id="status" role="status" aria-live="polite">Loaded four converted synthetic bars.</p>
+    <p class="note">The source rows are synthetic. This example uses the local BaroChart source and makes no market-data request.</p>
+  </main>
+  <script type="module" src="./lightweight-migration.mjs"></script>
+</body>
+</html>

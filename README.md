@@ -225,10 +225,13 @@ toolbar.setOptions({labels: {select: 'Pan', fit: 'Fit view'}});
 | Drawing workflows | [Drawing groups](http://127.0.0.1:5173/examples/web/drawing-groups.html) | [Style presets](docs/DRAWING-STYLE-PRESETS.md) · [risk/reward](docs/POSITION-DRAWINGS.md) |
 | Batched live updates | [Ingestion queue](http://127.0.0.1:5173/examples/web/ingestion-queue.html) | [Host-owned data ingestion](docs/INGESTION.md) |
 | Data and analysis | [Analysis](http://127.0.0.1:5173/examples/web/analysis.html) | [Indicators](docs/INDICATORS.md) · [ingestion](docs/INGESTION.md) · [resampling](docs/RESAMPLING.md) |
+| Lightweight Charts migration | [Candlestick conversion](http://127.0.0.1:5173/examples/web/lightweight-migration.html) | [Migration guide](docs/MIGRATING-FROM-LIGHTWEIGHT-CHARTS.md); numeric UTC seconds and explicit volume, not API compatibility |
 
 [API/lifecycle](docs/API.md) · [Data rules](docs/DATA.md) · [Independent axes](docs/INDEPENDENT-AXES.md) · [Architecture](docs/ARCHITECTURE.md) · [Contributing](CONTRIBUTING.md)
 
 ## Support and validation
+
+See the current [support/compatibility matrix, release gates, and privacy-safe issue template](docs/SUPPORT.md) for current scope. The dated entries below retain their original validation limits.
 
 | Integration | What exists | Important boundary |
 | --- | --- | --- |
@@ -237,6 +240,7 @@ toolbar.setOptions({labels: {select: 'Pan', fit: 'Fit view'}});
 | Mobile web | Explicit input preset and responsive example CSS | Preview images are illustrations; touch, scrolling and assistive technology remain unverified |
 | Apple native | Swift package `BaroChart`: typed API, SwiftUI/UIKit views, privacy manifest | [iOS guide](docs/IOS-GUIDE.md); runners pass on iOS 27 Simulator and macOS JavaScriptCore; [device measurements](docs/measurements/native-device-performance.json) when recorded |
 | Android native | `kr.coden:barochart-android` + Compose module: typed API, View/Compose, two ABIs | [Android guide](docs/ANDROID-GUIDE.md); runners pass on an API 36 emulator, x86_64 in CI; [device measurements](docs/measurements/native-device-performance.json) when recorded |
+| Rust native chart backend | In development; M1b ABI/package integration is in progress | Not a complete chart backend; no JS parity, speed-ratio, or default-backend claim |
 
 Native paths are not WebViews. React Native/Flutter adapters are not supplied. Since 0.3.0 the native SDK uses `BaroChart` names ([migration guide](docs/MIGRATING-FROM-ASTER.md)); serialized `aster.*` schemas and the web React export `AsterChart` keep their names for compatibility. Do not rename serialized schemas.
 

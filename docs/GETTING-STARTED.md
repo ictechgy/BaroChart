@@ -21,6 +21,7 @@ For a smaller first render, open [the four-bar example](http://127.0.0.1:5173/ex
 | Target | Runnable starting point | Mount, update and release ownership |
 | --- | --- | --- |
 | JavaScript / TypeScript | [Four-bar web example](../examples/web/quickstart.mjs) | Give the container a height; create the model/chart; apply a data event; call `chart.destroy({disposeModel: true})` when its owner ends. |
+| Migrating from Lightweight Charts | [Candlestick conversion page](http://127.0.0.1:5173/examples/web/lightweight-migration.html) · [Guide](MIGRATING-FROM-LIGHTWEIGHT-CHARTS.md) | Converts numeric UTC seconds to milliseconds, requires an explicit volume source, and routes updates by time. It is a data recipe, not a drop-in adapter or a freshness protocol. |
 | React web | [TypeScript consumer](../examples/react-web/README.md) | Use `AsterChart` from `barochart/react`; update through the ref; the adapter releases its owned model on unmount. Borrowed models remain app-owned. |
 | SwiftUI / UIKit | [SwiftUI sample](../examples/swiftui-sample) and [iOS guide](IOS-GUIDE.md#before-the-first-release) | The app creates the engine on the main thread, calls `setBars`/`apply`, and closes the engine when its owner ends. The view borrows it. |
 | Compose / Android View | [Compose sample](../examples/compose-sample) and [Android guide](ANDROID-GUIDE.md#before-the-first-release) | The app creates and updates the engine on its owner thread and calls `close()` when its owner ends. Disposing the view does not close the engine. |
@@ -79,4 +80,4 @@ Use the [executable HTTP/stream recipe](FEED-INTEGRATION.md) for snapshot/live o
 3. An invalid event is reported without changing the accepted data.
 4. Leaving/unmounting the screen releases what it owns; coming back creates a usable chart.
 
-The host owns feeds, subscription cancellation and storage. The SDK does not place orders or supply market data. Start with a known dataset before adding your network feed. [Data contract](DATA.md) · [Streaming recipes and boundaries](INGESTION.md) · [Current support limits](../README.md#support-and-validation).
+The host owns feeds, subscription cancellation and storage. The SDK does not place orders or supply market data. Start with a known dataset before adding your network feed. [Data contract](DATA.md) · [Streaming recipes and boundaries](INGESTION.md) · [Current support matrix and release gates](SUPPORT.md).
