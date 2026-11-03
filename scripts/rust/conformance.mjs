@@ -12,7 +12,7 @@
 // - carrier: jsonLossless에서 오라클만 읽는 표준 JSON. 같은 텍스트에서 특수 값만 표지 객체로 바꿨다
 // 결과는 정규 문자열이다. 수는 NaN이면 'NaN', 아니면 16진 비트다(설계 §6.2: Object.is 기준, NaN만 정규화).
 // 문자열·JSON은 16진, 정수는 십진, 불리언은 'true'/'false', 오류는 'E:<이름>'이다. 커널 결과 줄은 {"r":"..."}이고,
-// 숫자를 쓰는 연산의 QuickJS 방언(Android 빌드) 결과가 다르면 {"r":"...","q":"..."}다(커널 NumberDialect, 리뷰 C1).
+// 숫자를 읽거나 쓰는 연산의 QuickJS 방언(Android 빌드) 결과가 다르면 {"r":"...","q":"..."}다(커널 NumberDialect).
 //
 // 판정(설계 §6.1: 오라클은 같은 플랫폼의 JS 백엔드):
 // - 엔진마다 그 플랫폼의 커널 결과와 비교한다. V8(WASM 하네스)·JSC(iOS)는 r, QuickJS(Android)는 q(없으면 r)다.
@@ -752,14 +752,28 @@ function mutate(random,text,noise){
  return points.join('');
 }
 
+/** 첫 JSON 작업에서 세 입력 형식으로 고정하는 QuickJS 숫자 파싱 경계 */
+const JSON_PARSE_BOUNDARIES=Object.freeze([
+ `9007199254740993.${'0'.repeat(22)}1`,
+ `-9007199254740993.${'0'.repeat(22)}1`,
+ '1.00000000000000011102230246251565404236316680908203125001',
+ '-1.00000000000000011102230246251565404236316680908203125001',
+]);
+
 /**
- * json 스위트 작업 하나. 넷 중 둘은 표준 JSON(UTF-8 바이트), 하나는 무손실(BCJSON) 왕복, 하나는 JS 문자열 원문
- * (코드 단위, 원문 단독 서로게이트 포함)이다. 표준·코드 단위는 30%를 변형해 오류도 시험한다.
+ * json 스위트 작업 하나. 처음에는 숫자 파싱 경계를 세 형식으로 넣고, 그 뒤 넷 중 둘은 표준 JSON(UTF-8 바이트),
+ * 하나는 무손실(BCJSON) 왕복, 하나는 JS 문자열 원문이다. 표준·코드 단위는 30%를 변형해 오류도 시험한다.
  * @param {ReturnType<typeof createRandom>} random 난수 도구
  * @param {number} index 스위트 안 색인
  * @returns {{source: string, task: object}} 작업
  */
 function jsonCase(random,index){
+ // 무작위 긴 가수만으로는 38자리 뒤 숫자가 반올림을 바꾸는 경계를 사실상 만나지 못한다(외부 리뷰 X3).
+ if(index<JSON_PARSE_BOUNDARIES.length*3){
+  const text=JSON_PARSE_BOUNDARIES[Math.floor(index/3)],kind=index%3;
+  const task=kind===0?{op:'json',text:utf8Hex(text)}:kind===1?{op:'jsonUnits',units:unitsHex(text)}:{op:'jsonLossless',text:utf8Hex(text),carrier:utf8Hex(text)};
+  return {source:'parse-boundary',task};
+ }
  const lossless=index%4===2,units=index%4===3,node=random.chance(0.02)?deepNode(random,lossless):jsonNode(random,4,lossless);
  const before=jsonSpace(random),[body,carrierBody]=renderJson(random,node,units),after=jsonSpace(random);
  if(lossless)return {source:'lossless',task:{op:'jsonLossless',text:utf8Hex(before+body+after),carrier:utf8Hex(before+carrierBody+after)}};
@@ -1275,6 +1289,19 @@ const CASE_IGNORABLE=/^\p{Case_Ignorable}$/u;
 const isUnicodeAddition=code=>UNICODE_UPGRADE.added.some(([first,last])=>code>=first&&code<=last);
 
 /**
+ * 유니코드 16→17에서 새로 할당된 글자 중 소문자 대응이 바뀐 28자. JSC·동봉 QuickJS로 UNICODE_UPGRADE의
+ * 4,803자 전부를 대조해 두 엔진이 같은 대응을 내는지 확인했다(2026-11-03). 나머지 새 글자는 자기 자신이어야 한다.
+ * 새 글자라는 이유만으로 임의의 코드 포인트를 허용하면 틀린 커널 답도 알려진 차이로 빠진다(외부 리뷰 X1).
+ */
+const UNICODE_UPGRADE_LOWERCASE=new Map([
+ [0xa7ce,0xa7cf],[0xa7d2,0xa7d3],[0xa7d4,0xa7d5],
+ ...Array.from({length:25},(_,index)=>[0x16ea0+index,0x16ebb+index]),
+]);
+
+/** 실측한 새 글자의 소문자 대응만 적용한다(Σ 문맥 처리는 unicodeUpgradeExplains가 따로 검사한다). */
+const applyUnicodeUpgradeMappings=text=>Array.from(text,point=>String.fromCodePoint(UNICODE_UPGRADE_LOWERCASE.get(point.codePointAt(0))??point.codePointAt(0))).join('');
+
+/**
  * Σ(U+03A3)의 final sigma 문맥에 새 글자가 있는지 본다. Node 판의 대소문자 무시 글자를 건너뛰며 앞뒤로 처음 만나는
  * 글자가 새 글자면, 커널 판에서는 그 글자가 cased이거나 대소문자 무시일 수 있어 σ와 ς가 모두 맞을 수 있다.
  * @param {string[]} points 입력의 코드 포인트(단독 서로게이트는 그 단위 하나)
@@ -1294,7 +1321,7 @@ function sigmaContextHasAddition(points,index){
 /**
  * 커널의 toLowerCase 답이 Node와 다른 것을 유니코드 판 차이로 설명할 수 있는지 본다(리뷰 C6). 입력을 코드 포인트마다
  * 따라가며 커널 답을 맞춰 본다.
- * - 새 글자(UNICODE_UPGRADE): 커널 답의 코드 포인트 하나면 된다(새 소문자 대응).
+ * - 새 글자(UNICODE_UPGRADE): 두 독립 엔진으로 확인한 소문자 대응과 정확히 같아야 한다(대응이 없으면 자기 자신).
  * - 문맥에 새 글자가 있는 Σ: σ 또는 ς.
  * - 그 밖의 글자: Node가 낸 조각과 정확히 같아야 한다(Σ는 Node 결과의 그 자리, 나머지는 문맥 없는 전체 소문자 대응).
  * 입력에 새 글자가 없으면 설명할 수 없다(false).
@@ -1311,9 +1338,9 @@ function unicodeUpgradeExplains(units,actual,expected){
   const point=points[index],code=point.codePointAt(0),piece=code===0x3a3?node.slice(nodeOffset,nodeOffset+1):point.toLowerCase();
   nodeOffset+=piece.length;
   if(isUnicodeAddition(code)){
-   const produced=output.codePointAt(outputOffset);
-   if(produced===undefined)return false;
-   outputOffset+=produced>0xffff?2:1;
+   const lowercase=applyUnicodeUpgradeMappings(point);
+   if(!output.startsWith(lowercase,outputOffset))return false;
+   outputOffset+=lowercase.length;
   }else if(code===0x3a3&&sigmaContextHasAddition(points,index)){
    if(output[outputOffset]!=='\u03c3'&&output[outputOffset]!=='\u03c2')return false;
    outputOffset++;
@@ -1382,10 +1409,14 @@ function judge(stats,entry,result,context){
  const divergences=[],failures=[];
  for(const engine of context.engineNames){
   const tally=suite.byEngine[engine],expected=entry.engineValues?entry.engineValues[engine]:entry.expected,actual=kernelValueFor(engine,result);
-  if(actual===expected){tally.matched++;matched++;continue;}
+  // 커널이 새 대문자를 옛 Node 답 그대로 두면 expected와 같아도 틀린 답이다. 판 차이 검사는 equality보다 먼저 한다.
+  const upgradedInput=engine==='v8'&&context.unicodeUpgrade&&op==='toLowerCase'&&Array.from(unitsFromHex(entry.task.units)).some(point=>isUnicodeAddition(point.codePointAt(0)));
+  const upgradeMatches=!upgradedInput||unicodeUpgradeExplains(entry.task.units,actual,expected);
+  if(actual===expected&&upgradeMatches){tally.matched++;matched++;continue;}
   const reason=knownDivergence(entry.task,actual,expected,engine,context);
   if(reason){tally.divergent[reason]=(tally.divergent[reason]??0)+1;divergences.push({engine,reason,expected,actual});continue;}
-  tally.mismatched++;failures.push({engine,expected,actual});
+  const required=actual===expected&&!upgradeMatches?unitsHex(applyUnicodeUpgradeMappings(unitsFromHex(expected))):expected;
+  tally.mismatched++;failures.push({engine,expected:required,actual});
  }
  if(failures.length){
   suite.compared++;suite.mismatches++;

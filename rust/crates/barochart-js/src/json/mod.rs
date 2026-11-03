@@ -16,7 +16,7 @@ mod value;
 mod write;
 
 pub use object::JsObject;
-pub use parse::{parse_json, parse_json_utf16};
+pub use parse::{parse_json, parse_json_utf16, parse_json_utf16_with, parse_json_with};
 pub use value::JsValue;
 pub use write::{stringify_json, stringify_json_with};
 

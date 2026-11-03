@@ -31,7 +31,8 @@ use barochart_js::date::{
     to_iso_string,
 };
 use barochart_js::json::{
-    JsObject, JsValue, JsonMode, parse_json, parse_json_utf16, stringify_json, stringify_json_with,
+    JsObject, JsValue, JsonMode, parse_json, parse_json_utf16_with, parse_json_with,
+    stringify_json, stringify_json_with,
 };
 use barochart_js::num::{
     NumberDialect, js_max, js_min, js_round, js_sign, number_to_string_with, same_value,
@@ -276,7 +277,7 @@ fn op_object_is(task: &JsObject) -> Outcome {
 /// `JSON.stringify(JSON.parse(text))`. 파싱 오류는 `E:SyntaxError`다.
 fn op_json(task: &JsObject, dialect: NumberDialect) -> Outcome {
     let text = hex_bytes_field(task, "text")?;
-    Ok(match parse_json(&text, JsonMode::Standard) {
+    Ok(match parse_json_with(&text, JsonMode::Standard, dialect) {
         Ok(value) => hex_of_bytes(&stringify_json_with(&value, JsonMode::Standard, dialect)),
         Err(error) => format!("E:{}", error.name),
     })
@@ -286,7 +287,7 @@ fn op_json(task: &JsObject, dialect: NumberDialect) -> Outcome {
 fn op_json_units(task: &JsObject, dialect: NumberDialect) -> Outcome {
     let text = units_field(task, "units")?;
     Ok(
-        match parse_json_utf16(text.as_units(), JsonMode::Standard) {
+        match parse_json_utf16_with(text.as_units(), JsonMode::Standard, dialect) {
             Ok(value) => hex_of_bytes(&stringify_json_with(&value, JsonMode::Standard, dialect)),
             Err(error) => format!("E:{}", error.name),
         },
@@ -296,7 +297,7 @@ fn op_json_units(task: &JsObject, dialect: NumberDialect) -> Outcome {
 /// 무손실(BCJSON) 텍스트를 읽어 표준 JSON과 무손실 텍스트로 다시 쓴다: `<표준 16진>,<무손실 16진>`.
 fn op_json_lossless(task: &JsObject, dialect: NumberDialect) -> Outcome {
     let text = hex_bytes_field(task, "text")?;
-    Ok(match parse_json(&text, JsonMode::Lossless) {
+    Ok(match parse_json_with(&text, JsonMode::Lossless, dialect) {
         Ok(value) => format!(
             "{},{}",
             hex_of_bytes(&stringify_json_with(&value, JsonMode::Standard, dialect)),
@@ -654,6 +655,35 @@ mod tests {
             "\"q\":\"5b352e39363034363434373735333930363235652d385d\"}\n",
         );
         assert_eq!(results(input), Ok(String::from(expected)));
+    }
+
+    /// JSON의 q 결과는 쓰기 방언뿐 아니라 QuickJS의 38자리 숫자 파싱도 반영한다.
+    #[test]
+    fn json_results_use_the_parsing_dialect_before_stringifying() {
+        let text = format!("9007199254740993.{}1", "0".repeat(22));
+        let ecma = super::hex_of_bytes(b"9007199254740994");
+        let quickjs = super::hex_of_bytes(b"9007199254740992");
+        for op in ["json", "jsonUnits", "jsonLossless"] {
+            let (field, source) = if op == "jsonUnits" {
+                (
+                    "units",
+                    super::hex_of_units(&text.encode_utf16().collect::<Vec<_>>()),
+                )
+            } else {
+                ("text", super::hex_of_bytes(text.as_bytes()))
+            };
+            let (r, q) = if op == "jsonLossless" {
+                (format!("{ecma},{ecma}"), format!("{quickjs},{quickjs}"))
+            } else {
+                (ecma.clone(), quickjs.clone())
+            };
+            let input = format!("{{\"op\":\"{op}\",\"{field}\":\"{source}\"}}\n");
+            assert_eq!(
+                results(&input),
+                Ok(format!("{{\"r\":\"{r}\",\"q\":\"{q}\"}}\n")),
+                "{op}"
+            );
+        }
     }
 
     /// 잘못된 작업은 줄 번호와 이유를 담아 거절한다(하네스와 형식이 어긋난 것을 조용히 넘기지 않는다).

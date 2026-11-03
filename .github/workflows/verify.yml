@@ -74,7 +74,7 @@ jobs:
           CHROME_BIN="${chrome_bin}" npm run test:indicator-layout:browser
 
   rust:
-    # Rust 네이티브 코어 워크스페이스: 포맷, clippy 경고 0, 테스트, 이식 코드 금지 패턴, JS 의미 커널의 V8 대조
+    # Rust 네이티브 코어 워크스페이스: 포맷, clippy 경고 0, 테스트, 이식 코드 금지 패턴, JS 의미 커널의 V8·QuickJS 대조
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -112,9 +112,9 @@ jobs:
       - name: Check banned patterns in ported Rust code
         run: node scripts/rust/check-bans.mjs
 
-      - name: Compare the JS kernel with V8 on a seeded corpus
-        # 시드 고정 코퍼스로 barochart-js 결과를 Node(V8)와 비교한다(대조 하네스는 M1 Task 4)
-        run: node scripts/rust/conformance.mjs --count 100000
+      - name: Compare the JS kernel with V8 and bundled QuickJS on a seeded corpus
+        # 같은 시드 고정 코퍼스의 ECMA(r)·Android 방언(q)을 Node(V8)·동봉 QuickJS와 각각 비교한다.
+        run: node scripts/rust/conformance.mjs --count 100000 --engines v8,quickjs
 
   ios-build:
     # 네이티브 SDK(Swift): 경고 0 빌드, macOS JavaScriptCore 테스트, iOS 시뮬레이터 빌드

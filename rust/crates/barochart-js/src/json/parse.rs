@@ -5,7 +5,8 @@
 //!   단독 서로게이트는 UTF-8로 나타낼 수 없어 바이트 진입점으로는 JS와 같은 결과를 낼 수 없기 때문이다(이식 지도 D7).
 //!   문법 문자는 모두 ASCII라 같은 파서가 두 형식을 읽고, 문자열 안의 원문 구간만 형식대로 옮긴다.
 //! - 공백은 SP·TAB·LF·CR만 받는다(JS 공백 표가 아니다).
-//! - 숫자는 문법을 먼저 확인한 뒤 `str::parse::<f64>`로 정확히 반올림한다. `1e400`은 Infinity, `-0`은 -0이다.
+//! - 숫자는 문법을 먼저 확인한다. Ecma 방언은 `str::parse::<f64>`로 정확히 반올림하고, QuickJS 방언은 동봉 엔진처럼
+//!   십진 가수의 첫 38자리만 남겨 반올림한다. 기본 방언은 `NumberDialect::PLATFORM`이다. `1e400`은 Infinity, `-0`은 -0이다.
 //!   명시 지수가 크면(앞의 0을 뺀 숫자 6자리 이상) 리터럴을 그대로 넘기지 않는다. Rust 1.98.1 dec2flt는 명시 지수를
 //!   65536 근처에서 포화시켜 `"0." + "0"×700000 + "1e700001"`을 0으로 읽었다(JS 엔진은 1). 그래서 첫 유효 숫자의
 //!   지수를 포화 연산으로 직접 구해 넘침·밑넘침을 가르고, 그 사이 값은 정규화한 `d.ddd…e<지수>`로 읽는다.
@@ -22,6 +23,7 @@ use std::ops::Range;
 
 use super::{JsObject, JsValue, JsonMode};
 use crate::error::JsError;
+use crate::num::NumberDialect;
 use crate::string::JsString;
 
 /// 명시 지수(앞의 0을 뺀 숫자)가 이 자릿수 이상이면 리터럴을 `str::parse::<f64>`에 그대로 넘기지 않는다.
@@ -30,13 +32,17 @@ use crate::string::JsString;
 /// 655360부터 틀리므로, 그보다 작은 6자리부터 정규화 경로로 보낸다.
 const LARGE_EXPONENT_DIGITS: usize = 6;
 
+/// QuickJS 2026-06-04 `js_atod`의 십진 가수 한도(`dtoa.c` atod_max_digits_table[10 - 2]).
+/// 뒤의 숫자는 sticky bit도 남기지 않고 버린다. 정확한 동률 바로 위 입력에서 ECMA와 결과가 다를 수 있다.
+const QUICKJS_PARSE_DIGITS: usize = 38;
+
 /// 첫 유효 숫자의 십진 지수가 이보다 크면 값이 10^310 이상이라 늘 Infinity다(최댓값은 약 1.8e308)
 const MAX_DECIMAL_EXPONENT: i64 = 309;
 
 /// 첫 유효 숫자의 십진 지수가 이보다 작으면 값이 10^-325 미만이라 늘 0이다(최소 부분정규수의 절반은 약 2.47e-324)
 const MIN_DECIMAL_EXPONENT: i64 = -325;
 
-/// 문법을 확인한 수 리터럴의 구간들. 정규화 경로(`Parser::parse_large_exponent`)가 쓴다.
+/// 문법을 확인한 수 리터럴의 구간들. 정규화 경로(`Parser::parse_normalized_number`)가 쓴다.
 struct NumberParts {
     /// `-`로 시작했는지
     negative: bool,
@@ -60,7 +66,21 @@ struct NumberParts {
 /// - `mode`: 문법
 /// - 반환: 값, 또는 `SyntaxError`(위치는 바이트 단위)
 pub fn parse_json(text: &[u8], mode: JsonMode) -> Result<JsValue, JsError> {
-    Parser::new(Utf8Source(text), mode).parse_document()
+    parse_json_with(text, mode, NumberDialect::PLATFORM)
+}
+
+/// 숫자 파싱 방언을 정해 UTF-8 JSON·BCJSON을 읽는다. 문법·오류·문자열 규칙은 `parse_json`과 같다.
+///
+/// - `text`: UTF-8 JSON 텍스트
+/// - `mode`: 문법
+/// - `dialect`: Ecma는 정확한 반올림, QuickJS는 동봉 엔진의 십진 38자리 한도
+/// - 반환: 값, 또는 `SyntaxError`
+pub fn parse_json_with(
+    text: &[u8],
+    mode: JsonMode,
+    dialect: NumberDialect,
+) -> Result<JsValue, JsError> {
+    Parser::new(Utf8Source(text), mode, dialect).parse_document()
 }
 
 /// `JSON.parse(text)`(Standard) 또는 BCJSON 파싱(Lossless)을 JS 문자열(WTF-16 코드 단위)에 한다.
@@ -74,7 +94,21 @@ pub fn parse_json(text: &[u8], mode: JsonMode) -> Result<JsValue, JsError> {
 /// - `mode`: 문법
 /// - 반환: 값, 또는 `SyntaxError`(위치는 코드 단위, 곧 JS 문자열 위치)
 pub fn parse_json_utf16(text: &[u16], mode: JsonMode) -> Result<JsValue, JsError> {
-    Parser::new(Utf16Source(text), mode).parse_document()
+    parse_json_utf16_with(text, mode, NumberDialect::PLATFORM)
+}
+
+/// 숫자 파싱 방언을 정해 WTF-16 JSON·BCJSON을 읽는다. 단독 서로게이트와 오류 위치는 `parse_json_utf16`과 같다.
+///
+/// - `text`: JSON 텍스트의 UTF-16 코드 단위
+/// - `mode`: 문법
+/// - `dialect`: 숫자를 읽는 엔진 방언
+/// - 반환: 값, 또는 `SyntaxError`
+pub fn parse_json_utf16_with(
+    text: &[u16],
+    mode: JsonMode,
+    dialect: NumberDialect,
+) -> Result<JsValue, JsError> {
+    Parser::new(Utf16Source(text), mode, dialect).parse_document()
 }
 
 /// ASCII가 아닌 원문 단위를 문법 바이트로 볼 때 쓰는 값. 어느 문법 문자와도 같지 않고 0x20 이상이라
@@ -209,6 +243,8 @@ struct Parser<S: Source> {
     position: usize,
     /// 문법
     mode: JsonMode,
+    /// 숫자 파싱 방언
+    dialect: NumberDialect,
 }
 
 impl<S: Source> Parser<S> {
@@ -216,11 +252,13 @@ impl<S: Source> Parser<S> {
     ///
     /// - `source`: 원문
     /// - `mode`: 문법
-    fn new(source: S, mode: JsonMode) -> Self {
+    /// - `dialect`: 숫자 파싱 방언
+    fn new(source: S, mode: JsonMode, dialect: NumberDialect) -> Self {
         Self {
             source,
             position: 0,
             mode,
+            dialect,
         }
     }
 
@@ -375,7 +413,7 @@ impl<S: Source> Parser<S> {
     ///
     /// 문법을 확인한 텍스트만 `str::parse::<f64>`에 넘긴다(Rust 파서는 `+1`, `.5`, `inf` 같은 JSON 밖 형식도 받으므로).
     /// 명시 지수가 크면(앞의 0을 뺀 숫자가 `LARGE_EXPONENT_DIGITS`자리 이상) 그대로 넘기지 않고
-    /// `parse_large_exponent`로 정규화한다. dec2flt가 명시 지수를 65536 근처에서 포화시키기 때문이다.
+    /// `parse_normalized_number`로 정규화한다. dec2flt가 명시 지수를 65536 근처에서 포화시키기 때문이다.
     fn parse_number(&mut self) -> Result<f64, JsError> {
         let start = self.position;
         let negative = self.eat(b'-');
@@ -410,9 +448,14 @@ impl<S: Source> Parser<S> {
             self.require_digits("a digit in the exponent")?;
             exponent = Some((exponent_negative, exponent_start..self.position));
         }
-        if let Some((exponent_negative, digits)) = exponent
-            && self.significant_length(digits.clone()) >= LARGE_EXPONENT_DIGITS
-        {
+        let large_exponent = exponent.as_ref().is_some_and(|(_, digits)| {
+            self.significant_length(digits.clone()) >= LARGE_EXPONENT_DIGITS
+        });
+        let long_quickjs = self.dialect == NumberDialect::QuickJs
+            && integer.len() + fraction.len() > QUICKJS_PARSE_DIGITS;
+        if large_exponent || long_quickjs {
+            let (exponent_negative, digits) =
+                exponent.unwrap_or((false, self.position..self.position));
             let parts = NumberParts {
                 negative,
                 integer,
@@ -420,7 +463,7 @@ impl<S: Source> Parser<S> {
                 exponent_negative,
                 exponent: digits,
             };
-            return self.parse_large_exponent(start, &parts);
+            return self.parse_normalized_number(start, &parts);
         }
         // 문법을 확인한 ASCII라 문자열 변환과 f64 파싱은 실패하지 않는다. 실패하면 위치를 담아 SyntaxError로 알린다
         let literal = self
@@ -432,15 +475,15 @@ impl<S: Source> Parser<S> {
             .map_err(|_| self.error_at(start, "number does not parse as f64"))
     }
 
-    /// 명시 지수가 큰 수를 정규화해 읽는다.
+    /// 명시 지수가 크거나 QuickJS의 가수가 긴 수를 정규화해 읽는다.
     ///
     /// 정수부·소수부 숫자를 이은 열에서 처음과 마지막 유효 숫자(0이 아닌 숫자)를 찾고, 첫 유효 숫자의 십진 지수를
     /// 포화 연산으로 직접 구한다. 지수가 `MAX_DECIMAL_EXPONENT`보다 크면 ±Infinity, `MIN_DECIMAL_EXPONENT`보다
     /// 작으면 ±0이고, 그 사이면 `d.ddd…e<지수>`(지수 절댓값 326 미만)를 다시 만들어 `str::parse::<f64>`로 정확히
-    /// 반올림한다. 유효 숫자가 없으면 부호 있는 0이다(`-0e999999` → -0).
+    /// 반올림한다. QuickJS 방언은 처음 38자리 뒤를 버린다. 유효 숫자가 없으면 부호 있는 0이다(`-0e999999` → -0).
     /// - `start`: 수가 시작한 위치(오류 위치)
     /// - `parts`: 문법을 확인한 수의 구간들
-    fn parse_large_exponent(&self, start: usize, parts: &NumberParts) -> Result<f64, JsError> {
+    fn parse_normalized_number(&self, start: usize, parts: &NumberParts) -> Result<f64, JsError> {
         let integer_length = parts.integer.len();
         let digit_at = |index: usize| {
             let position = if index < integer_length {
@@ -455,6 +498,11 @@ impl<S: Source> Parser<S> {
         let last = (0..total).rev().find(|&index| digit_at(index) != b'0');
         let (Some(first), Some(last)) = (first, last) else {
             return Ok(if parts.negative { -0.0 } else { 0.0 });
+        };
+        let last = if self.dialect == NumberDialect::QuickJs {
+            std::cmp::min(last, first.saturating_add(QUICKJS_PARSE_DIGITS - 1))
+        } else {
+            last
         };
         let explicit = parts.exponent.clone().fold(0_i64, |value, position| {
             // 문법을 확인한 십진 숫자라 b'0'을 빼도 0..=9다

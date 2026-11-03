@@ -504,7 +504,7 @@ Output example: `{"a":{"$asterNumber":"-0"},"b":{"$asterNumber":"NaN"},"e":[1e+2
 3. `JSON.parse(text)` → engine `SyntaxError` on grammar errors.
 4. **Decode walk** in `Object.keys` order: depth > 32 first, then nodes > 250000 → RangeError `Checkpoint state limit`; lone surrogate → TypeError `Checkpoint Unicode scalar`. An object with own `$asterNumber` must have exactly that one key with one of the four strings, else TypeError `Checkpoint number marker`. The marker is replaced in its parent by the number. Raw non-finite numbers → `Checkpoint untagged nonfinite number`.
 
-Notes: `1e-400` is accepted as `0`. A raw `-0` token is accepted and yields `-0`. Underflow and correct rounding match Rust's `str::parse::<f64>`.
+Notes: `1e-400` is accepted as `0`. A raw `-0` token is accepted and yields `-0`. V8/JSC decimal parsing rounds correctly like Rust's `str::parse::<f64>`. QuickJS 2026-06-04 keeps only the first 38 significant decimal digits (`dtoa.c`, `js_atod`), so a nonzero digit beyond that limit can change a rounding-boundary result. The Rust kernel selects this parsing behavior with `NumberDialect::QuickJs` on Android; UTF-8 and WTF-16 entry points also accept an explicit dialect (M1a external review X3, 2026-11-03).
 
 `validateCheckpointState` (`:62-171`) is specified in §3.8.4.
 

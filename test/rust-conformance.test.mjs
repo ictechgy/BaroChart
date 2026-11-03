@@ -108,6 +108,15 @@ test('the number suites sweep every power of two ±2^n (n = -1074..1023), so eng
  }
 });
 
+test('the JSON corpus exercises the long-decimal parsing boundary in every input format',()=>{
+ const boundary=`9007199254740993.${'0'.repeat(22)}1`,ops=new Set();
+ for(const {task} of corpusCases({seed:1,count:128,suites:['json']})){
+  const text=task.op==='jsonUnits'?String.fromCharCode(...(task.units.match(/.{4}/g)??[]).map(unit=>parseInt(unit,16))):Buffer.from(task.text,'hex').toString('utf8');
+  if(text===boundary)ops.add(task.op);
+ }
+ assert.deepEqual([...ops].sort(),['json','jsonLossless','jsonUnits']);
+});
+
 test('the CLI prints the same corpus bytes as the module from a separate process',()=>{
  const args=['--emit-corpus','--seed','9','--count','150'];
  const first=runConformance(args),second=runConformance(args);
@@ -199,6 +208,8 @@ test('the engine script is self-contained and reproduces the oracle in a fresh c
  * - FAKE_UNICODE_VERSION: --unicode-version에 이 판을 답한다(기본은 이 Node의 판)
  * - FAKE_LOWERCASE: toLowerCase 결과를 바꾼다. cn-garbage는 Node 기준 미할당(Cn) 코드 포인트가 든 입력에 '0041',
  *   non-cn-wrong은 그런 입력의 결과에서 a를 A로, high-plane은 결과의 U+40000..U+DFFFF를 U+FFFD로,
+ *   new-case-wrong은 새 대문자를 z로, new-uncased-wrong은 새 비대응 문자 U+088F·U+20C1을 z로 바꾼다.
+ *   unchanged-new-case는 판을 17이라고 답하면서 새 대문자를 Node 16 결과 그대로 둔다.
  *   unicode17은 유니코드 17에서 생긴 대소문자 대응 28자(U+A7CE·A7D2·A7D4, U+16EA0..16EB8)를 소문자로 바꾼다
  */
 const FAKE_KERNEL=conformanceUrl=>[
@@ -216,6 +227,8 @@ const FAKE_KERNEL=conformanceUrl=>[
  '  if(lowerMode===\'cn-garbage\')return unassigned?\'0041\':result;',
  '  if(lowerMode===\'non-cn-wrong\')return unassigned?encode(decode(result).replaceAll(\'a\',\'A\')):result;',
  '  if(lowerMode===\'high-plane\')return encode(mapPoints(decode(result),(code,point)=>code>=0x40000&&code<=0xdffff?\'\\ufffd\':point));',
+ '  if(lowerMode===\'new-case-wrong\')return encode(mapPoints(decode(result),(code,point)=>newCase.has(code)?\'z\':point));',
+ '  if(lowerMode===\'new-uncased-wrong\')return encode(mapPoints(decode(result),(code,point)=>code===0x88f||code===0x20c1?\'z\':point));',
  '  if(lowerMode===\'unicode17\')return encode(mapPoints(decode(result),(code,point)=>newCase.has(code)?String.fromCodePoint(newCase.get(code)):point));',
  '  return result;',
  ' }',
@@ -373,7 +386,7 @@ test('the unicode-version exclusion excuses only answers that code points new in
   const common=['--binary',binary,'--suite','string','--count','3000','--seed','8','--work-dir',dir];
   const env={...process.env,FAKE_UNICODE_VERSION:'17.0.0'};
   // 예전 규칙은 Node 기준 미할당 코드 포인트가 든 toLowerCase 작업을 커널 답과 무관하게 뺐다(리뷰 C6)
-  for(const mode of ['cn-garbage','non-cn-wrong','high-plane']){
+  for(const mode of ['cn-garbage','non-cn-wrong','high-plane','new-case-wrong','new-uncased-wrong','unchanged-new-case']){
    const result=runConformance(common,{...env,FAKE_LOWERCASE:mode});
    assert.equal(result.status,1,`${mode}: ${result.stdout}${result.stderr}`);
    assert.match(result.stdout,/MISMATCH string#\d+ op=toLowerCase/,mode);

@@ -165,7 +165,7 @@
     },
     {
       "command": "node scripts/rust/conformance.mjs --suite round,json,string,date --count 200000 --seed 3",
-      "date": "2026-11-02",
+      "date": "2026-11-03",
       "seed": 3,
       "count": 200000,
       "suites": [
@@ -226,9 +226,9 @@
           "disagreements": 0,
           "mismatches": 0,
           "ops": {
-            "json": 100000,
-            "jsonLossless": 50000,
-            "jsonUnits": 50000
+            "json": 99998,
+            "jsonUnits": 50001,
+            "jsonLossless": 50001
           },
           "byEngine": {
             "v8": {
@@ -691,7 +691,7 @@
         "ryuJs": "1.0.3",
         "platform": "darwin 25.6.0 arm64"
       },
-      "durationSeconds": 24.6
+      "durationSeconds": 12.9
     },
     {
       "command": "node scripts/rust/conformance.mjs --suite number,fixed --count 100000 --seed 4 --engines v8,jsc,quickjs",
@@ -1153,7 +1153,7 @@
     },
     {
       "command": "node scripts/rust/conformance.mjs --suite number,fixed,precision,exponential,round,json,string,date --count 20000 --seed 5 --engines v8,jsc,quickjs",
-      "date": "2026-11-02",
+      "date": "2026-11-03",
       "seed": 5,
       "count": 20000,
       "suites": [
@@ -1176,7 +1176,7 @@
         "cases": 160000,
         "compared": 160000,
         "excluded": 0,
-        "disagreements": 340,
+        "disagreements": 352,
         "mismatches": 0
       },
       "byEngine": {
@@ -1347,12 +1347,12 @@
           "cases": 20000,
           "compared": 20000,
           "excluded": {},
-          "disagreements": 26,
+          "disagreements": 38,
           "mismatches": 0,
           "ops": {
-            "json": 10000,
-            "jsonLossless": 5000,
-            "jsonUnits": 5000
+            "json": 9998,
+            "jsonUnits": 5001,
+            "jsonLossless": 5001
           },
           "byEngine": {
             "v8": {
@@ -1808,11 +1808,11 @@
         },
         "quickjs": "2026-06-04"
       },
-      "durationSeconds": 4.2
+      "durationSeconds": 7.2
     },
     {
       "command": "node scripts/rust/conformance.mjs --suite string --count 200000 --seed 6 --engines v8,jsc,quickjs",
-      "date": "2026-11-02",
+      "date": "2026-11-03",
       "seed": 6,
       "count": 200000,
       "suites": [
@@ -2229,8 +2229,8 @@
         },
         "quickjs": "2026-06-04"
       },
-      "durationSeconds": 4.1
+      "durationSeconds": 6.7
     }
   ],
-  "updated": "2026-11-02"
+  "updated": "2026-11-03"
 }

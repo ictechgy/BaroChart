@@ -41,24 +41,25 @@ const TO_STRING_MAX_POINT: i64 = 21;
 /// `Number::toString`이 `0.000…` 표기를 쓰는 소수점 위치 n의 하한(이보다 커야 한다: `-6 < n`)
 const TO_STRING_MIN_POINT: i64 = -6;
 
-/// 숫자를 문자열로 쓸 때 따르는 JS 엔진 방언(`Number::toString`이 최단 자릿수를 고르는 규칙).
+/// 숫자 텍스트 변환에 따르는 JS 엔진 방언(`Number::toString` 자릿수와 JSON 숫자 파싱).
 ///
-/// 설계 §6.1은 같은 기기의 JS 백엔드를 오라클로 정한다(iOS는 JSC, Android는 QuickJS). 두 엔진은 한 곳에서 다르다.
+/// 설계 §6.1은 같은 기기의 JS 백엔드를 오라클로 정한다(iOS는 JSC, Android는 QuickJS). 숫자 쓰기의 차이는 다음과 같다.
 /// QuickJS 2026-06-04의 `js_dtoa`(FORMAT_FREE)는 17자리에서 시작해 자릿수를 하나씩 줄이며 가장 가까운(RNDN) 후보
 /// 하나만 왕복 검사하고, 처음 실패한 곳에서 멈춘다(`native/android/quickjs/dtoa.c` `js_dtoa`). IEEE 반올림 구간이
 /// 비대칭인 정규수 2의 거듭제곱(가수 0, 지수 필드 2 이상)에서는 가장 가까운 후보가 아래쪽의 좁은 반 구간 밖으로
 /// 나가 검사가 실패할 수 있다. 그래서 2,045개 가운데 54개 지수(부호 포함 108값)에서 최단(13~16자리)이 아닌
 /// 17자리를 쓴다(`2 ** -24` → `5.9604644775390625e-8`, V8·JSC는 `5.960464477539063e-8`, 2026-11-02 실측).
-/// 그 밖의 수는 두 방언이 같다. 구간이 대칭이면 가장 가까운 후보가 최단 후보와 같기 때문이다.
+/// 숫자 쓰기에서 그 밖의 수는 두 방언이 같다. 구간이 대칭이면 가장 가까운 후보가 최단 후보와 같기 때문이다.
 ///
 /// `String(x)`, 템플릿 문자열, `JSON.stringify`, `toExponential()`, `toPrecision(undefined)`, `|x| ≥ 1e21`의
 /// `toFixed`가 이 자릿수를 쓴다. JSON 텍스트 길이가 문서 한도와 undo 가중치를 정하므로(설계 §6.4) Android에서도
 /// 바이트가 같아야 한다.
+/// JSON 숫자 읽기는 QuickJS가 십진 가수의 첫 38자리만 반올림에 쓴다. `json::parse_json_with`도 이 방언을 받는다.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NumberDialect {
-    /// ECMA-262 `Number::toString`: 왕복하는 가장 짧은 자릿수(V8, JSC; ryu-js)
+    /// ECMA-262: 최단 숫자 표기(V8, JSC; ryu-js), JSON 숫자는 정확한 반올림
     Ecma,
-    /// QuickJS 2026-06-04(Android JS 백엔드): 정규수 2의 거듭제곱 54개 지수에서 17자리, 그 밖은 ECMA와 같다
+    /// QuickJS 2026-06-04: 일부 2의 거듭제곱은 17자리로 쓰고, JSON 숫자는 십진 가수 38자리까지만 읽는다
     QuickJs,
 }
 

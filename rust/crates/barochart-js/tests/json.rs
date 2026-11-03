@@ -2,11 +2,12 @@
 //!
 //! Standard 기대값은 같은 입력을 V8(Node 22.20.0), JSC(macOS 시스템 `jsc`), QuickJS(`native/android/quickjs`
 //! 2026-06-04)의 `JSON.parse`·`JSON.stringify`로 계산해 세 엔진이 모두 같은 값을 낸 것만 넣었다(2026-11-02 실측).
-//! 엔진마다 다른 두 경우는 해당 테스트에 적었다(깊은 중첩, 40자리를 넘는 숫자). 오류는 이름(`SyntaxError`)만
+//! 엔진마다 다른 경우는 해당 테스트에 적었다(깊은 중첩, 38자리를 넘는 숫자). 오류는 이름(`SyntaxError`)만
 //! 계약이다(이식 지도 D8). Lossless는 M0 계획 Task 5의 BCJSON 문법에서 `F64` 토큰을 뺀 것이다.
 
 use barochart_js::json::{
-    JsObject, JsValue, JsonMode, parse_json, parse_json_utf16, stringify_json, stringify_json_with,
+    JsObject, JsValue, JsonMode, parse_json, parse_json_utf16, parse_json_utf16_with,
+    parse_json_with, stringify_json, stringify_json_with,
 };
 use barochart_js::num::NumberDialect;
 use barochart_js::string::JsString;
@@ -304,17 +305,93 @@ fn numbers_are_correctly_rounded() {
 
 /// 유효 숫자 40자리를 넘는 입력도 정확히 반올림한다.
 ///
-/// 2^53+1 바로 위(동률보다 아주 조금 큰 값)는 2^53+2가 맞다. V8과 JSC는 그렇게 내지만 QuickJS 2026-06-04는
-/// 유효 숫자 약 40자리 뒤를 버려 2^53을 낸다(2026-11-02 실측, 21자리 뒤 0 20개까지는 세 엔진이 같다).
-/// 계획은 `str::parse::<f64>`의 정확한 반올림을 정했으므로 V8·JSC 쪽이 기대값이다. Task 4 대조에서 QuickJS 제외 사례다.
+/// 2^53+1 바로 위(동률보다 아주 조금 큰 값)는 ECMA에서 2^53+2다. QuickJS의 다른 결과는 아래 방언 테스트로 검증한다.
 #[test]
 fn long_decimal_inputs_round_correctly() {
     let above_tie = format!("9007199254740993{}1e-301", "0".repeat(300));
     assert_eq!(
-        number(&parse(&above_tie, JsonMode::Standard)).to_bits(),
+        number(
+            &parse_json_with(
+                above_tie.as_bytes(),
+                JsonMode::Standard,
+                NumberDialect::Ecma
+            )
+            .unwrap()
+        )
+        .to_bits(),
         0x4340_0000_0000_0001,
         "JSON.parse('9007199254740993' + '0'.repeat(300) + '1e-301')"
     );
+}
+
+/// JSON 숫자도 같은 기기의 JS를 따른다: QuickJS는 십진 가수의 첫 38자리만 반올림에 쓴다.
+#[test]
+fn long_decimal_parsing_follows_the_selected_engine_dialect() {
+    let low = 9_007_199_254_740_992.0_f64;
+    let high = 9_007_199_254_740_994.0_f64;
+    let mut cases = vec![
+        (format!("9007199254740993.{}1", "0".repeat(21)), high, high),
+        (format!("9007199254740993.{}1", "0".repeat(22)), high, low),
+        (
+            format!("9007199254740993{}1e-301", "0".repeat(300)),
+            high,
+            low,
+        ),
+        (
+            format!(
+                "0.{}9007199254740993{}1e100016",
+                "0".repeat(100_000),
+                "0".repeat(22)
+            ),
+            high,
+            low,
+        ),
+        (
+            String::from("1.00000000000000011102230246251565404236316680908203125001"),
+            f64::from_bits(1.0_f64.to_bits() + 1),
+            1.0,
+        ),
+    ];
+    let negatives: Vec<_> = cases
+        .iter()
+        .map(|(text, ecma, quickjs)| (format!("-{text}"), -*ecma, -*quickjs))
+        .collect();
+    cases.extend(negatives);
+    for (text, ecma, quickjs) in cases {
+        let units: Vec<_> = text.encode_utf16().collect();
+        for mode in [JsonMode::Standard, JsonMode::Lossless] {
+            for (dialect, expected) in [
+                (NumberDialect::Ecma, ecma),
+                (NumberDialect::QuickJs, quickjs),
+            ] {
+                let bytes = parse_json_with(text.as_bytes(), mode, dialect).unwrap();
+                let utf16 = parse_json_utf16_with(&units, mode, dialect).unwrap();
+                assert_eq!(
+                    number(&bytes).to_bits(),
+                    expected.to_bits(),
+                    "{mode:?} {dialect:?}"
+                );
+                assert_eq!(
+                    number(&utf16).to_bits(),
+                    expected.to_bits(),
+                    "UTF-16 {mode:?} {dialect:?}"
+                );
+            }
+            let expected = if NumberDialect::PLATFORM == NumberDialect::QuickJs {
+                quickjs
+            } else {
+                ecma
+            };
+            assert_eq!(
+                number(&parse_json(text.as_bytes(), mode).unwrap()).to_bits(),
+                expected.to_bits()
+            );
+            assert_eq!(
+                number(&parse_json_utf16(&units, mode).unwrap()).to_bits(),
+                expected.to_bits()
+            );
+        }
+    }
 }
 
 /// 명시 지수가 아주 커도(앞의 0을 뺀 지수 숫자 6자리 이상) 자릿수가 지수를 상쇄하면 `JSON.parse`와 같은 값이다.
