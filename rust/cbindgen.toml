@@ -1,0 +1,35 @@
+# cbindgen 0.29.4로 rust/include/barochart_core.h를 만든다.
+language = "C"
+include_guard = "BAROCHART_CORE_H"
+pragma_once = false
+usize_is_size_t = true
+documentation = true
+documentation_style = "c99"
+cpp_compat = true
+style = "type"
+sort_by = "Name"
+header = "/* cbindgen 0.29.4가 생성한 파일이다. 수정하지 말고 node scripts/rust/cbindgen.mjs를 실행한다. */"
+
+[parse]
+parse_deps = false
+
+[export]
+include = [
+  "BC_FLAG_LOSSLESS",
+  "BcBuf",
+  "BcEngine",
+  "BcF64Buf",
+  "BcHost",
+  "BcStatus",
+  "bc_buf_free",
+  "bc_buf_new_copy",
+  "bc_call",
+  "bc_engine_free",
+  "bc_engine_new",
+  "bc_f64_buf_free",
+  "bc_memory_stats",
+  "bc_packet",
+  "bc_read_f64",
+  "bc_supports",
+  "bc_write_f64",
+]

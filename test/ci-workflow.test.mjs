@@ -36,6 +36,9 @@ test('the Rust workspace job installs the pinned toolchain and runs every Rust g
   '--workspace --all-targets -- -D warnings',
   'node scripts/rust/cargo.mjs test',
   'node scripts/rust/check-bans.mjs',
+  'node scripts/rust/install-cbindgen.mjs',
+  'node scripts/rust/check-header.mjs',
+  'node scripts/rust/c-smoke.mjs',
  ])assert.ok(job.includes(command),`rust job must run ${command}`);
  // 같은 코퍼스의 r(ECMA)·q(Android QuickJS)를 두 실제 엔진과 비교해야 한다.
  assert.match(job,/^\s+run: node scripts\/rust\/conformance\.mjs --count 100000 --engines v8,quickjs\s*$/m);

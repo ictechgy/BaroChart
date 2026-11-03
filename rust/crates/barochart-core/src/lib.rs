@@ -3,30 +3,45 @@
 
 use barochart_js::string::JsString;
 
-/// Opaque host callback failure; the core supplies the stable JavaScript error text.
+/// 호스트 콜백이 실패했음을 나타내는 불투명 오류다.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HostError;
 
-/// Host services owned by an engine and callable on its current owning thread.
-/// Implementations must remain valid when the engine moves to another thread.
+/// 엔진이 소유하며 현재 소유 스레드에서 부르는 호스트 서비스다.
+/// 구현은 엔진이 다른 스레드로 옮겨가도 유효해야 한다.
 pub trait Host: Send {
-    /// Resolves an accepted zone name to its canonical name.
+    /// 허용된 시간대 이름을 표준 이름으로 해석한다.
     fn zone_resolve(&self, name: &JsString) -> Result<JsString, HostError>;
-    /// Returns the zone offset at a finite epoch timestamp in seconds.
+    /// 유한한 epoch 밀리초에서의 시간대 오프셋을 초 단위로 돌려준다.
     fn zone_offset_seconds(&self, zone: &JsString, epoch_ms: f64) -> Result<i32, HostError>;
-    /// Emits a developer diagnostic without exposing user payloads.
+    /// 사용자 페이로드를 노출하지 않는 개발자 진단을 남긴다.
     fn log(&self, level: i32, message: &str);
 }
 
-/// Internal empty engine scaffold. Chart state is added in subsequent porting stages.
-/// An engine is Send, but is intentionally not Sync: its host need not be Sync.
+/// 내부 빈 엔진 뼈대다. 차트 상태는 후속 이식 단계에서 추가한다.
+/// `Send`이지만 호스트가 `Sync`일 필요는 없으므로 의도적으로 `Sync`가 아니다.
 pub struct Engine {
-    _host: Box<dyn Host>,
+    host: Box<dyn Host>,
 }
 
 impl Engine {
-    /// Takes ownership of host services for the engine's lifetime.
+    /// 엔진 수명 동안 호스트 서비스의 소유권을 받는다.
     pub fn new(host: Box<dyn Host>) -> Self {
-        Self { _host: host }
+        Self { host }
+    }
+
+    /// 호스트에게 시간대 표준 이름 해석을 요청한다.
+    pub fn zone_resolve(&self, name: &JsString) -> Result<JsString, HostError> {
+        self.host.zone_resolve(name)
+    }
+
+    /// 호스트에게 시간대 오프셋을 요청한다.
+    pub fn zone_offset_seconds(&self, zone: &JsString, epoch_ms: f64) -> Result<i32, HostError> {
+        self.host.zone_offset_seconds(zone, epoch_ms)
+    }
+
+    /// 호스트 진단 로그를 남긴다.
+    pub fn log(&self, level: i32, message: &str) {
+        self.host.log(level, message);
     }
 }

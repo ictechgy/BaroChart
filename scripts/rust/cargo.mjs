@@ -18,9 +18,10 @@ const HOME_VARIABLES=['CARGO_HOME','RUSTUP_HOME'];
 /**
  * rustup이 cargo 프록시를 두는 bin 디렉터리를 정한다.
  * @param {NodeJS.ProcessEnv} env 래퍼가 받은 환경
- * @returns {string} CARGO_HOME이 있으면 `$CARGO_HOME/bin`, 없으면 `$HOME/.cargo/bin`(절대 경로)
+ * @returns {string} BAROCHART_RUSTUP_BIN, `$CARGO_HOME/bin`, `$HOME/.cargo/bin` 순으로 고른 절대 경로
  */
 export function rustupBinDirectory(env){
+ if(env.BAROCHART_RUSTUP_BIN)return resolve(env.BAROCHART_RUSTUP_BIN);
  if(env.CARGO_HOME)return join(resolve(env.CARGO_HOME),'bin');
  return join(env.HOME||homedir(),'.cargo','bin');
 }
@@ -56,7 +57,7 @@ export function exitCodeOf(result){
 export function runCargo(args,env=process.env){
  const binDirectory=rustupBinDirectory(env),cargo=join(binDirectory,'cargo');
  if(!existsSync(cargo)){
-  console.error(`cargo.mjs: rustup cargo not found at ${cargo}. Install rustup (https://rustup.rs), or set CARGO_HOME to the directory that holds rustup's bin/cargo. Homebrew cargo is not used because it ignores rust/rust-toolchain.toml.`);
+  console.error(`cargo.mjs: rustup cargo not found at ${cargo}. Install rustup (https://rustup.rs), set BAROCHART_RUSTUP_BIN to rustup's bin directory, or set CARGO_HOME to the directory that holds bin/cargo. Homebrew cargo is not used because it ignores rust/rust-toolchain.toml.`);
   return 127;
  }
  const result=spawnSync(cargo,args,{cwd:WORKSPACE,env:cargoEnvironment(env,binDirectory),stdio:'inherit'});

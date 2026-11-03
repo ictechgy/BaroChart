@@ -18,6 +18,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "barochart-ffi"
+version = "0.0.0"
+dependencies = [
+ "barochart-bridge",
+ "barochart-core",
+ "barochart-js",
+]
+
+[[package]]
 name = "barochart-js"
 version = "0.0.0"
 dependencies = [

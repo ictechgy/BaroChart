@@ -102,6 +102,17 @@ jobs:
       - name: Check Rust formatting
         run: node scripts/rust/cargo.mjs fmt --check
 
+      - name: Install pinned cbindgen in the repository tool directory
+        # 인증 환경을 상속하지 않는 새 rust/.tools Cargo 홈에 0.29.4를 설치하고,
+        # 후속 헤더/C smoke는 그 소스로 오프라인 실행한다.
+        run: node scripts/rust/install-cbindgen.mjs
+
+      - name: Check generated C ABI header
+        run: node scripts/rust/check-header.mjs
+
+      - name: Compile, link, and call the C ABI smoke program
+        run: node scripts/rust/c-smoke.mjs
+
       - name: Clippy with warnings as errors
         # --locked: 커밋한 Cargo.lock과 다른 의존성으로 조용히 빌드하지 않는다
         run: node scripts/rust/cargo.mjs clippy --locked --workspace --all-targets -- -D warnings
