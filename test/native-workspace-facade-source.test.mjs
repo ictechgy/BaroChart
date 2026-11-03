@@ -17,9 +17,10 @@ for(const [name,source,save,preflight,call] of [
 });
 test('Swift direct call retains owning-thread and closed-engine guards before JavaScript entry',()=>{
  const body=method(swift,'public func call(');
- assert.ok(body.indexOf('Thread.current === owner')<body.indexOf('function.call'));
- assert.ok(body.indexOf('guard !closed')<body.indexOf('function.call'));
- assert.match(body,/checkException\(\)/);
+ // 코어 진입은 이음새 런타임의 perform이다(M0 Task 6). 예외는 이전 checkException과 같은 문구로 던진다.
+ assert.ok(body.indexOf('Thread.current === owner')<body.indexOf('coreRuntime.perform('));
+ assert.ok(body.indexOf('guard !closed')<body.indexOf('coreRuntime.perform('));
+ assert.match(body,/case \.threw\(let exception\): throw BaroChartLowLevelError\.javaScript\(exception\.toString\(\) \?\? "Unknown JS error"\)/);
 });
 test('Java direct invoke retains owning-thread and closed-handle guards before JNI entry',()=>{
  const check=method(java,'private void check('),body=method(java,'public Object invoke(');
@@ -27,7 +28,8 @@ test('Java direct invoke retains owning-thread and closed-handle guards before J
  assert.match(check,/if\(handle==0\)throw new IllegalStateException/);
  assert.ok(check.indexOf('Thread.currentThread()!=owner')<check.indexOf('resumeOwnerCleanup()'));
  assert.ok(check.indexOf('resumeOwnerCleanup()')<check.indexOf('if(handle==0)'));
- assert.ok(body.indexOf('check()')<body.indexOf('call(handle'));
+ // JNI call 진입은 추적 훅을 겸하는 callRuntime 하나다(M0 Task 7). 검사 순서는 그대로다.
+ assert.ok(body.indexOf('check()')<body.indexOf('callRuntime(handle'));
 });
 test('Java workspace close recovery remains reachable after the source handle is retired',()=>{
  const close=method(java,'@Override public void close(');

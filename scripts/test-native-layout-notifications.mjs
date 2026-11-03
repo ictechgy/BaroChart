@@ -8,7 +8,7 @@ for(let i=0;i<args.length;i++){if(args[i]==='--sdk')sdk=resolve(args[++i]);else 
 await mkdir(join(out,'module-cache'),{recursive:true});
 await writeFile(join(out,'main.swift'),'import Foundation\nlet report=try verifyNativeLayoutNotifications(URL(fileURLWithPath:CommandLine.arguments[1]))\nlet data=try JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys])\nprint(String(data:data,encoding:.utf8)!)\nif report["failed"] as? Bool == true {exit(1)}\n');
 const run=async(command,argv,log)=>{const result=spawnSync(command,argv,{encoding:'utf8',timeout:180000,maxBuffer:16*1024*1024});await writeFile(join(out,log),(result.stdout??'')+(result.stderr??''));if(result.error)throw result.error;return result;};
-const sources=['BaroChartEngine.swift','BaroChartError.swift','BaroChartColumns.swift','BaroChartFrameRenderer.swift'].map(name=>join(sdk,'native',name));
+const sources=['BaroChartEngine.swift','BaroChartCoreRuntime.swift','BaroChartTrace.swift','BaroChartError.swift','BaroChartColumns.swift','BaroChartFrameRenderer.swift'].map(name=>join(sdk,'native',name));
 const compile=await run('swiftc',['-O','-warnings-as-errors','-module-cache-path',join(out,'module-cache'),...sources,join(root,'examples/native/layout-notification-verification.swift'),join(out,'main.swift'),'-o',join(out,'probe')],'build.log');
 if(compile.status!==0)throw new Error('Layout observer compile failed: '+compile.stderr);
 const bundle=join(sdk,'native/Resources/aster-core.js'),result=await run(join(out,'probe'),[bundle],'run.log'),report=JSON.parse(result.stdout),sha=data=>createHash('sha256').update(data).digest('hex');

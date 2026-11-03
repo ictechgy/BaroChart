@@ -8,7 +8,7 @@ const sw=swift.slice(swift.indexOf('private func dataExploration('),swift.indexO
 const ja=java.slice(java.indexOf('private JSONObject dataExploration('),java.indexOf('public void addPanel('));
 function ordered(text,...parts){let i=0;for(const part of parts){const n=text.indexOf(part,i);assert.ok(n>=0,part);i=n+part.length;}}
 test('Swift dedicated exploration checks owner/open and original context after conversion without notification',()=>{
- ordered(sw,'Thread.current === owner','!closed, !closing','let runtime = contextRuntime','runtime.acquireCaptureLease()','defer {runtime?.releaseCaptureLease()}','return try autoreleasepool','let source = contextBacking','source.objectForKeyedSubscript("nativeDataExploration")','function.call(withArguments:','source.exception','value.toDictionary()','source.exception','!closed, !closing, contextBacking === source','return result');
+ ordered(sw,'Thread.current === owner','!closed, !closing','let runtime = contextRuntime','runtime.acquireCaptureLease()','defer {runtime?.releaseCaptureLease()}','return try autoreleasepool','let source = contextBacking','source.perform("nativeDataExploration", [action, argument])','case .threw','value.toDictionary()','source.takeException()','!closed, !closing, contextBacking === source','return result');
  assert.doesNotMatch(sw,/notifyChanges|command\(|setNeedsDisplay|try call\(|checkException\(|let source = context\n/);
 });
 test('Java dedicated exploration checks source handle after checked invocation without notification',()=>{

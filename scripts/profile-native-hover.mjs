@@ -3,7 +3,7 @@ const root=resolve(import.meta.dirname,'..'),source=resolve(process.argv[2]??'.'
 const scratch=await mkdtemp(join(tmpdir(),'aster-native-hover-')),quote=x=>'"'+x.replaceAll('\\','\\\\').replaceAll('"','\\"')+'"';
 await writeFile(join(scratch,'main.swift'),'import Foundation\ntry profileNativeHover(bundle:URL(fileURLWithPath:'+quote(join(source,'native/Resources/aster-core.js'))+'),output:URL(fileURLWithPath:'+quote(output)+'),cached:'+String(process.argv.includes('--cached'))+')\n');
 const cached=process.argv.includes('--cached');
-const files=[join(source,'native/BaroChartEngine.swift'),join(source,'native/BaroChartError.swift'),join(source,'native/BaroChartColumns.swift'),join(root,'benchmarks/native-hover.swift'),join(scratch,'main.swift')];
+const files=[join(source,'native/BaroChartEngine.swift'),join(source,'native/BaroChartCoreRuntime.swift'),join(source,'native/BaroChartTrace.swift'),join(source,'native/BaroChartError.swift'),join(source,'native/BaroChartColumns.swift'),join(root,'benchmarks/native-hover.swift'),join(scratch,'main.swift')];
 if(cached)files.push(join(source,'native/BaroChartFrameRenderer.swift'));
 const r=spawnSync('swiftc',[...(cached?['-D','ASTER_FRAME_CACHE']:[]),'-O','-warnings-as-errors','-module-cache-path','/tmp/aster-swift-module-cache',...files,'-o',join(scratch,'profile')],{stdio:'inherit'});if(r.status)process.exit(r.status);
 const run=spawnSync(join(scratch,'profile'),[],{stdio:'inherit'});if(run.status)process.exit(run.status);

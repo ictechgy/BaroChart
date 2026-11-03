@@ -38,6 +38,34 @@ public final class BaroChartEngine implements AutoCloseable {
     private static native long memoryPeak(long handle);
     private static native long[] memoryStats(long handle);
     private static native byte[] indicatorSlice(long handle,String id,String output,int offset,int count);
+    /**
+     * 테스트 전용 추적 훅(package-private, 설계 §6.5-1·§7.3). 디렉터리를 정하면 그 뒤에 만드는 코어 런타임마다 그 디렉터리에
+     * BCJSON 추적 파일 runtime-&lt;n&gt;.jsonl을 쓴다(n은 1부터, 정할 때마다 다시 센다). null(기본값)이면 끄고 아무 파일도 만들지 않는다.
+     * 끄거나 바꾸면 이전에 만든 런타임의 기록도 그 자리에서 멈춘다.
+     * @param directory 추적 디렉터리, 끄려면 null
+     */
+    static void setTraceDirectoryForTesting(File directory){BaroChartTrace.setDirectory(directory);}
+    /**
+     * 코어 런타임 하나를 만든다(번들을 평가한 빈 QuickJS 런타임). JNI create를 부르는 곳은 이 함수 하나다: 엔진 생성자,
+     * 작업공간 복원·params·비동기 준비 대상 생성(설계 §4.4). 지금의 create 호출과 같은 의미이고, M1에서 백엔드 인자를 더한다.
+     * 추적이 켜져 있으면 새 런타임에 추적 파일을 붙인다.
+     * @param bundle 평가할 코어 번들 원문
+     * @return 새 런타임 핸들(호출자가 free로 해제한다)
+     */
+    static long createRuntime(String bundle){long runtime=create(bundle);BaroChartTrace.runtimeCreated(runtime);return runtime;}
+    /**
+     * 런타임의 전역 함수 하나를 JSON 인자 글자로 부른다. 코어를 JSON으로 부르는 JNI call은 모두 이 함수만 거친다.
+     * 추적이 켜진 런타임이면 호출과 결과(또는 JNI가 던진 오류)를 한 줄로 남기고, 꺼져 있으면 JNI call을 그대로 부른다.
+     * @param runtime 런타임 핸들
+     * @param name 전역 함수 이름
+     * @param arguments 인자 JSON 배열 글자
+     * @return 결과 JSON 글자
+     */
+    private static String callRuntime(long runtime,String name,String arguments){
+        BaroChartTrace.Recorder trace=BaroChartTrace.recorder(runtime);if(trace==null)return call(runtime,name,arguments);
+        String result;try{result=call(runtime,name,arguments);}catch(RuntimeException|Error error){trace.threw(name,arguments,error);throw error;}
+        trace.returned(name,arguments,result);return result;
+    }
     private AsyncJob activeJob;
     /**
      * Creates an engine with the labeled demonstration chart, owned by the calling thread. Prefer {@link
@@ -58,7 +86,7 @@ public final class BaroChartEngine implements AutoCloseable {
      */
     public BaroChartEngine(Context context,int count,JSONObject options) throws IOException,JSONException {
         try(InputStream in=context.getAssets().open("aster-core.js")){ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] buffer=new byte[8192];int size;while((size=in.read(buffer))!=-1)out.write(buffer,0,size);sourceBundle=new String(out.toByteArray(),StandardCharsets.UTF_8);}
-        handle=create(sourceBundle);
+        handle=createRuntime(sourceBundle);
         try {invoke("nativeInit",count,options==null?JSONObject.NULL:options);}catch(JSONException|RuntimeException|Error error){long released=handle;handle=0;try{free(released);}catch(Throwable cleanup){if(cleanup!=error)error.addSuppressed(cleanup);}throw error;}
     }
     private void check(){if(Thread.currentThread()!=owner)throw new IllegalStateException("Use the engine on its owning thread before close");if(activeWorkspace!=null&&activeWorkspace.job.pendingOwnerCleanup())activeWorkspace.job.resumeOwnerCleanup();if(activeParams!=null&&activeParams.job.pendingOwnerCleanup())activeParams.job.resumeOwnerCleanup();if(handle==0)throw new IllegalStateException("Engine closed");if(closing)throw new IllegalStateException("Engine closing");}
@@ -71,7 +99,7 @@ public final class BaroChartEngine implements AutoCloseable {
      * @return the decoded JSON result
      * @throws JSONException if the arguments cannot be encoded or the core returns invalid JSON
      */
-    public Object invoke(String name,Object... args) throws JSONException {check();if(name==null||name.length()==0||name.length()>128||args.length>16)throw new IllegalArgumentException("Native function name/argument limit");return new JSONArray("["+call(handle,name,new JSONArray(args).toString())+"]").get(0);}
+    public Object invoke(String name,Object... args) throws JSONException {check();if(name==null||name.length()==0||name.length()>128||args.length>16)throw new IllegalArgumentException("Native function name/argument limit");return new JSONArray("["+callRuntime(handle,name,new JSONArray(args).toString())+"]").get(0);}
     static final class SceneTiming {
         final long jniNanos,envelopeParseNanos,bodyParseNanos;final int jsonChars;
         final String transport;final long metadataParseNanos,numericValidationNanos,numericBytes;final int commandCount,stringCount;
@@ -119,7 +147,7 @@ public final class BaroChartEngine implements AutoCloseable {
     SceneTiming sceneTiming(){check();return sceneTiming;}
     private JSONObject sceneJSON(String name,Object... args) throws JSONException {
         check();String arguments=new JSONArray(args).toString();long start=System.nanoTime();
-        String returned=call(handle,name,arguments);long afterJNI=System.nanoTime();
+        String returned=callRuntime(handle,name,arguments);long afterJNI=System.nanoTime();
         String body=(String)new JSONArray("["+returned+"]").get(0);long afterEnvelope=System.nanoTime();
         JSONObject scene=new JSONObject(body);long afterBody=System.nanoTime();
         sceneTiming=new SceneTiming(afterJNI-start,afterEnvelope-afterJNI,afterBody-afterEnvelope,body.length());return scene;
@@ -135,7 +163,7 @@ public final class BaroChartEngine implements AutoCloseable {
     public JSONObject scene(double width,double height) throws JSONException {return sceneJSON("nativeSceneJSON",width,height);}
     JSONObject renderFrame(String token,double width,double height,boolean force) throws JSONException {return sceneJSON("nativeRenderFrameJSON",token,width,height,force);}
     ScenePacket scenePacket(String mode,String token,double width,double height,boolean force)throws JSONException {
-        check();long start=System.nanoTime();Object[] transfer=packet(handle,mode,token,width,height,force);long afterJNI=System.nanoTime();
+        check();BaroChartTrace.typedTransfer(handle,"nativeScenePacket");long start=System.nanoTime();Object[] transfer=packet(handle,mode,token,width,height,force);long afterJNI=System.nanoTime();
         if(transfer==null||transfer.length!=2||!(transfer[0] instanceof String)||!(transfer[1] instanceof double[]))throw new JSONException("Native packet transfer shape");
         ScenePacket result=new ScenePacket((String)transfer[0],(double[])transfer[1]);long afterJava=System.nanoTime();
         sceneTiming=new SceneTiming(afterJNI-start,0,afterJava-afterJNI,((String)transfer[0]).length(),"f64",result.metadataParseNanos,result.numericValidationNanos,result.numbers.length*8L,result.commandCount,result.strings.length);return result;
@@ -273,7 +301,7 @@ public final class BaroChartEngine implements AutoCloseable {
      * @throws JSONException if the metrics cannot be encoded
      */
     public JSONObject runtimeMetrics() throws JSONException {check();long[] stats=memoryStats(handle);return new JSONObject().put("requestedLiveBytes",stats[0]).put("requestedPeakBytes",stats[1]).put("processLiveNativeHandles",stats[2]).put("processNativeHandlesCreated",stats[3]).put("processNativeHandlesFreed",stats[4]).put("scope","QuickJS requested bytes including aligned allocator headers; live handle counts include all engines and current isolated workers in this process");}
-    byte[] indicatorBytes(String id,String output,int offset,int count){check();if(id==null||output==null||id.length()>128||output.length()>128||offset<0||count<1||count>262144)throw new IllegalArgumentException("Indicator byte slice limits");return indicatorSlice(handle,id,output,offset,count);}
+    byte[] indicatorBytes(String id,String output,int offset,int count){check();if(id==null||output==null||id.length()>128||output.length()>128||offset<0||count<1||count>262144)throw new IllegalArgumentException("Indicator byte slice limits");BaroChartTrace.typedTransfer(handle,"nativeIndicatorBuffer");return indicatorSlice(handle,id,output,offset,count);}
     /**
      * Registers a listener run after each chart change. A {@code RuntimeException} it throws is recorded in {@link
      * #observerErrors()} and does not stop other listeners. Call on the engine's owner thread.
@@ -983,11 +1011,11 @@ public final class BaroChartEngine implements AutoCloseable {
                 expectedBytes=workspaceInteger(value.getJSONObject("plan").get("totalBytes"),1,WorkspaceRestoreJob.MAX_BYTES,"logical bytes");return new WorkspaceRestoreJob.Admission(done,new WorkspaceRestoreJob.Descriptor(ticket,(String)value.get("metadataJSON"),length,expectedBytes));
             }
             public void checkSource(long h,long ticket,long r)throws JSONException {if(!Boolean.TRUE.equals(invokeHandle(h,"nativeWorkspaceSourceCheck",ticket,r)))throw new JSONException("Workspace source check");}
-            public byte[] readSource(long h,long ticket,int slot,int offset,int count){return readBuffer(h,ticket,slot,offset,count);}
+            public byte[] readSource(long h,long ticket,int slot,int offset,int count){BaroChartTrace.typedTransfer(h,"nativeAsyncBuffer");return readBuffer(h,ticket,slot,offset,count);}
             public void finishSource(long h,long ticket,long r)throws JSONException {JSONObject value=(JSONObject)invokeHandle(h,"nativeWorkspaceSourceFinish",ticket,r);if(!"aster.native-workspace-source-finished".equals(value.get("schema"))||workspaceInteger(value.get("version"),1,1,"version")!=1||workspaceInteger(value.get("ticket"),1,9007199254740991L,"ticket")!=ticket||workspaceInteger(value.get("revision"),0,9007199254740991L,"revision")!=r)throw new JSONException("Workspace source finish binding");}
             public void releaseSource(long h,long ticket)throws JSONException {Object result=invokeHandle(h,"nativeWorkspaceSourceAbort",registration);if(!(result instanceof Boolean))throw new JSONException("Workspace abort receipt");}
-            public long createTarget(String metadata)throws JSONException {long target=create(sourceBundle);try{if(!Boolean.TRUE.equals(invokeHandle(target,"nativeWorkspaceTargetCreate",metadata)))throw new JSONException("Workspace target create");return target;}catch(JSONException|RuntimeException|Error error){free(target);throw error;}}
-            public void writeTarget(long h,int slot,int offset,byte[] bytes){writeBuffer(h,slot,offset,bytes);}
+            public long createTarget(String metadata)throws JSONException {long target=createRuntime(sourceBundle);try{if(!Boolean.TRUE.equals(invokeHandle(target,"nativeWorkspaceTargetCreate",metadata)))throw new JSONException("Workspace target create");return target;}catch(JSONException|RuntimeException|Error error){free(target);throw error;}}
+            public void writeTarget(long h,int slot,int offset,byte[] bytes){BaroChartTrace.typedTransfer(h,"nativeAsyncTargetBuffer");writeBuffer(h,slot,offset,bytes);}
             public void startTarget(long h)throws JSONException {if(!Boolean.TRUE.equals(invokeHandle(h,"nativeAsyncStart")))throw new JSONException("Workspace target start");}
             public WorkspaceRestoreJob.Progress stepTarget(long h,int bars)throws JSONException {Object encoded=invokeHandle(h,"nativeAsyncStep",bars);if(!(encoded instanceof String))throw new JSONException("Workspace progress encoding");JSONObject p=new JSONObject((String)encoded);Object phase=p.get("phase"),complete=p.get("complete");if(!(phase instanceof String)||!(complete instanceof Boolean)||!java.util.Arrays.asList("validate","store-index","calculate","indices","workspace-checkpoints","workspace-ready").contains(phase)||((Boolean)complete)!=phase.equals("workspace-ready"))throw new JSONException("Workspace target phase");return new WorkspaceRestoreJob.Progress((String)phase,workspaceInteger(p.get("done"),0,9007199254740991L,"progress"),workspaceInteger(p.get("total"),0,9007199254740991L,"total"),(Boolean)complete);}
             public void finishTarget(long h)throws JSONException {JSONObject value=(JSONObject)invokeHandle(h,"nativeWorkspaceTargetFinish");if(!"aster.native-workspace-target-ready".equals(value.get("schema"))||workspaceInteger(value.get("version"),1,1,"version")!=1||!"target-ready".equals(value.get("status"))||!Boolean.FALSE.equals(value.get("hostPublished"))||workspaceInteger(value.getJSONObject("plan").get("totalBytes"),1,WorkspaceRestoreJob.MAX_BYTES,"logical bytes")!=expectedBytes)throw new JSONException("Workspace target finish binding");}
@@ -1054,18 +1082,18 @@ public final class BaroChartEngine implements AutoCloseable {
             public long begin(long h,String id,String params,long r,long token)throws JSONException{JSONObject v=(JSONObject)invokeHandle(h,"nativeParamsSourceBegin",id,new JSONObject(params),r,NativeJobBudget.MAX_BYTES,token);if(workspaceInteger(v.get("registration"),1,9007199254740991L,"registration")!=token)throw new JSONException("Params begin registration");return workspaceInteger(v.get("ticket"),1,9007199254740991L,"ticket");}
             public ParamsUpdateJob.Descriptor admit(long h,long ticket,long r)throws JSONException{JSONObject v=(JSONObject)invokeHandle(h,"nativeParamsSourceStep",ticket,8,r);Object complete=v.get("complete");if(!(complete instanceof Boolean))throw new JSONException("Params admission completion");if(!((Boolean)complete))return null;if("noop".equals(v.get("phase")))return new ParamsUpdateJob.Descriptor(null,0,0,true);if(!"copy".equals(v.get("phase")))throw new JSONException("Params admission phase");Object metadata=v.get("metadataJSON");if(!(metadata instanceof String)||((String)metadata).length()>131072)throw new JSONException("Params metadata limit");JSONObject meta=new JSONObject((String)metadata);return new ParamsUpdateJob.Descriptor((String)metadata,(int)workspaceInteger(meta.get("length"),0,BaroChartColumns.MAX_BARS,"length"),workspaceInteger(v.getJSONObject("plan").get("totalBytes"),1,NativeJobBudget.MAX_BYTES,"logical bytes"),false);}
             public void checkSource(long h,long ticket,long r)throws JSONException{paramsTrue(invokeHandle(h,"nativeParamsSourceCheck",ticket,r));}
-            public byte[] readSource(long h,long ticket,int slot,int offset,int count){return readBuffer(h,ticket,slot,offset,count);}
-            public long createTarget(){return create(sourceBundle);}
+            public byte[] readSource(long h,long ticket,int slot,int offset,int count){BaroChartTrace.typedTransfer(h,"nativeAsyncBuffer");return readBuffer(h,ticket,slot,offset,count);}
+            public long createTarget(){return createRuntime(sourceBundle);}
             public void initializeTarget(long h,String metadata)throws JSONException{paramsTrue(invokeHandle(h,"nativeParamsTargetCreate",metadata));}
-            public void writeTarget(long h,int slot,int offset,byte[] bytes){writeBuffer(h,slot,offset,bytes);}
+            public void writeTarget(long h,int slot,int offset,byte[] bytes){BaroChartTrace.typedTransfer(h,"nativeAsyncTargetBuffer");writeBuffer(h,slot,offset,bytes);}
             public void startTarget(long h)throws JSONException{paramsTrue(invokeHandle(h,"nativeParamsTargetStart"));}
             public boolean stepTarget(long h,int bars)throws JSONException{JSONObject p=(JSONObject)invokeHandle(h,"nativeParamsTargetStep",bars);Object phase=p.get("phase"),flag=p.get("complete");if(!(flag instanceof Boolean)||!java.util.Arrays.asList("validate","calculate","outputs","ready").contains(phase)||((Boolean)flag)!=phase.equals("ready"))throw new JSONException("Params target progress");long done=workspaceInteger(p.get("done"),0,9007199254740991L,"progress"),total=workspaceInteger(p.get("total"),0,9007199254740991L,"total");if(done>total)throw new JSONException("Params progress bounds");return (Boolean)flag;}
             public ParamsUpdateJob.Result result(long h)throws JSONException{Object text=invokeHandle(h,"nativeParamsTargetDescriptor");if(!(text instanceof String)||((String)text).length()>131072)throw new JSONException("Params result metadata");JSONObject v=new JSONObject((String)text);return new ParamsUpdateJob.Result((String)text,v.getJSONArray("outputs").length(),(int)workspaceInteger(v.get("capacity"),16,BaroChartColumns.MAX_BARS,"capacity"),(int)workspaceInteger(v.get("checkpointCount"),0,16385,"checkpoint count"));}
-            public byte[] readResult(long h,long token,int slot,int offset,int count){return readBuffer(h,token,slot,offset,count);}
+            public byte[] readResult(long h,long token,int slot,int offset,int count){BaroChartTrace.typedTransfer(h,"nativeAsyncBuffer");return readBuffer(h,token,slot,offset,count);}
             public ParamsUpdateJob.Record checkpoint(long h,int ordinal)throws JSONException{JSONObject v=(JSONObject)invokeHandle(h,"nativeParamsTargetCheckpoint",ordinal);Object text=v.get("text");if(!(text instanceof String))throw new JSONException("Params checkpoint text");return new ParamsUpdateJob.Record((int)workspaceInteger(v.get("index"),0,BaroChartColumns.MAX_BARS,"checkpoint index"),(String)text);}
             public void freeTarget(long h){free(h);}
             public void receive(long h,long ticket,String text,long r)throws JSONException{paramsTrue(invokeHandle(h,"nativeParamsSourceReceive",ticket,text,r));}
-            public void writeResult(long h,long ticket,int slot,int offset,byte[] bytes,long r)throws JSONException{paramsTrue(invokeHandle(h,"nativeParamsSourceArmWrite",ticket,slot,offset,bytes.length/8,r));writeBuffer(h,slot,offset,bytes);}
+            public void writeResult(long h,long ticket,int slot,int offset,byte[] bytes,long r)throws JSONException{paramsTrue(invokeHandle(h,"nativeParamsSourceArmWrite",ticket,slot,offset,bytes.length/8,r));BaroChartTrace.typedTransfer(h,"nativeAsyncTargetBuffer");writeBuffer(h,slot,offset,bytes);}
             public void importCheckpoint(long h,long ticket,ParamsUpdateJob.Record record,long r)throws JSONException{paramsTrue(invokeHandle(h,"nativeParamsSourceCheckpoint",ticket,record.index,record.text,r));}
             public boolean validate(long h,long ticket,int values,long r)throws JSONException{JSONObject p=(JSONObject)invokeHandle(h,"nativeParamsSourceValidate",ticket,values,r);Object flag=p.get("complete");if(!(flag instanceof Boolean))throw new JSONException("Params validation completion");return (Boolean)flag;}
             public void prepare(long h,long ticket,long r)throws JSONException{paramsTrue(invokeHandle(h,"nativeParamsSourcePrepare",ticket,r));}
@@ -1095,7 +1123,7 @@ public final class BaroChartEngine implements AutoCloseable {
         return new ParamsUpdateJob.Receipt((String)status,registration);
     }
     private static long workspaceInteger(Object value,long min,long max,String label)throws JSONException {if(!(value instanceof Number))throw new JSONException("Workspace numeric "+label);double n=((Number)value).doubleValue();if(!Double.isFinite(n)||n!=Math.rint(n)||n<min||n>max)throw new JSONException("Workspace integer "+label);return (long)n;}
-    private static Object invokeHandle(long h,String function,Object... args) throws JSONException {return new JSONArray("["+call(h,function,new JSONArray(args).toString())+"]").get(0);}
+    private static Object invokeHandle(long h,String function,Object... args) throws JSONException {return new JSONArray("["+callRuntime(h,function,new JSONArray(args).toString())+"]").get(0);}
     private static final class Transfer {
         final int slot,offset,entry,inputCount,uiKind;final byte[] bytes;final String rows;
         Transfer(int slot,int offset,byte[] bytes){this.slot=slot;this.offset=offset;this.bytes=bytes;entry=-1;rows=null;inputCount=0;uiKind=0;}
@@ -1151,7 +1179,7 @@ public final class BaroChartEngine implements AutoCloseable {
                 }
                 while(slotIndex<buffers.length()){
                     JSONObject buffer=buffers.getJSONObject(slotIndex);int length=buffer.getInt("length");if(slotOffset==length){slotIndex++;slotOffset=0;continue;}
-                    int count=Math.min(262144,length-slotOffset);long began=System.nanoTime();byte[] bytes=readBuffer(handle,ticket,buffer.getInt("slot"),slotOffset,count);long elapsed=System.nanoTime()-began;ownerCopyNanos+=elapsed;ownerCopyMaxNanos=Math.max(ownerCopyMaxNanos,elapsed);
+                    int count=Math.min(262144,length-slotOffset);BaroChartTrace.typedTransfer(handle,"nativeAsyncBuffer");long began=System.nanoTime();byte[] bytes=readBuffer(handle,ticket,buffer.getInt("slot"),slotOffset,count);long elapsed=System.nanoTime()-began;ownerCopyNanos+=elapsed;ownerCopyMaxNanos=Math.max(ownerCopyMaxNanos,elapsed);
                     if(bytes==null||bytes.length!=count*8)throw new IllegalStateException("Async typed buffer copy length");
                     Transfer chunk=new Transfer(buffer.getInt("slot"),slotOffset,bytes);slotOffset+=count;copiedBytes+=bytes.length;copyChunks++;intermediatePeakBytes=Math.max(intermediatePeakBytes,bytes.length*2L);
                     if(!transfers.offer(chunk))throw new IllegalStateException("Async transfer backpressure");progress("capture",copiedBytes,totalBytes(),false);return;
@@ -1167,11 +1195,11 @@ public final class BaroChartEngine implements AutoCloseable {
         private long totalCheckpoints() throws JSONException {long n=0;JSONArray list=descriptor.getJSONArray("checkpoints");for(int i=0;i<list.length();i++)n+=list.getJSONObject(i).getLong("total");return n;}
         private void captureUI(boolean begin){if(terminal||stopRequested()||activeJob!=this||handle==0){stopOnce(handle==0?"closed":"superseded");releaseOnOwner();transfers.offer(new Transfer());return;}try{long started=System.nanoTime();invokeHandle(handle,"nativeAsyncCheck",ticket);String json=(String)invokeHandle(handle,begin?"nativeAsyncUIBegin":"nativeAsyncUINext",ticket);if(json.length()>262144)throw new IllegalStateException("UI transfer character limit");int utf8Bytes=json.getBytes(StandardCharsets.UTF_8).length;if(utf8Bytes>1048576)throw new IllegalStateException("UI transfer UTF-8 limit");boolean complete=!begin&&json.equals("{\"complete\":true}");long elapsed=System.nanoTime()-started;uiSnapshotNanos+=elapsed;uiSnapshotMaxNanos=Math.max(uiSnapshotMaxNanos,elapsed);uiChunks++;uiChars+=json.length();uiUtf8Bytes+=utf8Bytes;if(!transfers.offer(new Transfer(json,begin?1:complete?3:2)))throw new IllegalStateException("UI transfer backpressure");progress("ui-capture",uiChunks,0,false);}catch(Throwable error){failure=error;stopOnce(classify(error));releaseOnOwner();transfers.offer(new Transfer());}}
         private void runWorker(){long prepared=0;boolean handedOff=false;try {
-            if(stopRequested())return;long began=System.nanoTime();prepared=create(sourceBundle);invokeHandle(prepared,kind.equals("correction")?"nativeAsyncCreate":"nativePrepareCreate",descriptor.getString("metadataJSON"));createNanos=System.nanoTime()-began;workerMemoryPeak=memoryPeak(prepared);handler.post(this::captureNext);
+            if(stopRequested())return;long began=System.nanoTime();prepared=createRuntime(sourceBundle);invokeHandle(prepared,kind.equals("correction")?"nativeAsyncCreate":"nativePrepareCreate",descriptor.getString("metadataJSON"));createNanos=System.nanoTime()-began;workerMemoryPeak=memoryPeak(prepared);handler.post(this::captureNext);
             while(!stopRequested()){
                 Transfer transfer=transfers.poll(50,java.util.concurrent.TimeUnit.MILLISECONDS);if(transfer==null)continue;if(stopRequested())break;
-                if(transfer.inputCount>0){long copyStart=System.nanoTime();inputColumns.copyInto(prepared,transfer.slot,transfer.offset,transfer.inputCount);long elapsed=System.nanoTime()-copyStart;inputWriteNanos+=elapsed;inputWriteMaxNanos=Math.max(inputWriteMaxNanos,elapsed);copiedBytes+=transfer.inputCount*8L;copyChunks++;intermediatePeakBytes=Math.max(intermediatePeakBytes,transfer.inputCount*8L);progress("copy-input",copiedBytes,inputOwnedBytes,false);}
-                else if(transfer.bytes!=null){writeBuffer(prepared,transfer.slot,transfer.offset,transfer.bytes);}
+                if(transfer.inputCount>0){BaroChartTrace.typedTransfer(prepared,"nativeAsyncTargetBuffer");long copyStart=System.nanoTime();inputColumns.copyInto(prepared,transfer.slot,transfer.offset,transfer.inputCount);long elapsed=System.nanoTime()-copyStart;inputWriteNanos+=elapsed;inputWriteMaxNanos=Math.max(inputWriteMaxNanos,elapsed);copiedBytes+=transfer.inputCount*8L;copyChunks++;intermediatePeakBytes=Math.max(intermediatePeakBytes,transfer.inputCount*8L);progress("copy-input",copiedBytes,inputOwnedBytes,false);}
+                else if(transfer.bytes!=null){BaroChartTrace.typedTransfer(prepared,"nativeAsyncTargetBuffer");writeBuffer(prepared,transfer.slot,transfer.offset,transfer.bytes);}
                 else if(transfer.rows!=null){invokeHandle(prepared,"nativeAsyncCheckpointImport",transfer.entry,transfer.rows);}
                 else break;
                 workerMemoryPeak=Math.max(workerMemoryPeak,memoryPeak(prepared));transfer=null;handler.post(this::captureNext);

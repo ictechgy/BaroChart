@@ -71,7 +71,7 @@ check('workspace and params share opaque admission, not source registries', () =
 check('pending record cannot own client callbacks, Error or strong Engine/job', () => {
   const fields=record.slice(0,record.search(/\binit\s*\(/));
   assert.match(fields,/weak var engine: BaroChartEngine\?/);assert.match(fields,/weak var job: BaroChartParamsJob\?/);
-  assert.match(fields,/weak var sourceIdentity: JSContext\?/);
+  assert.match(fields,/weak var sourceIdentity: BaroChartCoreRuntime\?/);
   assert.doesNotMatch(fields,/\b(?:Error|Result|Any|AnyObject|JSValue)\b|->|\b(?:completion|callback|progress)\b/);
   ordered(method(job,'finish'),'terminal = true','lock.unlock()','params = nil','plan = nil','record = nil','let callback = completion','completion = nil','progress = nil','callback?(');
 });
@@ -112,7 +112,7 @@ check('recovery is bounded, main-only and returns status instead of redelivery',
 });
 check('original runtime never swaps to worker context', () => {
   assert.doesNotMatch(job,/contextBacking\s*=(?!=)|contextRuntime\s*=(?!=)|nativeAsyncFinish|nativeWorkspaceSourceFinish/);
-  assert.match(method(job,'compute'),/JSContext\(virtualMachine:JSVirtualMachine\(\)\)/);
+  assert.match(method(job,'compute'),/BaroChartRuntimeFactory\.makeIsolated\(like: sourceBackend\)/);
   assert.doesNotMatch(method(job,'compute'),/return context|return value|return row/);
 });
 check('whole worker autoreleasepool exits before owner publication or cleanup', () => {
@@ -126,12 +126,12 @@ check('owner tasks guard cancellation and source identity around callback-capabl
   ordered(method(job,'sourceCall'),'try check()','try finalOwner()','try autoreleasepool','nativeParamsSourceCheck','try operation(source)','try check()','try finalOwner()','return result');
   const owner=method(job,'finalOwner');assert.match(compact(owner),/engine\.activeParams===self,engine\.revision==sourceRevision/);
   assert.match(compact(owner),/engine\.contextBacking===source/);
-  assert.doesNotMatch(owner,/asterInvoke|callback|notifyChanges/);
+  assert.doesNotMatch(owner,/asterInvoke|\.invoke\(|\.perform\(|callback|notifyChanges/);
 });
 check('cancellation linearizes before JS publication with no JS under the lock', () => {
   const publish=method(job,'publish');
   ordered(publish,'nativeParamsSourcePrepare','try check()','try finalOwner()','lock.lock()','publishing = true','lock.unlock()','if stopped','record.outcome = .unknown','nativeParamsSourcePublish','catch {try record.recover()}','settle(nil)');
-  assert.doesNotMatch(publish.slice(publish.indexOf('lock.lock()'),publish.indexOf('lock.unlock()')),/asterInvoke|accept\(|recover\(|notify/);
+  assert.doesNotMatch(publish.slice(publish.indexOf('lock.lock()'),publish.indexOf('lock.unlock()')),/asterInvoke|\.invoke\(|\.perform\(|accept\(|recover\(|notify/);
   const pool=block(publish,/autoreleasepool/);ordered(pool,'guard let source = record.context','nativeParamsSourcePublish');assert.doesNotMatch(pool,/settle\(|notifyChanges/);
   assert.equal((publish.match(/let source =/g)||[]).length,1);
   assert.match(compact(method(job,'cancel')),/if!terminal&&!publishing/);
@@ -140,8 +140,9 @@ check('cancellation linearizes before JS publication with no JS under the lock',
 check('bounded owned binary copies use arm and write in one owner closure', () => {
   const compute=method(job,'compute');
   assert.equal((compute.match(/min\(16384,/g)||[]).length,2);
-  ordered(compute,'Data(bytes:try asterTypedBytes(value,source,count:count),count:count*8)','nativeAsyncTargetBuffer','copyMemory');
-  const arm=compute.indexOf('nativeParamsSourceArmWrite'),write=compute.indexOf('nativeAsyncTargetBuffer',arm),copy=compute.indexOf('copyMemory',write);
+  // 복사는 이음새의 readFloat64Data·writeFloat64가 한다(M0 Task 6): 쓰기는 대상 뷰를 받는 호출과 바이트 복사가 한 호출이다.
+  ordered(compute,'source.readFloat64Data("nativeAsyncBuffer",[plan.ticket,slot,at,count],count:count)','writeFloat64("nativeAsyncTargetBuffer"','from:bytes.baseAddress!');
+  const arm=compute.indexOf('nativeParamsSourceArmWrite'),write=compute.indexOf('writeFloat64("nativeAsyncTargetBuffer"',arm),copy=compute.indexOf('return true',write);
   assert.ok(arm>=0&&write>arm&&copy>write);assert.doesNotMatch(compute.slice(arm,copy),/DispatchQueue|onOwner|report\(|wait\(/);
   assert.match(compute,/plan.capacity \* outputs.count \* 8 <= 256\*1024\*1024/);
 });
