@@ -68,6 +68,10 @@ Android Studio에서 `examples/compose-sample`을 열고 API 26 이상 기기·�
 
 **Pause → Line → Save → Restore**로 확인합니다. iOS와 마찬가지로 이 샘플의 워크스페이스는 같은 원본 데이터를 요구합니다. [수명과 데이터 이벤트](ANDROID-GUIDE.ko.md).
 
+## 시세 연결
+
+[실행 가능한 초기 조회·스트림 레시피](FEED-INTEGRATION.ko.md)로 조회/이벤트 겹침, 순번 누락, 취소와 재연결을 확인합니다. 로컬 예제는 `node scripts/serve-feed.mjs`로 실행합니다.
+
 ## 첫 통합 확인
 
 1. 크기가 0이 아닌 컨테이너에 차트가 표시됩니다.

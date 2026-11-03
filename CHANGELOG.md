@@ -7,6 +7,7 @@ All notable changes to this project are documented here. The format follows [Kee
 Native SDK commercial-readiness work. See the [design](docs/superpowers/specs/2026-11-01-native-sdk-commercial-design.md) and the [iOS](docs/IOS-GUIDE.md) and [Android](docs/ANDROID-GUIDE.md) guides.
 
 ### Added
+- Host-owned feed connection recipe and local HTTP/SSE example: subscribe-before-snapshot buffering, contiguous sequence/duplicate checks, explicit reconnect, stale-generation cancellation, and bounded response/event/source budgets. Existing SDK data APIs are reused.
 - Platform-specific first-integration guide linking the web, React, SwiftUI and Compose consumers.
 - Main demo drawing-object manager and an application-owned analysis file that restores captured bars, studies, drawings and viewport. Invalid or cancelled restores retain the mounted chart; successful restore pauses the synthetic stream. The file is limited to 250,000 bars / 32 MiB; SDK workspace schemas are unchanged.
 - Typed Swift and Android APIs: `BaroChartEngine(options:)` / `BaroChartEngine.create(context, options)`, data events, series, 35 indicator kinds, 16 drawing tools, themes, symbols, visible range, workspace save/restore with cancellation, crosshair values.
