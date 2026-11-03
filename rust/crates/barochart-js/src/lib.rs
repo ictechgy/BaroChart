@@ -14,12 +14,10 @@
 //! 이식 코드는 Rust 표준의 실수 포맷(`{:.N}`·`{:e}`)과 `f64::min`/`max`/`round`/`signum`,
 //! `str::trim`, serde 대신 이 커널을 부른다. 이 규칙은 `scripts/rust/check-bans.mjs`가 CI에서 검사한다.
 //!
-//! `unsafe`: 기기 타깃(iOS·macOS·Android)에서는 `forbid`다. wasm32 하네스 빌드만 `deny`로 두고,
-//! `math`의 호스트 import 블록 하나에서만 허용한다. Rust 2024에서 외부 함수 선언은 `unsafe extern`
-//! 블록이어야 하고, `forbid`는 안쪽에서 다시 허용할 수 없기 때문이다. 출하 바이너리에는 이 블록이 들어가지 않는다.
+//! `unsafe`: 이 의미 커널에서는 모든 타깃에서 금지한다. wasm32 호스트 import와 raw-pointer 처리는
+//! `barochart-ffi` 한곳에서 맡고, 커널에는 안전한 수학 함수 포인터만 설치한다.
 
-#![cfg_attr(not(target_arch = "wasm32"), forbid(unsafe_code))]
-#![cfg_attr(target_arch = "wasm32", deny(unsafe_code))]
+#![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
 pub mod date;

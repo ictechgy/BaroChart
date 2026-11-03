@@ -39,7 +39,9 @@ test('the Rust workspace job installs the pinned toolchain and runs every Rust g
   'node scripts/rust/install-cbindgen.mjs',
   'node scripts/rust/check-header.mjs',
   'node scripts/rust/c-smoke.mjs',
+  'node --test test/rust-wasm-harness.test.mjs',
  ])assert.ok(job.includes(command),`rust job must run ${command}`);
+ assert.match(job,/REQUIRE_WASM: '1'/);
  // 같은 코퍼스의 r(ECMA)·q(Android QuickJS)를 두 실제 엔진과 비교해야 한다.
  assert.match(job,/^\s+run: node scripts\/rust\/conformance\.mjs --count 100000 --engines v8,quickjs\s*$/m);
 });
@@ -48,4 +50,18 @@ test('every action is pinned to a full commit SHA',()=>{
  const uses=[...workflow.matchAll(/uses:\s*([^\s#]+)/g)].map(match=>match[1]);
  assert.ok(uses.length>=6);
  for(const ref of uses)assert.match(ref,/@[0-9a-f]{40}$/,ref+' must be pinned to a commit SHA');
+});
+
+test('native jobs exercise the optional Rust packages and keep the JS-only lane',()=>{
+ const ios=jobBlock('ios-build'),android=jobBlock('android-build'),smoke=jobBlock('android-x86-smoke');
+ for(const job of [ios,android,smoke]){
+  assert.match(job,/rustup toolchain install/);
+  assert.match(job,/node scripts\/rust\/cargo\.mjs fetch --locked/);
+ }
+ assert.match(ios,/node scripts\/rust\/build-xcframework\.mjs/);
+ assert.match(ios,/BAROCHART_RUST_XCFRAMEWORK/);
+ assert.match(ios,/swift test/);
+ assert.match(android,/-PbarochartRust=false/);
+ assert.match(android,/-PbarochartQuickjs=false/);
+ assert.match(smoke,/kr\.coden\.barochart\.RustRuntimeTest/);
 });

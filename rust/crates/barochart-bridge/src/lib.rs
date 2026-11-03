@@ -6,18 +6,18 @@ use barochart_js::error::JsError;
 use barochart_js::json::JsValue;
 use barochart_js::string::JsString;
 
-/// A native bridge handler operating on an exclusively borrowed engine.
+/// 배타적으로 빌린 엔진에서 동작하는 네이티브 브리지 핸들러다.
 pub type Handler = fn(&mut Engine, &[JsValue]) -> Result<JsValue, JsError>;
 
-/// Implemented functions; this table is the sole source of supports().
+/// 구현한 함수 표이며 supports()가 조회하는 유일한 원천이다.
 pub static FUNCTIONS: &[(&str, Handler)] = &[("nativeInit", native_init)];
 
-/// Reports whether the current scaffold implements the named function.
+/// 현재 뼈대가 지정한 함수를 구현하는지 돌려준다.
 pub fn supports(name: &str) -> bool {
     FUNCTIONS.iter().any(|(key, _)| *key == name)
 }
 
-/// Calls an implemented function or returns the staged backend's unavailable error.
+/// 구현한 함수를 부르거나 단계적 백엔드의 사용 불가 오류를 돌려준다.
 pub fn call(engine: &mut Engine, name: &str, args: &[JsValue]) -> Result<JsValue, JsError> {
     match FUNCTIONS.iter().find(|(key, _)| *key == name) {
         Some((_, handler)) => handler(engine, args),

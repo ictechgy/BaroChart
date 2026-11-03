@@ -44,4 +44,9 @@ test('committed header identifies cbindgen and keeps the engine incomplete',asyn
  assert.match(header,/BC_OK = 0/);
  assert.match(header,/BC_INVALID = 6/);
  assert.match(header,/bc_buf_new_copy/);
+ for(const symbol of ['bc_buf_free','bc_f64_buf_free','bc_read_f64','bc_write_f64','bc_packet','bc_memory_stats','bc_supports']){
+  assert.match(header,new RegExp(`\\b${symbol}\\(`),`native header must retain ${symbol}`);
+ }
+ assert.equal([...header.matchAll(/\bbc_engine_new\(/g)].length,1,'native constructor must have exactly one signature');
+ assert.doesNotMatch(header,/\b(?:bc_alloc|bc_free|host_release|js_log|js_exp|js_hypot|zone_resolve|zone_offset_seconds)\s*\(/);
 });

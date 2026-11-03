@@ -1,0 +1,13 @@
+[package]
+name = "barochart-wasm"
+description = "Node WASM conformance harness shell for the BaroChart Rust core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+barochart-ffi = { path = "../barochart-ffi" }

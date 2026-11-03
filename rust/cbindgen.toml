@@ -14,6 +14,7 @@ header = "/* cbindgen 0.29.4가 생성한 파일이다. 수정하지 말고 node
 parse_deps = false
 
 [export]
+exclude = ["host_release", "js_log", "js_exp", "js_hypot", "zone_resolve", "zone_offset_seconds"]
 include = [
   "BC_FLAG_LOSSLESS",
   "BcBuf",
