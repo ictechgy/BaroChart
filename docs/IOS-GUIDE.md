@@ -165,6 +165,8 @@ Cancelling the surrounding task cancels the restore and throws `.cancelled`; the
 - The view pauses rendering in the background and resumes when the app becomes active.
 - `BaroChartView` never closes the engine. Close it when its owner is released.
 
+The SwiftUI sample owns its synthetic stream in a scene-aware `.task`: backgrounding suspends updates, and returning resumes only if the user left streaming enabled. Save and Restore pause it. Its dataset revision changes after every accepted event, so restoring metadata against changed bars reports an error. Rotation retains the in-memory analysis; process termination does not persist it. The fixed stream button stays reachable while the other actions scroll horizontally. The sample enables Dynamic Type for chart labels; very large text can shorten labels to an ellipsis. [Mobile verification and manual limits](measurements/2026-11-04-mobile-quality.md).
+
 ## Error handling
 
 Typed API methods throw only `BaroChartError`:

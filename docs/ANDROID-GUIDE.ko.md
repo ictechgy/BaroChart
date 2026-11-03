@@ -172,6 +172,8 @@ val handle = engine.restoreWorkspace(document, binding) { error ->
 - 터치·키 입력 중 실패는 뷰 밖으로 던지지 않고 `OnChartErrorListener`로 전달합니다.
 - `BaroChart`와 `BaroChartView`는 엔진을 닫지 않습니다. 소유자가 사라질 때 직접 닫으세요.
 
+Compose 샘플은 `AndroidViewModel`이 엔진과 메모리의 분석을 보존하고 `onCleared`에서 닫습니다. 합성 스트림은 `repeatOnLifecycle(STARTED)` 안에서만 동작하므로 백그라운드에서는 갱신을 멈추고 복귀 시 사용자의 일시정지 상태를 지킵니다. Save와 Restore도 스트림을 멈춥니다. 수락한 이벤트마다 데이터 revision을 바꿔 저장 뒤 달라진 봉에 메타데이터를 조용히 복원하지 않습니다. 구성 변경 동안 분석을 유지하며 프로세스 종료까지 저장하지는 않습니다. 스트림 버튼은 고정하고 나머지 동작은 가로로 스크롤합니다. 차트 글자에도 시스템 글자 배율을 켰으며, 매우 큰 글자는 말줄임표로 줄어들 수 있습니다. [모바일 검증과 수동 확인 범위](measurements/2026-11-04-mobile-quality.md).
+
 ## 오류 처리
 
 타입 API 메서드는 unchecked 예외인 `BaroChartException` 하나만 던집니다.

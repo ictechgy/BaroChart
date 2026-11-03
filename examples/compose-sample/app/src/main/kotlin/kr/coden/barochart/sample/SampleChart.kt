@@ -1,7 +1,10 @@
 package kr.coden.barochart.sample
 
+import android.app.Application
 import android.content.Context
+import androidx.lifecycle.AndroidViewModel
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlin.math.cos
@@ -28,7 +31,7 @@ import kr.coden.barochart.Theme
 /**
  * 샘플 화면의 상태와 차트 엔진을 소유한다(메인 스레드 전용).
  *
- * 액티비티가 onCreate에서 만들고 onDestroy에서 [close]한다. 실제 앱에서는 ViewModel이 소유하는 편이 좋다.
+ * [SampleChartOwner]가 구성 변경 동안 보존하며 소유자가 끝날 때 [close]한다.
  */
 class SampleChart(context: Context) {
     /** Compose BaroChart에 넘기는 엔진(이 객체가 소유) */
@@ -46,6 +49,9 @@ class SampleChart(context: Context) {
     private val bars = syntheticBars(240).toMutableList()
     private var savedWorkspace: String? = null
     private var tick = 0
+    private var dataRevision by mutableIntStateOf(0)
+    val streamSummary: String get() = "Bars ${bars.size} · Updates $dataRevision"
+    private val binding: DatasetBinding get() = DatasetBinding("SAMPLE:SYNTH", dataRevision.toString(), "raw", "USD", Adjustment.RAW)
 
     init {
         engine.setBars(bars)
@@ -63,13 +69,17 @@ class SampleChart(context: Context) {
     }
 
     /** 현재 차트 설정·지표·드로잉을 작업공간 문서로 저장한다 */
-    fun save() = perform("Saved") { savedWorkspace = engine.saveWorkspace(BINDING) }
+    fun save(): Boolean {
+        isStreaming = false
+        return perform("Saved") { savedWorkspace = engine.saveWorkspace(binding) }
+    }
 
     /** 저장한 작업공간을 복원한다. 저장 뒤 봉이 추가됐다면 코어가 거부하고 오류 배너가 뜬다 */
     fun restore() {
+        isStreaming = false
         val document = savedWorkspace ?: run { errorMessage = "Save a workspace first."; return }
         try {
-            engine.restoreWorkspace(document, BINDING) { error ->
+            engine.restoreWorkspace(document, binding) { error ->
                 if (error == null) { status = "Restored"; errorMessage = null } else report(error)
             }
         } catch (error: BaroChartException) {
@@ -88,20 +98,21 @@ class SampleChart(context: Context) {
 
     /** 1초마다 현재 봉을 갱신하고 15번째마다 새 봉을 추가한다(합성 데이터) */
     fun streamTick() {
+        if (!isStreaming) return
         tick += 1
         val last = bars.last()
         val drift = sin(tick / 3.0) * 0.4
         if (tick % 15 == 0) {
             val next = Bar(last.time + 60_000, last.close, last.close + 0.6, last.close - 0.6, last.close + drift, 900.0)
-            if (perform(status) { engine.apply(DataEvent.append(next)) }) bars.add(next)
+            if (perform(status) { engine.apply(DataEvent.append(next)) }) { bars.add(next); dataRevision++ }
         } else {
             val close = last.close + drift
             val updated = Bar(last.time, last.open, max(last.high, close), min(last.low, close), close, last.volume + 10)
-            if (perform(status) { engine.apply(DataEvent.update(updated)) }) bars[bars.lastIndex] = updated
+            if (perform(status) { engine.apply(DataEvent.update(updated)) }) { bars[bars.lastIndex] = updated; dataRevision++ }
         }
     }
 
-    /** 엔진을 닫는다. 액티비티 onDestroy에서 한 번 부른다 */
+    /** 소유 ViewModel의 최종 정리에서 엔진을 닫는다. */
     fun close() = engine.close()
 
     /** 엔진 호출을 실행하고 성공 문구 또는 오류 배너를 갱신한다. 성공하면 true */
@@ -112,8 +123,6 @@ class SampleChart(context: Context) {
     }
 
     private companion object {
-        val BINDING = DatasetBinding("SAMPLE:SYNTH", "1", "raw", "USD", Adjustment.RAW)
-
         /** 가격(캔들+EMA) · 거래량 · RSI 세 패널 구성 */
         fun layout() = EngineOptions(
             listOf(Panel("price", 3.0), Panel("volume", 1.0), Panel("rsi", 1.0)),
@@ -132,4 +141,10 @@ class SampleChart(context: Context) {
             }
         }
     }
+}
+
+/** Keeps the engine and in-memory analysis across activity configuration changes. */
+class SampleChartOwner(application: Application) : AndroidViewModel(application) {
+    val chart = SampleChart(application)
+    override fun onCleared() { chart.close() }
 }

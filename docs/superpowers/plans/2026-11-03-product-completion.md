@@ -1,6 +1,6 @@
 # Remaining product improvements
 
-User authorization: continue all remaining items after #25, through implementation, verification, PR/CI/merge. Base `d6833f0`. Existing Rust rewrite remains a separate unfinished objective; the user has been asked whether full M1b–M7 is included in this run.
+User authorization: continue all remaining items after #25, through implementation, verification, PR/CI/merge. Base `d6833f0`. Existing Rust rewrite remains a separate unfinished objective; the user explicitly confirmed that full M1b–M7 is included and approved project-local cbindgen metadata/download/install from Crates.io/index/static and official cbindgen GitHub.
 
 ## 3. Data connection recipes
 
@@ -18,7 +18,7 @@ Acceptance: new regression tests distinguish every behavior fix; available nativ
 
 Use existing pinned/accessible runtimes, identical data and visible work, explicit cold/warm sampling and source hashes. Separate API CPU, first-render scheduling, gesture/frame pacing and memory. Preserve failures/inconclusive comparisons. Existing native measurements are historical CPU/offscreen results, not display FPS.
 
-The Rust engine is a count-echo scaffold on `feat/rust-m1b-abi-packaging`, not a chart backend. Never publish a JS/Rust chart-speed ratio from that scaffold. If the user selects product-first, deliver a reproducible JS/native baseline, fair competitor comparison and machine-readable unavailable status for the full Rust chart lane. If the user includes the complete rewrite, continue the existing Rust M1b–M7 plan and compare only after the implementation/conformance gates.
+The Rust engine is a count-echo scaffold on `feat/rust-m1b-abi-packaging`, not a chart backend. Never publish a JS/Rust chart-speed ratio from that scaffold. The user selected the complete rewrite. Continue the existing Rust M1b–M7 plan and compare only after the implementation/conformance gates. Current JS/native and competitor baselines can be prepared earlier, but cannot substitute for the final Rust chart comparison.
 
 ## 6. Migration and operations
 
