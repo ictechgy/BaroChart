@@ -13,7 +13,7 @@ GLM 9건과 DeepSeek 9건의 비어 있지 않은 답변을 현재 코드·회�
 | A3 독립 시나리오 | measured가 prior보다 커도 독립 2.5MiB 시나리오를 바꾸지 않는다. 직접 반례 회귀를 추가했다. 실제 측정 행의 값은 변하지 않았다. |
 | A4/A5 M2 의존·typed kind | store `apply_data_event`는 Task2 통합으로 옮기고 Node22가 제공하지 않는 Float16 fixture를 요구하지 않는다. 다른 플랫폼의 실제 지원은 별도 metadata/검사 대상이다. |
 | A6 LOC 분모 | 0·음수·비정수·비유한 line count를 명시적으로 거절해 진단 필드가 JSON null로 바뀌지 않게 했다. |
-| 추가 Root 계획 점검 | nativeInit 반환은 무조건0이 아닌 실제 store.length이며 실제 data leaf 파일명과 계획을 맞췄다. |
+| 추가 Root 계획 점검 | nativeInit 반환은 무조건0이 아닌 검증된 count 원값(`-0` 포함)이며 실제 data leaf 파일명과 계획을 맞췄다. |
 
 수정 후 전체 Node **5953/5953(skip0)**, manifest **4/4**, Swift JS **67/67**·Rust **82/82** 및 두 release 경고0를 확인했다. Native Rust85/WASM4/C ABI/Android 기존 통과는 변경되지 않은 입력의 증거를 재사용한다. 새 SwiftPM/Swift 실행 증거는 M1b 통합 보고서와 로컬 `artifacts/task6-parent/`에 있다. M1b scaffold를 chart parity나 속도 비교로 해석하지 않는다.
 
