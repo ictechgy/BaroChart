@@ -16,6 +16,8 @@ import {createIndicatorEditor} from '../examples/web/indicator-editor.mjs';
 import {createIndicatorPicker} from '../examples/web/indicator-picker.mjs';
 import {createLiveReadout} from '../examples/web/live-readout.mjs';
 import {safeCheckpointStringify} from '../src/core/checkpoint-validation.mjs';
+import {readWorkspaceDocument,installWorkspaceConfiguration} from '../src/core/workspace.mjs';
+import * as analysisHelpers from '../examples/web/analysis-session.mjs';
 import {fixture,event,key} from './helpers/customization-dom.mjs';
 const root=new URL('../',import.meta.url);
 const src=readFileSync(new URL('examples/web/demo.mjs',root),'utf8'),html=readFileSync(new URL('examples/web/index.html',root),'utf8');
@@ -26,16 +28,18 @@ function demo(t){
  for(const m of html.matchAll(/<button data-tool="([^"]+)" title="([^"]+)"[^>]*>/g)){const n=env.node('button');n.dataset.tool=m[1];n.title=m[2];n.disabled=/\bdisabled\b/.test(m[0]);toolNodes.push(n);}
  const $=id=>nodes.get(id);env.document.getElementById=$;env.document.querySelectorAll=()=>toolNodes;env.document.querySelector=()=>toolNodes.find(n=>n.getAttribute('aria-pressed')==='true');
  for(const[id,value]of Object.entries({market:'us',count:'64',series:'candles',scale:'linear',renderer:'canvas',indicator:'ema','crosshair-snap':'free',magnet:'off'}))$(id).value=value;
- const requests=[],timers=new Map();let timerSerial=0;
+ const requests=[],workspaceRequests=[],timers=new Map();let timerSerial=0;
  const prepareChartModel=(request,options)=>new Promise((resolve,reject)=>{requests.push({request,options,resolve,reject});options.signal.addEventListener('abort',()=>reject(new DOMException('Cancelled','AbortError')),{once:true});});
  const createChart=(host,model,opts)=>{const chart=new lib.CanvasChart(host,model,{...opts,observeResize:false,layerCaching:false,dpr:()=>1,rendererFactory:()=>({kind:'canvas',render(){},dispose(){}})});env.charts.push(chart);env.models.push(model);return chart;};
- const args={...lib,...layoutHelpers,...presetHelpers,...historyHelpers,applyLayoutFrame,createLayoutMemory,createIndicatorEditor,createIndicatorPicker,createLiveReadout,safeCheckpointStringify,createChart,modelRequest,drawingImportMessage,createDrawingFileImport,prepareChartModel,matchMedia:()=>({matches:false}),setInterval:(fn,delay)=>{const id=++timerSerial;timers.set(id,{fn,delay});return id;},clearInterval:id=>timers.delete(id)};
- const body=src.replace(/^import[^\n]+\n/gm,'').replaceAll('import.meta.url',JSON.stringify(new URL('examples/web/demo.mjs',root).href)).replace('await load();','const initialLoad=load(); return {initialLoad,load,addIndicator,install,importLayoutFile,get layoutHistoryStatus(){return layoutHistory.status();},get model(){return model;},get chart(){return chart;},get preparing(){return preparing;}};');
+ const prepareWorkspaceAsync=(store,text,options)=>new Promise((resolve,reject)=>{workspaceRequests.push({store,text,options,resolve,reject});options.signal.addEventListener('abort',()=>reject(new DOMException('Cancelled','AbortError')),{once:true});});
+ const args={...lib,...layoutHelpers,...presetHelpers,...historyHelpers,...analysisHelpers,applyLayoutFrame,createLayoutMemory,createIndicatorEditor,createIndicatorPicker,createLiveReadout,safeCheckpointStringify,createChart,modelRequest,drawingImportMessage,createDrawingFileImport,prepareChartModel,prepareWorkspaceAsync,matchMedia:()=>({matches:false}),setInterval:(fn,delay)=>{const id=++timerSerial;timers.set(id,{fn,delay});return id;},clearInterval:id=>timers.delete(id)};
+ const body=src.replace(/^import[^\n]+\n/gm,'').replaceAll('import.meta.url',JSON.stringify(new URL('examples/web/demo.mjs',root).href)).replace('await load();','const initialLoad=load(); return {initialLoad,load,addIndicator,install,importLayoutFile,importAnalysisFile:typeof importAnalysisFile==="function"?importAnalysisFile:null,get layoutHistoryStatus(){return layoutHistory.status();},get model(){return model;},get chart(){return chart;},get preparing(){return preparing;}};');
  const state=Function(...Object.keys(args),body)(...Object.values(args));
 
  const complete=async (index=requests.length-1)=>{const r=requests[index],m=new lib.ChartModel(r.request.options);m.store.setColumns(lib.seededColumns(64));const api=new lib.ChartAPI(m);for(const d of r.request.options.indicators??[])api.addIndicator(d.id,d.name,d.params);for(const s of r.request.options.series??[])m.addSeries(s);r.resolve(m);await Promise.resolve();await Promise.resolve();return m;};
  t.after(async()=>{event(env.window,'pagehide',{persisted:false});await state.initialLoad;await Promise.resolve();for(const fn of cleanup)fn();});
- return {...env,$,state,requests,complete,toolNodes};
+ const completeWorkspace=async()=>{const r=workspaceRequests.at(-1),doc=readWorkspaceDocument(r.text),m=new lib.ChartModel({store:r.store,...doc.chart}),api=new lib.ChartAPI(m);for(const e of doc.indicators)api.addIndicator(e.id,e.name,e.params);installWorkspaceConfiguration(m,doc);r.resolve(m);await Promise.resolve();await Promise.resolve();return m;};
+ return {...env,$,state,requests,workspaceRequests,complete,completeWorkspace,toolNodes};
 }
 const dependent=['add-indicator','clear-indicators','series','scale','renderer','stream','load','fit','recent','save','explore','explore-read'];
 const commandIds=['series','scale','renderer','clear-indicators','save','load','lock','stream'];
@@ -118,6 +122,69 @@ test('an explicit retained panel resumes autoscale when a study reuses its tempo
 function chooseRSIOverlay(f){
  f.$('layout-indicator').value='rsi';f.$('layout-indicator').onchange();f.$('layout-panel').value='price';f.$('layout-panel').onchange();f.$('layout-axis').value='independent';f.$('layout-axis').onchange();
 }
+
+function analysisFile(f){
+ new lib.ChartAPI(f.state.model).setSymbol(lib.DEMO_SYMBOLS.us);
+ const text=analysisHelpers.saveDemoAnalysis(f.state.chart.api,{market:'us',count:10000,light:false});
+ return {size:new TextEncoder().encode(text).length,text:async()=>text};
+}
+test('analysis controls are unavailable until the first accepted chart',async t=>{
+ const f=demo(t);
+ for(const id of ['save-analysis','load-analysis','drawing-manager-controls']){assert.ok(f.$(id),id);assert.equal(f.$(id).disabled,true,id);}
+ await f.complete();await f.state.initialLoad;
+ for(const id of ['save-analysis','load-analysis','drawing-manager-controls'])assert.equal(f.$(id).disabled,false,id);
+});
+test('analysis restore replaces bars, studies, drawings and view without reusing the old journal',async t=>{
+ const f=demo(t);await f.complete();await f.state.initialLoad;
+ f.state.chart.api.addDrawing({id:'saved-level',type:'horizontal',points:[{time:f.state.model.store.at(0).time,price:100}]});
+ f.state.chart.api.setVisibleRange(10,35);
+ const file=analysisFile(f),before=f.state.model,saved=before.store.at(0);
+ f.state.chart.api.deleteDrawings(['saved-level']);f.state.chart.api.applyDataEvent({kind:'correction',bar:{...saved,volume:999}});f.state.chart.api.setVisibleRange(20,50);
+ const loading=f.state.importAnalysisFile(file);await settle();
+ const candidate=await f.completeWorkspace();await loading;
+ assert.equal(f.state.model,candidate);assert.equal(before.disposed,true);
+ assert.deepEqual(candidate.store.at(0),saved);assert.deepEqual(candidate.view,{from:10,to:35});
+ assert.deepEqual(candidate.drawings.items.map(d=>d.id),['saved-level']);assert.equal(candidate.drawings.undoStack.length,0);
+ assert.equal(f.state.preparing,false);assert.equal(f.$('stream').getAttribute('aria-pressed'),'false');
+ assert.match(f.$('analysis-status').textContent,/복원/);
+});
+test('invalid or oversized analysis input retains the accepted chart and avoids preparation',async t=>{
+ const f=demo(t);await f.complete();await f.state.initialLoad;const accepted=f.state.chart;
+ let read=false;
+ await f.state.importAnalysisFile({size:analysisHelpers.MAX_ANALYSIS_BYTES+1,text(){read=true;}});
+ assert.equal(read,false);await f.state.importAnalysisFile({size:2,text:async()=>'{}'});
+ assert.equal(f.workspaceRequests.length,0);assert.equal(f.state.chart,accepted);assert.equal(accepted.disposed,false);assert.equal(f.state.preparing,false);
+});
+test('cancelled analysis preparation preserves the current chart',async t=>{
+ const f=demo(t);await f.complete();await f.state.initialLoad;const accepted=f.state.chart,file=analysisFile(f);
+ const loading=f.state.importAnalysisFile(file);await settle();f.$('cancel-compute').onclick();await loading;
+ assert.equal(f.state.chart,accepted);assert.equal(accepted.disposed,false);assert.equal(f.state.preparing,false);
+});
+test('superseded analysis file reads cannot replace a newer chart',async t=>{
+ const f=demo(t);await f.complete();await f.state.initialLoad;const original=analysisFile(f);let finishRead;
+ const loading=f.state.importAnalysisFile({...original,text:()=>new Promise(resolve=>{finishRead=resolve;})});
+ const newer=f.state.load(),replacement=await f.complete();await newer;
+ finishRead(await original.text());await loading;
+ assert.equal(f.state.model,replacement);assert.equal(f.workspaceRequests.length,0);assert.equal(f.state.preparing,false);
+});
+test('edits during analysis preparation retain the mounted chart and dispose the candidate',async t=>{
+ const f=demo(t);await f.complete();await f.state.initialLoad;const accepted=f.state.model,file=analysisFile(f);
+ const loading=f.state.importAnalysisFile(file);await settle();
+ f.state.chart.api.addDrawing({id:'new-edit',type:'horizontal',points:[{time:accepted.store.at(0).time,price:100}]});
+ const candidate=await f.completeWorkspace();await loading;
+ assert.equal(f.state.model,accepted);assert.equal(candidate.disposed,true);assert.equal(accepted.drawings.items.length,1);
+});
+test('panning during analysis preparation preserves the new user viewport',async t=>{
+ const f=demo(t);await f.complete();await f.state.initialLoad;const accepted=f.state.model,file=analysisFile(f);
+ const loading=f.state.importAnalysisFile(file);await settle();f.state.chart.api.setVisibleRange(5,20);
+ const candidate=await f.completeWorkspace();await loading;
+ assert.equal(f.state.model,accepted);assert.equal(candidate.disposed,true);assert.deepEqual(accepted.view,{from:5,to:20});
+});
+test('terminal navigation cancels analysis preparation and cannot publish its result',async t=>{
+ const f=demo(t);await f.complete();await f.state.initialLoad;const file=analysisFile(f),accepted=f.state.model;
+ const loading=f.state.importAnalysisFile(file);await settle();event(f.window,'pagehide',{persisted:false});await loading;
+ assert.equal(f.workspaceRequests[0].options.signal.aborted,true);assert.equal(f.state.model,accepted);assert.equal(accepted.disposed,true);assert.equal(f.state.preparing,false);
+});
 
 test('nested layout handlers during a placement notification cannot append another command',async t=>{
  const f=demo(t);await f.complete();await f.state.initialLoad;chooseRSIOverlay(f);const api=f.state.chart.api,invalidate=api.invalidate;let nested=0;

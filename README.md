@@ -27,6 +27,8 @@ A custom web interface built with BaroChart: synthetic candles, EMA overlays, vo
 
 Core/web renderers have **no npm runtime dependencies**. React is optional. The library does **not** supply market feeds, broker execution, accounts, journal backends or cloud synchronization. Trade markers display host-owned data; they do not place orders.
 
+[Choose your integration](docs/GETTING-STARTED.md) · [Analysis save/restore workflow](docs/ANALYSIS-DEMO.md)
+
 ## Quick start
 
 Use **Node.js 22+**. No dependency install is required for the plain web demo.

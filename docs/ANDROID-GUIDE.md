@@ -17,7 +17,7 @@ BaroChart draws financial charts natively: the chart core runs in an embedded Qu
 
 ### Gradle
 
-Artifacts use the group `kr.coden`. Once a release is published to Maven Central, add:
+The current development preview uses a [local checkout](#before-the-first-release). Artifacts use the group `kr.coden`. Once a release is published to Maven Central, add:
 
 ```kotlin
 // app/build.gradle.kts

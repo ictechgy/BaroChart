@@ -1,6 +1,7 @@
 import {drawingImportMessage} from './import-errors.mjs';
 import {createDrawingFileImport} from './drawing-file-import.mjs';
-import {createChart,ChartAPI,createLayout,DARK_THEME,LIGHT_THEME,builtinIndicators,DEMO_SYMBOLS,formatPrice,zonedParts,demoCalendar} from '../../src/index.mjs';
+import {createChart,ChartAPI,createLayout,attachDrawingPanel,prepareWorkspaceAsync,DARK_THEME,LIGHT_THEME,builtinIndicators,DEMO_SYMBOLS,formatPrice,demoCalendar} from '../../src/index.mjs';
+import {saveDemoAnalysis,readDemoAnalysis,MAX_ANALYSIS_BYTES} from './analysis-session.mjs';
 import {prepareChartModel,setIndicatorParamsAsync} from '../../src/web/worker.mjs';
 import {createIndicatorEditor} from './indicator-editor.mjs';
 import {createIndicatorPicker} from './indicator-picker.mjs';
@@ -84,6 +85,7 @@ const drawingFileImport=createDrawingFileImport({getChart:()=>preparing?null:cha
 const editorStatus=message=>setText('indicator-editor-status',message);
 const indicatorEditor=createIndicatorEditor({root:$('indicator-editor'),getChart:()=>chart,isBusy:()=>preparing||!pageActive||pageClosed,onApplyParams:applyIndicatorParams,onApplyStyle:applyIndicatorStyle,onRemove:removeSelectedIndicator,onStatus:editorStatus});
 const presetStatus=message=>setText('chart-layout-status',message);
+const analysisStatus=message=>setText('analysis-status',message);
 const layoutMemory=createLayoutMemory({getStorage:()=>window.localStorage,getPreset:currentLayoutPreset,onStatus:presetStatus});
 const rememberedLayout=layoutMemory.read();let startupPreset=rememberedLayout.preset;
 $('remember-chart-layout').checked=rememberedLayout.enabled;
@@ -95,7 +97,7 @@ function sync(){if(!model||!chart||chart.disposed)return;$('explore').setAttribu
  if(typeof syncIndicatorLayoutControls==='function')syncIndicatorLayoutControls();
  indicatorEditor.sync();
 }
-function busy(value){preparing=value;if(value)drawingFileImport.cancel();$('cancel-compute').hidden=!value;$('workspace').setAttribute('aria-busy',String(value));for(const id of ['add-indicator','clear-indicators','series','scale','renderer','stream','load','layout-indicator','layout-panel','layout-axis','apply-indicator-placement','separate-indicator-panel','reorder-panel','panel-up','panel-down','layout-undo','layout-redo','save-chart-layout','load-chart-layout'])$(id).disabled=value||!model||!chart||chart.disposed;const ready=!!model&&!model.disposed&&!!chart&&!chart.disposed;for(const id of ['fit','recent','save','explore','explore-read'])$(id).disabled=!ready;for(const node of document.querySelectorAll('[data-tool]'))node.disabled=!ready;if(!value&&typeof syncIndicatorLayoutControls==='function')syncIndicatorLayoutControls();indicatorEditor.sync();syncIndicatorAddControl();}
+function busy(value){preparing=value;if(value)drawingFileImport.cancel();$('cancel-compute').hidden=!value;$('workspace').setAttribute('aria-busy',String(value));for(const id of ['add-indicator','clear-indicators','series','scale','renderer','stream','load','layout-indicator','layout-panel','layout-axis','apply-indicator-placement','separate-indicator-panel','reorder-panel','panel-up','panel-down','layout-undo','layout-redo','save-chart-layout','load-chart-layout','save-analysis','load-analysis','drawing-manager-controls'])$(id).disabled=value||!model||!chart||chart.disposed;const ready=!!model&&!model.disposed&&!!chart&&!chart.disposed;for(const id of ['fit','recent','save','explore','explore-read'])$(id).disabled=!ready;for(const node of document.querySelectorAll('[data-tool]'))node.disabled=!ready;if(!value&&typeof syncIndicatorLayoutControls==='function')syncIndicatorLayoutControls();indicatorEditor.sync();syncIndicatorAddControl();}
 function syncIndicatorAddControl(){indicatorPicker.sync();$('add-indicator').disabled=!indicatorPicker.selectedName||!model||model.disposed||!chart||chart.disposed||preparing||!pageActive||pageClosed;}
 function progress(p){status(p.phase==='data'?'원본 데이터 준비 '+Math.round(p.done/p.total*100)+'%…':p.phase==='indicators'?'지표 계산 '+p.done+'/'+p.total+'…':'화면 인덱스를 준비합니다…');}
 function defaults(market){const symbol=DEMO_SYMBOLS[market];return {panels:[{id:'price',label:'PRICE',weight:3.5},{id:'volume',label:'VOLUME',weight:.8,precision:0},{id:'rsi',label:'RSI',weight:1,range:[0,100],precision:0}],series:[{id:'price',label:'가격',type:$('series').value,panel:'price',color:'#58cadb'},{id:'volume',label:'거래량',type:'histogram',source:'volume',panel:'volume',color:'#2b6e78'},{id:'ema',label:'EMA',type:'line',panel:'price',indicator:'ema',color:'#f0b755'},{id:'upper',label:'볼린저 상단',type:'line',panel:'price',indicator:'bb',output:'upper',color:'#63779e',width:1},{id:'lower',label:'볼린저 하단',type:'line',panel:'price',indicator:'bb',output:'lower',color:'#63779e',width:1},{id:'rsi',label:'RSI',type:'line',panel:'rsi',indicator:'rsi',color:'#aa91f7'}],indicators:[{id:'ema',name:'ema',params:{}},{id:'bb',name:'bollinger',params:{}},{id:'rsi',name:'rsi',params:{}}],precision:symbol.priceDecimals,axisWidth:market==='crypto'?125:85,theme:light?LIGHT_THEME:DARK_THEME};}
@@ -115,15 +117,19 @@ function palette(){
  }
 }
 function layoutPanels(){if(!model)return;const total=model.panels.reduce((a,p)=>a+p.weight,0),min=Math.min(...model.panels.map(p=>p.weight)),height=Math.max(515,Math.ceil(72*total/min+38));$('chart-row').style.height=(height+(matchMedia('(max-width:600px)').matches?64:0))+'px';chart?.resize();}
-function install(next,market,count,newExtras=extras,{adoption=null,beforeCommit=null}={}){
- drawingFileImport.cancel();const same=market===loadedMarket,oldModel=model,oldChart=chart;
- const symbol=DEMO_SYMBOLS[market];next.symbol=symbol;next.priceFormatter=v=>formatPrice(v,symbol);next.timeFormatter=t=>{const p=zonedParts(t,symbol.timezone);return p.month+'/'+p.day+' '+p.hour+':'+p.minute;};
- if(oldModel)journals.set(loadedMarket,oldModel.drawings);if(journals.has(market))next.drawings=journals.get(market);
- if(same&&oldModel){const span=oldModel.view.to-oldModel.view.from;next.setVisibleRange(oldModel.follow?next.store.length-span-.5:oldModel.view.from,oldModel.follow?next.store.length-.5:oldModel.view.to);next.follow=oldModel.follow;}
- const host=document.createElement('div');host.style='width:100%;height:100%';let created;
+function drawingPanelHost(target){
+ const host=document.createElement('div');attachDrawingPanel(host,target,{label:'도형 관리'});return host;
+}
+function install(next,market,count,newExtras=extras,{adoption=null,beforeCommit=null,restoreAnalysis=false}={}){
+ drawingFileImport.cancel();const same=market===loadedMarket,oldMarket=loadedMarket,oldModel=model,oldChart=chart;
+ const symbol=DEMO_SYMBOLS[market];if(!restoreAnalysis){const precision=next.precision;new ChartAPI(next).setSymbol(symbol);next.precision=precision;}
+ if(!restoreAnalysis){if(oldModel)journals.set(loadedMarket,oldModel.drawings);if(journals.has(market))next.drawings=journals.get(market);}
+ if(!restoreAnalysis&&same&&oldModel){const span=oldModel.view.to-oldModel.view.from;next.setVisibleRange(oldModel.follow?next.store.length-span-.5:oldModel.view.from,oldModel.follow?next.store.length-.5:oldModel.view.to);next.follow=oldModel.follow;}
+ const host=document.createElement('div');host.style='width:100%;height:100%';let created,drawingHost;
  try{
   createLayout(next,Math.max(100,oldChart?.canvas?.clientWidth||800),Math.max(80,oldChart?.canvas?.clientHeight||500));
   created=createChart(host,next,{renderer:$('renderer').value,dataExplorer:dataExplorer(),onError:error=>status(friendly(error)),onFallback:reason=>status('GPU를 사용할 수 없어 Canvas로 전환했습니다. '+reason.slice(0,80))});
+  drawingHost=drawingPanelHost(created);
   beforeCommit?.();
  }catch(error){created?.destroy();next.dispose();throw error;}
  layoutAxisExplicit=false;layoutDraft=null;
@@ -138,12 +144,13 @@ function install(next,market,count,newExtras=extras,{adoption=null,beforeCommit=
  // Publish the mounted owner before tearing down the old chart. Any disposal
  // observer sees the new accepted chart, never a half-disposed old owner.
  model=next;chart=created;resetLayoutHistory(next);extras=newExtras;loadedMarket=market;loadedCount=count;streamCalendar=demoCalendar(market);rebindSyntheticRangePinsToModel(model);
+ if(restoreAnalysis){if(oldModel&&oldMarket!==market)journals.set(oldMarket,oldModel.drawings);journals.set(market,next.drawings);}
  $('chart').replaceChildren(host);window.aster={model,chart};liveReadout.bind(chart);
  host.addEventListener('aster:exploration',()=>{$('explore').setAttribute('aria-pressed',String(chart.dataExploration.active));});host.addEventListener('aster:render',sync);host.addEventListener('aster:state',sync);
  if(adoption){document.documentElement.dataset.chartTheme=light?'light':'dark';$('theme').setAttribute('aria-pressed',String(light));}else palette();
  $('series').value=model.series.find(series=>series.id==='price')?.type??'candles';$('scale').value=model.panels.find(panel=>panel.id==='price')?.scale??'linear';
  chart.setTool(document.querySelector('[data-tool][aria-pressed="true"]').dataset.tool);chart.api.setCrosshairSnap({mode:$('crosshair-snap').value});chart.api.setDrawingMagnet({mode:$('magnet').value});chart.controller.text=$('annotation').value;chart.canvas.setAttribute('aria-describedby','keyboard-help exploration-help selection data-summary');
- oldChart?.destroy({disposeModel:true});setText('symbol',symbol.id);setText('meta',symbol.currency+' · '+symbol.timezone+' · '+symbol.volumeUnit);layoutPanels();chart.invalidate();sync();
+ oldChart?.destroy({disposeModel:true});$('drawing-controls').replaceChildren(drawingHost);setText('symbol',symbol.id);setText('meta',symbol.currency+' · '+symbol.timezone+' · '+symbol.volumeUnit);layoutPanels();chart.invalidate();sync();
 }
 async function load({ignoreSaved=false}={}){
  if(!pageActive||pageClosed)return;cleanupSyntheticRangePins();const token=++job;controller?.abort();controller=new AbortController();stopStream();busy(true);
@@ -387,12 +394,42 @@ async function importLayoutFile(file){
   if(token===undefined||token===job)presetStatus(published?'배치는 적용됐지만 화면 정리 중 오류가 발생했습니다. 현재 차트를 확인하세요.':friendly(error));
  }finally{if(token!==undefined&&token===job){busy(false);if(streamIntent&&!document.hidden)startStream();}}
 }
+function downloadAnalysis(){
+ if(!layoutMutationReady())return;
+ try{
+  const text=saveDemoAnalysis(chart.api,{market:loadedMarket,count:loadedCount,light}),url=URL.createObjectURL(new Blob([text],{type:'application/json'})),link=document.createElement('a');
+  link.href=url;link.download='barochart-analysis.json';try{link.click();}finally{setTimeout(()=>URL.revokeObjectURL(url),1000);}
+  analysisStatus('시세·지표·도형·표시 범위를 분석 파일에 저장했습니다.');
+ }catch(error){analysisStatus(friendly(error));}
+}
+async function importAnalysisFile(file){
+ if(!file||!layoutMutationReady())return;
+ let owner,token,signal,candidate;
+ const check=()=>{
+  checkImportOwner(owner,token,signal);
+  if(model.drawings.items!==owner.items||model.drawings.undoStack.length!==owner.undoLength||model.drawings.redoStack.length!==owner.redoLength||!Object.is(model.view.from,owner.view.from)||!Object.is(model.view.to,owner.view.to)||model.follow!==owner.follow){const error=new Error('파일을 읽는 동안 도형이나 표시 범위가 바뀌었습니다. 다시 불러오세요.');error.name='StaleSourceError';throw error;}
+ };
+ try{
+  if(!Number.isSafeInteger(file.size)||file.size<0||file.size>MAX_ANALYSIS_BYTES)throw new RangeError('분석 파일은 32 MiB 이하여야 합니다.');
+  owner={...captureImportOwner(),items:model.drawings.items,undoLength:model.drawings.undoStack.length,redoLength:model.drawings.redoStack.length,view:{...model.view},follow:model.follow};
+  token=++job;controller?.abort();controller=new AbortController();signal=controller.signal;stopStream();busy(true);analysisStatus('분석 파일을 확인하고 있습니다.');
+  const text=await file.text();check();const saved=readDemoAnalysis(text);
+  candidate=await prepareWorkspaceAsync(saved.store,saved.workspace,{datasetBinding:saved.binding,signal,onProgress:p=>{if(token===job&&pageActive&&!pageClosed)analysisStatus(({snapshot:'저장된 시세를 준비하고 있습니다.',compute:'저장된 지표를 계산하고 있습니다.',validate:'복원할 차트를 확인하고 있습니다.'})[p.phase]??'분석 복원 준비 중입니다.');}});
+  check();const adoption={light:saved.light,generatedPanels:[],generatedAxes:[],panelPins:new Map(),axisPins:new Map()};
+  install(candidate,saved.market,saved.count,[],{adoption,restoreAnalysis:true,beforeCommit:check});candidate=null;
+  if(token!==job)return;streamIntent=false;stopStream();$('market').value=saved.market;$('count').value=String(saved.count);recordLayoutChange();
+  analysisStatus('분석을 복원했습니다. 저장한 시세·지표·도형·표시 범위를 적용했고 합성 스트림은 일시 정지했습니다.');
+ }catch(error){
+  const published=candidate&&model===candidate;if(candidate&&!published)candidate.dispose();
+  if(token===undefined||token===job)analysisStatus(published?'분석은 복원됐지만 화면 정리 중 오류가 발생했습니다. 현재 차트를 확인하세요.':friendly(error));
+ }finally{if(token!==undefined&&token===job){busy(false);if(streamIntent&&!document.hidden)startStream();}}
+}
 $('market').onchange=load;$('count').onchange=load;$('cancel-compute').onclick=()=>controller?.abort();$('fit').onclick=()=>chart?.api.fit();$('recent').onclick=()=>chart?.api.setVisibleRange(model.store.length-200.5,model.store.length-.5);
 $('series').onchange=()=>{if(!model||!chart||chart.disposed||preparing)return;const s=model.series.find(s=>s.id==='price'),old=s.type;try{chart.api.setSeries('price',{type:$('series').value});palette();chart.drawNow();recordLayoutChange();}catch(error){chart.api.setSeries('price',{type:old});$('series').value=old;status(friendly(error));}chart.invalidate();};
 $('scale').onchange=()=>{if(!model||!chart||chart.disposed||preparing)return;const old=model.panels.find(p=>p.id==='price').scale;try{chart.api.setPanel('price',{scale:$('scale').value});chart.drawNow();resetLayoutHistory(model);recordLayoutChange();}catch(error){chart.api.setPanel('price',{scale:old});$('scale').value=old;status(friendly(error));}chart.invalidate();};
 $('explore').onclick=()=>{if(!chart)return;try{chart.setDataExploration(!chart.dataExploration.active);$('explore').setAttribute('aria-pressed',String(chart.dataExploration.active));chart.canvas.focus({preventScroll:true});}catch(error){status(friendly(error));}};
 $('explore-read').onclick=()=>{if(!chart)return;try{chart.readExploration();}catch(error){status(friendly(error));}};
-  $('renderer').onchange=()=>{if(!model||!chart||chart.disposed||preparing)return;drawingFileImport.cancel();layoutDraft=null;layoutAxisExplicit=false;const tool=chart.controller.tool;chart.destroy();chart=createChart(chart.container,model,{renderer:$('renderer').value,dataExplorer:dataExplorer(),onError:error=>status(friendly(error))});chart.setTool(tool);chart.api.setCrosshairSnap({mode:$('crosshair-snap').value});chart.api.setDrawingMagnet({mode:$('magnet').value});chart.controller.text=$('annotation').value;chart.canvas.setAttribute('aria-describedby','keyboard-help exploration-help selection data-summary');window.aster={model,chart};liveReadout.bind(chart);chart.invalidate();sync();};
+  $('renderer').onchange=()=>{if(!model||!chart||chart.disposed||preparing)return;drawingFileImport.cancel();layoutDraft=null;layoutAxisExplicit=false;const tool=chart.controller.tool;chart.destroy();chart=createChart(chart.container,model,{renderer:$('renderer').value,dataExplorer:dataExplorer(),onError:error=>status(friendly(error))});chart.setTool(tool);chart.api.setCrosshairSnap({mode:$('crosshair-snap').value});chart.api.setDrawingMagnet({mode:$('magnet').value});chart.controller.text=$('annotation').value;chart.canvas.setAttribute('aria-describedby','keyboard-help exploration-help selection data-summary');window.aster={model,chart};liveReadout.bind(chart);$('drawing-controls').replaceChildren(drawingPanelHost(chart));chart.invalidate();sync();};
 $('theme').onclick=()=>{light=!light;palette();chart?.invalidate();recordLayoutChange();};
 for(const b of document.querySelectorAll('[data-tool]')){b.setAttribute('aria-pressed',String(b.dataset.tool==='select'));b.onclick=()=>{if(!chart)return;chart.setTool(b.dataset.tool);for(const x of document.querySelectorAll('[data-tool]'))x.setAttribute('aria-pressed',String(x===b));status('도구: '+b.title+' · '+(['channel','fibextension'].includes(b.dataset.tool)?'드래그 후 세 번째 핸들을 편집하세요.':'Esc로 취소할 수 있습니다.'));chart.canvas.focus({preventScroll:true});};}
 $('crosshair-snap').onchange=()=>{if(chart)chart.api.setCrosshairSnap({mode:$('crosshair-snap').value});status('십자선: '+$('crosshair-snap').selectedOptions[0].textContent+' · 포인터만 적용하며 도형 자석과 별개입니다.');};
@@ -408,6 +445,9 @@ $('apply-indicator-placement').onclick=applyIndicatorPlacement;$('separate-indic
 $('reorder-panel').onchange=()=>syncIndicatorLayoutControls();$('layout-undo').onclick=()=>navigateLayoutHistory('undo');$('layout-redo').onclick=()=>navigateLayoutHistory('redo');
 $('save-chart-layout').onclick=downloadLayout;$('load-chart-layout').onclick=()=>{if(layoutMutationReady())$('chart-layout-file').click();};
 $('chart-layout-file').onchange=e=>{const file=e.target.files[0];e.target.value='';void importLayoutFile(file);};
+$('open-drawing-manager').onclick=()=>{$('drawing-manager').open=true;};
+$('save-analysis').onclick=downloadAnalysis;$('load-analysis').onclick=()=>{if(layoutMutationReady())$('analysis-file').click();};
+$('analysis-file').onchange=e=>{const file=e.target.files[0];e.target.value='';void importAnalysisFile(file);};
 $('remember-chart-layout').onchange=()=>{const enabled=$('remember-chart-layout').checked,saved=layoutMemory.setEnabled(enabled);$('remember-chart-layout').checked=layoutMemory.enabled;if(saved){if(enabled){recordLayoutChange();layoutMemory.flush();}else presetStatus('배치를 자동으로 기억하지 않습니다.');}};
 $('forget-chart-layout').onclick=()=>{const cleared=layoutMemory.clear();$('remember-chart-layout').checked=layoutMemory.enabled;if(cleared){startupPreset=null;presetStatus('저장된 배치를 지웠습니다. 다음 방문은 기본 배치로 시작합니다.');}};
 function startStream(){if(timer||!model||model.disposed||!chart||chart.disposed||!pageActive||pageClosed||preparing||document.hidden)return;let ticks=0;timer=setInterval(()=>{try{const b=model.store.at(model.store.length-1),delta=Math.sin(++ticks*1.7)*.05*(model.symbol.id.endsWith('COIN')?1e-10:model.symbol.currency==='KRW'?700:1),close=Math.max(model.symbol.tickSize,b.close+delta);if(ticks%20)model.store.upsert({...b,close,high:Math.max(b.high,close),low:Math.min(b.low,close),volume:b.volume+20});else{let time=b.time+60000;const calendar=demoCalendarForStream();while(!calendar.at(time))time+=60000;model.store.append({time,open:close,high:close,low:close,close,volume:0});}}catch(error){streamIntent=false;stopStream();status(friendly(error));}},100);$('stream').setAttribute('aria-pressed','true');$('stream').textContent='Ⅱ 스트림 정지';}

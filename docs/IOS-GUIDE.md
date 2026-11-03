@@ -16,7 +16,7 @@ BaroChart draws financial charts natively: the chart core runs in JavaScriptCore
 
 ### Swift Package Manager
 
-Releases are tagged `X.Y.Z` on the repository. Once a release tag is published, add:
+The current development preview uses a [local checkout](#before-the-first-release). After the first `X.Y.Z` release tag is published, add:
 
 ```swift
 // Package.swift
