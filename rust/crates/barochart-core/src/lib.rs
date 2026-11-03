@@ -14,8 +14,14 @@ pub mod data;
 /// 순서를 고정한 구간 집계를 다룬다.
 pub mod range_index;
 
+/// 지표별 checkpoint 상태의 의미를 검증한다.
+pub mod indicator_checkpoint;
+/// 35 builtin과 pressure 계산을 typed dispatch로 연결한다.
+pub mod indicator_dispatch;
 /// 지표의 rolling·smoothing·checkpoint 공통 연산을 다룬다.
 pub mod indicator_helpers;
+/// 정적 linked module과 문서 binding을 다룬다.
+pub mod indicator_modules;
 /// 지표 파라미터의 값과 키 순서를 검증한다.
 pub mod indicator_params;
 /// 정적 지표 이름과 provenance 메타데이터를 다룬다.
@@ -30,8 +36,12 @@ pub mod indicators_momentum;
 pub mod indicators_volume;
 /// 시장 시각과 세션 달력을 다룬다.
 pub mod markets;
+/// 네이티브 staging checkpoint의 byte ledger를 다룬다.
+pub mod native_checkpoints;
 /// 세션 VWAP와 Pivots 계산을 다룬다.
 pub mod session_studies;
+/// 정적 pressure 지표를 다룬다.
+pub mod trusted_studies;
 
 use barochart_js::error::JsError;
 use barochart_js::string::JsString;

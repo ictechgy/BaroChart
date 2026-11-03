@@ -617,7 +617,8 @@ fn to_primitive_error() -> JsError {
     type_error(message)
 }
 
-fn to_string_units(value: &JsValue, dialect: NumberDialect) -> Result<JsString, JsError> {
+/// JSON 값 경계에서 JS ToString(string hint)을 수행하며 WTF-16과 대상 숫자 방언을 보존한다.
+pub fn js_to_string_with(value: &JsValue, dialect: NumberDialect) -> Result<JsString, JsError> {
     enum Action<'a> {
         Value(&'a JsValue, bool),
         Comma,
@@ -681,7 +682,7 @@ pub fn assert_json_text_depth_with(
     message: &str,
     dialect: NumberDialect,
 ) -> Result<JsString, JsError> {
-    let text = to_string_units(value, dialect)?;
+    let text = js_to_string_with(value, dialect)?;
     let mut depth = 0usize;
     let mut in_string = false;
     let mut escaped = false;

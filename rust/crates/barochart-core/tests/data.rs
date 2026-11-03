@@ -110,6 +110,76 @@ fn store_capacity_versions_bytes_and_serial_are_owner_scoped() {
 }
 
 #[test]
+fn change_wire_preserves_absent_and_own_undefined_added_fields() {
+    use barochart_js::json::{JsonMode, stringify_json};
+    let wire = |change: &barochart_core::data::DataChange| {
+        String::from_utf8(stringify_json(&change.to_js_value(), JsonMode::Lossless)).unwrap()
+    };
+    let mut state = ModelDataState::new(StoreOptions::default(), Vec::new()).unwrap();
+    let reset = state
+        .store_mut()
+        .set_data(Vec::new())
+        .unwrap()
+        .change
+        .unwrap();
+    assert!(!reset.added_present);
+    assert_eq!(wire(&reset), r#"{"from":0,"kind":"reset","version":2}"#);
+    let empty: [f64; 0] = [];
+    let input = ColumnInputs {
+        time: NumericColumn::F64(&empty),
+        open: NumericColumn::F64(&empty),
+        high: NumericColumn::F64(&empty),
+        low: NumericColumn::F64(&empty),
+        close: NumericColumn::F64(&empty),
+        volume: NumericColumn::F64(&empty),
+    };
+    let columns = state
+        .store_mut()
+        .set_columns(&input, None)
+        .unwrap()
+        .change
+        .unwrap();
+    assert!(columns.added_present);
+    assert_eq!(columns.added, None);
+    assert_eq!(
+        wire(&columns),
+        r#"{"from":0,"kind":"reset","version":3,"added":undefined}"#
+    );
+    let append = state
+        .store_mut()
+        .append(bar(T, 1.0, 1.0))
+        .unwrap()
+        .change
+        .unwrap();
+    assert!(!append.added_present);
+    assert_eq!(append.added, None);
+    assert_eq!(wire(&append), r#"{"from":0,"kind":"append","version":4}"#);
+    let prepend = state
+        .store_mut()
+        .prepend(vec![bar(T - 60_000.0, 1.0, 1.0)])
+        .unwrap()
+        .change
+        .unwrap();
+    assert_eq!(
+        wire(&prepend),
+        r#"{"from":0,"kind":"prepend","version":5,"added":1}"#
+    );
+    let batch = state
+        .store_mut()
+        .apply_events(
+            &[BatchEvent::Append(bar(T + 60_000.0, 1.0, 1.0))],
+            &BatchOptions::empty(),
+        )
+        .unwrap()
+        .change
+        .unwrap();
+    assert_eq!(
+        wire(&batch),
+        r#"{"from":2,"kind":"batch","version":6,"appended":1,"to":3}"#
+    );
+}
+
+#[test]
 fn set_data_is_atomic_and_empty_reset_still_publishes_one_change() {
     let mut state = ModelDataState::new(StoreOptions::default(), vec![bar(T, 1.0, 2.0)]).unwrap();
     let before = state.store().clone();
