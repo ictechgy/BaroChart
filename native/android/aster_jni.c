@@ -33,6 +33,18 @@ static char *utf8_n(JNIEnv *env,jstring text,size_t limit,size_t *written){
  jbyteArray bytes=(*env)->CallObjectMethod(env,text,encode,charset);if(!bytes||(*env)->ExceptionCheck(env))return NULL;jsize n=(*env)->GetArrayLength(env,bytes);if((size_t)n>limit){fail(env,"Native argument size limit");return NULL;}char *result=malloc((size_t)n+1);if(result){(*env)->GetByteArrayRegion(env,bytes,0,n,(jbyte*)result);if((*env)->ExceptionCheck(env)){free(result);result=NULL;}else{result[n]=0;if(written)*written=(size_t)n;}}(*env)->DeleteLocalRef(env,bytes);(*env)->DeleteLocalRef(env,charset);return result;
 }
 static char *utf8(JNIEnv *env,jstring text,size_t limit){return utf8_n(env,text,limit,NULL);}
+/* JSON 파서에 들어가기 전에 깊이만 검사한다. 문자열/이스케이프는 건너뛰고 문법 오류는 기존 파서가 결정한다. */
+static int argument_depth_exceeded(const char *text,size_t length){
+ int depth=0,in_string=0,escaped=0;
+ for(size_t i=0;i<length;i++){
+  unsigned char c=(unsigned char)text[i];
+  if(in_string){if(escaped)escaped=0;else if(c=='\\')escaped=1;else if(c=='"')in_string=0;}
+  else if(c=='"')in_string=1;
+  else if(c=='{'||c=='['){if(++depth>64)return 1;}
+  else if((c=='}'||c==']')&&depth>0)depth--;
+ }
+ return 0;
+}
 static jstring java_string_n(JNIEnv *env,const char *text,size_t length){
  if(!text||(*env)->ExceptionCheck(env))return NULL;jclass string=(*env)->FindClass(env,"java/lang/String");if(!string)return NULL;jmethodID init=(*env)->GetMethodID(env,string,"<init>","([BLjava/lang/String;)V");if(!init)return NULL;if(length>256*1024*1024){fail(env,"Native result size limit");return NULL;}jsize n=(jsize)length;jbyteArray bytes=(*env)->NewByteArray(env,n);if(!bytes)return NULL;(*env)->SetByteArrayRegion(env,bytes,0,n,(const jbyte*)text);if((*env)->ExceptionCheck(env))return NULL;jstring charset=(*env)->NewStringUTF(env,"UTF-8");if(!charset)return NULL;jstring result=(*env)->NewObject(env,string,init,bytes,charset);(*env)->DeleteLocalRef(env,bytes);(*env)->DeleteLocalRef(env,charset);return result;
 }
@@ -54,7 +66,7 @@ JNIEXPORT jlong JNICALL Java_kr_coden_barochart_BaroChartEngine_create(JNIEnv *e
  error:if(h->context)JS_FreeContext(h->context);if(h->runtime)JS_FreeRuntime(h->runtime);if(h->bridge)(*env)->DeleteGlobalRef(env,h->bridge);free(h);return 0;
 }
 JNIEXPORT jstring JNICALL Java_kr_coden_barochart_BaroChartEngine_call(JNIEnv *env,jclass cls,jlong handle,jstring name,jstring arguments){
- (void)cls;AsterHost *h=enter(env,handle);if(!h){fail(env,"Engine closed");return NULL;}JSContext *ctx=h->context;char *json=utf8(env,arguments,256*1024*1024);if(!json){fail(env,"UTF-8 allocation failed");return NULL;}JSValue args=JS_ParseJSON(ctx,json,strlen(json),"arguments");free(json);if(exception(h,args)){JS_FreeValue(ctx,args);return NULL;}
+ (void)cls;AsterHost *h=enter(env,handle);if(!h){fail(env,"Engine closed");return NULL;}char *json=utf8(env,arguments,256*1024*1024);if(!json){fail(env,"UTF-8 allocation failed");return NULL;}size_t json_length=strlen(json);if(argument_depth_exceeded(json,json_length)){free(json);fail(env,"SyntaxError: Native argument depth limit");return NULL;}JSContext *ctx=h->context;JSValue args=JS_ParseJSON(ctx,json,json_length,"arguments");free(json);if(exception(h,args)){JS_FreeValue(ctx,args);return NULL;}
  JSValue length=JS_GetPropertyStr(ctx,args,"length");uint32_t count=0;JS_ToUint32(ctx,&count,length);JS_FreeValue(ctx,length);if(count>16){JS_FreeValue(ctx,args);fail(env,"At most 16 arguments");return NULL;}JSValue argv[16];for(uint32_t i=0;i<count;i++)argv[i]=JS_GetPropertyUint32(ctx,args,i);
  JSValue global=JS_GetGlobalObject(ctx);const char *function=(*env)->GetStringUTFChars(env,name,NULL);if(!function){for(uint32_t i=0;i<count;i++)JS_FreeValue(ctx,argv[i]);JS_FreeValue(ctx,args);JS_FreeValue(ctx,global);return NULL;}JSValue fn=JS_GetPropertyStr(ctx,global,function);(*env)->ReleaseStringUTFChars(env,name,function);JSValue result=JS_Call(ctx,fn,global,count,argv);JS_FreeValue(ctx,fn);JS_FreeValue(ctx,global);for(uint32_t i=0;i<count;i++)JS_FreeValue(ctx,argv[i]);JS_FreeValue(ctx,args);
  if(exception(h,result)){JS_FreeValue(ctx,result);return NULL;}if(JS_IsUndefined(result)){JS_FreeValue(ctx,result);result=JS_NULL;}JSValue encoded=JS_JSONStringify(ctx,result,JS_UNDEFINED,JS_UNDEFINED);JS_FreeValue(ctx,result);if(exception(h,encoded)){JS_FreeValue(ctx,encoded);return NULL;}const char *text=JS_ToCString(ctx,encoded);jstring output=text?java_string(env,text):NULL;JS_FreeCString(ctx,text);JS_FreeValue(ctx,encoded);return output;

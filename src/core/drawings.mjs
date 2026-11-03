@@ -1,7 +1,7 @@
 import {isPositionDrawing,positionMetricsFor,drawingDocumentVersion,validateDrawingDocumentVersion} from './position-drawing.mjs';
 import {validateDrawing,canonicalDrawing} from './drawing-validation.mjs';
 import {labelMetrics,labelWidth} from './labels.mjs';
-import {optionRecord,boundedText,sizeLimit,RESOURCE_LIMITS} from './contracts.mjs';
+import {optionRecord,boundedText,sizeLimit,assertJsonTextDepth,RESOURCE_LIMITS} from './contracts.mjs';
 export {DRAWING_TYPES,drawingPointCount} from './drawing-validation.mjs';
 import {DRAWING_TYPES,drawingPointCount} from './drawing-validation.mjs';
 const copyDrawing = x => JSON.parse(JSON.stringify(x, (key,value)=>['axisId','seriesId'].includes(key)&&value===null?undefined:value));
@@ -39,7 +39,7 @@ export class DrawingStore {
   redo(){if(this.transaction)this.cancel();if(!this.redoStack.length)return false;this.undoStack.push(this.items.slice());this.items=this.redoStack.pop().slice();this.selected=null;this.trim();return true;}
   save(){if(this.transaction)throw new Error('Commit or cancel before saving');return drawingDocument(this.items,this.maxDocumentChars);}
   load(text,{styleDecoder=null,validatePanel=null,validateBinding=null}={}) {
-    boundedText(text,this.maxDocumentChars,'Drawing document',true);const doc=JSON.parse(text);optionRecord(doc,['schema','version','drawings'],'Drawing document');if(doc.schema!=='aster.drawings'||![1,2,3,4].includes(doc.version)||!Array.isArray(doc.drawings)||doc.drawings.length>this.maxDrawings)throw new TypeError('Unsupported drawing document');
+    boundedText(text,this.maxDocumentChars,'Drawing document',true);const doc=JSON.parse(assertJsonTextDepth(text,32,'Drawing document depth limit'));optionRecord(doc,['schema','version','drawings'],'Drawing document');if(doc.schema!=='aster.drawings'||![1,2,3,4].includes(doc.version)||!Array.isArray(doc.drawings)||doc.drawings.length>this.maxDrawings)throw new TypeError('Unsupported drawing document');
     const items=doc.drawings.map(d=>{validateDrawing(d);validateDrawingDocumentVersion(d,doc.version);if(validateBinding&&!validateBinding(d))throw new Error('Invalid drawing binding');if(validatePanel&&!validatePanel(d.panel))throw new Error('Missing drawing panel');const copy=copyDrawing(d);if(styleDecoder&&copy.style)copy.style=styleDecoder(copy.style);const next=canonicalDrawing(copy);validateDrawing(next);return frozenDrawing(next);});this.budget(items);if(new Set(items.map(d=>d.id)).size!==items.length)throw new TypeError('Duplicate drawing ids');if(this.transaction)throw new Error('Cannot load during a gesture');drawingDocument(items,this.maxDocumentChars);this.mutate(()=>{this.items=items;});this.selected=null;
   }
 }

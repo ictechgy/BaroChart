@@ -102,7 +102,7 @@ test('Java static: thin drawing translation facade returns the ordinary command 
 
 test('Java static: drawing translation retains owner/closed checks without adding an async BUSY gate', () => {
     order(jCommand, 'check();', 'if(ingestionCommand(operation))',
-        'invoke("nativeCommand",operation,new JSONArray(args))', 'if("translateDrawings".equals(operation))');
+        'invoke("nativeCommand",operation,argumentsArray(args))', 'if("translateDrawings".equals(operation))');
     const ownerCheck = body(java, /private void check\(/);
     order(ownerCheck, 'Thread.currentThread()!=owner', 'throw new IllegalStateException',
         'if(handle==0)', 'throw new IllegalStateException');

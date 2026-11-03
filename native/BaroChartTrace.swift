@@ -589,11 +589,13 @@ final class BaroChartRecordingCoreRuntime: BaroChartCoreRuntime {
 
     /// 인자를 먼저 쓰고 안쪽 런타임을 부른 뒤, 결과나 코어 예외를 기록한다.
     func perform(_ name: String, _ arguments: [Any]) -> BaroChartCoreOutcome {
+        if let error = BaroChartArgumentDepth.rejection(for: arguments) {return .rejected(error)}
         let pending = writer.begin(name, arguments)
         let outcome = inner.perform(name, arguments)
         if let pending = pending {
             switch outcome {
             case .missing: break
+            case .rejected: break
             case .returned(let value): writer.finish(pending, returned: value.javaScriptValue, in: value.javaScriptContext)
             case .threw(let exception): writer.finish(pending, threw: exception.javaScriptValue, in: exception.javaScriptContext)
             }

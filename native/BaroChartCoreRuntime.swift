@@ -14,10 +14,108 @@ enum BaroChartRuntimeBackend { case javaScript }
 enum BaroChartCoreOutcome {
     /// 그 이름의 전역이 없거나 undefined다(코어를 부르지 않았다).
     case missing
+    /// 호스트 인자 검사에서 거절됨(코어를 부르지 않았다).
+    case rejected(Error)
     /// 정상 반환한 값
     case returned(BaroChartCoreValue)
     /// 코어가 던진 값(예외는 이미 지웠다)
     case threw(BaroChartCoreValue)
+}
+
+/// Swift 값 컨테이너는 Objective-C로 재귀 브리징하기 전에 한 단계씩 읽는다.
+private protocol BaroChartArgumentContainer {
+    var argumentReference: AnyObject? {get}
+    func argumentChildren() -> AnyIterator<Any>
+}
+private extension BaroChartArgumentContainer {var argumentReference: AnyObject? {nil}}
+extension Array: BaroChartArgumentContainer {
+    fileprivate func argumentChildren() -> AnyIterator<Any> {
+        var iterator = makeIterator()
+        return AnyIterator {iterator.next().map {$0 as Any}}
+    }
+}
+extension Dictionary: BaroChartArgumentContainer {
+    fileprivate func argumentChildren() -> AnyIterator<Any> {
+        var iterator = makeIterator()
+        return AnyIterator {iterator.next().map {$0.value as Any}}
+    }
+}
+extension NSArray: BaroChartArgumentContainer {
+    fileprivate var argumentReference: AnyObject? {self}
+    fileprivate func argumentChildren() -> AnyIterator<Any> {
+        var index = 0
+        return AnyIterator {
+            guard index < self.count else {return nil}
+            defer {index += 1}
+            return self.object(at: index)
+        }
+    }
+}
+extension NSDictionary: BaroChartArgumentContainer {
+    fileprivate var argumentReference: AnyObject? {self}
+    fileprivate func argumentChildren() -> AnyIterator<Any> {
+        let iterator = objectEnumerator()
+        return AnyIterator {iterator.nextObject()}
+    }
+}
+private protocol BaroChartArgumentOptional {var argumentValue: Any? {get}}
+extension Optional: BaroChartArgumentOptional {
+    fileprivate var argumentValue: Any? {map {$0 as Any}}
+}
+
+/// 값으로 브리징하는 호스트 배열·딕셔너리를 검사한다. 이미 VM 안에 있는 JSValue·JSExport 참조는 읽지 않는다.
+/// 인자 배열이 깊이 1이다. 반복형 DFS와 참조 컨테이너 높이 메모로 순환·공유 부분 트리를 다룬다.
+enum BaroChartArgumentDepth {
+    private struct Frame {
+        var children: AnyIterator<Any>
+        let depth: Int
+        let reference: AnyObject?
+        var height = 1
+    }
+
+    private static func container(_ value: Any) -> BaroChartArgumentContainer? {
+        var current = value
+        while let optional = current as? BaroChartArgumentOptional {
+            guard let unwrapped = optional.argumentValue else {return nil}
+            current = unwrapped
+        }
+        return current as? BaroChartArgumentContainer
+    }
+
+    static func rejection(for arguments: [Any]) -> BaroChartLowLevelError? {
+        var frames = [Frame(children: arguments.argumentChildren(), depth: 1, reference: nil)]
+        var active = Set<ObjectIdentifier>()
+        // 참조도 보유해 순회 중 주소 재사용을 같은 컨테이너로 오인하지 않는다.
+        var completed: [ObjectIdentifier: (owner: AnyObject, height: Int)] = [:]
+        defer {withExtendedLifetime(completed) {}}
+        while !frames.isEmpty {
+            let last = frames.count - 1
+            guard let value = frames[last].children.next() else {
+                let done = frames.removeLast()
+                if let reference = done.reference {
+                    let id = ObjectIdentifier(reference)
+                    active.remove(id);completed[id] = (reference, done.height)
+                }
+                if !frames.isEmpty {frames[frames.count - 1].height = max(frames[frames.count - 1].height, done.height + 1)}
+                continue
+            }
+            guard let child = container(value) else {continue}
+            let depth = frames[last].depth + 1, reference = child.argumentReference
+            guard depth <= 64 else {return .javaScript("SyntaxError: Native argument depth limit")}
+            if let reference = reference {
+                let id = ObjectIdentifier(reference)
+                if active.contains(id) {return .javaScript("SyntaxError: Native argument depth limit")}
+                if let height = completed[id]?.height {
+                    guard depth + height - 1 <= 64 else {return .javaScript("SyntaxError: Native argument depth limit")}
+                    frames[last].height = max(frames[last].height, height + 1)
+                    continue
+                }
+                active.insert(id)
+            }
+            frames.append(Frame(children: child.argumentChildren(), depth: depth, reference: reference))
+        }
+        return nil
+    }
 }
 
 /// 백엔드 중립 결과 값. 엔진이 코어 결과에 쓰던 JSValue 멤버와 이름·의미가 같은 접근자만 둔다.
@@ -122,6 +220,7 @@ extension BaroChartCoreRuntime {
     func invoke(_ name: String, _ arguments: [Any]) throws -> BaroChartCoreValue {
         switch perform(name, arguments) {
         case .missing: throw BaroChartLowLevelError.javaScript("Missing function: \(name)")
+        case .rejected(let error): throw error
         case .returned(let value): return value
         case .threw(let exception):
             // Async begin/lease failures retain the same stable queue error code.
@@ -181,6 +280,7 @@ final class BaroChartJSCoreRuntime: BaroChartCoreRuntime {
 
     /// 이전 asterInvoke와 공개 call의 앞부분: 전역을 찾아 부르고, 예외가 있으면 지운 뒤 던진 값을 돌려준다.
     func perform(_ name: String, _ arguments: [Any]) -> BaroChartCoreOutcome {
+        if let error = BaroChartArgumentDepth.rejection(for: arguments) {return .rejected(error)}
         guard let function = javaScriptContext.objectForKeyedSubscript(name), !function.isUndefined,
               let value = function.call(withArguments: arguments) else {return .missing}
         if let exception = takeException() {return .threw(exception)}

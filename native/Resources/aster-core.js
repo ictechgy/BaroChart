@@ -57,6 +57,32 @@ function optionRecord(value,keys,label='Options') {
  return value;
 }
 function boundedText(value,max=128,label='Text',empty=false) {if(typeof value!=='string'||value.length>max||!empty&&!value.length)throw new TypeError(`${label}: string limit ${max}`);return value;}
+/** 순회 중 String.prototype 변경에 흔들리지 않도록 원래 읽기 함수를 잡아 둔다. */
+const jsonDepthCharCodeAt=Function.prototype.call.bind(String.prototype.charCodeAt);
+/**
+ * JSON.parse 전에 텍스트의 컨테이너 깊이만 반복형으로 검사한다. 문자열·이스케이프 안 괄호는 세지 않고,
+ * 나머지 문법 검사는 JSON.parse에 맡긴다. 가장 바깥 배열·객체가 깊이 1이다.
+ * JSON.parse와 같은 ToString(string hint, Symbol 거절)을 한 번만 하고 그 텍스트를 반환한다.
+ * @param {unknown} value JSON 텍스트 또는 JSON.parse가 문자열로 바꿀 입력
+ * @param {number} limit 최대 컨테이너 깊이
+ * @param {string} message 넘었을 때의 RangeError 문구
+ * @returns {string} 검사한 문자열(호출자는 이것을 JSON.parse에 넘긴다)
+ */
+function assertJsonTextDepth(value,limit,message){
+ const text=typeof value==='string'?value:`${value}`;
+ let depth=0,string=false,escaped=false;
+ for(let index=0;index<text.length;index++){
+  const code=jsonDepthCharCodeAt(text,index);
+  if(string){
+   if(escaped)escaped=false;
+   else if(code===0x5c)escaped=true;
+   else if(code===0x22)string=false;
+  }else if(code===0x22)string=true;
+  else if(code===0x7b||code===0x5b){if(++depth>limit)throw new RangeError(message);}
+  else if((code===0x7d||code===0x5d)&&depth>0)depth--;
+ }
+ return text;
+}
 function sizeLimit(value,max,label='Size') {if(!Number.isSafeInteger(value)||value<0||value>max)throw new RangeError(`${label}: limit ${max}`);return value;}
 function identifier(value,label='Id') {boundedText(value,128,label);if(['__proto__','prototype','constructor'].includes(value))throw new TypeError(`${label}: reserved identifier`);return value;}
 const PANEL_KEYS=['id','weight','label','scale','inverted','padding','range','base','precision','formatter','axisVisible','axisSide'];
@@ -1543,7 +1569,7 @@ class DrawingStore {
   redo(){if(this.transaction)this.cancel();if(!this.redoStack.length)return false;this.undoStack.push(this.items.slice());this.items=this.redoStack.pop().slice();this.selected=null;this.trim();return true;}
   save(){if(this.transaction)throw new Error('Commit or cancel before saving');return drawingDocument(this.items,this.maxDocumentChars);}
   load(text,{styleDecoder=null,validatePanel=null,validateBinding=null}={}) {
-    boundedText(text,this.maxDocumentChars,'Drawing document',true);const doc=JSON.parse(text);optionRecord(doc,['schema','version','drawings'],'Drawing document');if(doc.schema!=='aster.drawings'||![1,2,3,4].includes(doc.version)||!Array.isArray(doc.drawings)||doc.drawings.length>this.maxDrawings)throw new TypeError('Unsupported drawing document');
+    boundedText(text,this.maxDocumentChars,'Drawing document',true);const doc=JSON.parse(assertJsonTextDepth(text,32,'Drawing document depth limit'));optionRecord(doc,['schema','version','drawings'],'Drawing document');if(doc.schema!=='aster.drawings'||![1,2,3,4].includes(doc.version)||!Array.isArray(doc.drawings)||doc.drawings.length>this.maxDrawings)throw new TypeError('Unsupported drawing document');
     const items=doc.drawings.map(d=>{validateDrawing(d);validateDrawingDocumentVersion(d,doc.version);if(validateBinding&&!validateBinding(d))throw new Error('Invalid drawing binding');if(validatePanel&&!validatePanel(d.panel))throw new Error('Missing drawing panel');const copy=copyDrawing(d);if(styleDecoder&&copy.style)copy.style=styleDecoder(copy.style);const next=canonicalDrawing(copy);validateDrawing(next);return frozenDrawing(next);});this.budget(items);if(new Set(items.map(d=>d.id)).size!==items.length)throw new TypeError('Duplicate drawing ids');if(this.transaction)throw new Error('Cannot load during a gesture');drawingDocument(items,this.maxDocumentChars);this.mutate(()=>{this.items=items;});this.selected=null;
   }
 }
@@ -4075,8 +4101,8 @@ let nativeLatestLayout=null,nativeLatestLayoutModel=null;
 let nativeWorkspaceSource=null,nativeWorkspaceRegistration=0,nativeWorkspaceTargetCreating=null;
 let nativeAsyncCapture=null,nativeAsyncTicket=0,nativeAsyncPrepared=null,nativePrepareTargetCreating=false,nativeAsyncUIImport=null,nativeAsyncUIPrepared=null;
 function nativeCapture(ticket){if(!nativeAsyncCapture||nativeAsyncCapture.ticket!==ticket||nativeAsyncCapture.capture.model!==globalThis.nativeModel)throw new Error('Async stale: source replaced/released');nativeAsyncCapture.capture.check();return nativeAsyncCapture.capture;}
-globalThis.nativeAsyncBegin=function(eventJSON){if(nativeAsyncCapture||nativeWorkspaceSource||nativeParamsSource)throw new Error('Async capture busy');const capture=new AsyncCapture(globalThis.nativeModel,JSON.parse(eventJSON)),ticket=++nativeAsyncTicket;nativeAsyncCapture={ticket,capture};return JSON.stringify({ticket,metadataJSON:capture.metadataJSON,buffers:capture.buffers.map((a,slot)=>({slot,length:a.length})),checkpoints:capture.checkpoints.map((row,entry)=>({entry,total:row.keys.length,maxRows:row.maxRows}))});};
-globalThis.nativePrepareBegin=function(requestJSON){if(nativeAsyncCapture||nativeWorkspaceSource||nativeParamsSource)throw new Error('Async capture busy');const capture=new PrepareCapture(globalThis.nativeModel,JSON.parse(requestJSON)),ticket=++nativeAsyncTicket;nativeAsyncCapture={ticket,capture};return JSON.stringify({ticket,metadataJSON:capture.metadataJSON,buffers:[],checkpoints:[]});};
+globalThis.nativeAsyncBegin=function(eventJSON){if(nativeAsyncCapture||nativeWorkspaceSource||nativeParamsSource)throw new Error('Async capture busy');const capture=new AsyncCapture(globalThis.nativeModel,JSON.parse(assertJsonTextDepth(eventJSON,32,'Native data event document depth limit'))),ticket=++nativeAsyncTicket;nativeAsyncCapture={ticket,capture};return JSON.stringify({ticket,metadataJSON:capture.metadataJSON,buffers:capture.buffers.map((a,slot)=>({slot,length:a.length})),checkpoints:capture.checkpoints.map((row,entry)=>({entry,total:row.keys.length,maxRows:row.maxRows}))});};
+globalThis.nativePrepareBegin=function(requestJSON){if(nativeAsyncCapture||nativeWorkspaceSource||nativeParamsSource)throw new Error('Async capture busy');const capture=new PrepareCapture(globalThis.nativeModel,JSON.parse(assertJsonTextDepth(requestJSON,32,'Native prepare document depth limit'))),ticket=++nativeAsyncTicket;nativeAsyncCapture={ticket,capture};return JSON.stringify({ticket,metadataJSON:capture.metadataJSON,buffers:[],checkpoints:[]});};
 globalThis.nativeDataAsyncBegin=function(kind,requestJSON){
  if(!['correction','columns','seeded'].includes(kind))throw new TypeError('Unknown async begin kind');
  try{return {result:kind==='correction'?nativeAsyncBegin(requestJSON):nativePrepareBegin(requestJSON)};}catch(error){if(!(error instanceof IngestionError))throw error;return {error:{name:error.name,code:error.code,message:String(error.message).slice(0,256)}};}
