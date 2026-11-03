@@ -1,7 +1,7 @@
 //! 소유 Float64 OHLCV 열, 원자적 저장소 변경과 batch transaction이다.
 
 use barochart_js::error::JsError;
-use barochart_js::json::JsValue;
+use barochart_js::json::{JsObject, JsValue};
 use barochart_js::string::JsString;
 
 use crate::batch_options::BatchOptions;
@@ -298,8 +298,48 @@ pub struct DataChange {
     pub version: f64,
     /// append/prepend 행 수다.
     pub added: Option<usize>,
+    /// added 자기 키의 존재 여부다. 열 reset은 존재하면서 값이 undefined다.
+    pub added_present: bool,
     /// batch append 수다.
     pub appended: Option<usize>,
+}
+
+impl DataChange {
+    /// JS listener change의 자기 키 존재와 순서를 그대로 보존한다.
+    pub fn to_js_value(&self) -> JsValue {
+        let kind = match self.kind {
+            ChangeKind::Reset => "reset",
+            ChangeKind::Append => "append",
+            ChangeKind::Update => "update",
+            ChangeKind::Prepend => "prepend",
+            ChangeKind::Batch => "batch",
+        };
+        let mut record = JsObject::new();
+        record.insert(
+            JsString::from_str("from"),
+            JsValue::Number(self.from as f64),
+        );
+        record.insert(
+            JsString::from_str("kind"),
+            JsValue::String(JsString::from_str(kind)),
+        );
+        record.insert(JsString::from_str("version"), JsValue::Number(self.version));
+        if self.added_present {
+            record.insert(
+                JsString::from_str("added"),
+                self.added
+                    .map_or(JsValue::Undefined, |value| JsValue::Number(value as f64)),
+            );
+        }
+        if let Some(appended) = self.appended {
+            record.insert(
+                JsString::from_str("appended"),
+                JsValue::Number(appended as f64),
+            );
+            record.insert(JsString::from_str("to"), JsValue::Number(self.to as f64));
+        }
+        JsValue::Object(record)
+    }
 }
 
 /// 저장소 커밋 결과와 이후 publication 정보를 분리한다.
@@ -560,7 +600,12 @@ impl BarStore {
             capacity,
             false,
         )?;
-        self.commit_replacement(columns, index, length, capacity, ChangeKind::Reset, None)
+        let mut committed =
+            self.commit_replacement(columns, index, length, capacity, ChangeKind::Reset, None)?;
+        if let Some(change) = committed.change.as_mut() {
+            change.added_present = true;
+        }
+        Ok(committed)
     }
 
     /// index의 행을 복사한다.
@@ -604,7 +649,7 @@ impl BarStore {
             self.version += 1.0;
             self.time_version += 1.0;
         }
-        let change = self.change(index, self.length, ChangeKind::Append, Some(1), None);
+        let change = self.change(index, self.length, ChangeKind::Append, None, None);
         Ok(Committed {
             value: index,
             change: Some(change),
@@ -720,7 +765,12 @@ impl BarStore {
             capacity,
             false,
         )?;
-        self.commit_replacement(columns, index, length, capacity, ChangeKind::Reset, None)
+        let mut committed =
+            self.commit_replacement(columns, index, length, capacity, ChangeKind::Reset, None)?;
+        if let Some(change) = committed.change.as_mut() {
+            change.added_present = true;
+        }
+        Ok(committed)
     }
 
     /// 정렬된 time 열의 lower bound다.
@@ -1088,6 +1138,7 @@ impl BarStore {
             to,
             kind,
             version: self.version,
+            added_present: added.is_some(),
             added,
             appended,
         }
