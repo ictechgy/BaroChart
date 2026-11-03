@@ -42,3 +42,5 @@ This verifies one headless Chrome session and this local example only. Viewport 
 ## Integrated source checks
 
 The parent reviewer inspected the converter, lifecycle implementation, guides and browser evidence, including the 320 px screenshot. The whole Node suite passed **5,931/5,931**, with zero failures/cancellations/skips and TypeScript 5.9.3 configured. Syntax checks parsed **653 modules**; strict types passed. The four converter tests include signed-zero preservation and unchanged source columns/version after rejected input.
+
+The offline installed npm consumer also passed. Rebase onto the mobile-quality merge changes native sample files/documentation, with no changes to this migration implementation or the JavaScript SDK inputs used above.

@@ -25,6 +25,8 @@ The [2026-11-04 migration run](measurements/2026-11-04-migration-operations.md) 
 
 The [feed integration report](measurements/2026-11-03-feed-integration.md) and [onboarding report](measurements/2026-11-03-onboarding-analysis.md) preserve dated automated Node and Chrome results for their then-current source. Earlier checkpoints and failures remain in [public validation history](PUBLIC-VALIDATION.md). A historical passing count does not imply that the current checkout or pull request has passed those commands. The workflow definitions are in [CI](../.github/workflows/verify.yml); check the exact pull request's run before release.
 
+The [mobile sample report](measurements/2026-11-04-mobile-quality.md) adds native lifecycle/rotation/source-revision regressions, simulated accessibility audits at large font sizes, and trusted Chrome touch emulation. Its native UI results are iOS 7 plus 2 large-font checks and Android 8 plus 1 large-font check; its 12 browser checks cover pan/pinch/cancel/keyboard/scroll. These remain simulated results; extreme chart text can be ellipsized and physical screen-reader usefulness is pending.
+
 Automated tests and simulated DOM/RAF/host tests can check state transitions and API contracts. They cannot replace the following manual gates:
 
 - Touch input, browser scroll behavior, and usable chart controls on physical iOS and Android devices.

@@ -25,6 +25,8 @@ BaroChart `0.3.0-dev`는 개발 프리뷰입니다. 패키지는 private이며 n
 
 [피드 통합 보고서](measurements/2026-11-03-feed-integration.md)와 [온보딩 보고서](measurements/2026-11-03-onboarding-analysis.md)는 해당 시점 소스에서 실행한 Node/Chrome 자동 검사 결과입니다. 이전 체크포인트와 실패는 [공개 검증 이력](PUBLIC-VALIDATION.md)에 보존되어 있습니다. 과거 통과 수치는 현재 체크아웃이나 PR이 같은 명령을 통과했다는 뜻이 아닙니다. [CI](../.github/workflows/verify.yml)에 있는 워크플로 정의를 확인하고 출시 전에 대상 PR의 실행 결과를 보세요.
 
+[모바일 샘플 보고서](measurements/2026-11-04-mobile-quality.md)는 네이티브 수명주기·회전·데이터 revision 회귀, 큰 글자의 자동 접근성 검사, Chrome의 실제 터치 이벤트 에뮬레이션을 추가합니다. 네이티브 UI는 iOS 7개와 큰 글자 2개, Android 8개와 큰 글자 1개이며 브라우저 12개 검사는 팬·핀치·취소·키보드·스크롤을 다룹니다. 모두 시뮬레이션 결과입니다. 매우 큰 차트 글자는 말줄임표로 줄어들 수 있고 실기기 화면 낭독기 사용성 확인은 남아 있습니다.
+
 자동 테스트 및 DOM/RAF/호스트 모의 검사는 상태 전이와 API 계약을 검사할 수 있습니다. 아래 수동 검사를 대신하지 않습니다.
 
 - 실제 iOS·Android 기기의 터치 입력, 브라우저 스크롤, 차트 컨트롤 사용성.
