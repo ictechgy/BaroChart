@@ -167,6 +167,11 @@ jobs:
       - name: Show toolchain
         run: xcodebuild -version && swift --version
 
+      - name: Verify conditional SwiftPM manifest without toolchain skips
+        env:
+          REQUIRE_SWIFTPM: '1'
+        run: node --test test/rust-swiftpm-manifest.test.mjs
+
       - name: Swift build with warnings as errors
         run: swift build -Xswiftc -warnings-as-errors
 
@@ -183,6 +188,8 @@ jobs:
         env:
           BAROCHART_RUST_XCFRAMEWORK: ${{ github.workspace }}/artifacts/rust/BaroChartCoreRust.xcframework
         run: |
+          swift test --scratch-path "${RUNNER_TEMP}/swift-rust" list > "${RUNNER_TEMP}/swift-rust-tests.txt"
+          grep -F 'RustRuntimeTests/testRawCallReturnsTheRustNativeInitValue' "${RUNNER_TEMP}/swift-rust-tests.txt"
           swift test --scratch-path "${RUNNER_TEMP}/swift-rust"
           swift build --scratch-path "${RUNNER_TEMP}/swift-rust" -c release -Xswiftc -warnings-as-errors
           xcodebuild -scheme BaroChart -destination 'generic/platform=iOS Simulator' -derivedDataPath "${RUNNER_TEMP}/dd-rust" build OTHER_SWIFT_FLAGS=-warnings-as-errors

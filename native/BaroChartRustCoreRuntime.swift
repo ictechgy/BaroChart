@@ -271,6 +271,26 @@ final class RustValueRealm {
 /// Stable retained callback context. The FFI may move an engine between threads sequentially.
 private final class RustHostContext: @unchecked Sendable {}
 
+/// Converts the common C ABI status into the existing Swift runtime error semantics.
+enum BaroChartRustStatusDecoder {
+    static func outcome(status: UInt32, value: BaroChartCoreValue?) -> BaroChartCoreOutcome {
+        switch status {
+        case 0: // BC_OK
+            guard let value else {return .rejected(BaroChartLowLevelError.javaScript("Error: Missing Rust response"))}
+            return .returned(value)
+        case 1, 2: // BC_THROW, BC_UNAVAILABLE
+            guard let value else {return .rejected(BaroChartLowLevelError.javaScript("Error: Missing Rust response"))}
+            return .threw(value)
+        case 5: // BC_BUSY
+            return .rejected(BaroChartAsyncError.busy)
+        case 3, 4: // BC_CLOSED, BC_POISONED
+            return .rejected(BaroChartLowLevelError.javaScript("Error: Chart disposed"))
+        default:
+            return .rejected(BaroChartLowLevelError.javaScript("Error: Invalid Rust call"))
+        }
+    }
+}
+
 private func rustZoneResolve(_ context: UnsafeMutableRawPointer?, _ bytes: UnsafePointer<UInt8>?, _ length: Int, _ output: UnsafeMutablePointer<BcBuf>?) -> Int32 {
     guard let bytes, let output, let name = String(bytes: UnsafeBufferPointer(start: bytes, count: length), encoding: .utf8),
           let zone = TimeZone(identifier: name) else {return 1}
@@ -319,7 +339,7 @@ final class BaroChartRustCoreRuntime: BaroChartCoreRuntime {
     }
 
     func perform(_ name: String, _ arguments: [Any]) -> BaroChartCoreOutcome {
-        guard let engine else {return disposedOutcome()}
+        guard let engine else {return BaroChartRustStatusDecoder.outcome(status: BC_CLOSED.rawValue, value: nil)}
         if let error = BaroChartArgumentDepth.rejection(for: arguments) {return .rejected(error)}
         guard let values = RustValueRealm.current() else {return .rejected(BaroChartLowLevelError.unavailableContext)}
         do {
@@ -330,26 +350,21 @@ final class BaroChartRustCoreRuntime: BaroChartCoreRuntime {
                 bc_call(engine, n.baseAddress, n.count, a.baseAddress, a.count, UInt32(BC_FLAG_LOSSLESS), &result)
             }}
             defer {if result.ptr != nil {bc_buf_free(result)}}
-            if status == BC_BUSY || status == BC_CLOSED || status == BC_POISONED {
-                return disposedOutcome()
+            switch status {
+            case BC_BUSY, BC_CLOSED, BC_POISONED:
+                return BaroChartRustStatusDecoder.outcome(status: status.rawValue, value: nil)
+            case BC_INVALID:
+                return BaroChartRustStatusDecoder.outcome(status: status.rawValue, value: nil)
+            default:
+                break
             }
             guard let pointer = result.ptr else {return .rejected(BaroChartLowLevelError.javaScript("Error: Missing Rust response"))}
             let text = String(decoding: UnsafeBufferPointer(start: pointer, count: result.len), as: UTF8.self)
             var parser = RustJSONParser(text)
             let value = try parser.parse()
             let wrapped = try values.materialize(value, asError: status == BC_THROW || status == BC_UNAVAILABLE)
-            switch status {
-            case BC_OK: return .returned(wrapped)
-            case BC_THROW, BC_UNAVAILABLE: return .threw(wrapped)
-            default: return .rejected(BaroChartLowLevelError.javaScript("Error: Invalid Rust call"))
-            }
+            return BaroChartRustStatusDecoder.outcome(status: status.rawValue, value: wrapped)
         } catch {return .rejected(error)}
-    }
-
-    private func disposedOutcome() -> BaroChartCoreOutcome {
-        guard let values = RustValueRealm.current() else {return .rejected(BaroChartLowLevelError.unavailableContext)}
-        do {return .threw(try values.materialize(.object([("name", .string("Error")), ("message", .string("Chart disposed"))]), asError: true))}
-        catch {return .rejected(error)}
     }
 
     func takeException() -> BaroChartCoreValue? {nil}

@@ -62,6 +62,8 @@ test('native jobs exercise the optional Rust packages and keep the JS-only lane'
  }
  assert.match(ios,/node scripts\/rust\/build-xcframework\.mjs/);
  assert.match(ios,/BAROCHART_RUST_XCFRAMEWORK/);
+ assert.match(ios,/REQUIRE_SWIFTPM: '1'/);
+ assert.match(ios,/RustRuntimeTests\/testRawCallReturnsTheRustNativeInitValue/);
  assert.match(ios,/swift test/);
  assert.match(android,/-PbarochartRust=false/);
  assert.match(android,/-PbarochartQuickjs=false/);

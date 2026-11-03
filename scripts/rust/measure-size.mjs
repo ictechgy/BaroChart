@@ -36,7 +36,7 @@ const RUST_CRATES=['barochart-js','barochart-core','barochart-bridge','barochart
 /** Actual scaffold and an independent design-prior scenario. Neither is a full-port bound. */
 export function scenarioForecast({jsOnlyBytes,dualScaffoldBytes,designPriorRustBytes=2_621_440,budgetBytes=SIZE_BUDGET}){
  const measured=Math.max(0,dualScaffoldBytes-jsOnlyBytes);
- const scenario=Math.max(measured,designPriorRustBytes);
+ const scenario=designPriorRustBytes;
  return {
   method:'actual measured scaffold plus an independent 2.5 MiB design-prior scenario; the scenario is not a bound or probability interval',
   assumptions:[
@@ -52,6 +52,9 @@ export function scenarioForecast({jsOnlyBytes,dualScaffoldBytes,designPriorRustB
 
 /** Required by the old plan as a diagnostic only; fixed runtime overhead makes it unreliable. */
 export function naiveLocDiagnostic({linkedRustDeltaBytes,compiledScaffoldRustLines,totalScopeLines,jsOnlyBytes,budgetBytes=SIZE_BUDGET}){
+ if(!Number.isSafeInteger(compiledScaffoldRustLines)||compiledScaffoldRustLines<=0||!Number.isSafeInteger(totalScopeLines)||totalScopeLines<=0){
+  throw new RangeError('LOC diagnostics require positive safe integer source and scope line counts');
+ }
  const ratio=linkedRustDeltaBytes/compiledScaffoldRustLines;
  const projectedRustBytes=Math.round(ratio*totalScopeLines),projectedDualBytes=jsOnlyBytes+projectedRustBytes;
  return {

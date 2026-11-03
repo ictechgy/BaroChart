@@ -4,6 +4,27 @@ import JavaScriptCore
 @testable import BaroChart
 
 final class RustRuntimeTests: XCTestCase {
+    func testRustBusyStatusMapsToTransientUnavailableInsteadOfClosed() {
+        let outcome = BaroChartRustStatusDecoder.outcome(status: 5, value: nil) // BC_BUSY
+        guard case .rejected(let error) = outcome else {return XCTFail("BC_BUSY must be a host rejection")}
+        let wrapped = BaroChartError.wrap(error)
+        XCTAssertEqual(wrapped.code, .unavailable)
+        XCTAssertEqual(wrapped.message, "Another asynchronous job is already active on this engine.")
+    }
+
+    func testRustClosedAndPoisonedStatusesRetainDisposedClassification() {
+        for status: UInt32 in [3, 4] { // BC_CLOSED, BC_POISONED
+            let outcome = BaroChartRustStatusDecoder.outcome(status: status, value: nil)
+            guard case .rejected(let error) = outcome,
+                  let lowLevel = error as? BaroChartLowLevelError,
+                  case .javaScript(let message) = lowLevel else {
+                return XCTFail("\(status) must reject with the disposed host error")
+            }
+            XCTAssertEqual(message, "Error: Chart disposed")
+            XCTAssertEqual(BaroChartError.wrap(error).code, .engineClosed)
+        }
+    }
+
     func testRawCallReturnsTheRustNativeInitValue() throws {
         let engine = try BaroChartEngine(options: nil, runtimeBackend: .rust)
         defer {try? engine.close()}

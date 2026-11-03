@@ -34,6 +34,21 @@ test('naive LOC projection is explicit and warns that fixed runtime overhead mak
  assert.equal(diagnostic.useForDecision,false);
 });
 
+test('a measured scaffold above the design prior does not rewrite the independent scenario',()=>{
+ const forecast=scenarioForecast({jsOnlyBytes:1_000_000,dualScaffoldBytes:4_000_000,designPriorRustBytes:2_621_440});
+ assert.deepEqual(forecast.rustContributionBytes,{measuredScaffold:3_000_000,designPriorScenario:2_621_440});
+ assert.deepEqual(forecast.dualBytes,{measuredScaffold:4_000_000,designPriorScenario:3_621_440});
+});
+
+test('LOC diagnostics reject invalid line counts instead of persisting nonfinite JSON fields',()=>{
+ for(const compiledScaffoldRustLines of [0,-1,NaN,Infinity,0.5]){
+  assert.throws(()=>naiveLocDiagnostic({linkedRustDeltaBytes:1_000,compiledScaffoldRustLines,totalScopeLines:37_850,jsOnlyBytes:1_000}),RangeError);
+ }
+ for(const totalScopeLines of [0,-1,NaN,Infinity]){
+  assert.throws(()=>naiveLocDiagnostic({linkedRustDeltaBytes:1_000,compiledScaffoldRustLines:1_000,totalScopeLines,jsOnlyBytes:1_000}),RangeError);
+ }
+});
+
 test('authoritative port scope uses the corrected Tier-A estimate without claiming precision',()=>{
  assert.deepEqual(PORT_SCOPE,{stableRustLinesEstimate:27_850,tierANetNewRustLinesEstimate:10_000,totalRustLinesEstimate:37_850,kind:'reader-estimate-not-measurement'});
 });
