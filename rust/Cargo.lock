@@ -3,6 +3,21 @@
 version = 4
 
 [[package]]
+name = "barochart-bridge"
+version = "0.0.0"
+dependencies = [
+ "barochart-core",
+ "barochart-js",
+]
+
+[[package]]
+name = "barochart-core"
+version = "0.0.0"
+dependencies = [
+ "barochart-js",
+]
+
+[[package]]
 name = "barochart-js"
 version = "0.0.0"
 dependencies = [
