@@ -1,6 +1,8 @@
 # Local package consumption
 
-BaroChart is distributed here as source. An npm registry release has not been made. Run `npm pack --ignore-scripts` and install the resulting local `barochart-0.2.13.tgz` in a consumer project.
+[Choose an integration](GETTING-STARTED.md) · [한국어 시작 가이드](GETTING-STARTED.ko.md)
+
+BaroChart is distributed here as source. An npm registry release has not been made. Run `npm pack --ignore-scripts` and install the resulting local `barochart-0.3.0-dev.tgz` in a consumer project.
 
 The root and `/core`, `/canvas`, `/webgl`, `/worker`, `/worker-entry`, optional `/react` exports include ESM and TypeScript declarations. Use `/core` for DOM-free Node consumers. React remains an optional peer dependency; its existing `AsterChart` component name is retained for compatibility.
 
