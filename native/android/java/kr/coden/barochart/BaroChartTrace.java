@@ -247,6 +247,10 @@ final class BaroChartTrace {
         synchronized void threw(String function, String arguments, Throwable error) {
             if (stopped || closed) return;
             String message = error instanceof IllegalStateException ? error.getMessage() : null;
+            if ("SyntaxError: Native argument depth limit".equals(message)) {
+                stop(function, "argument: native depth limit");
+                return;
+            }
             int separator = message == null ? -1 : message.indexOf(": ");
             if (arguments == null || !isErrorName(message, separator)) {
                 stop(function, "error: " + error.getClass().getSimpleName() + " without a JavaScript error name: " + error.getMessage());

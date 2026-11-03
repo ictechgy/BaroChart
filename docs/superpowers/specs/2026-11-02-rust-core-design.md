@@ -442,6 +442,9 @@ Rust는 `staticlib`으로 빌드한다. `cbindgen`으로 만든 헤더 하나를
    - 조치:
      - 코어에서 `JSON.parse`를 그대로 부르는 세 곳(`drawings.mjs:39`, 브리지 B:5·B:6) 앞에 반복형 깊이 검사를 둔다(32).
      - 두 플랫폼의 호스트 인자에도 깊이 검사를 둔다(64).
+     - 깊이는 가장 바깥 배열·객체가 1이다. 호스트 인자는 전달용 인자 배열도 포함하며, 문자열 안 괄호와 Swift Optional 포장은 깊이를 늘리지 않는다. 한도와 같은 깊이는 허용한다.
+     - 오류는 `RangeError: Drawing document depth limit`, `RangeError: Native data event document depth limit`, `RangeError: Native prepare document depth limit`, 호스트는 `SyntaxError: Native argument depth limit`다. Swift·Android에서 모두 잘못된 인수 코드다.
+     - Swift는 값으로 브리징하는 배열·딕셔너리만 순회한다. 기존 JSValue·JSExport VM 참조의 속성은 읽지 않아 getter 부작용을 추가하지 않는다. Java는 JSONArray/JSONObject·컬렉션·배열을 직렬화 전에 검사하고, JNI도 실제 UTF-8 텍스트를 검사한다. 참조 컨테이너는 부분 트리 높이를 메모해 공유·순환을 처리한다.
    - 정상 입력은 깊이 5 안팎이라 영향이 없다.
    - 이유 1: QuickJS는 깊은 입력에서 스택이 넘친다. V8·JSC는 반복 파싱이라 다른 오류 클래스를 낸다. 이 차이를 없앤다.
    - 이유 2: Rust의 재귀 해제와 순회가 앱을 죽이지 않게 한다.
@@ -468,7 +471,7 @@ Rust는 `staticlib`으로 빌드한다. `cbindgen`으로 만든 헤더 하나를
 
 M0의 JS 정규화와 D2 수정은 첫 PR로 따로 낸다. 같은 PR로 묶으면 웹 동작 변경과 이음새 리팩터링이 섞여 리뷰가 어렵다.
 
-진행 기록(2026-11-03): M0a는 #21, M0b 이음새·추적은 #22로 머지됐다([M0b 판정 및 검증 근거](../../measurements/2026-11-03-rust-m0b-external-review.md)). Qwen의 마지막 두 조각 답변은 없으며, 중단된 추적의 앞부분을 전체 동등성으로 취급하지 않는다. M0c 깊은 JSON 제한은 아직 시작하지 않았다. 따라서 M0 전체는 미완료다.
+진행 기록(2026-11-03): M0a는 #21, M0b 이음새·추적은 #22, M1a 의미 커널은 #23으로 머지됐다([M0b 판정 및 검증 근거](../../measurements/2026-11-03-rust-m0b-external-review.md), [M1a 근거](../../measurements/2026-11-03-rust-m1a-external-review.md)). M0c는 §7.4-4의 깊이 제한을 도입한다. 단계별 플랫폼 검증·리뷰·CI 상태는 진행 원장과 HANDOFF에 남긴다. 중단된 추적의 앞부분을 전체 동등성으로 취급하지 않는다.
 
 ### 8.2 단계마다 하는 일
 

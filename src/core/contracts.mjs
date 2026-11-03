@@ -55,6 +55,32 @@ export function optionRecord(value,keys,label='Options') {
  return value;
 }
 export function boundedText(value,max=128,label='Text',empty=false) {if(typeof value!=='string'||value.length>max||!empty&&!value.length)throw new TypeError(`${label}: string limit ${max}`);return value;}
+/** 순회 중 String.prototype 변경에 흔들리지 않도록 원래 읽기 함수를 잡아 둔다. */
+const jsonDepthCharCodeAt=Function.prototype.call.bind(String.prototype.charCodeAt);
+/**
+ * JSON.parse 전에 텍스트의 컨테이너 깊이만 반복형으로 검사한다. 문자열·이스케이프 안 괄호는 세지 않고,
+ * 나머지 문법 검사는 JSON.parse에 맡긴다. 가장 바깥 배열·객체가 깊이 1이다.
+ * JSON.parse와 같은 ToString(string hint, Symbol 거절)을 한 번만 하고 그 텍스트를 반환한다.
+ * @param {unknown} value JSON 텍스트 또는 JSON.parse가 문자열로 바꿀 입력
+ * @param {number} limit 최대 컨테이너 깊이
+ * @param {string} message 넘었을 때의 RangeError 문구
+ * @returns {string} 검사한 문자열(호출자는 이것을 JSON.parse에 넘긴다)
+ */
+export function assertJsonTextDepth(value,limit,message){
+ const text=typeof value==='string'?value:`${value}`;
+ let depth=0,string=false,escaped=false;
+ for(let index=0;index<text.length;index++){
+  const code=jsonDepthCharCodeAt(text,index);
+  if(string){
+   if(escaped)escaped=false;
+   else if(code===0x5c)escaped=true;
+   else if(code===0x22)string=false;
+  }else if(code===0x22)string=true;
+  else if(code===0x7b||code===0x5b){if(++depth>limit)throw new RangeError(message);}
+  else if((code===0x7d||code===0x5d)&&depth>0)depth--;
+ }
+ return text;
+}
 export function sizeLimit(value,max,label='Size') {if(!Number.isSafeInteger(value)||value<0||value>max)throw new RangeError(`${label}: limit ${max}`);return value;}
 export function identifier(value,label='Id') {boundedText(value,128,label);if(['__proto__','prototype','constructor'].includes(value))throw new TypeError(`${label}: reserved identifier`);return value;}
 export const PANEL_KEYS=['id','weight','label','scale','inverted','padding','range','base','precision','formatter','axisVisible','axisSide'];

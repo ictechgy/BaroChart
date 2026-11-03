@@ -1394,6 +1394,7 @@ public final class BaroChartEngine {
         return try autoreleasepool {
             switch coreRuntime.perform(name, arguments) {
             case .missing: throw BaroChartLowLevelError.javaScript("Missing function: \(name)")
+            case .rejected(let error): throw error
             case .threw(let exception): throw BaroChartLowLevelError.javaScript(exception.toString() ?? "Unknown JS error")
             case .returned(let value): return value.javaScriptValue
             }
@@ -1693,6 +1694,7 @@ public final class BaroChartEngine {
             let value: BaroChartCoreValue
             switch source.perform("nativeApplyUnchangedDataEvents", [events]) {
             case .missing: throw BaroChartLowLevelError.invalidScene
+            case .rejected(let error): throw error
             case .threw(let exception): throw BaroChartLowLevelError.javaScript(exception.toString() ?? "Data batch error")
             case .returned(let result): value = result
             }
@@ -1797,6 +1799,7 @@ public final class BaroChartEngine {
             let value: BaroChartCoreValue
             switch source.perform("nativeDataExploration", [action, argument]) {
             case .missing: throw BaroChartLowLevelError.invalidScene
+            case .rejected(let error): throw error
             case .threw(let exception): throw BaroChartLowLevelError.javaScript(exception.toString() ?? "Exploration error")
             case .returned(let result): value = result
             }

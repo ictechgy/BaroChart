@@ -20,6 +20,7 @@ Native SDK commercial-readiness work. See the [design](docs/superpowers/specs/20
 - Android `BaroChartView.dispose()` / `isDisposed()`; Compose releases dispose the view and keep the engine open.
 
 ### Changed
+- Drawing JSON and native async event/prepare documents reject nesting beyond 32 before parsing. Native value-bridged host argument containers reject nesting beyond 64, including the outer argument array, with `SyntaxError: Native argument depth limit` (`invalidArgument` / `INVALID_ARGUMENT`). Brackets inside strings do not count toward nesting.
 - Native public names renamed from `Aster*` / `dev.aster.charts` to `BaroChart*` / `kr.coden.barochart` ([migration guide](docs/MIGRATING-FROM-ASTER.md)). Saved `aster.*` documents are unchanged.
 - View setters throw instead of recording a silent `lastError`; Android `lastError` is now `getLastError()`.
 - Workspace documents write the dataset binding in a fixed key order, so equal charts save identical bytes on every platform.

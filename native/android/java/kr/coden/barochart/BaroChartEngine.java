@@ -8,6 +8,13 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.time.*;
 import java.util.Locale;
+import java.util.ArrayDeque;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.Iterator;
+import java.util.Map;
 
 /** Native QuickJS/JNI host, owned by one thread. No WebView or browser. */
 public final class BaroChartEngine implements AutoCloseable {
@@ -66,6 +73,47 @@ public final class BaroChartEngine implements AutoCloseable {
         String result;try{result=call(runtime,name,arguments);}catch(RuntimeException|Error error){trace.threw(name,arguments,error);throw error;}
         trace.returned(name,arguments,result);return result;
     }
+    /** 호스트 컨테이너 하나의 반복형 깊이 검사 프레임. */
+    private static final class ArgumentFrame {
+        final Object value;final Iterator<?> children;final int depth;int height=1;
+        ArgumentFrame(Object value,Iterator<?> children,int depth){this.value=value;this.children=children;this.depth=depth;}
+    }
+    /** JSON으로 값 복사하는 컨테이너인지 본다. 사용자 equals/hashCode는 호출하지 않는다. */
+    private static boolean argumentContainer(Object value){return value instanceof JSONObject||value instanceof JSONArray||value instanceof Map||value instanceof Collection||value!=null&&value.getClass().isArray();}
+    /** 다음 자식만 읽어 폭이 큰 배열도 순회 스택에 전부 복사하지 않는다. */
+    private static Iterator<?> argumentChildren(Object value){
+        if(value instanceof JSONObject){JSONObject object=(JSONObject)value;Iterator<String> keys=object.keys();return new Iterator<Object>(){public boolean hasNext(){return keys.hasNext();}public Object next(){return object.opt(keys.next());}};}
+        if(value instanceof JSONArray){JSONArray array=(JSONArray)value;return new Iterator<Object>(){int index;public boolean hasNext(){return index<array.length();}public Object next(){return array.opt(index++);}};}
+        if(value instanceof Map)return ((Map<?,?>)value).values().iterator();
+        if(value instanceof Collection)return ((Collection<?>)value).iterator();
+        if(value.getClass().getComponentType().isPrimitive())return Collections.emptyIterator();
+        return new Iterator<Object>(){int index;final int length=java.lang.reflect.Array.getLength(value);public boolean hasNext(){return index<length;}public Object next(){return java.lang.reflect.Array.get(value,index++);}};
+    }
+    /** JSONArray의 재귀 직렬화 전에 깊이를 제한한다. 인자 배열이 깊이 1이며 참조별 부분 트리 높이로 공유/순환도 처리한다. */
+    private static void assertArgumentDepth(Object[] args){
+        if(args==null)return; // null의 기존 JSONArray 오류는 직렬화 경로에 맡긴다.
+        ArrayDeque<ArgumentFrame> frames=new ArrayDeque<>();frames.push(new ArgumentFrame(args,Arrays.asList(args).iterator(),1));
+        IdentityHashMap<Object,Boolean> active=new IdentityHashMap<>();active.put(args,true);
+        IdentityHashMap<Object,Integer> completed=new IdentityHashMap<>();
+        while(!frames.isEmpty()){
+            ArgumentFrame frame=frames.peek();
+            if(!frame.children.hasNext()){
+                frames.pop();active.remove(frame.value);completed.put(frame.value,frame.height);
+                if(!frames.isEmpty())frames.peek().height=Math.max(frames.peek().height,frame.height+1);
+                continue;
+            }
+            Object value=frame.children.next();if(!argumentContainer(value))continue;
+            int depth=frame.depth+1;
+            if(depth>64||active.containsKey(value))throw new IllegalStateException("SyntaxError: Native argument depth limit");
+            Integer height=completed.get(value);
+            if(height!=null){if(depth+height-1>64)throw new IllegalStateException("SyntaxError: Native argument depth limit");frame.height=Math.max(frame.height,height+1);continue;}
+            active.put(value,true);frames.push(new ArgumentFrame(value,argumentChildren(value),depth));
+        }
+    }
+    /** 검증한 인자를 기존 org.json 변환 규칙으로 감싼다. */
+    private static JSONArray argumentsArray(Object[] args)throws JSONException{assertArgumentDepth(args);return new JSONArray(args);}
+    /** JNI로 넘길 인자 JSON. 검사 뒤에 직렬화해 깊은 Java 컬렉션/순환이 먼저 스택을 넘지 않게 한다. */
+    private static String argumentsJSON(Object[] args)throws JSONException{return argumentsArray(args).toString();}
     private AsyncJob activeJob;
     /**
      * Creates an engine with the labeled demonstration chart, owned by the calling thread. Prefer {@link
@@ -99,7 +147,7 @@ public final class BaroChartEngine implements AutoCloseable {
      * @return the decoded JSON result
      * @throws JSONException if the arguments cannot be encoded or the core returns invalid JSON
      */
-    public Object invoke(String name,Object... args) throws JSONException {check();if(name==null||name.length()==0||name.length()>128||args.length>16)throw new IllegalArgumentException("Native function name/argument limit");return new JSONArray("["+callRuntime(handle,name,new JSONArray(args).toString())+"]").get(0);}
+    public Object invoke(String name,Object... args) throws JSONException {check();if(name==null||name.length()==0||name.length()>128||args.length>16)throw new IllegalArgumentException("Native function name/argument limit");String arguments=argumentsJSON(args);check();return new JSONArray("["+callRuntime(handle,name,arguments)+"]").get(0);}
     static final class SceneTiming {
         final long jniNanos,envelopeParseNanos,bodyParseNanos;final int jsonChars;
         final String transport;final long metadataParseNanos,numericValidationNanos,numericBytes;final int commandCount,stringCount;
@@ -146,7 +194,7 @@ public final class BaroChartEngine implements AutoCloseable {
     private SceneTiming sceneTiming=new SceneTiming(0,0,0,0);
     SceneTiming sceneTiming(){check();return sceneTiming;}
     private JSONObject sceneJSON(String name,Object... args) throws JSONException {
-        check();String arguments=new JSONArray(args).toString();long start=System.nanoTime();
+        check();String arguments=argumentsJSON(args);long start=System.nanoTime();
         String returned=callRuntime(handle,name,arguments);long afterJNI=System.nanoTime();
         String body=(String)new JSONArray("["+returned+"]").get(0);long afterEnvelope=System.nanoTime();
         JSONObject scene=new JSONObject(body);long afterBody=System.nanoTime();
@@ -244,9 +292,9 @@ public final class BaroChartEngine implements AutoCloseable {
         if("compactData".equals(operation)&&(activeJob!=null&&!activeJob.committed||activeWorkspace!=null||activeParams!=null))throw new IngestionException("BUSY","Compaction has an active asynchronous calculation");
         if(ingestionCommand(operation)){
             if((activeJob!=null&&!activeJob.committed||activeWorkspace!=null&&!activeWorkspace.job.committed()||activeParams!=null&&!activeParams.job.committed())&&!operation.equals("dataIngestionStats")&&!operation.equals("saveDataIngestion"))throw new IngestionException("BUSY","Data ingestion has an active asynchronous calculation");
-            JSONObject envelope=(JSONObject)invoke("nativeDataIngestionCommand",operation,new JSONArray(args));
+            JSONObject envelope=(JSONObject)invoke("nativeDataIngestionCommand",operation,argumentsArray(args));
             result=ingestionResult(envelope);
-        }else result=invoke("nativeCommand",operation,new JSONArray(args));
+        }else result=invoke("nativeCommand",operation,argumentsArray(args));
         if("compactData".equals(operation)){
             if(!(result instanceof JSONObject))throw new JSONException("Compaction receipt object required");
             if(CompactionReceipt.changed(((JSONObject)result).get("removed")))notifyChanges();
@@ -1123,7 +1171,7 @@ public final class BaroChartEngine implements AutoCloseable {
         return new ParamsUpdateJob.Receipt((String)status,registration);
     }
     private static long workspaceInteger(Object value,long min,long max,String label)throws JSONException {if(!(value instanceof Number))throw new JSONException("Workspace numeric "+label);double n=((Number)value).doubleValue();if(!Double.isFinite(n)||n!=Math.rint(n)||n<min||n>max)throw new JSONException("Workspace integer "+label);return (long)n;}
-    private static Object invokeHandle(long h,String function,Object... args) throws JSONException {return new JSONArray("["+callRuntime(h,function,new JSONArray(args).toString())+"]").get(0);}
+    private static Object invokeHandle(long h,String function,Object... args) throws JSONException {return new JSONArray("["+callRuntime(h,function,argumentsJSON(args))+"]").get(0);}
     private static final class Transfer {
         final int slot,offset,entry,inputCount,uiKind;final byte[] bytes;final String rows;
         Transfer(int slot,int offset,byte[] bytes){this.slot=slot;this.offset=offset;this.bytes=bytes;entry=-1;rows=null;inputCount=0;uiKind=0;}

@@ -1590,7 +1590,7 @@ The first failure wins:
 
 #### 3.10.5 `load(text, {styleDecoder, validatePanel, validateBinding})` (`:38-41`)
 1. `boundedText(text, maxDocumentChars, 'Drawing document', true)`.
-2. `JSON.parse` (engine SyntaxError).
+2. **(M0c)** `assertJsonTextDepth(text, 32, 'Drawing document depth limit')` rejects excessive container nesting with RangeError before `JSON.parse` (engine SyntaxError). Quoted brackets and escapes do not count. The length check above still comes first.
 3. `optionRecord(['schema','version','drawings'],'Drawing document')`.
 4. Wrong schema, `version ∉ {1,2,3,4}`, a non-array, or length > maxDrawings → TypeError `Unsupported drawing document`.
 5. Per drawing:
