@@ -25,6 +25,51 @@ pub struct CheckpointFieldOrder {
 }
 
 impl CheckpointFieldOrder {
+    /// 아직 생성된 필드가 없는 JS state의 키 순서다.
+    pub fn empty() -> Self {
+        Self { order: Vec::new() }
+    }
+
+    /// 선택 필드가 있는 imported state의 실제 삽입 순서를 보존한다.
+    pub fn capture_present(value: &JsValue, allowed: &[&str]) -> Option<Self> {
+        let JsValue::Object(object) = value else {
+            return None;
+        };
+        let mut order = Vec::with_capacity(object.len());
+        for (key, _) in object.iter() {
+            let index = allowed
+                .iter()
+                .position(|candidate| text_eq(key, candidate))?;
+            if order.contains(&index) {
+                return None;
+            }
+            order.push(index);
+        }
+        Some(Self { order })
+    }
+
+    /// JS가 처음 helper 필드를 만들 때만 그 키를 끝에 추가한다.
+    pub fn touch(&mut self, canonical_index: usize) {
+        if !self.order.contains(&canonical_index) {
+            self.order.push(canonical_index);
+        }
+    }
+
+    /// 존재하는 선택 필드만 현재 키 순서대로 직렬화한다.
+    pub fn ordered_present_object(&self, fields: &[(&str, Option<JsValue>)]) -> JsValue {
+        debug_assert_eq!(
+            self.order.len(),
+            fields.iter().filter(|(_, value)| value.is_some()).count()
+        );
+        let mut output = JsObject::new();
+        for index in &self.order {
+            if let Some((key, Some(value))) = fields.get(*index) {
+                output.insert(JsString::from_str(key), value.clone());
+            }
+        }
+        JsValue::Object(output)
+    }
+
     /// 새 JS state가 만드는 source insertion order다.
     pub fn source(field_count: usize) -> Self {
         Self {

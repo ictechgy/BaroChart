@@ -10,6 +10,37 @@ use indicator_helpers::{
     true_range, vwma_accumulate, vwma_step,
 };
 
+#[test]
+fn optional_helper_order_tracks_lazy_creation_and_imported_key_order() {
+    let fields = ["e", "r"];
+    let mut order = CheckpointFieldOrder::empty();
+    let empty = order.ordered_present_object(&[("e", None), ("r", None)]);
+    assert!(matches!(empty, JsValue::Object(ref object) if object.is_empty()));
+    order.touch(1);
+    let only_r = order.ordered_present_object(&[("e", None), ("r", Some(JsValue::Number(2.0)))]);
+    let partial = CheckpointFieldOrder::capture_present(&only_r, &fields).unwrap();
+    assert_eq!(partial.indices(), &[1]);
+    order.touch(0);
+    order.touch(1);
+    let snapshot = order.ordered_present_object(&[
+        ("e", Some(JsValue::Number(1.0))),
+        ("r", Some(JsValue::Number(2.0))),
+    ]);
+    let JsValue::Object(object) = &snapshot else {
+        panic!("object required")
+    };
+    assert_eq!(
+        object
+            .iter()
+            .map(|(key, _)| key.to_string_lossy())
+            .collect::<Vec<_>>(),
+        ["r", "e"]
+    );
+    let imported = CheckpointFieldOrder::capture_present(&snapshot, &fields).unwrap();
+    assert_eq!(imported.indices(), &[1, 0]);
+    assert!(CheckpointFieldOrder::capture_present(&snapshot, &["e"]).is_none());
+}
+
 fn bar(close: f64, volume: f64) -> Bar {
     Bar {
         time: 0.0,
