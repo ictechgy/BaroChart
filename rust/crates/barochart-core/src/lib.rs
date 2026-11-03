@@ -1,6 +1,19 @@
 //! Rust 코어 뼈대(M1b Task 5). 실제 모델·저장소는 M2 이후에 이식한다.
 #![forbid(unsafe_code)]
 
+/// 배치 한도 옵션을 검증한다.
+pub mod batch_options;
+/// 빌린 열의 블록 집계를 다룬다.
+pub mod block_range;
+/// 체크포인트의 무손실 문서 코덱을 다룬다.
+pub mod checkpoint_codec;
+/// JS와 같은 코어 공통 한도와 값 계약을 다룬다.
+pub mod contracts;
+/// OHLCV 데이터와 원자적 변경을 다룬다.
+pub mod data;
+/// 순서를 고정한 구간 집계를 다룬다.
+pub mod range_index;
+
 use barochart_js::string::JsString;
 
 /// 호스트 콜백이 실패했음을 나타내는 불투명 오류다.
