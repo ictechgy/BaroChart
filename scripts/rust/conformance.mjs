@@ -1387,6 +1387,38 @@ function remember(list,item){
  if(list.length<EXAMPLE_LIMIT)list.push(item);
 }
 
+/** 첫 V8 JSON 불일치만 관찰한다. 재실행 결과는 원래 판정이나 기대값을 바꾸지 않는다. */
+function jsonMismatchDiagnostic(entry,originalExpected){
+ const diagnostic={taskSha256:createHash('sha256').update(JSON.stringify(entry.task)).digest('hex'),originalExpected};
+ try{diagnostic.portableReplay=createOracle()(entry.task);}catch(error){diagnostic.portableReplay=oracleFailure(error);}
+ try{
+  const value=JSON.parse(Buffer.from(entry.task.text,'hex').toString('utf8'));
+  const text=JSON.stringify(value);
+  diagnostic.nativeReplay=Buffer.from(text===undefined?'null':text,'utf8').toString('hex');
+ }catch(error){diagnostic.nativeReplay=`E:${error.name}`;}
+ const keys=hex=>{
+  try{
+   const value=JSON.parse(Buffer.from(hex,'hex').toString('utf8'));
+   return value&&typeof value==='object'&&!Array.isArray(value)
+    ? Object.keys(value).map(key=>Array.from({length:key.length},(_,index)=>key.charCodeAt(index))) : [];
+  }catch{return null;}
+ };
+ diagnostic.originalKeyUnits=keys(originalExpected);
+ diagnostic.replayedKeyUnits=keys(diagnostic.nativeReplay);
+ return diagnostic;
+}
+
+/** 오라클 자체의 JSON 키 보존을 확인한다. 실패한 런타임을 Rust 불일치로 세지 않는다. */
+function assertJsonOracleRuntime(){
+ const target=String.raw`{"-0":0,"\uD800":0}`;
+ const before=Object.keys(JSON.parse(target));
+ JSON.parse(String.raw`{"-0":{},"\\":0}`);
+ const after=Object.keys(JSON.parse(target));
+ if(before.length!==2||after.length!==2||before[1]!==String.fromCharCode(0xd800)||after[1]!==String.fromCharCode(0xd800)){
+  throw new HarnessError(`JSON.parse changed an escaped property key in Node ${process.version} / V8 ${process.versions.v8}; use the pinned Node 22 verification runtime or a runtime that passes this probe; no Rust comparison was run`);
+ }
+}
+
 /**
  * 커널 결과 하나를 판정한다. 엔진마다 그 플랫폼의 커널 값(kernelValueFor)과 비교한다.
  * - 어느 엔진과든 알려진 차이가 아닌데 다르면 불일치다(비교한 작업으로 센다).
@@ -1420,7 +1452,13 @@ function judge(stats,entry,result,context){
  }
  if(failures.length){
   suite.compared++;suite.mismatches++;
-  remember(stats.examples.mismatches,{label,source:entry.source,task:entry.task,failures});
+  const mismatch={label,source:entry.source,task:entry.task,failures};
+  const v8Failure=failures.find(failure=>failure.engine==='v8');
+  if(op==='json'&&v8Failure&&!stats.jsonDiagnosticCaptured){
+   stats.jsonDiagnosticCaptured=true;
+   mismatch.diagnostic=jsonMismatchDiagnostic(entry,v8Failure.expected);
+  }
+  remember(stats.examples.mismatches,mismatch);
   return;
  }
  if(matched){suite.compared++;return;}
@@ -1569,6 +1607,8 @@ function readMatch(path,pattern){
 function describeEnvironment(options,context){
  const environment={
   node:process.version,v8:process.versions.v8,nodeUnicode:process.versions.unicode,kernelUnicode:context.kernelUnicode,
+  kernelBinarySha256:context.kernelBinarySha256,
+  nodeBinarySha256:createHash('sha256').update(readFileSync(process.execPath)).digest('hex'),
   rustToolchain:readMatch(join(WORKSPACE,'rust-toolchain.toml'),/^channel\s*=\s*"([^"]+)"/m),
   ryuJs:readMatch(join(WORKSPACE,'crates/barochart-js/Cargo.toml'),/^ryu-js\s*=\s*"=?([^"]+)"/m),
   platform:`${platform()} ${release()} ${arch()}`,
@@ -1815,8 +1855,10 @@ async function main(args){
  const options=parseOptions(args);
  if(options.help){console.log(USAGE);return 0;}
  if(options.emitCorpus){await emitCorpus(options);return 0;}
+ assertJsonOracleRuntime();
  const started=performance.now(),binary=options.binary??buildKernel(),expected=createOracle();
- const context={engines:prepareEngines(options),engineNames:options.engines,kernelUnicode:kernelUnicodeVersion(binary),oracle:task=>{
+ const context={engines:prepareEngines(options),engineNames:options.engines,kernelUnicode:kernelUnicodeVersion(binary),
+  kernelBinarySha256:createHash('sha256').update(readFileSync(binary)).digest('hex'),oracle:task=>{
   try{return expected(task);}catch(error){return oracleFailure(error);}
  }};
  context.unicodeDiffers=majorMinor(context.kernelUnicode)!==majorMinor(process.versions.unicode);

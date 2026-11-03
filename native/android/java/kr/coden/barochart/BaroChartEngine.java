@@ -1328,7 +1328,11 @@ public final class BaroChartEngine implements AutoCloseable {
     static int zoneOffsetSeconds(long epochMillis,String zone){return timezone(zone).getRules().getOffset(Instant.ofEpochMilli(epochMillis)).getTotalSeconds();}
     /** JNI Rust status/error envelope to the same Name: message text used by QuickJS. */
     static String rustErrorMessage(int status,String envelope){
-        if(envelope!=null&&!envelope.isEmpty())try{JSONObject value=new JSONObject(envelope);String name=value.optString("name","Error"),message=value.optString("message","Rust core call failed");return name.isEmpty()?message:name+": "+message;}catch(JSONException ignored){/* fixed status fallback below */}
+        if(envelope!=null&&!envelope.isEmpty())try{JSONObject value=new JSONObject(envelope);String name=value.optString("name","Error"),message=value.optString("message","Rust core call failed");return name.isEmpty()?message:name+": "+message;}catch(JSONException invalidEnvelope){return rustStatusMessage(status);}
+        return rustStatusMessage(status);
+    }
+    /** 깨진 전송 본문은 노출하지 않고 고정 상태 문구만 반환한다. */
+    private static String rustStatusMessage(int status){
         switch(status){case 3:case 4:return "Error: Chart disposed";case 5:return "Rust core busy";case 6:return "TypeError: Invalid Rust core transport";default:return "Rust engine unavailable";}
     }
     /**

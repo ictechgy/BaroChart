@@ -116,6 +116,13 @@ public class RustRuntimeTest {
         assertFalse(BaroChartEngine.zoneResolve("UTC").isEmpty());
     }
 
+    @Test public void malformedRustErrorEnvelopeUsesFixedStatusText() {
+        assertEquals("Error: Chart disposed", BaroChartEngine.rustErrorMessage(3,"{private input"));
+        assertEquals("Rust core busy", BaroChartEngine.rustErrorMessage(5,"null"));
+        assertEquals("TypeError: Invalid Rust core transport", BaroChartEngine.rustErrorMessage(6,"not-json"));
+        assertEquals("Rust engine unavailable", BaroChartEngine.rustErrorMessage(2,null));
+    }
+
     @Test public void missingRustBackendIsTypedUnavailable() {
         Assume.assumeFalse(BuildConfig.BAROCHART_WITH_RUST);
         TestSupport.onMain(() -> {

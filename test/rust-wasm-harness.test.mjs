@@ -27,6 +27,8 @@ test('WASM harness compares nativeInit with the Node VM and reports staged unava
   const nonzeroComparison = await harness.compare('nativeInit', [1, null]);
   assert.equal(nonzeroComparison.equal, true);
   assert.equal(nonzeroComparison.rust.value, 1);
+  const recordComparison = await harness.compare('nativeInit', [1, {}]);
+  assert.equal(recordComparison.equal, true, 'arguments must belong to the VM realm');
 
   const unavailable = await harness.call('nativeSelfTest', []);
   assert.equal(unavailable.status, 2);
