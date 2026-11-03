@@ -12,6 +12,12 @@ group = 'kr.coden'
 version = sdkVersion
 def selectedCore = file(providers.gradleProperty('asterCoreFile').orElse('../../Resources/aster-core.js').get())
 def generatedAssets = layout.buildDirectory.dir('generated/asterAssets')
+def rustEnabled = providers.gradleProperty('barochartRust').map { it.toBoolean() }.orElse(true).get()
+def quickjsEnabled = providers.gradleProperty('barochartQuickjs').map { it.toBoolean() }.orElse(true).get()
+if (!rustEnabled && !quickjsEnabled) throw new GradleException('At least one BaroChart backend must be enabled')
+def repositoryRoot = file('../../..').canonicalFile
+def rustTargetDirectory = new File(repositoryRoot, 'rust/target')
+def rustNode = providers.gradleProperty('barochartNode').orElse(providers.environmentVariable('BAROCHART_NODE')).orElse('node').get()
 if (providers.gradleProperty('asterBuildDir').isPresent()) layout.buildDirectory = file(providers.gradleProperty('asterBuildDir').get())
 
 android {
@@ -25,25 +31,55 @@ android {
         consumerProguardFiles 'consumer-rules.pro'
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
         resValue 'string', 'barochart_sdk_version', sdkVersion
-        externalNativeBuild { cmake { arguments '-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON' } }
+        buildConfigField 'boolean', 'BAROCHART_WITH_QUICKJS', quickjsEnabled.toString()
+        buildConfigField 'boolean', 'BAROCHART_WITH_RUST', rustEnabled.toString()
+        externalNativeBuild { cmake { arguments '-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON', "-DWITH_QUICKJS=${quickjsEnabled ? 'ON' : 'OFF'}", "-DWITH_RUST=${rustEnabled ? 'ON' : 'OFF'}", "-DBAROCHART_RUST_LIB=${rustTargetDirectory}" } }
     }
     sourceSets.main {
         java.srcDirs = ['../java']
         assets.srcDir generatedAssets
     }
+    buildFeatures { buildConfig true }
     compileOptions { sourceCompatibility JavaVersion.VERSION_1_8; targetCompatibility JavaVersion.VERSION_1_8 }
     externalNativeBuild { cmake { path 'CMakeLists.txt'; version '3.22.1'; buildStagingDirectory new File(layout.buildDirectory.get().asFile.parentFile, project.name + '-cmake') } }
 }
 
+def sdkRoot = System.getenv('ANDROID_SDK_ROOT') ?: System.getenv('ANDROID_HOME') ?: new File(System.getProperty('user.home'), 'Library/Android/sdk').path
+def ndkHost = System.getProperty('os.name').toLowerCase(java.util.Locale.ROOT).contains('mac') ? 'darwin-x86_64' : 'linux-x86_64'
+def ndkBin = new File(sdkRoot, "ndk/29.0.14033849/toolchains/llvm/prebuilt/${ndkHost}/bin")
+def cargoScript = new File(repositoryRoot, 'scripts/rust/cargo.mjs')
+
+def registerCargoBuild = { String taskName, String target, String linker ->
+    tasks.register(taskName, Exec) {
+        onlyIf { rustEnabled }
+        workingDir repositoryRoot
+        environment 'CARGO_BUILD_JOBS', '2'
+        environment 'CARGO_NET_OFFLINE', 'true'
+        environment "CARGO_TARGET_${target.toUpperCase(java.util.Locale.ROOT).replace('-', '_')}_LINKER", new File(ndkBin, linker).path
+        commandLine rustNode, cargoScript.path, 'build', '--locked', '--release', '-p', 'barochart-ffi', '--target', target
+        inputs.files(fileTree(new File(repositoryRoot, 'rust/crates')) { include '**/*.rs', '**/Cargo.toml' })
+        inputs.files(new File(repositoryRoot, 'rust/Cargo.lock'), new File(repositoryRoot, 'rust/rust-toolchain.toml'))
+        outputs.file(new File(rustTargetDirectory, "${target}/release/libbarochart_ffi.a"))
+    }
+}
+def cargoArm64 = registerCargoBuild('cargoBuildArm64', 'aarch64-linux-android', 'aarch64-linux-android26-clang')
+def cargoX8664 = registerCargoBuild('cargoBuildX8664', 'x86_64-linux-android', 'x86_64-linux-android26-clang')
+cargoX8664.configure { mustRunAfter cargoArm64 }
+
 tasks.register('prepareAsterAssets', Sync) {
-    if (!selectedCore.isFile()) throw new GradleException('Missing bundled core: ' + selectedCore)
-    from(selectedCore) { rename { 'aster-core.js' } }
-    from('../quickjs/LICENSE') { into 'licenses'; rename { 'QUICKJS-LICENSE.txt' } }
+    if (quickjsEnabled) {
+        if (!selectedCore.isFile()) throw new GradleException('Missing bundled core: ' + selectedCore)
+        from(selectedCore) { rename { 'aster-core.js' } }
+        from('../quickjs/LICENSE') { into 'licenses'; rename { 'QUICKJS-LICENSE.txt' } }
+    }
     from('LICENSE.txt') { into 'licenses' }
     from('../../../NOTICE') { into 'licenses'; rename { 'NOTICE.txt' } }
     into generatedAssets
 }
-tasks.named('preBuild').configure { dependsOn 'prepareAsterAssets' }
+tasks.named('preBuild').configure {
+    dependsOn 'prepareAsterAssets'
+    if (rustEnabled) dependsOn cargoArm64, cargoX8664
+}
 tasks.withType(JavaCompile).configureEach { options.compilerArgs.addAll(['-Werror', '-Xlint:all,-options']) }
 
 // SDK AAR 런타임 의존성은 0을 유지한다(compileOnly·androidTest만).
@@ -75,7 +111,7 @@ afterEvaluate {
                 version = project.version
                 pom {
                     name = 'barochart-android'
-                    description = 'BaroChart financial chart engine for Android: QuickJS core, Canvas view and typed API.'
+                    description = 'BaroChart financial chart engine for Android: QuickJS-default and internal Rust cores, Canvas view and typed API.'
                     url = 'https://github.com/ictechgy/BaroChart'
                     licenses {
                         license {

@@ -85,6 +85,8 @@ public final class BaroChartException extends RuntimeException {
         if (error instanceof BaroChartEngine.IngestionException) return message.matches("(?s).*(budget|limit|full).*") ? Code.BUDGET_EXCEEDED : Code.INVALID_ARGUMENT;
         if (error instanceof CancellationException || error instanceof InterruptedException) return Code.CANCELLED;
         if (error instanceof JSONException || error instanceof IllegalArgumentException) return Code.INVALID_ARGUMENT;
+        // Rust-only unavailable 문구에 사용자 id의 cancel/budget이 들어도 host 부분일치보다 먼저 분류한다.
+        if (message.startsWith("UnavailableError: ")) return Code.UNAVAILABLE;
         // TypeError는 형식 검증, SyntaxError는 loadDrawings 등에 넘긴 깨진 JSON이라 둘 다 잘못된 인수다
         if (message.startsWith("TypeError: ") || message.startsWith("SyntaxError: ")) return Code.INVALID_ARGUMENT;
         if (message.startsWith("RangeError: ")) return message.matches("(?is).*(: limit \\d+$|budget|exceeds).*") ? Code.BUDGET_EXCEEDED : Code.INVALID_ARGUMENT;
@@ -108,7 +110,7 @@ public final class BaroChartException extends RuntimeException {
 
     /** "TypeError: x" 같은 JS 예외 접두어를 떼어 원인 문장만 남긴다 */
     private static String withoutScriptPrefix(String message) {
-        for (String prefix : new String[]{"TypeError: ", "RangeError: ", "SyntaxError: ", "IngestionError: ", "Error: "}) {
+        for (String prefix : new String[]{"UnavailableError: ", "TypeError: ", "RangeError: ", "SyntaxError: ", "IngestionError: ", "Error: "}) {
             if (message.startsWith(prefix)) return message.substring(prefix.length());
         }
         return message;
