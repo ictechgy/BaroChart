@@ -68,6 +68,10 @@ Open `examples/compose-sample` in Android Studio and run the `app` configuration
 
 Use **Pause**, **Line**, **Save** and **Restore**. As on iOS, the native sample's workspace expects matching bars. [Android lifecycle and data events](ANDROID-GUIDE.md).
 
+## Connect your feed
+
+Use the [executable HTTP/stream recipe](FEED-INTEGRATION.md) for snapshot/live overlap, sequence gaps, cancellation and reconnect. Run `node scripts/serve-feed.mjs` to try the local fixture.
+
 ## Check your first integration
 
 1. A chart appears inside a container with a nonzero size.
