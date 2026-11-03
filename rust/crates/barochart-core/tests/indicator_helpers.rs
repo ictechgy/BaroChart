@@ -61,6 +61,28 @@ fn text(value: &JsValue) -> String {
 }
 
 #[test]
+fn smoother_reset_preserves_imported_object_key_order() {
+    let wire = value(r#"{"value":4,"sum":7,"count":2}"#);
+    let mut smoother = Smoother::from_parts(2.0, 7.0, 4.0);
+    assert!(smoother.capture_wire_order(&wire));
+    let mut state = Some(smoother);
+    assert!(smooth(&mut state, f64::INFINITY, 3, 0.5).is_nan());
+    assert_eq!(
+        text(&state.as_ref().unwrap().to_wire()),
+        r#"{"value":NaN,"sum":0,"count":0}"#
+    );
+
+    let mut smoother = Smoother::from_parts(1.0, f64::INFINITY, f64::NAN);
+    assert!(smoother.capture_wire_order(&wire));
+    let mut state = Some(smoother);
+    assert!(ema_recover(&mut state, 2.0, 3, 0.5).is_nan());
+    assert_eq!(
+        text(&state.as_ref().unwrap().to_wire()),
+        r#"{"value":NaN,"sum":2,"count":1}"#
+    );
+}
+
+#[test]
 fn raw_roll_wrap_reset_and_sma_recovery_remain_distinct() {
     let mut raw = None;
     assert!(raw.is_none());

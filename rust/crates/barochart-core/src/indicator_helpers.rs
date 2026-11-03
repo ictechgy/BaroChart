@@ -303,7 +303,9 @@ pub fn smooth(state: &mut Option<Smoother>, value: f64, period: usize, alpha: f6
     debug_assert!(period > 0);
     let smoother = state.get_or_insert_with(Smoother::default);
     if !value.is_finite() {
-        *smoother = Smoother::default();
+        smoother.count = 0.0;
+        smoother.sum = 0.0;
+        smoother.value = f64::NAN;
         return f64::NAN;
     }
     if smoother.count < period as f64 {
@@ -336,7 +338,9 @@ pub fn ema_recover(state: &mut Option<Smoother>, value: f64, period: usize, alph
             !smoother.value.is_finite()
         }
     {
-        *smoother = Smoother::default();
+        smoother.count = 0.0;
+        smoother.sum = 0.0;
+        smoother.value = f64::NAN;
     }
     let before = state.as_ref().map_or(f64::NAN, |smoother| {
         if smoother.count >= period as f64 {
