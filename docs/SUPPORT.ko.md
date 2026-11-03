@@ -14,7 +14,7 @@ BaroChart `0.3.0-dev`는 개발 프리뷰입니다. 패키지는 private이며 n
 | 모바일 웹 | **반응형 호스트 예제와 명시적 입력 프리셋.** | 마이그레이션 페이지를 측정한 폭에서는 가로 넘침이 없습니다. 브라우저 viewport 에뮬레이션은 터치 제스처, 스크롤 처리, VoiceOver, TalkBack, 실기기를 검증하지 않습니다. |
 | Apple 네이티브 | **기존 Swift/JavaScriptCore SDK 통합.** 로컬 소스 체크아웃에서 SwiftUI/UIKit 뷰를 제공합니다. | CI, 날짜가 기록된 시뮬레이터/실기기 근거는 [네이티브 측정](measurements/native-device-performance.json)에 있습니다. 2026-11-01 실기기 결과는 iPhone 한 대의 화면 밖 CPU 작업이며 display FPS나 폭넓은 기기 지원을 뜻하지 않습니다. SwiftPM 릴리스 태그는 없습니다. |
 | Android 네이티브 | **기존 Android/QuickJS SDK 통합.** 로컬 소스 체크아웃에서 View/Compose API와 두 ABI를 제공합니다. | CI, 에뮬레이터, 날짜가 기록된 실기기 근거는 [네이티브 측정](measurements/native-device-performance.json)에 있습니다. 2026-11-01 실기기 결과는 Samsung 기기 한 대의 CPU bitmap 렌더링이며 display FPS나 폭넓은 기기 지원을 뜻하지 않습니다. Maven Central 릴리스는 없습니다. |
-| Rust 네이티브 차트 백엔드 | **미완성·개발 중.** M1b ABI/패키징 통합을 구현 중이며 완전한 네이티브 차트 백엔드나 적합성 검증 관문은 통과하지 않았습니다. | Rust JS 의미 커널은 차트 엔진이 아닙니다. JavaScript 기능 동등성, JS/Rust 속도 비율, Rust 기본 백엔드 주장을 하지 마세요. 상태를 바꾸기 전에 승인된 M1b–M7 구현과 호스트/플랫폼 검사를 완료해야 합니다. 현재 차트를 만들지 않는 범위는 [M1 계획](superpowers/plans/2026-11-02-rust-core-m1.md)을 참고하세요. |
+| Rust 네이티브 차트 백엔드 | **미완성·개발 중.** M1b ABI/패키징/내부 선택 기반은 구현됐으며 완전한 차트 백엔드와 적합성 관문은 아직 통과하지 않았습니다. | [M1b 검사](measurements/2026-11-04-rust-m1b.md)는 count-echo 뼈대를 검증합니다. JS 기능 동등성·차트 속도 비율·Rust 기본값을 주장하지 마세요. 승인된 M1b–M7 구현과 호스트/플랫폼 관문을 마친 뒤 상태를 갱신합니다. |
 | 피드·계정·거래 | **호스트 소유이며 제공하지 않습니다.** | 로컬 HTTP/SSE fixture는 합성 데이터만 씁니다. 운영 공급자 인증, 사용 권한, 순번/watermark 정책, 재시도, 계정, 주문 실행은 앱 책임입니다. [피드 통합](FEED-INTEGRATION.ko.md)을 참고하세요. |
 
 웹 React 이름 `AsterChart`와 저장용 `aster.*` 스키마는 호환 표면으로 유지합니다. 네이티브 SDK의 브랜드 이름은 `BaroChart`입니다. 제품 이름을 바꾼다고 저장 스키마를 개명하지 마세요. 이 프로젝트는 TradingView 제품과 독립적이며 API 관계를 주장하지 않습니다.

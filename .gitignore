@@ -9,6 +9,7 @@ examples/react-web/qa-results*.json
 .cxx/
 native/android/library/build/
 rust/target/
+rust/.tools/
 examples/kotlin-consumer/build/
 examples/kotlin-consumer/app/build/
 *.aar

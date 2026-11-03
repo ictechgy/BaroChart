@@ -6,8 +6,8 @@ import JavaScriptCore
 // 프로토콜을 따른다. JS 구현은 이전 asterInvoke·asterTypedBytes+memcpy 본문을 그대로 옮겼다: JSC 호출 순서, 예외 검사,
 // 오류 문구가 같고, autorelease 풀은 지금처럼 엔진 쪽 호출 자리에 둔다.
 
-/// 코어 백엔드 종류. M1에서 `rust`를 더한다.
-enum BaroChartRuntimeBackend { case javaScript }
+/// 코어 백엔드 종류. Rust 선택자는 내부 테스트와 M6 연결만을 위한 값이다.
+enum BaroChartRuntimeBackend { case javaScript, rust }
 
 /// 코어 함수 한 번을 부른 날것의 결과. 호스트 오류로 바꾸기 전 단계라, 오류를 바꾸는 규칙이 다른 호출 자리(asterInvoke, 공개 call,
 /// 전용 경로)가 각자 규칙을 적용하고 추적 기록기가 같은 결과를 그대로 볼 수 있다.
@@ -311,6 +311,19 @@ enum BaroChartRuntimeFactory {
         return traced(BaroChartJSCoreRuntime(context: context))
     }
 
+    /// Engine runtime for an explicit internal backend choice.
+    static func makeEngineRuntime(like backend: BaroChartRuntimeBackend) -> BaroChartCoreRuntime? {
+        switch backend {
+        case .javaScript: return makeEngineRuntime()
+        case .rust:
+            #if canImport(BaroChartCoreRust)
+            return makeRustEngineRuntime()
+            #else
+            return nil
+            #endif
+        }
+    }
+
     /// 비동기·복원·params 대상용 격리 런타임(새 VM의 새 컨텍스트). 원본과 같은 백엔드로 만든다.
     /// 작업 스레드에서 부르므로 원본 런타임 대신, 소유 스레드에서 미리 읽어 둔 원본의 백엔드를 받는다.
     /// - Parameter backend: 원본 런타임의 백엔드
@@ -320,11 +333,18 @@ enum BaroChartRuntimeFactory {
         case .javaScript:
             guard let vm = JSVirtualMachine(), let context = JSContext(virtualMachine: vm) else {return nil}
             return traced(BaroChartJSCoreRuntime(context: context))
+        #if canImport(BaroChartCoreRust)
+        case .rust:
+            return makeRustEngineRuntime()
+        #else
+        case .rust:
+            return nil
+        #endif
         }
     }
 
     /// 추적이 켜져 있으면 기록 런타임으로 감싼다.
-    private static func traced(_ runtime: BaroChartCoreRuntime) -> BaroChartCoreRuntime {
+    static func traced(_ runtime: BaroChartCoreRuntime) -> BaroChartCoreRuntime {
         guard let writer = BaroChartTraceSettings.makeWriter() else {return runtime}
         return BaroChartRecordingCoreRuntime(runtime, writer: writer)
     }

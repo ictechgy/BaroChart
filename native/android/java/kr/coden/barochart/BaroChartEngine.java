@@ -16,11 +16,14 @@ import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.Map;
 
-/** Native QuickJS/JNI host, owned by one thread. No WebView or browser. */
+/** Native QuickJS/Rust JNI host, owned by one thread. No WebView or browser. */
 public final class BaroChartEngine implements AutoCloseable {
     static {System.loadLibrary("barochart");}
+    /** 내부 코어 선택 훅. 공개 API 기본값은 항상 JAVASCRIPT다. */
+    enum RuntimeBackend { JAVASCRIPT, RUST }
     private long handle;
     private final String sourceBundle;
+    private final RuntimeBackend runtimeBackend;
     private final Thread owner=Thread.currentThread();
     private final java.util.Set<Runnable> observers=new java.util.LinkedHashSet<>();
     private final java.util.Set<Runnable> closeObservers=new java.util.LinkedHashSet<>();
@@ -36,6 +39,7 @@ public final class BaroChartEngine implements AutoCloseable {
      */
     public java.util.function.Consumer<Throwable> onObserverError;
     private static native long create(String source);
+    private static native long createRust();
     private static native String call(long handle,String name,String arguments);
     private static native Object[] packet(long handle,String mode,String token,double width,double height,boolean force);
     private static native void free(long handle);
@@ -53,13 +57,14 @@ public final class BaroChartEngine implements AutoCloseable {
      */
     static void setTraceDirectoryForTesting(File directory){BaroChartTrace.setDirectory(directory);}
     /**
-     * 코어 런타임 하나를 만든다(번들을 평가한 빈 QuickJS 런타임). JNI create를 부르는 곳은 이 함수 하나다: 엔진 생성자,
-     * 작업공간 복원·params·비동기 준비 대상 생성(설계 §4.4). 지금의 create 호출과 같은 의미이고, M1에서 백엔드 인자를 더한다.
+     * 선택한 코어 런타임 하나를 만든다. JNI create/createRust를 부르는 곳은 이 함수 하나다: 엔진 생성자,
+     * 작업공간 복원·params·비동기 준비 대상 생성(설계 §4.4). 격리 런타임도 원본과 같은 backend을 쓴다.
      * 추적이 켜져 있으면 새 런타임에 추적 파일을 붙인다.
-     * @param bundle 평가할 코어 번들 원문
+     * @param bundle JavaScript 코어 번들 원문; Rust는 null
+     * @param backend 생성할 코어 backend
      * @return 새 런타임 핸들(호출자가 free로 해제한다)
      */
-    static long createRuntime(String bundle){long runtime=create(bundle);BaroChartTrace.runtimeCreated(runtime);return runtime;}
+    static long createRuntime(String bundle,RuntimeBackend backend){long runtime=backend==RuntimeBackend.RUST?createRust():create(bundle);BaroChartTrace.runtimeCreated(runtime);return runtime;}
     /**
      * 런타임의 전역 함수 하나를 JSON 인자 글자로 부른다. 코어를 JSON으로 부르는 JNI call은 모두 이 함수만 거친다.
      * 추적이 켜진 런타임이면 호출과 결과(또는 JNI가 던진 오류)를 한 줄로 남기고, 꺼져 있으면 JNI call을 그대로 부른다.
@@ -123,7 +128,7 @@ public final class BaroChartEngine implements AutoCloseable {
      * @throws IOException if the bundled {@code aster-core.js} asset cannot be read
      * @throws JSONException if the core rejects the initialization
      */
-    public BaroChartEngine(Context context,int count) throws IOException,JSONException {this(context,count,null);}
+    public BaroChartEngine(Context context,int count) throws IOException,JSONException {this(context,count,null,RuntimeBackend.JAVASCRIPT);}
     /**
      * Creates an engine owned by the calling thread. Engines attached to a view must be created on the main thread.
      * @param context used to read the bundled core asset
@@ -132,9 +137,13 @@ public final class BaroChartEngine implements AutoCloseable {
      * @throws IOException if the bundled {@code aster-core.js} asset cannot be read
      * @throws JSONException if the core rejects the options
      */
-    public BaroChartEngine(Context context,int count,JSONObject options) throws IOException,JSONException {
-        try(InputStream in=context.getAssets().open("aster-core.js")){ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] buffer=new byte[8192];int size;while((size=in.read(buffer))!=-1)out.write(buffer,0,size);sourceBundle=new String(out.toByteArray(),StandardCharsets.UTF_8);}
-        handle=createRuntime(sourceBundle);
+    public BaroChartEngine(Context context,int count,JSONObject options) throws IOException,JSONException {this(context,count,options,RuntimeBackend.JAVASCRIPT);}
+    /** 테스트와 같은-backend 격리 런타임이 쓰는 내부 생성자다. */
+    BaroChartEngine(Context context,int count,JSONObject options,RuntimeBackend backend) throws IOException,JSONException {
+        if(backend==null)throw new IllegalArgumentException("Runtime backend required");runtimeBackend=backend;
+        if(backend==RuntimeBackend.JAVASCRIPT&&BuildConfig.BAROCHART_WITH_QUICKJS){try(InputStream in=context.getAssets().open("aster-core.js")){ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] buffer=new byte[8192];int size;while((size=in.read(buffer))!=-1)out.write(buffer,0,size);sourceBundle=new String(out.toByteArray(),StandardCharsets.UTF_8);}}
+        else sourceBundle=null;
+        handle=createRuntime(sourceBundle,backend);
         try {invoke("nativeInit",count,options==null?JSONObject.NULL:options);}catch(JSONException|RuntimeException|Error error){long released=handle;handle=0;try{free(released);}catch(Throwable cleanup){if(cleanup!=error)error.addSuppressed(cleanup);}throw error;}
     }
     private void check(){if(Thread.currentThread()!=owner)throw new IllegalStateException("Use the engine on its owning thread before close");if(activeWorkspace!=null&&activeWorkspace.job.pendingOwnerCleanup())activeWorkspace.job.resumeOwnerCleanup();if(activeParams!=null&&activeParams.job.pendingOwnerCleanup())activeParams.job.resumeOwnerCleanup();if(handle==0)throw new IllegalStateException("Engine closed");if(closing)throw new IllegalStateException("Engine closing");}
@@ -343,12 +352,12 @@ public final class BaroChartEngine implements AutoCloseable {
      */
     public long revision(){check();return revision;}
     /**
-     * Returns QuickJS memory and native handle counters for diagnostics. Advanced API that may change within 1.x.
+     * Returns selected-core memory and shared native handle counters for diagnostics. Advanced API that may change within 1.x.
      * Call on the engine's owner thread.
      * @return the counters as JSON
      * @throws JSONException if the metrics cannot be encoded
      */
-    public JSONObject runtimeMetrics() throws JSONException {check();long[] stats=memoryStats(handle);return new JSONObject().put("requestedLiveBytes",stats[0]).put("requestedPeakBytes",stats[1]).put("processLiveNativeHandles",stats[2]).put("processNativeHandlesCreated",stats[3]).put("processNativeHandlesFreed",stats[4]).put("scope","QuickJS requested bytes including aligned allocator headers; live handle counts include all engines and current isolated workers in this process");}
+    public JSONObject runtimeMetrics() throws JSONException {check();long[] stats=memoryStats(handle);String scope=runtimeBackend==RuntimeBackend.RUST?"Rust engine accounted bytes for FFI-owned buffers; live handle counts include all engines of both backends and current isolated workers in this process":"QuickJS requested bytes including aligned allocator headers; live handle counts include all engines and current isolated workers in this process";return new JSONObject().put("requestedLiveBytes",stats[0]).put("requestedPeakBytes",stats[1]).put("processLiveNativeHandles",stats[2]).put("processNativeHandlesCreated",stats[3]).put("processNativeHandlesFreed",stats[4]).put("scope",scope);}
     byte[] indicatorBytes(String id,String output,int offset,int count){check();if(id==null||output==null||id.length()>128||output.length()>128||offset<0||count<1||count>262144)throw new IllegalArgumentException("Indicator byte slice limits");BaroChartTrace.typedTransfer(handle,"nativeIndicatorBuffer");return indicatorSlice(handle,id,output,offset,count);}
     /**
      * Registers a listener run after each chart change. A {@code RuntimeException} it throws is recorded in {@link
@@ -1062,7 +1071,7 @@ public final class BaroChartEngine implements AutoCloseable {
             public byte[] readSource(long h,long ticket,int slot,int offset,int count){BaroChartTrace.typedTransfer(h,"nativeAsyncBuffer");return readBuffer(h,ticket,slot,offset,count);}
             public void finishSource(long h,long ticket,long r)throws JSONException {JSONObject value=(JSONObject)invokeHandle(h,"nativeWorkspaceSourceFinish",ticket,r);if(!"aster.native-workspace-source-finished".equals(value.get("schema"))||workspaceInteger(value.get("version"),1,1,"version")!=1||workspaceInteger(value.get("ticket"),1,9007199254740991L,"ticket")!=ticket||workspaceInteger(value.get("revision"),0,9007199254740991L,"revision")!=r)throw new JSONException("Workspace source finish binding");}
             public void releaseSource(long h,long ticket)throws JSONException {Object result=invokeHandle(h,"nativeWorkspaceSourceAbort",registration);if(!(result instanceof Boolean))throw new JSONException("Workspace abort receipt");}
-            public long createTarget(String metadata)throws JSONException {long target=createRuntime(sourceBundle);try{if(!Boolean.TRUE.equals(invokeHandle(target,"nativeWorkspaceTargetCreate",metadata)))throw new JSONException("Workspace target create");return target;}catch(JSONException|RuntimeException|Error error){free(target);throw error;}}
+            public long createTarget(String metadata)throws JSONException {long target=createRuntime(sourceBundle,runtimeBackend);try{if(!Boolean.TRUE.equals(invokeHandle(target,"nativeWorkspaceTargetCreate",metadata)))throw new JSONException("Workspace target create");return target;}catch(JSONException|RuntimeException|Error error){free(target);throw error;}}
             public void writeTarget(long h,int slot,int offset,byte[] bytes){BaroChartTrace.typedTransfer(h,"nativeAsyncTargetBuffer");writeBuffer(h,slot,offset,bytes);}
             public void startTarget(long h)throws JSONException {if(!Boolean.TRUE.equals(invokeHandle(h,"nativeAsyncStart")))throw new JSONException("Workspace target start");}
             public WorkspaceRestoreJob.Progress stepTarget(long h,int bars)throws JSONException {Object encoded=invokeHandle(h,"nativeAsyncStep",bars);if(!(encoded instanceof String))throw new JSONException("Workspace progress encoding");JSONObject p=new JSONObject((String)encoded);Object phase=p.get("phase"),complete=p.get("complete");if(!(phase instanceof String)||!(complete instanceof Boolean)||!java.util.Arrays.asList("validate","store-index","calculate","indices","workspace-checkpoints","workspace-ready").contains(phase)||((Boolean)complete)!=phase.equals("workspace-ready"))throw new JSONException("Workspace target phase");return new WorkspaceRestoreJob.Progress((String)phase,workspaceInteger(p.get("done"),0,9007199254740991L,"progress"),workspaceInteger(p.get("total"),0,9007199254740991L,"total"),(Boolean)complete);}
@@ -1131,7 +1140,7 @@ public final class BaroChartEngine implements AutoCloseable {
             public ParamsUpdateJob.Descriptor admit(long h,long ticket,long r)throws JSONException{JSONObject v=(JSONObject)invokeHandle(h,"nativeParamsSourceStep",ticket,8,r);Object complete=v.get("complete");if(!(complete instanceof Boolean))throw new JSONException("Params admission completion");if(!((Boolean)complete))return null;if("noop".equals(v.get("phase")))return new ParamsUpdateJob.Descriptor(null,0,0,true);if(!"copy".equals(v.get("phase")))throw new JSONException("Params admission phase");Object metadata=v.get("metadataJSON");if(!(metadata instanceof String)||((String)metadata).length()>131072)throw new JSONException("Params metadata limit");JSONObject meta=new JSONObject((String)metadata);return new ParamsUpdateJob.Descriptor((String)metadata,(int)workspaceInteger(meta.get("length"),0,BaroChartColumns.MAX_BARS,"length"),workspaceInteger(v.getJSONObject("plan").get("totalBytes"),1,NativeJobBudget.MAX_BYTES,"logical bytes"),false);}
             public void checkSource(long h,long ticket,long r)throws JSONException{paramsTrue(invokeHandle(h,"nativeParamsSourceCheck",ticket,r));}
             public byte[] readSource(long h,long ticket,int slot,int offset,int count){BaroChartTrace.typedTransfer(h,"nativeAsyncBuffer");return readBuffer(h,ticket,slot,offset,count);}
-            public long createTarget(){return createRuntime(sourceBundle);}
+            public long createTarget(){return createRuntime(sourceBundle,runtimeBackend);}
             public void initializeTarget(long h,String metadata)throws JSONException{paramsTrue(invokeHandle(h,"nativeParamsTargetCreate",metadata));}
             public void writeTarget(long h,int slot,int offset,byte[] bytes){BaroChartTrace.typedTransfer(h,"nativeAsyncTargetBuffer");writeBuffer(h,slot,offset,bytes);}
             public void startTarget(long h)throws JSONException{paramsTrue(invokeHandle(h,"nativeParamsTargetStart"));}
@@ -1243,7 +1252,7 @@ public final class BaroChartEngine implements AutoCloseable {
         private long totalCheckpoints() throws JSONException {long n=0;JSONArray list=descriptor.getJSONArray("checkpoints");for(int i=0;i<list.length();i++)n+=list.getJSONObject(i).getLong("total");return n;}
         private void captureUI(boolean begin){if(terminal||stopRequested()||activeJob!=this||handle==0){stopOnce(handle==0?"closed":"superseded");releaseOnOwner();transfers.offer(new Transfer());return;}try{long started=System.nanoTime();invokeHandle(handle,"nativeAsyncCheck",ticket);String json=(String)invokeHandle(handle,begin?"nativeAsyncUIBegin":"nativeAsyncUINext",ticket);if(json.length()>262144)throw new IllegalStateException("UI transfer character limit");int utf8Bytes=json.getBytes(StandardCharsets.UTF_8).length;if(utf8Bytes>1048576)throw new IllegalStateException("UI transfer UTF-8 limit");boolean complete=!begin&&json.equals("{\"complete\":true}");long elapsed=System.nanoTime()-started;uiSnapshotNanos+=elapsed;uiSnapshotMaxNanos=Math.max(uiSnapshotMaxNanos,elapsed);uiChunks++;uiChars+=json.length();uiUtf8Bytes+=utf8Bytes;if(!transfers.offer(new Transfer(json,begin?1:complete?3:2)))throw new IllegalStateException("UI transfer backpressure");progress("ui-capture",uiChunks,0,false);}catch(Throwable error){failure=error;stopOnce(classify(error));releaseOnOwner();transfers.offer(new Transfer());}}
         private void runWorker(){long prepared=0;boolean handedOff=false;try {
-            if(stopRequested())return;long began=System.nanoTime();prepared=createRuntime(sourceBundle);invokeHandle(prepared,kind.equals("correction")?"nativeAsyncCreate":"nativePrepareCreate",descriptor.getString("metadataJSON"));createNanos=System.nanoTime()-began;workerMemoryPeak=memoryPeak(prepared);handler.post(this::captureNext);
+            if(stopRequested())return;long began=System.nanoTime();prepared=createRuntime(sourceBundle,runtimeBackend);invokeHandle(prepared,kind.equals("correction")?"nativeAsyncCreate":"nativePrepareCreate",descriptor.getString("metadataJSON"));createNanos=System.nanoTime()-began;workerMemoryPeak=memoryPeak(prepared);handler.post(this::captureNext);
             while(!stopRequested()){
                 Transfer transfer=transfers.poll(50,java.util.concurrent.TimeUnit.MILLISECONDS);if(transfer==null)continue;if(stopRequested())break;
                 if(transfer.inputCount>0){BaroChartTrace.typedTransfer(prepared,"nativeAsyncTargetBuffer");long copyStart=System.nanoTime();inputColumns.copyInto(prepared,transfer.slot,transfer.offset,transfer.inputCount);long elapsed=System.nanoTime()-copyStart;inputWriteNanos+=elapsed;inputWriteMaxNanos=Math.max(inputWriteMaxNanos,elapsed);copiedBytes+=transfer.inputCount*8L;copyChunks++;intermediatePeakBytes=Math.max(intermediatePeakBytes,transfer.inputCount*8L);progress("copy-input",copiedBytes,inputOwnedBytes,false);}
@@ -1313,6 +1322,19 @@ public final class BaroChartEngine implements AutoCloseable {
             TIMEZONES.put(key,zone);if(TIMEZONES.size()>32)TIMEZONES.remove(TIMEZONES.keySet().iterator().next());return zone;
         }
     }
+    /** JNI Rust host callback: accepted zone name to java.time canonical identifier. */
+    static String zoneResolve(String zone){return timezone(zone).getId();}
+    /** JNI Rust host callback: offset seconds at a UTC epoch millisecond. */
+    static int zoneOffsetSeconds(long epochMillis,String zone){return timezone(zone).getRules().getOffset(Instant.ofEpochMilli(epochMillis)).getTotalSeconds();}
+    /** JNI Rust status/error envelope to the same Name: message text used by QuickJS. */
+    static String rustErrorMessage(int status,String envelope){
+        if(envelope!=null&&!envelope.isEmpty())try{JSONObject value=new JSONObject(envelope);String name=value.optString("name","Error"),message=value.optString("message","Rust core call failed");return name.isEmpty()?message:name+": "+message;}catch(JSONException invalidEnvelope){return rustStatusMessage(status);}
+        return rustStatusMessage(status);
+    }
+    /** 깨진 전송 본문은 노출하지 않고 고정 상태 문구만 반환한다. */
+    private static String rustStatusMessage(int status){
+        switch(status){case 3:case 4:return "Error: Chart disposed";case 5:return "Rust core busy";case 6:return "TypeError: Invalid Rust core transport";default:return "Rust engine unavailable";}
+    }
     /**
      * Formats a time as year, month, day, hour, minute and second parts in a time zone, for the core's time zone
      * formatting.
@@ -1347,7 +1369,11 @@ public final class BaroChartEngine implements AutoCloseable {
      * @return a new engine with no bars
      */
     @androidx.annotation.NonNull public static BaroChartEngine create(@androidx.annotation.NonNull Context context,@androidx.annotation.NonNull EngineOptions options){
-        return typedCall(()->new BaroChartEngine(context,0,LowLevelJson.engineOptions(options)));
+        return create(context,options,RuntimeBackend.JAVASCRIPT);
+    }
+    /** Package-private backend selection hook; public callers stay on JavaScript in M1. */
+    @androidx.annotation.NonNull static BaroChartEngine create(@androidx.annotation.NonNull Context context,@androidx.annotation.NonNull EngineOptions options,RuntimeBackend backend){
+        return typedCall(()->new BaroChartEngine(context,0,LowLevelJson.engineOptions(options),backend));
     }
     /**
      * Replaces every bar of the primary series.

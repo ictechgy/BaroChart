@@ -27,20 +27,66 @@ mod platform {
     }
 }
 
-/// wasm32 하네스 빌드의 구현: 호스트(Node) import. 커널에서 `unsafe`를 허용하는 유일한 곳이다(lib.rs 참고).
+/// wasm32 대조 하네스의 호스트 수학 함수 포인터를 설치한다.
 ///
-/// 함수는 `safe`로 선언한다. f64를 받아 f64를 돌려주는 순수 함수라 호출하는 쪽이 지킬 조건이 없다.
+/// 기기 빌드에는 영향이 없으며 계속 플랫폼 libm을 쓴다.
 #[cfg(target_arch = "wasm32")]
-#[allow(unsafe_code)]
+#[doc(hidden)]
+pub fn install_wasm_math(
+    log: fn(f64) -> f64,
+    exp: fn(f64) -> f64,
+    hypot: fn(f64, f64) -> f64,
+) -> bool {
+    platform::install_wasm_math(log, exp, hypot)
+}
+
+/// wasm32 하네스 빌드의 구현: FFI 계층에서 설치한 V8 수학 함수 포인터다.
+/// 외부 import와 unsafe 호출은 `barochart-ffi`에만 둔다.
+#[cfg(target_arch = "wasm32")]
 mod platform {
-    #[link(wasm_import_module = "env")]
-    unsafe extern "C" {
-        /// 호스트의 `Math.log`
-        pub(super) safe fn js_log(x: f64) -> f64;
-        /// 호스트의 `Math.exp`
-        pub(super) safe fn js_exp(x: f64) -> f64;
-        /// 호스트의 `Math.hypot(a, b)`
-        pub(super) safe fn js_hypot(a: f64, b: f64) -> f64;
+    use std::sync::OnceLock;
+
+    #[derive(Clone, Copy)]
+    struct WasmMathFns {
+        log: fn(f64) -> f64,
+        exp: fn(f64) -> f64,
+        hypot: fn(f64, f64) -> f64,
+    }
+
+    static WASM_MATH: OnceLock<WasmMathFns> = OnceLock::new();
+
+    /// 안전한 호스트 수학 함수를 한 번 설치하며, 같은 함수의 재설치만 허용한다.
+    #[doc(hidden)]
+    pub fn install_wasm_math(
+        log: fn(f64) -> f64,
+        exp: fn(f64) -> f64,
+        hypot: fn(f64, f64) -> f64,
+    ) -> bool {
+        let functions = WasmMathFns { log, exp, hypot };
+        match WASM_MATH.set(functions) {
+            Ok(()) => true,
+            Err(_) => WASM_MATH.get().is_some_and(|installed| {
+                std::ptr::fn_addr_eq(installed.log, log)
+                    && std::ptr::fn_addr_eq(installed.exp, exp)
+                    && std::ptr::fn_addr_eq(installed.hypot, hypot)
+            }),
+        }
+    }
+
+    fn functions() -> &'static WasmMathFns {
+        WASM_MATH
+            .get()
+            .expect("WASM math host functions must be installed before use")
+    }
+
+    pub(super) fn js_log(x: f64) -> f64 {
+        (functions().log)(x)
+    }
+    pub(super) fn js_exp(x: f64) -> f64 {
+        (functions().exp)(x)
+    }
+    pub(super) fn js_hypot(a: f64, b: f64) -> f64 {
+        (functions().hypot)(a, b)
     }
 }
 

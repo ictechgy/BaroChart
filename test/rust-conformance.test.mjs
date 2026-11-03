@@ -324,6 +324,42 @@ test('the harness passes a correct kernel, reports a wrong result and fails on m
  }finally{await rm(dir,{recursive:true,force:true});}
 });
 
+test('JSON mismatch diagnostics retain the failure and record independent replays and executable identity',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'barochart-json-diagnostic-'));
+ try{
+  const {binary}=await writeFakes(dir),report=join(dir,'failure.json');
+  const result=runConformance(['--binary',binary,'--suite','json','--count','10','--seed','1','--report',report],{...process.env,FAKE_CORRUPT_LINE:'7'});
+  assert.equal(result.status,1,result.stdout+result.stderr);
+  const [run]=JSON.parse(await readFile(report,'utf8')).runs;
+  assert.equal(run.result,'fail');
+  assert.equal(run.totals.mismatches,1);
+  const mismatch=run.examples.mismatches[0],diagnostic=mismatch.diagnostic;
+  assert.equal(diagnostic.portableReplay,mismatch.failures[0].expected);
+  assert.equal(diagnostic.nativeReplay,mismatch.failures[0].expected);
+  assert.notEqual(mismatch.failures[0].actual,diagnostic.nativeReplay);
+  assert.match(diagnostic.taskSha256,/^[0-9a-f]{64}$/);
+  assert.equal(run.environment.kernelBinarySha256,createHash('sha256').update(await readFile(binary)).digest('hex'));
+  assert.match(run.environment.nodeBinarySha256,/^[0-9a-f]{64}$/);
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('an oracle runtime that corrupts escaped keys fails before any Rust comparison',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'barochart-json-runtime-'));
+ try{
+  const {binary}=await writeFakes(dir),preload=join(dir,'json-runtime.cjs');
+  await writeFile(preload,String.raw`
+const parse=JSON.parse,target=String.raw\`{"-0":0,"\uD800":0}\`,trigger=String.raw\`{"-0":{},"\\":0}\`;
+let armed=false;
+JSON.parse=function(text,...rest){const value=parse(text,...rest);if(text===trigger)armed=true;if(armed&&text===target){delete value['\ud800'];value['\\']=0;}return value;};
+`.replaceAll('\\`','`'));
+  const result=runConformance(['--binary',binary,'--suite','json','--count','10'],{...process.env,NODE_OPTIONS:`--require=${JSON.stringify(preload)}`});
+  assert.equal(result.status,2,result.stdout+result.stderr);
+  assert.match(result.stderr,/JSON\.parse changed an escaped property key/);
+  assert.match(result.stderr,/no Rust comparison was run/);
+  assert.doesNotMatch(result.stdout,/conformance: (PASS|FAIL)/);
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+
 test('triangulation compares every engine with the kernel built for its platform and stops on broken engines',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'barochart-conformance-'));
  try{

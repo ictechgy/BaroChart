@@ -1,0 +1,10 @@
+[package]
+name = "barochart-bridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+barochart-core = { path = "../barochart-core" }
+barochart-js = { path = "../barochart-js" }

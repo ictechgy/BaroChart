@@ -3,10 +3,41 @@
 version = 4
 
 [[package]]
+name = "barochart-bridge"
+version = "0.0.0"
+dependencies = [
+ "barochart-core",
+ "barochart-js",
+]
+
+[[package]]
+name = "barochart-core"
+version = "0.0.0"
+dependencies = [
+ "barochart-js",
+]
+
+[[package]]
+name = "barochart-ffi"
+version = "0.0.0"
+dependencies = [
+ "barochart-bridge",
+ "barochart-core",
+ "barochart-js",
+]
+
+[[package]]
 name = "barochart-js"
 version = "0.0.0"
 dependencies = [
  "ryu-js",
+]
+
+[[package]]
+name = "barochart-wasm"
+version = "0.0.0"
+dependencies = [
+ "barochart-ffi",
 ]
 
 [[package]]
