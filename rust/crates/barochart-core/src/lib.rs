@@ -14,6 +14,15 @@ pub mod data;
 /// 순서를 고정한 구간 집계를 다룬다.
 pub mod range_index;
 
+/// 지표의 rolling·smoothing·checkpoint 공통 연산을 다룬다.
+pub mod indicator_helpers;
+/// 지표 파라미터의 값과 키 순서를 검증한다.
+pub mod indicator_params;
+/// 정적 지표 이름과 provenance 메타데이터를 다룬다.
+pub mod indicator_registry;
+/// 지표 정의와 고정 출력 행 타입을 다룬다.
+pub mod indicator_types;
+
 use barochart_js::error::JsError;
 use barochart_js::string::JsString;
 use data::{ModelDataState, StoreOptions};
