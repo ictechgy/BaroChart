@@ -21,6 +21,7 @@ npm run demo
 | 대상 | 실행 예제와 가이드 | 생성·갱신·해제 |
 | --- | --- | --- |
 | JavaScript / TypeScript | [웹 첫 차트 소스](../examples/web/quickstart.mjs) | 높이가 있는 컨테이너에 모델·차트를 만들고 데이터를 갱신합니다. 소유 화면이 끝날 때 `chart.destroy({disposeModel: true})`로 해제합니다. |
+| Lightweight Charts에서 마이그레이션 | [캔들 변환 페이지](http://127.0.0.1:5173/examples/web/lightweight-migration.html) · [가이드](MIGRATING-FROM-LIGHTWEIGHT-CHARTS.ko.md) | 숫자형 UTC 초를 밀리초로 바꾸고 거래량 소스를 명시하며 시각 기준으로 갱신합니다. 데이터 변환 레시피이며 기존 코드를 그대로 대체하는 어댑터나 최신성 판정 프로토콜은 아닙니다. |
 | React 웹 | [TypeScript 소비자](../examples/react-web/README.md) | `barochart/react`의 `AsterChart`와 ref API를 사용합니다. 어댑터가 만든 모델은 unmount 때 해제하며 빌린 모델은 앱이 해제합니다. |
 | SwiftUI / UIKit | [SwiftUI 샘플](../examples/swiftui-sample), [iOS 가이드](IOS-GUIDE.ko.md) | 앱이 메인 스레드에서 엔진을 만들고 `setBars`/`apply`로 갱신합니다. 뷰는 엔진을 빌리며 엔진 소유자가 수명 종료 때 닫습니다. |
 | Compose / Android View | [Compose 샘플](../examples/compose-sample), [Android 가이드](ANDROID-GUIDE.ko.md) | 앱이 소유 스레드에서 엔진을 만들고 갱신합니다. 소유자 종료 때 `close()`를 호출합니다. 뷰 해제가 엔진을 닫지는 않습니다. |
@@ -79,4 +80,4 @@ Android Studio에서 `examples/compose-sample`을 열고 API 26 이상 기기·�
 3. 잘못된 입력은 오류로 보고되며 수락된 데이터는 유지됩니다.
 4. 화면을 떠날 때 소유한 자원을 해제하고, 다시 돌아오면 사용 가능한 차트를 만듭니다.
 
-시세 구독·취소·저장은 호스트 앱이 담당합니다. 바로차트는 시세를 공급하거나 주문을 실행하지 않습니다. 먼저 알려진 데이터로 확인한 뒤 앱의 피드를 연결하세요. [데이터 계약](DATA.md) · [수집 예제와 경계](INGESTION.md) · [현재 지원 범위](../README.ko.md#지원과-검증-범위).
+시세 구독·취소·저장은 호스트 앱이 담당합니다. 바로차트는 시세를 공급하거나 주문을 실행하지 않습니다. 먼저 알려진 데이터로 확인한 뒤 앱의 피드를 연결하세요. [데이터 계약](DATA.md) · [수집 예제와 경계](INGESTION.md) · [현재 지원 표와 출시 관문](SUPPORT.ko.md).

@@ -227,10 +227,13 @@ toolbar.setOptions({labels: {select: '이동', fit: '전체 보기'}});
 | 드로잉 작업 | [도형 그룹](http://127.0.0.1:5173/examples/web/drawing-groups.html) | [스타일 프리셋](docs/DRAWING-STYLE-PRESETS.md) · [위험/보상](docs/POSITION-DRAWINGS.md) |
 | 실시간 묶음 갱신 | [수집 큐](http://127.0.0.1:5173/examples/web/ingestion-queue.html) | [호스트 소유 데이터 수집](docs/INGESTION.md) |
 | 데이터·분석 | [분석 화면](http://127.0.0.1:5173/examples/web/analysis.html) | [지표](docs/INDICATORS.md) · [수집](docs/INGESTION.md) · [리샘플링](docs/RESAMPLING.md) |
+| Lightweight Charts 마이그레이션 | [캔들 변환 예제](http://127.0.0.1:5173/examples/web/lightweight-migration.html) | [마이그레이션 가이드](docs/MIGRATING-FROM-LIGHTWEIGHT-CHARTS.ko.md); UTC 초와 명시적 거래량, API 호환 아님 |
 
 [API·수명 관리](docs/API.md) · [데이터 규칙](docs/DATA.md) · [독립 가격축](docs/INDEPENDENT-AXES.md) · [구조](docs/ARCHITECTURE.md) · [기여](CONTRIBUTING.md)
 
 ## 지원과 검증 범위
+
+현재 [지원·호환성 표, 출시 관문, 개인정보를 보호하는 문제 보고 양식](docs/SUPPORT.ko.md)을 참고하세요. 아래 날짜가 붙은 이력은 당시 검증 범위와 한계를 그대로 유지합니다.
 
 | 통합 경로 | 제공 내용 | 주요 제한 |
 | --- | --- | --- |
@@ -239,6 +242,7 @@ toolbar.setOptions({labels: {select: '이동', fit: '전체 보기'}});
 | 모바일 웹 | 명시적 입력 프리셋·반응형 예제 CSS | 이미지는 설명용 미리보기. 터치·스크롤·보조 기술 미검증 |
 | Apple 네이티브 | Swift 패키지 `BaroChart`: 타입 API, SwiftUI/UIKit 뷰, 개인정보 매니페스트 | [iOS 가이드](docs/IOS-GUIDE.ko.md). iOS 27 시뮬레이터와 macOS JavaScriptCore에서 runner 통과. 기록되면 [실기기 측정](docs/measurements/native-device-performance.json) |
 | Android 네이티브 | `kr.coden:barochart-android` + Compose 모듈: 타입 API, View/Compose, 두 ABI | [Android 가이드](docs/ANDROID-GUIDE.ko.md). API 36 에뮬레이터에서 runner 통과, x86_64는 CI. 기록되면 [실기기 측정](docs/measurements/native-device-performance.json) |
+| Rust 네이티브 차트 백엔드 | 개발 중; M1b ABI/패키징 통합 진행 중 | 완성된 차트 백엔드 아님. JS 동등성·속도 비율·기본 백엔드 주장을 하지 않음 |
 
 네이티브 경로는 WebView가 아닙니다. React Native/Flutter 어댑터는 없습니다. 0.3.0부터 네이티브 SDK는 `BaroChart` 이름을 씁니다([마이그레이션 가이드](docs/MIGRATING-FROM-ASTER.ko.md)). 저장 스키마 `aster.*`와 웹 React export `AsterChart`는 호환을 위해 이름을 유지합니다. 저장 스키마 이름을 바꾸면 안 됩니다.
 
