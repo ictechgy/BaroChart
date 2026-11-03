@@ -3,6 +3,7 @@ package kr.coden.barochart.sample
 import androidx.compose.ui.test.junit4.accessibility.enableAccessibilityChecks
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.tryPerformAccessibilityChecks
@@ -18,6 +19,7 @@ class AccessibilityTest {
 
     @Test fun chartScreenPassesAccessibilityChecks() {
         compose.enableAccessibilityChecks()
+        compose.onNodeWithTag("sample-stream").assertIsDisplayed()
         compose.onNodeWithTag("sample-stream").performClick() // 검사 중 화면이 바뀌지 않게 스트리밍을 멈춘다
         compose.onRoot().tryPerformAccessibilityChecks()
     }

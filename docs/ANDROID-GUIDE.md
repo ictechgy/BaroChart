@@ -169,6 +169,8 @@ Documents use the portable `aster.workspace` schema, so files saved by earlier v
 - Touch and key input never throw out of the view; failures go to `OnChartErrorListener`.
 - `BaroChart` and `BaroChartView` never close the engine. Close it when its owner is destroyed.
 
+The Compose sample keeps its engine and in-memory analysis in an `AndroidViewModel`, closes it in `onCleared`, and runs its synthetic stream inside `repeatOnLifecycle(STARTED)`. Backgrounding suspends updates; returning respects the user's paused state. Save and Restore pause it, and every accepted event changes the dataset revision so changed bars cannot silently reuse saved metadata. Configuration recreation retains the analysis; process death does not persist it. The stream button stays fixed while the other actions scroll. The sample enables system font scaling for chart labels; very large text can shorten labels to an ellipsis. [Mobile verification and manual limits](measurements/2026-11-04-mobile-quality.md).
+
 ## Error handling
 
 Typed API methods throw only the unchecked `BaroChartException`:

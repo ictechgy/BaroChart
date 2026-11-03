@@ -15,14 +15,17 @@ final class ChartModel {
     /// 마지막 오류. nil이 아니면 배너로 보여 준다
     private(set) var errorMessage: String?
     /// 1초 스트리밍 진행 여부
-    var isStreaming = true { didSet { isStreaming ? startStreaming() : stopStreaming() } }
+    var isStreaming = true
     private(set) var isDark = true
 
     private var bars: [BaroChartBar]
     private var savedWorkspace: String?
-    private var streamTask: Task<Void, Never>?
     private var tick = 0
-    private static let binding = BaroChartDatasetBinding(key: "SAMPLE:SYNTH", revision: "1", adjustmentVersion: "raw", priceUnit: "USD", adjustment: .raw)
+    private var dataRevision = 0
+    var streamSummary: String { "Bars \(bars.count) · Updates \(dataRevision)" }
+    private var binding: BaroChartDatasetBinding {
+        BaroChartDatasetBinding(key: "SAMPLE:SYNTH", revision: String(dataRevision), adjustmentVersion: "raw", priceUnit: "USD", adjustment: .raw)
+    }
 
     init() {
         bars = Self.syntheticBars(count: 240)
@@ -35,7 +38,6 @@ final class ChartModel {
             // 엔진 구성이 실패하면 샘플을 쓸 수 없으므로 원인을 담아 즉시 알린다(개발자용)
             fatalError("BaroChart sample setup failed: \(error)")
         }
-        startStreaming()
     }
 
     /// 가격(캔들+EMA) · 거래량 · RSI 세 패널 구성
@@ -63,14 +65,16 @@ final class ChartModel {
 
     /// 현재 차트 설정·지표·드로잉을 작업공간 문서로 저장한다
     func save() {
-        perform("Saved") { savedWorkspace = try engine.saveWorkspace(binding: Self.binding) }
+        isStreaming = false
+        perform("Saved") { savedWorkspace = try engine.saveWorkspace(binding: binding) }
     }
 
     /// 저장한 작업공간을 복원한다. 저장 뒤 봉이 추가됐다면 코어가 거부하고 오류 배너가 뜬다.
     func restore() async {
+        isStreaming = false
         guard let document = savedWorkspace else { errorMessage = "Save a workspace first."; return }
         do {
-            try await engine.restoreWorkspace(document, binding: Self.binding)
+            try await engine.restoreWorkspace(document, binding: binding)
             status = "Restored"; errorMessage = nil
         } catch let error as BaroChartError {
             errorMessage = "\(error.message) \(error.recovery)"
@@ -97,33 +101,21 @@ final class ChartModel {
         }
     }
 
-    private func startStreaming() {
-        guard streamTask == nil else { return }
-        streamTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(1))
-                guard !Task.isCancelled else { return }
-                self?.streamTick()
-            }
-        }
-    }
-
-    private func stopStreaming() { streamTask?.cancel(); streamTask = nil }
-
     /// 1초마다 현재 봉을 갱신하고 15번째마다 새 봉을 추가한다(합성 데이터)
-    private func streamTick() {
+    func streamTick() {
+        guard isStreaming else { return }
         tick += 1
         guard let last = bars.last else { return }
         let drift = sin(Double(tick) / 3) * 0.4
         if tick % 15 == 0 {
             let next = BaroChartBar(time: last.time + 60_000, open: last.close, high: last.close + 0.6, low: last.close - 0.6, close: last.close + drift, volume: 900)
             perform(status) { try engine.apply(.append(next)) }
-            if errorMessage == nil { bars.append(next) }
+            if errorMessage == nil { bars.append(next); dataRevision += 1 }
         } else {
             let close = last.close + drift
             let updated = BaroChartBar(time: last.time, open: last.open, high: max(last.high, close), low: min(last.low, close), close: close, volume: last.volume + 10)
             perform(status) { try engine.apply(.update(updated)) }
-            if errorMessage == nil { bars[bars.count - 1] = updated }
+            if errorMessage == nil { bars[bars.count - 1] = updated; dataRevision += 1 }
         }
     }
 

@@ -36,3 +36,5 @@ Items marked **[owner]** need the repository owner's sign-off on a real device. 
 | Android API 36 emulator | Control: a 10 dp unlabeled clickable must be rejected (`AccessibilityCheckSensitivityTest`) | Pass. With the checks turned off, this control fails, which proves the sample check is active |
 
 The chart itself is one accessibility element with a value summary and custom actions. Automated audits cannot judge whether those actions are useful with a screen reader, so the manual items above still need a person.
+
+The [2026-11-04 mobile sample verification](measurements/2026-11-04-mobile-quality.md) adds lifecycle, retained analysis, stale-source protection and fixed stream controls. The iOS audit also passed at the largest accessibility text size, and the Android audit passed at font scale 2.0. Extreme chart labels may be ellipsized; these automated results do not replace the owner checks above.
