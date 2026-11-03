@@ -1,0 +1,2236 @@
+{
+  "schema": "barochart.rust-js-kernel-conformance",
+  "version": 2,
+  "description": "barochart-js (Rust JS-semantics kernel) compared with JavaScript engines on seeded corpora; with --engines every engine is compared with the kernel built for its platform (v8 and jsc: ECMA number dialect r, quickjs: QuickJS number dialect q); written by node scripts/rust/conformance.mjs --report (M1 plan Task 4)",
+  "runs": [
+    {
+      "command": "node scripts/rust/conformance.mjs --suite number --count 10000000 --seed 1",
+      "date": "2026-11-02",
+      "seed": 1,
+      "count": 10000000,
+      "suites": [
+        "number"
+      ],
+      "engines": [
+        "v8"
+      ],
+      "result": "pass",
+      "totals": {
+        "cases": 10000000,
+        "compared": 10000000,
+        "excluded": 0,
+        "disagreements": 0,
+        "mismatches": 0
+      },
+      "byEngine": {
+        "v8": {
+          "matched": 10000000,
+          "divergent": {},
+          "mismatched": 0
+        }
+      },
+      "bySuite": {
+        "number": {
+          "cases": 10000000,
+          "compared": 10000000,
+          "excluded": {},
+          "disagreements": 0,
+          "mismatches": 0,
+          "ops": {
+            "toString": 10000000
+          },
+          "byEngine": {
+            "v8": {
+              "matched": 10000000,
+              "divergent": {},
+              "mismatched": 0
+            }
+          }
+        }
+      },
+      "knownDivergences": {},
+      "examples": {
+        "mismatches": [],
+        "excluded": [],
+        "disagreements": []
+      },
+      "environment": {
+        "node": "v22.20.0",
+        "v8": "12.4.254.21-node.33",
+        "nodeUnicode": "16.0",
+        "kernelUnicode": "17.0.0",
+        "rustToolchain": "1.98.1",
+        "ryuJs": "1.0.3",
+        "platform": "darwin 25.6.0 arm64"
+      },
+      "durationSeconds": 70.7
+    },
+    {
+      "command": "node scripts/rust/conformance.mjs --suite fixed,precision,exponential --count 2000000 --seed 2",
+      "date": "2026-11-02",
+      "seed": 2,
+      "count": 2000000,
+      "suites": [
+        "fixed",
+        "precision",
+        "exponential"
+      ],
+      "engines": [
+        "v8"
+      ],
+      "result": "pass",
+      "totals": {
+        "cases": 6000000,
+        "compared": 6000000,
+        "excluded": 0,
+        "disagreements": 0,
+        "mismatches": 0
+      },
+      "byEngine": {
+        "v8": {
+          "matched": 6000000,
+          "divergent": {},
+          "mismatched": 0
+        }
+      },
+      "bySuite": {
+        "fixed": {
+          "cases": 2000000,
+          "compared": 2000000,
+          "excluded": {},
+          "disagreements": 0,
+          "mismatches": 0,
+          "ops": {
+            "toFixed": 2000000
+          },
+          "byEngine": {
+            "v8": {
+              "matched": 2000000,
+              "divergent": {},
+              "mismatched": 0
+            }
+          }
+        },
+        "precision": {
+          "cases": 2000000,
+          "compared": 2000000,
+          "excluded": {},
+          "disagreements": 0,
+          "mismatches": 0,
+          "ops": {
+            "toPrecision": 2000000
+          },
+          "byEngine": {
+            "v8": {
+              "matched": 2000000,
+              "divergent": {},
+              "mismatched": 0
+            }
+          }
+        },
+        "exponential": {
+          "cases": 2000000,
+          "compared": 2000000,
+          "excluded": {},
+          "disagreements": 0,
+          "mismatches": 0,
+          "ops": {
+            "toExponential": 2000000
+          },
+          "byEngine": {
+            "v8": {
+              "matched": 2000000,
+              "divergent": {},
+              "mismatched": 0
+            }
+          }
+        }
+      },
+      "knownDivergences": {},
+      "examples": {
+        "mismatches": [],
+        "excluded": [],
+        "disagreements": []
+      },
+      "environment": {
+        "node": "v22.20.0",
+        "v8": "12.4.254.21-node.33",
+        "nodeUnicode": "16.0",
+        "kernelUnicode": "17.0.0",
+        "rustToolchain": "1.98.1",
+        "ryuJs": "1.0.3",
+        "platform": "darwin 25.6.0 arm64"
+      },
+      "durationSeconds": 264.5
+    },
+    {
+      "command": "node scripts/rust/conformance.mjs --suite round,json,string,date --count 200000 --seed 3",
+      "date": "2026-11-03",
+      "seed": 3,
+      "count": 200000,
+      "suites": [
+        "round",
+        "json",
+        "string",
+        "date"
+      ],
+      "engines": [
+        "v8"
+      ],
+      "result": "pass",
+      "totals": {
+        "cases": 800000,
+        "compared": 797717,
+        "excluded": 2283,
+        "disagreements": 0,
+        "mismatches": 0
+      },
+      "byEngine": {
+        "v8": {
+          "matched": 797717,
+          "divergent": {
+            "unicode-version": 2043,
+            "date-utc-folded-year": 240
+          },
+          "mismatched": 0
+        }
+      },
+      "bySuite": {
+        "round": {
+          "cases": 200000,
+          "compared": 200000,
+          "excluded": {},
+          "disagreements": 0,
+          "mismatches": 0,
+          "ops": {
+            "round": 28572,
+            "sign": 28572,
+            "max": 28572,
+            "min": 28571,
+            "toInt32": 28571,
+            "toUint32": 28571,
+            "objectIs": 28571
+          },
+          "byEngine": {
+            "v8": {
+              "matched": 200000,
+              "divergent": {},
+              "mismatched": 0
+            }
+          }
+        },
+        "json": {
+          "cases": 200000,
+          "compared": 200000,
+          "excluded": {},
+          "disagreements": 0,
+          "mismatches": 0,
+          "ops": {
+            "json": 99998,
+            "jsonUnits": 50001,
+            "jsonLossless": 50001
+          },
+          "byEngine": {
+            "v8": {
+              "matched": 200000,
+              "divergent": {},
+              "mismatched": 0
+            }
+          }
+        },
+        "string": {
+          "cases": 200000,
+          "compared": 197957,
+          "excluded": {
+            "unicode-version": 2043
+          },
+          "disagreements": 0,
+          "mismatches": 0,
+          "ops": {
+            "trim": 33334,
+            "toLowerCase": 33334,
+            "slice": 33333,
+            "length": 33333,
+            "isWhitespace": 33333,
+            "quote": 33333
+          },
+          "byEngine": {
+            "v8": {
+              "matched": 197957,
+              "divergent": {
+                "unicode-version": 2043
+              },
+              "mismatched": 0
+            }
+          }
+        },
+        "date": {
+          "cases": 200000,
+          "compared": 199760,
+          "excluded": {
+            "date-utc-folded-year": 240
+          },
+          "disagreements": 0,
+          "mismatches": 0,
+          "ops": {
+            "dateUtc": 28572,
+            "timeClip": 28572,
+            "toISOString": 28572,
+            "daysFromCivil": 28571,
+            "civilFromDays": 28571,
+            "parseIsoDate": 28571,
+            "parseIsoClock": 28571
+          },
+          "byEngine": {
+            "v8": {
+              "matched": 199760,
+              "divergent": {
+                "date-utc-folded-year": 240
+              },
+              "mismatched": 0
+            }
+          }
+        }
+      },
+      "knownDivergences": {
+        "date-utc-folded-year": "Date.UTC whose month-folded year lies outside -271821..275760: the kernel returns NaN like QuickJS, while V8 and JSC still compute a value when large time fields bring it back into range (M1 Task 3 ruling; applies to the v8 and jsc comparisons)",
+        "unicode-version": "toLowerCase input with code points assigned in the kernel Unicode version but not in this Node (UNICODE_UPGRADE): the kernel answer differs from Node only where those code points can change it, namely their own lowercase (one code point) and a neighboring final sigma (applies to the v8 comparison)"
+      },
+      "examples": {
+        "mismatches": [],
+        "excluded": [
+          {
+            "label": "string#31",
+            "source": "units",
+            "reason": "unicode-version",
+            "task": {
+              "op": "toLowerCase",
+              "units": "0085fffd0130d81bdeb80130212603c22029"
+            },
+            "expected": "0085fffd00690307d81bdeb80069030703c903c22029",
+            "actual": "0085fffd00690307d81bded30069030703c903c22029",
+            "divergences": [
+              {
+                "engine": "v8",
+                "reason": "unicode-version",
+                "expected": "0085fffd00690307d81bdeb80069030703c903c22029",
+                "actual": "0085fffd00690307d81bded30069030703c903c22029"
+              }
+            ]
+          },
+          {
+            "label": "string#49",
+            "source": "units",
+            "reason": "unicode-version",
+            "task": {
+              "op": "toLowerCase",
+              "units": "00ada7ce"
+            },
+            "expected": "00ada7ce",
+            "actual": "00ada7cf",
+            "divergences": [
+              {
+                "engine": "v8",
+                "reason": "unicode-version",
+                "expected": "00ada7ce",
+                "actual": "00ada7cf"
+              }
+            ]
+          },
+          {
+            "label": "string#103",
+            "source": "units",
+            "reason": "unicode-version",
+            "task": {
+              "op": "toLowerCase",
+              "units": "205f002f146720290009002d0301a7d4d800000c"
+            },
+            "expected": "205f002f146720290009002d0301a7d4d800000c",
+            "actual": "205f002f146720290009002d0301a7d5d800000c",
+            "divergences": [
+              {
+                "engine": "v8",
+                "reason": "unicode-version",
+                "expected": "205f002f146720290009002d0301a7d4d800000c",
+                "actual": "205f002f146720290009002d0301a7d5d800000c"
+              }
+            ]
+          },
+          {
+            "label": "string#109",
+            "source": "units",
+            "reason": "unicode-version",
+            "task": {
+              "op": "toLowerCase",
+              "units": "1114631ea7d20085212b0022000afffd"
+            },
+            "expected": "1114631ea7d2008500e50022000afffd",
+            "actual": "1114631ea7d3008500e50022000afffd",
+            "divergences": [
+              {
+                "engine": "v8",
+                "reason": "unicode-version",
+                "expected": "1114631ea7d2008500e50022000afffd",
+                "actual": "1114631ea7d3008500e50022000afffd"
+              }
+            ]
+          },
+          {
+            "label": "string#265",
+            "source": "units",
+            "reason": "unicode-version",
+            "task": {
+              "op": "toLowerCase",
+              "units": "212b00addbffdaabdcfc20007dc0d835dc00a7d2000c212b0391000a"
+            },
+            "expected": "00e500addbffdaabdcfc20007dc0d835dc00a7d2000c00e503b1000a",
+            "actual": "00e500addbffdaabdcfc20007dc0d835dc00a7d3000c00e503b1000a",
+            "divergences": [
+              {
+                "engine": "v8",
+                "reason": "unicode-version",
+                "expected": "00e500addbffdaabdcfc20007dc0d835dc00a7d2000c00e503b1000a",
+                "actual": "00e500addbffdaabdcfc20007dc0d835dc00a7d3000c00e503b1000a"
+              }
+            ]
+          },
+          {
+            "label": "string#463",
+            "source": "units",
+            "reason": "unicode-version",
+            "task": {
+              "op": "toLowerCase",
+              "units": "d81bdea0bb2700a0d9bcdda0"
+            },
+            "expected": "d81bdea0bb2700a0d9bcdda0",
+            "actual": "d81bdebbbb2700a0d9bcdda0",
+            "divergences": [
+              {
+                "engine": "v8",
+                "reason": "unicode-version",
+                "expected": "d81bdea0bb2700a0d9bcdda0",
+                "actual": "d81bdebbbb2700a0d9bcdda0"
+              }
+            ]
+          },
+          {
+            "label": "string#523",
+            "source": "units",
+            "reason": "unicode-version",
+            "task": {
+              "op": "toLowerCase",
+              "units": "d81bdea0000c10a030001c90200a001f0394"
+            },
+            "expected": "d81bdea0000c2d00300010d0200a001f03b4",
+            "actual": "d81bdebb000c2d00300010d0200a001f03b4",
+            "divergences": [
+              {
+                "engine": "v8",
+                "reason": "unicode-version",
+                "expected": "d81bdea0000c2d00300010d0200a001f03b4",
+                "actual": "d81bdebb000c2d00300010d0200a001f03b4"
+              }
+            ]
+          },
+          {
+            "label": "string#601",
+            "source": "units",
+            "reason": "unicode-version",
+            "task": {
+              "op": "toLowerCase",
+              "units": "28b6d1f61e9ed81bdeb803f4a7d2000c0080"
+            },
+            "expected": "28b6d1f600dfd81bdeb803b8a7d2000c0080",
+            "actual": "28b6d1f600dfd81bded303b8a7d3000c0080",
+            "divergences": [
+              {
+                "engine": "v8",
+                "reason": "unicode-version",
+                "expected": "28b6d1f600dfd81bdeb803b8a7d2000c0080",
+                "actual": "28b6d1f600dfd81bded303b8a7d3000c0080"
+              }
+            ]
+          },
+          {
+            "label": "string#667",
+            "source": "units",
+            "reason": "unicode-version",
+            "task": {
+              "op": "toLowerCase",
+              "units": "002d005ada71dc4e2000a7d20039d8000085006100a0"
+            },
+            "expected": "002d007ada71dc4e2000a7d20039d8000085006100a0",
+            "actual": "002d007ada71dc4e2000a7d30039d8000085006100a0",
+            "divergences": [
+              {
+                "engine": "v8",
+                "reason": "unicode-version",
+                "expected": "002d007ada71dc4e2000a7d20039d8000085006100a0",
+                "actual": "002d007ada71dc4e2000a7d30039d8000085006100a0"
+              }
+            ]
+          },
+          {
+            "label": "string#709",
+            "source": "units",
+            "reason": "unicode-version",
+            "task": {
+              "op": "toLowerCase",
+              "units": "000d002ffffd000c205f000dd81bdeb82028d8aadc4b002fe2ee0030"
+            },
+            "expected": "000d002ffffd000c205f000dd81bdeb82028d8aadc4b002fe2ee0030",
+            "actual": "000d002ffffd000c205f000dd81bded32028d8aadc4b002fe2ee0030",
+            "divergences": [
+              {
+                "engine": "v8",
+                "reason": "unicode-version",
+                "expected": "000d002ffffd000c205f000dd81bdeb82028d8aadc4b002fe2ee0030",
+                "actual": "000d002ffffd000c205f000dd81bded32028d8aadc4b002fe2ee0030"
+              }
+            ]
+          },
+          {
+            "label": "string#727",
+            "source": "units",
+            "reason": "unicode-version",
+            "task": {
+              "op": "toLowerCase",
+              "units": "06af212bdfffdbfbdce4d9a1dee80000a7d28035"
+            },
+            "expected": "06af00e5dfffdbfbdce4d9a1dee80000a7d28035",
+            "actual": "06af00e5dfffdbfbdce4d9a1dee80000a7d38035",
+            "divergences": [
+              {
+                "engine": "v8",
+                "reason": "unicode-version",
+                "expected": "06af00e5dfffdbfbdce4d9a1dee80000a7d28035",
+                "actual": "06af00e5dfffdbfbdce4d9a1dee80000a7d38035"
+              }
+            ]
+          },
+          {
+            "label": "string#751",
+            "source": "units",
+            "reason": "unicode-version",
+            "task": {
+              "op": "toLowerCase",
+              "units": "00a0a7ce202fd9edde290009a5a10394ff21f89f007a0085d801dc00"
+            },
+            "expected": "00a0a7ce202fd9edde290009a5a103b4ff41f89f007a0085d801dc28",
+            "actual": "00a0a7cf202fd9edde290009a5a103b4ff41f89f007a0085d801dc28",
+            "divergences": [
+              {
+                "engine": "v8",
+                "reason": "unicode-version",
+                "expected": "00a0a7ce202fd9edde290009a5a103b4ff41f89f007a0085d801dc28",
+                "actual": "00a0a7cf202fd9edde290009a5a103b4ff41f89f007a0085d801dc28"
+              }
+            ]
+          },
+          {
+            "label": "string#799",
+            "source": "units",
+            "reason": "unicode-version",
+            "task": {
+              "op": "toLowerCase",
+              "units": "d81bdeb8200bf91b00a02029212b"
+            },
+            "expected": "d81bdeb8200bf91b00a0202900e5",
+            "actual": "d81bded3200bf91b00a0202900e5",
+            "divergences": [
+              {
+                "engine": "v8",
+                "reason": "unicode-version",
+                "expected": "d81bdeb8200bf91b00a0202900e5",
+                "actual": "d81bded3200bf91b00a0202900e5"
+              }
+            ]
+          },
+          {
+            "label": "string#859",
+            "source": "units",
+            "reason": "unicode-version",
+            "task": {
+              "op": "toLowerCase",
+              "units": "d801dc28da2edc76007f00800062ff2193f30080d81bdeb8d800"
+            },
+            "expected": "d801dc28da2edc76007f00800062ff4193f30080d81bdeb8d800",
+            "actual": "d801dc28da2edc76007f00800062ff4193f30080d81bded3d800",
+            "divergences": [
+              {
+                "engine": "v8",
+                "reason": "unicode-version",
+                "expected": "d801dc28da2edc76007f00800062ff4193f30080d81bdeb8d800",
+                "actual": "d801dc28da2edc76007f00800062ff4193f30080d81bded3d800"
+              }
+            ]
+          },
+          {
+            "label": "string#949",
+            "source": "units",
+            "reason": "unicode-version",
+            "task": {
+              "op": "toLowerCase",
+              "units": "a7d20345d9a4dc71205f200a0394fb34180e"
+            },
+            "expected": "a7d20345d9a4dc71205f200a03b4fb34180e",
+            "actual": "a7d30345d9a4dc71205f200a03b4fb34180e",
+            "divergences": [
+              {
+                "engine": "v8",
+                "reason": "unicode-version",
+                "expected": "a7d20345d9a4dc71205f200a03b4fb34180e",
+                "actual": "a7d30345d9a4dc71205f200a03b4fb34180e"
+              }
+            ]
+          },
+          {
+            "label": "string#1213",
+            "source": "units",
+            "reason": "unicode-version",
+            "task": {
+              "op": "toLowerCase",
+              "units": "005a200a00220391000103c2000d10a0005ad81bdeb8"
+            },
+            "expected": "007a200a002203b1000103c2000d2d00007ad81bdeb8",
+            "actual": "007a200a002203b1000103c2000d2d00007ad81bded3",
+            "divergences": [
+              {
+                "engine": "v8",
+                "reason": "unicode-version",
+                "expected": "007a200a002203b1000103c2000d2d00007ad81bdeb8",
+                "actual": "007a200a002203b1000103c2000d2d00007ad81bded3"
+              }
+            ]
+          },
+          {
+            "label": "string#1309",
+            "source": "units",
+            "reason": "unicode-version",
+            "task": {
+              "op": "toLowerCase",
+              "units": "a7d42029202f0030007f"
+            },
+            "expected": "a7d42029202f0030007f",
+            "actual": "a7d52029202f0030007f",
+            "divergences": [
+              {
+                "engine": "v8",
+                "reason": "unicode-version",
+                "expected": "a7d42029202f0030007f",
+                "actual": "a7d52029202f0030007f"
+              }
+            ]
+          },
+          {
+            "label": "string#1357",
+            "source": "units",
+            "reason": "unicode-version",
+            "task": {
+              "op": "toLowerCase",
+              "units": "005f00ad03a320290394a7ce200a200b0345200bdfff005f"
+            },
+            "expected": "005f00ad03c3202903b4a7ce200a200b0345200bdfff005f",
+            "actual": "005f00ad03c3202903b4a7cf200a200b0345200bdfff005f",
+            "divergences": [
+              {
+                "engine": "v8",
+                "reason": "unicode-version",
+                "expected": "005f00ad03c3202903b4a7ce200a200b0345200bdfff005f",
+                "actual": "005f00ad03c3202903b4a7cf200a200b0345200bdfff005f"
+              }
+            ]
+          },
+          {
+            "label": "string#1447",
+            "source": "units",
+            "reason": "unicode-version",
+            "task": {
+              "op": "toLowerCase",
+              "units": "a7cee4c51ae0d90fdd595d55d81bde402000a139dbffdfff1400331c0030"
+            },
+            "expected": "a7cee4c51ae0d90fdd595d55d81bde602000a139dbffdfff1400331c0030",
+            "actual": "a7cfe4c51ae0d90fdd595d55d81bde602000a139dbffdfff1400331c0030",
+            "divergences": [
+              {
+                "engine": "v8",
+                "reason": "unicode-version",
+                "expected": "a7cee4c51ae0d90fdd595d55d81bde602000a139dbffdfff1400331c0030",
+                "actual": "a7cfe4c51ae0d90fdd595d55d81bde602000a139dbffdfff1400331c0030"
+              }
+            ]
+          },
+          {
+            "label": "string#1465",
+            "source": "units",
+            "reason": "unicode-version",
+            "task": {
+              "op": "toLowerCase",
+              "units": "1cca0041200a000c212a0041007f0062d81bde40005cd81bdea0"
+            },
+            "expected": "1cca0061200a000c006b0061007f0062d81bde60005cd81bdea0",
+            "actual": "1cca0061200a000c006b0061007f0062d81bde60005cd81bdebb",
+            "divergences": [
+              {
+                "engine": "v8",
+                "reason": "unicode-version",
+                "expected": "1cca0061200a000c006b0061007f0062d81bde60005cd81bdea0",
+                "actual": "1cca0061200a000c006b0061007f0062d81bde60005cd81bdebb"
+              }
+            ]
+          }
+        ],
+        "disagreements": []
+      },
+      "environment": {
+        "node": "v22.20.0",
+        "v8": "12.4.254.21-node.33",
+        "nodeUnicode": "16.0",
+        "kernelUnicode": "17.0.0",
+        "rustToolchain": "1.98.1",
+        "ryuJs": "1.0.3",
+        "platform": "darwin 25.6.0 arm64"
+      },
+      "durationSeconds": 12.9
+    },
+    {
+      "command": "node scripts/rust/conformance.mjs --suite number,fixed --count 100000 --seed 4 --engines v8,jsc,quickjs",
+      "date": "2026-11-02",
+      "seed": 4,
+      "count": 100000,
+      "suites": [
+        "number",
+        "fixed"
+      ],
+      "engines": [
+        "v8",
+        "jsc",
+        "quickjs"
+      ],
+      "result": "pass",
+      "totals": {
+        "cases": 200000,
+        "compared": 200000,
+        "excluded": 0,
+        "disagreements": 284,
+        "mismatches": 0
+      },
+      "byEngine": {
+        "v8": {
+          "matched": 200000,
+          "divergent": {},
+          "mismatched": 0
+        },
+        "jsc": {
+          "matched": 200000,
+          "divergent": {},
+          "mismatched": 0
+        },
+        "quickjs": {
+          "matched": 200000,
+          "divergent": {},
+          "mismatched": 0
+        }
+      },
+      "bySuite": {
+        "number": {
+          "cases": 100000,
+          "compared": 100000,
+          "excluded": {},
+          "disagreements": 190,
+          "mismatches": 0,
+          "ops": {
+            "toString": 100000
+          },
+          "byEngine": {
+            "v8": {
+              "matched": 100000,
+              "divergent": {},
+              "mismatched": 0
+            },
+            "jsc": {
+              "matched": 100000,
+              "divergent": {},
+              "mismatched": 0
+            },
+            "quickjs": {
+              "matched": 100000,
+              "divergent": {},
+              "mismatched": 0
+            }
+          }
+        },
+        "fixed": {
+          "cases": 100000,
+          "compared": 100000,
+          "excluded": {},
+          "disagreements": 94,
+          "mismatches": 0,
+          "ops": {
+            "toFixed": 100000
+          },
+          "byEngine": {
+            "v8": {
+              "matched": 100000,
+              "divergent": {},
+              "mismatched": 0
+            },
+            "jsc": {
+              "matched": 100000,
+              "divergent": {},
+              "mismatched": 0
+            },
+            "quickjs": {
+              "matched": 100000,
+              "divergent": {},
+              "mismatched": 0
+            }
+          }
+        }
+      },
+      "knownDivergences": {},
+      "examples": {
+        "mismatches": [],
+        "excluded": [],
+        "disagreements": [
+          {
+            "label": "number#2654",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "5790000000000000"
+            },
+            "engines": {
+              "v8": "6.156563468186638e+113",
+              "jsc": "6.156563468186638e+113",
+              "quickjs": "6.1565634681866374e+113"
+            },
+            "rust": {
+              "r": "6.156563468186638e+113",
+              "q": "6.1565634681866374e+113"
+            }
+          },
+          {
+            "label": "number#2663",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "d790000000000000"
+            },
+            "engines": {
+              "v8": "-6.156563468186638e+113",
+              "jsc": "-6.156563468186638e+113",
+              "quickjs": "-6.1565634681866374e+113"
+            },
+            "rust": {
+              "r": "-6.156563468186638e+113",
+              "q": "-6.1565634681866374e+113"
+            }
+          },
+          {
+            "label": "number#4328",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "6e30000000000000"
+            },
+            "engines": {
+              "v8": "5.78358058743443e+222",
+              "jsc": "5.78358058743443e+222",
+              "quickjs": "5.7835805874344294e+222"
+            },
+            "rust": {
+              "r": "5.78358058743443e+222",
+              "q": "5.7835805874344294e+222"
+            }
+          },
+          {
+            "label": "number#4337",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "ee30000000000000"
+            },
+            "engines": {
+              "v8": "-5.78358058743443e+222",
+              "jsc": "-5.78358058743443e+222",
+              "quickjs": "-5.7835805874344294e+222"
+            },
+            "rust": {
+              "r": "-5.78358058743443e+222",
+              "q": "-5.7835805874344294e+222"
+            }
+          },
+          {
+            "label": "number#5084",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "3d30000000000000"
+            },
+            "engines": {
+              "v8": "5.684341886080802e-14",
+              "jsc": "5.684341886080802e-14",
+              "quickjs": "5.6843418860808015e-14"
+            },
+            "rust": {
+              "r": "5.684341886080802e-14",
+              "q": "5.6843418860808015e-14"
+            }
+          },
+          {
+            "label": "number#5093",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "bd30000000000000"
+            },
+            "engines": {
+              "v8": "-5.684341886080802e-14",
+              "jsc": "-5.684341886080802e-14",
+              "quickjs": "-5.6843418860808015e-14"
+            },
+            "rust": {
+              "r": "-5.684341886080802e-14",
+              "q": "-5.6843418860808015e-14"
+            }
+          },
+          {
+            "label": "number#5759",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "5300000000000000"
+            },
+            "engines": {
+              "v8": "6.518515124270356e+91",
+              "jsc": "6.518515124270356e+91",
+              "quickjs": "6.5185151242703555e+91"
+            },
+            "rust": {
+              "r": "6.518515124270356e+91",
+              "q": "6.5185151242703555e+91"
+            }
+          },
+          {
+            "label": "number#5768",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "d300000000000000"
+            },
+            "engines": {
+              "v8": "-6.518515124270356e+91",
+              "jsc": "-6.518515124270356e+91",
+              "quickjs": "-6.5185151242703555e+91"
+            },
+            "rust": {
+              "r": "-6.518515124270356e+91",
+              "q": "-6.5185151242703555e+91"
+            }
+          },
+          {
+            "label": "number#6380",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "6c50000000000000"
+            },
+            "engines": {
+              "v8": "5.386379163185535e+213",
+              "jsc": "5.386379163185535e+213",
+              "quickjs": "5.3863791631855345e+213"
+            },
+            "rust": {
+              "r": "5.386379163185535e+213",
+              "q": "5.3863791631855345e+213"
+            }
+          },
+          {
+            "label": "number#6389",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "ec50000000000000"
+            },
+            "engines": {
+              "v8": "-5.386379163185535e+213",
+              "jsc": "-5.386379163185535e+213",
+              "quickjs": "-5.3863791631855345e+213"
+            },
+            "rust": {
+              "r": "-5.386379163185535e+213",
+              "q": "-5.3863791631855345e+213"
+            }
+          },
+          {
+            "label": "number#7811",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "5120000000000000"
+            },
+            "engines": {
+              "v8": "6.070840288205404e+82",
+              "jsc": "6.070840288205404e+82",
+              "quickjs": "6.0708402882054033e+82"
+            },
+            "rust": {
+              "r": "6.070840288205404e+82",
+              "q": "6.0708402882054033e+82"
+            }
+          },
+          {
+            "label": "number#7820",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "d120000000000000"
+            },
+            "engines": {
+              "v8": "-6.070840288205404e+82",
+              "jsc": "-6.070840288205404e+82",
+              "quickjs": "-6.0708402882054033e+82"
+            },
+            "rust": {
+              "r": "-6.070840288205404e+82",
+              "q": "-6.0708402882054033e+82"
+            }
+          },
+          {
+            "label": "number#8567",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "2020000000000000"
+            },
+            "engines": {
+              "v8": "5.966672584960166e-154",
+              "jsc": "5.966672584960166e-154",
+              "quickjs": "5.9666725849601654e-154"
+            },
+            "rust": {
+              "r": "5.966672584960166e-154",
+              "q": "5.9666725849601654e-154"
+            }
+          },
+          {
+            "label": "number#8576",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "a020000000000000"
+            },
+            "engines": {
+              "v8": "-5.966672584960166e-154",
+              "jsc": "-5.966672584960166e-154",
+              "quickjs": "-5.9666725849601654e-154"
+            },
+            "rust": {
+              "r": "-5.966672584960166e-154",
+              "q": "-5.9666725849601654e-154"
+            }
+          },
+          {
+            "label": "number#8999",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "0420000000000000"
+            },
+            "engines": {
+              "v8": "8.209073602596753e-289",
+              "jsc": "8.209073602596753e-289",
+              "quickjs": "8.2090736025967525e-289"
+            },
+            "rust": {
+              "r": "8.209073602596753e-289",
+              "q": "8.2090736025967525e-289"
+            }
+          },
+          {
+            "label": "number#9008",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "8420000000000000"
+            },
+            "engines": {
+              "v8": "-8.209073602596753e-289",
+              "jsc": "-8.209073602596753e-289",
+              "quickjs": "-8.2090736025967525e-289"
+            },
+            "rust": {
+              "r": "-8.209073602596753e-289",
+              "q": "-8.2090736025967525e-289"
+            }
+          },
+          {
+            "label": "number#9566",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "20f0000000000000"
+            },
+            "engines": {
+              "v8": "4.887898181599368e-150",
+              "jsc": "4.887898181599368e-150",
+              "quickjs": "4.8878981815993675e-150"
+            },
+            "rust": {
+              "r": "4.887898181599368e-150",
+              "q": "4.8878981815993675e-150"
+            }
+          },
+          {
+            "label": "number#9575",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "a0f0000000000000"
+            },
+            "engines": {
+              "v8": "-4.887898181599368e-150",
+              "jsc": "-4.887898181599368e-150",
+              "quickjs": "-4.8878981815993675e-150"
+            },
+            "rust": {
+              "r": "-4.887898181599368e-150",
+              "q": "-4.8878981815993675e-150"
+            }
+          },
+          {
+            "label": "number#10538",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "6510000000000000"
+            },
+            "engines": {
+              "v8": "6.483618076376552e+178",
+              "jsc": "6.483618076376552e+178",
+              "quickjs": "6.4836180763765515e+178"
+            },
+            "rust": {
+              "r": "6.483618076376552e+178",
+              "q": "6.4836180763765515e+178"
+            }
+          },
+          {
+            "label": "number#10547",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "e510000000000000"
+            },
+            "engines": {
+              "v8": "-6.483618076376552e+178",
+              "jsc": "-6.483618076376552e+178",
+              "quickjs": "-6.4836180763765515e+178"
+            },
+            "rust": {
+              "r": "-6.483618076376552e+178",
+              "q": "-6.4836180763765515e+178"
+            }
+          }
+        ]
+      },
+      "environment": {
+        "node": "v22.20.0",
+        "v8": "12.4.254.21-node.33",
+        "nodeUnicode": "16.0",
+        "kernelUnicode": "17.0.0",
+        "rustToolchain": "1.98.1",
+        "ryuJs": "1.0.3",
+        "platform": "darwin 25.6.0 arm64",
+        "jsc": {
+          "path": "/System/Library/Frameworks/JavaScriptCore.framework/Versions/A/Helpers/jsc",
+          "macOS": "26.7.2"
+        },
+        "quickjs": "2026-06-04"
+      },
+      "durationSeconds": 10
+    },
+    {
+      "command": "node scripts/rust/conformance.mjs --suite number,fixed,precision,exponential,round,json,string,date --count 20000 --seed 5 --engines v8,jsc,quickjs",
+      "date": "2026-11-03",
+      "seed": 5,
+      "count": 20000,
+      "suites": [
+        "number",
+        "fixed",
+        "precision",
+        "exponential",
+        "round",
+        "json",
+        "string",
+        "date"
+      ],
+      "engines": [
+        "v8",
+        "jsc",
+        "quickjs"
+      ],
+      "result": "pass",
+      "totals": {
+        "cases": 160000,
+        "compared": 160000,
+        "excluded": 0,
+        "disagreements": 352,
+        "mismatches": 0
+      },
+      "byEngine": {
+        "v8": {
+          "matched": 159750,
+          "divergent": {
+            "unicode-version": 217,
+            "date-utc-folded-year": 33
+          },
+          "mismatched": 0
+        },
+        "jsc": {
+          "matched": 159967,
+          "divergent": {
+            "date-utc-folded-year": 33
+          },
+          "mismatched": 0
+        },
+        "quickjs": {
+          "matched": 160000,
+          "divergent": {},
+          "mismatched": 0
+        }
+      },
+      "bySuite": {
+        "number": {
+          "cases": 20000,
+          "compared": 20000,
+          "excluded": {},
+          "disagreements": 36,
+          "mismatches": 0,
+          "ops": {
+            "toString": 20000
+          },
+          "byEngine": {
+            "v8": {
+              "matched": 20000,
+              "divergent": {},
+              "mismatched": 0
+            },
+            "jsc": {
+              "matched": 20000,
+              "divergent": {},
+              "mismatched": 0
+            },
+            "quickjs": {
+              "matched": 20000,
+              "divergent": {},
+              "mismatched": 0
+            }
+          }
+        },
+        "fixed": {
+          "cases": 20000,
+          "compared": 20000,
+          "excluded": {},
+          "disagreements": 22,
+          "mismatches": 0,
+          "ops": {
+            "toFixed": 20000
+          },
+          "byEngine": {
+            "v8": {
+              "matched": 20000,
+              "divergent": {},
+              "mismatched": 0
+            },
+            "jsc": {
+              "matched": 20000,
+              "divergent": {},
+              "mismatched": 0
+            },
+            "quickjs": {
+              "matched": 20000,
+              "divergent": {},
+              "mismatched": 0
+            }
+          }
+        },
+        "precision": {
+          "cases": 20000,
+          "compared": 20000,
+          "excluded": {},
+          "disagreements": 0,
+          "mismatches": 0,
+          "ops": {
+            "toPrecision": 20000
+          },
+          "byEngine": {
+            "v8": {
+              "matched": 20000,
+              "divergent": {},
+              "mismatched": 0
+            },
+            "jsc": {
+              "matched": 20000,
+              "divergent": {},
+              "mismatched": 0
+            },
+            "quickjs": {
+              "matched": 20000,
+              "divergent": {},
+              "mismatched": 0
+            }
+          }
+        },
+        "exponential": {
+          "cases": 20000,
+          "compared": 20000,
+          "excluded": {},
+          "disagreements": 6,
+          "mismatches": 0,
+          "ops": {
+            "toExponential": 20000
+          },
+          "byEngine": {
+            "v8": {
+              "matched": 20000,
+              "divergent": {},
+              "mismatched": 0
+            },
+            "jsc": {
+              "matched": 20000,
+              "divergent": {},
+              "mismatched": 0
+            },
+            "quickjs": {
+              "matched": 20000,
+              "divergent": {},
+              "mismatched": 0
+            }
+          }
+        },
+        "round": {
+          "cases": 20000,
+          "compared": 20000,
+          "excluded": {},
+          "disagreements": 0,
+          "mismatches": 0,
+          "ops": {
+            "round": 2858,
+            "sign": 2857,
+            "max": 2857,
+            "min": 2857,
+            "toInt32": 2857,
+            "toUint32": 2857,
+            "objectIs": 2857
+          },
+          "byEngine": {
+            "v8": {
+              "matched": 20000,
+              "divergent": {},
+              "mismatched": 0
+            },
+            "jsc": {
+              "matched": 20000,
+              "divergent": {},
+              "mismatched": 0
+            },
+            "quickjs": {
+              "matched": 20000,
+              "divergent": {},
+              "mismatched": 0
+            }
+          }
+        },
+        "json": {
+          "cases": 20000,
+          "compared": 20000,
+          "excluded": {},
+          "disagreements": 38,
+          "mismatches": 0,
+          "ops": {
+            "json": 9998,
+            "jsonUnits": 5001,
+            "jsonLossless": 5001
+          },
+          "byEngine": {
+            "v8": {
+              "matched": 20000,
+              "divergent": {},
+              "mismatched": 0
+            },
+            "jsc": {
+              "matched": 20000,
+              "divergent": {},
+              "mismatched": 0
+            },
+            "quickjs": {
+              "matched": 20000,
+              "divergent": {},
+              "mismatched": 0
+            }
+          }
+        },
+        "string": {
+          "cases": 20000,
+          "compared": 20000,
+          "excluded": {},
+          "disagreements": 217,
+          "mismatches": 0,
+          "ops": {
+            "trim": 3334,
+            "toLowerCase": 3334,
+            "slice": 3333,
+            "length": 3333,
+            "isWhitespace": 3333,
+            "quote": 3333
+          },
+          "byEngine": {
+            "v8": {
+              "matched": 19783,
+              "divergent": {
+                "unicode-version": 217
+              },
+              "mismatched": 0
+            },
+            "jsc": {
+              "matched": 20000,
+              "divergent": {},
+              "mismatched": 0
+            },
+            "quickjs": {
+              "matched": 20000,
+              "divergent": {},
+              "mismatched": 0
+            }
+          }
+        },
+        "date": {
+          "cases": 20000,
+          "compared": 20000,
+          "excluded": {},
+          "disagreements": 33,
+          "mismatches": 0,
+          "ops": {
+            "dateUtc": 2858,
+            "timeClip": 2857,
+            "toISOString": 2857,
+            "daysFromCivil": 2857,
+            "civilFromDays": 2857,
+            "parseIsoDate": 2857,
+            "parseIsoClock": 2857
+          },
+          "byEngine": {
+            "v8": {
+              "matched": 19967,
+              "divergent": {
+                "date-utc-folded-year": 33
+              },
+              "mismatched": 0
+            },
+            "jsc": {
+              "matched": 19967,
+              "divergent": {
+                "date-utc-folded-year": 33
+              },
+              "mismatched": 0
+            },
+            "quickjs": {
+              "matched": 20000,
+              "divergent": {},
+              "mismatched": 0
+            }
+          }
+        }
+      },
+      "knownDivergences": {
+        "date-utc-folded-year": "Date.UTC whose month-folded year lies outside -271821..275760: the kernel returns NaN like QuickJS, while V8 and JSC still compute a value when large time fields bring it back into range (M1 Task 3 ruling; applies to the v8 and jsc comparisons)",
+        "unicode-version": "toLowerCase input with code points assigned in the kernel Unicode version but not in this Node (UNICODE_UPGRADE): the kernel answer differs from Node only where those code points can change it, namely their own lowercase (one code point) and a neighboring final sigma (applies to the v8 comparison)"
+      },
+      "examples": {
+        "mismatches": [],
+        "excluded": [],
+        "disagreements": [
+          {
+            "label": "number#2654",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "5790000000000000"
+            },
+            "engines": {
+              "v8": "6.156563468186638e+113",
+              "jsc": "6.156563468186638e+113",
+              "quickjs": "6.1565634681866374e+113"
+            },
+            "rust": {
+              "r": "6.156563468186638e+113",
+              "q": "6.1565634681866374e+113"
+            }
+          },
+          {
+            "label": "number#2663",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "d790000000000000"
+            },
+            "engines": {
+              "v8": "-6.156563468186638e+113",
+              "jsc": "-6.156563468186638e+113",
+              "quickjs": "-6.1565634681866374e+113"
+            },
+            "rust": {
+              "r": "-6.156563468186638e+113",
+              "q": "-6.1565634681866374e+113"
+            }
+          },
+          {
+            "label": "number#4328",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "6e30000000000000"
+            },
+            "engines": {
+              "v8": "5.78358058743443e+222",
+              "jsc": "5.78358058743443e+222",
+              "quickjs": "5.7835805874344294e+222"
+            },
+            "rust": {
+              "r": "5.78358058743443e+222",
+              "q": "5.7835805874344294e+222"
+            }
+          },
+          {
+            "label": "number#4337",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "ee30000000000000"
+            },
+            "engines": {
+              "v8": "-5.78358058743443e+222",
+              "jsc": "-5.78358058743443e+222",
+              "quickjs": "-5.7835805874344294e+222"
+            },
+            "rust": {
+              "r": "-5.78358058743443e+222",
+              "q": "-5.7835805874344294e+222"
+            }
+          },
+          {
+            "label": "number#5084",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "3d30000000000000"
+            },
+            "engines": {
+              "v8": "5.684341886080802e-14",
+              "jsc": "5.684341886080802e-14",
+              "quickjs": "5.6843418860808015e-14"
+            },
+            "rust": {
+              "r": "5.684341886080802e-14",
+              "q": "5.6843418860808015e-14"
+            }
+          },
+          {
+            "label": "number#5093",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "bd30000000000000"
+            },
+            "engines": {
+              "v8": "-5.684341886080802e-14",
+              "jsc": "-5.684341886080802e-14",
+              "quickjs": "-5.6843418860808015e-14"
+            },
+            "rust": {
+              "r": "-5.684341886080802e-14",
+              "q": "-5.6843418860808015e-14"
+            }
+          },
+          {
+            "label": "number#5759",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "5300000000000000"
+            },
+            "engines": {
+              "v8": "6.518515124270356e+91",
+              "jsc": "6.518515124270356e+91",
+              "quickjs": "6.5185151242703555e+91"
+            },
+            "rust": {
+              "r": "6.518515124270356e+91",
+              "q": "6.5185151242703555e+91"
+            }
+          },
+          {
+            "label": "number#5768",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "d300000000000000"
+            },
+            "engines": {
+              "v8": "-6.518515124270356e+91",
+              "jsc": "-6.518515124270356e+91",
+              "quickjs": "-6.5185151242703555e+91"
+            },
+            "rust": {
+              "r": "-6.518515124270356e+91",
+              "q": "-6.5185151242703555e+91"
+            }
+          },
+          {
+            "label": "number#6380",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "6c50000000000000"
+            },
+            "engines": {
+              "v8": "5.386379163185535e+213",
+              "jsc": "5.386379163185535e+213",
+              "quickjs": "5.3863791631855345e+213"
+            },
+            "rust": {
+              "r": "5.386379163185535e+213",
+              "q": "5.3863791631855345e+213"
+            }
+          },
+          {
+            "label": "number#6389",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "ec50000000000000"
+            },
+            "engines": {
+              "v8": "-5.386379163185535e+213",
+              "jsc": "-5.386379163185535e+213",
+              "quickjs": "-5.3863791631855345e+213"
+            },
+            "rust": {
+              "r": "-5.386379163185535e+213",
+              "q": "-5.3863791631855345e+213"
+            }
+          },
+          {
+            "label": "number#7811",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "5120000000000000"
+            },
+            "engines": {
+              "v8": "6.070840288205404e+82",
+              "jsc": "6.070840288205404e+82",
+              "quickjs": "6.0708402882054033e+82"
+            },
+            "rust": {
+              "r": "6.070840288205404e+82",
+              "q": "6.0708402882054033e+82"
+            }
+          },
+          {
+            "label": "number#7820",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "d120000000000000"
+            },
+            "engines": {
+              "v8": "-6.070840288205404e+82",
+              "jsc": "-6.070840288205404e+82",
+              "quickjs": "-6.0708402882054033e+82"
+            },
+            "rust": {
+              "r": "-6.070840288205404e+82",
+              "q": "-6.0708402882054033e+82"
+            }
+          },
+          {
+            "label": "number#8567",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "2020000000000000"
+            },
+            "engines": {
+              "v8": "5.966672584960166e-154",
+              "jsc": "5.966672584960166e-154",
+              "quickjs": "5.9666725849601654e-154"
+            },
+            "rust": {
+              "r": "5.966672584960166e-154",
+              "q": "5.9666725849601654e-154"
+            }
+          },
+          {
+            "label": "number#8576",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "a020000000000000"
+            },
+            "engines": {
+              "v8": "-5.966672584960166e-154",
+              "jsc": "-5.966672584960166e-154",
+              "quickjs": "-5.9666725849601654e-154"
+            },
+            "rust": {
+              "r": "-5.966672584960166e-154",
+              "q": "-5.9666725849601654e-154"
+            }
+          },
+          {
+            "label": "number#8999",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "0420000000000000"
+            },
+            "engines": {
+              "v8": "8.209073602596753e-289",
+              "jsc": "8.209073602596753e-289",
+              "quickjs": "8.2090736025967525e-289"
+            },
+            "rust": {
+              "r": "8.209073602596753e-289",
+              "q": "8.2090736025967525e-289"
+            }
+          },
+          {
+            "label": "number#9008",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "8420000000000000"
+            },
+            "engines": {
+              "v8": "-8.209073602596753e-289",
+              "jsc": "-8.209073602596753e-289",
+              "quickjs": "-8.2090736025967525e-289"
+            },
+            "rust": {
+              "r": "-8.209073602596753e-289",
+              "q": "-8.2090736025967525e-289"
+            }
+          },
+          {
+            "label": "number#9566",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "20f0000000000000"
+            },
+            "engines": {
+              "v8": "4.887898181599368e-150",
+              "jsc": "4.887898181599368e-150",
+              "quickjs": "4.8878981815993675e-150"
+            },
+            "rust": {
+              "r": "4.887898181599368e-150",
+              "q": "4.8878981815993675e-150"
+            }
+          },
+          {
+            "label": "number#9575",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "a0f0000000000000"
+            },
+            "engines": {
+              "v8": "-4.887898181599368e-150",
+              "jsc": "-4.887898181599368e-150",
+              "quickjs": "-4.8878981815993675e-150"
+            },
+            "rust": {
+              "r": "-4.887898181599368e-150",
+              "q": "-4.8878981815993675e-150"
+            }
+          },
+          {
+            "label": "number#10538",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "6510000000000000"
+            },
+            "engines": {
+              "v8": "6.483618076376552e+178",
+              "jsc": "6.483618076376552e+178",
+              "quickjs": "6.4836180763765515e+178"
+            },
+            "rust": {
+              "r": "6.483618076376552e+178",
+              "q": "6.4836180763765515e+178"
+            }
+          },
+          {
+            "label": "number#10547",
+            "source": "powerOfTwo",
+            "task": {
+              "op": "toString",
+              "x": "e510000000000000"
+            },
+            "engines": {
+              "v8": "-6.483618076376552e+178",
+              "jsc": "-6.483618076376552e+178",
+              "quickjs": "-6.4836180763765515e+178"
+            },
+            "rust": {
+              "r": "-6.483618076376552e+178",
+              "q": "-6.4836180763765515e+178"
+            }
+          }
+        ]
+      },
+      "environment": {
+        "node": "v22.20.0",
+        "v8": "12.4.254.21-node.33",
+        "nodeUnicode": "16.0",
+        "kernelUnicode": "17.0.0",
+        "rustToolchain": "1.98.1",
+        "ryuJs": "1.0.3",
+        "platform": "darwin 25.6.0 arm64",
+        "jsc": {
+          "path": "/System/Library/Frameworks/JavaScriptCore.framework/Versions/A/Helpers/jsc",
+          "macOS": "26.7.2"
+        },
+        "quickjs": "2026-06-04"
+      },
+      "durationSeconds": 7.2
+    },
+    {
+      "command": "node scripts/rust/conformance.mjs --suite string --count 200000 --seed 6 --engines v8,jsc,quickjs",
+      "date": "2026-11-03",
+      "seed": 6,
+      "count": 200000,
+      "suites": [
+        "string"
+      ],
+      "engines": [
+        "v8",
+        "jsc",
+        "quickjs"
+      ],
+      "result": "pass",
+      "totals": {
+        "cases": 200000,
+        "compared": 200000,
+        "excluded": 0,
+        "disagreements": 2078,
+        "mismatches": 0
+      },
+      "byEngine": {
+        "v8": {
+          "matched": 197922,
+          "divergent": {
+            "unicode-version": 2078
+          },
+          "mismatched": 0
+        },
+        "jsc": {
+          "matched": 200000,
+          "divergent": {},
+          "mismatched": 0
+        },
+        "quickjs": {
+          "matched": 200000,
+          "divergent": {},
+          "mismatched": 0
+        }
+      },
+      "bySuite": {
+        "string": {
+          "cases": 200000,
+          "compared": 200000,
+          "excluded": {},
+          "disagreements": 2078,
+          "mismatches": 0,
+          "ops": {
+            "trim": 33334,
+            "toLowerCase": 33334,
+            "slice": 33333,
+            "length": 33333,
+            "isWhitespace": 33333,
+            "quote": 33333
+          },
+          "byEngine": {
+            "v8": {
+              "matched": 197922,
+              "divergent": {
+                "unicode-version": 2078
+              },
+              "mismatched": 0
+            },
+            "jsc": {
+              "matched": 200000,
+              "divergent": {},
+              "mismatched": 0
+            },
+            "quickjs": {
+              "matched": 200000,
+              "divergent": {},
+              "mismatched": 0
+            }
+          }
+        }
+      },
+      "knownDivergences": {
+        "unicode-version": "toLowerCase input with code points assigned in the kernel Unicode version but not in this Node (UNICODE_UPGRADE): the kernel answer differs from Node only where those code points can change it, namely their own lowercase (one code point) and a neighboring final sigma (applies to the v8 comparison)"
+      },
+      "examples": {
+        "mismatches": [],
+        "excluded": [],
+        "disagreements": [
+          {
+            "label": "string#163",
+            "source": "units",
+            "task": {
+              "op": "toLowerCase",
+              "units": "2000a7d200850131dafbdd48d806dca0c137200b0301202f"
+            },
+            "engines": {
+              "v8": "2000a7d200850131dafbdd48d806dcc0c137200b0301202f",
+              "jsc": "2000a7d300850131dafbdd48d806dcc0c137200b0301202f",
+              "quickjs": "2000a7d300850131dafbdd48d806dcc0c137200b0301202f"
+            },
+            "rust": {
+              "r": "2000a7d300850131dafbdd48d806dcc0c137200b0301202f"
+            }
+          },
+          {
+            "label": "string#235",
+            "source": "units",
+            "task": {
+              "op": "toLowerCase",
+              "units": "d81bdeb8200b00805f98212a0020d800d81bde40"
+            },
+            "engines": {
+              "v8": "d81bdeb8200b00805f98006b0020d800d81bde60",
+              "jsc": "d81bded3200b00805f98006b0020d800d81bde60",
+              "quickjs": "d81bded3200b00805f98006b0020d800d81bde60"
+            },
+            "rust": {
+              "r": "d81bded3200b00805f98006b0020d800d81bde60"
+            }
+          },
+          {
+            "label": "string#259",
+            "source": "units",
+            "task": {
+              "op": "toLowerCase",
+              "units": "007f205f20280301000ad81bdeb8"
+            },
+            "engines": {
+              "v8": "007f205f20280301000ad81bdeb8",
+              "jsc": "007f205f20280301000ad81bded3",
+              "quickjs": "007f205f20280301000ad81bded3"
+            },
+            "rust": {
+              "r": "007f205f20280301000ad81bded3"
+            }
+          },
+          {
+            "label": "string#295",
+            "source": "units",
+            "task": {
+              "op": "toLowerCase",
+              "units": "a7d4007a00e9d83dded8002e0020"
+            },
+            "engines": {
+              "v8": "a7d4007a00e9d83dded8002e0020",
+              "jsc": "a7d5007a00e9d83dded8002e0020",
+              "quickjs": "a7d5007a00e9d83dded8002e0020"
+            },
+            "rust": {
+              "r": "a7d5007a00e9d83dded8002e0020"
+            }
+          },
+          {
+            "label": "string#529",
+            "source": "units",
+            "task": {
+              "op": "toLowerCase",
+              "units": "005c20280041a7d4000d000b10a0"
+            },
+            "engines": {
+              "v8": "005c20280061a7d4000d000b2d00",
+              "jsc": "005c20280061a7d5000d000b2d00",
+              "quickjs": "005c20280061a7d5000d000b2d00"
+            },
+            "rust": {
+              "r": "005c20280061a7d5000d000b2d00"
+            }
+          },
+          {
+            "label": "string#571",
+            "source": "units",
+            "task": {
+              "op": "toLowerCase",
+              "units": "feff0020a7d400010001d801dc28"
+            },
+            "engines": {
+              "v8": "feff0020a7d400010001d801dc28",
+              "jsc": "feff0020a7d500010001d801dc28",
+              "quickjs": "feff0020a7d500010001d801dc28"
+            },
+            "rust": {
+              "r": "feff0020a7d500010001d801dc28"
+            }
+          },
+          {
+            "label": "string#601",
+            "source": "units",
+            "task": {
+              "op": "toLowerCase",
+              "units": "d81bdeb80009dbffdfff0022002ed0ed"
+            },
+            "engines": {
+              "v8": "d81bdeb80009dbffdfff0022002ed0ed",
+              "jsc": "d81bded30009dbffdfff0022002ed0ed",
+              "quickjs": "d81bded30009dbffdfff0022002ed0ed"
+            },
+            "rust": {
+              "r": "d81bded30009dbffdfff0022002ed0ed"
+            }
+          },
+          {
+            "label": "string#661",
+            "source": "units",
+            "task": {
+              "op": "toLowerCase",
+              "units": "17990030200bc09800220062a7cfa7d20061000d"
+            },
+            "engines": {
+              "v8": "17990030200bc09800220062a7cfa7d20061000d",
+              "jsc": "17990030200bc09800220062a7cfa7d30061000d",
+              "quickjs": "17990030200bc09800220062a7cfa7d30061000d"
+            },
+            "rust": {
+              "r": "17990030200bc09800220062a7cfa7d30061000d"
+            }
+          },
+          {
+            "label": "string#721",
+            "source": "units",
+            "task": {
+              "op": "toLowerCase",
+              "units": "a7ce000d9e95007f"
+            },
+            "engines": {
+              "v8": "a7ce000d9e95007f",
+              "jsc": "a7cf000d9e95007f",
+              "quickjs": "a7cf000d9e95007f"
+            },
+            "rust": {
+              "r": "a7cf000d9e95007f"
+            }
+          },
+          {
+            "label": "string#751",
+            "source": "units",
+            "task": {
+              "op": "toLowerCase",
+              "units": "212b03f4007fa7d4d801dc280030"
+            },
+            "engines": {
+              "v8": "00e503b8007fa7d4d801dc280030",
+              "jsc": "00e503b8007fa7d5d801dc280030",
+              "quickjs": "00e503b8007fa7d5d801dc280030"
+            },
+            "rust": {
+              "r": "00e503b8007fa7d5d801dc280030"
+            }
+          },
+          {
+            "label": "string#1015",
+            "source": "units",
+            "task": {
+              "op": "toLowerCase",
+              "units": "205f03c22028001f205fd801dc000131039f03f4d81bdea0212a"
+            },
+            "engines": {
+              "v8": "205f03c22028001f205fd801dc28013103bf03b8d81bdea0006b",
+              "jsc": "205f03c22028001f205fd801dc28013103bf03b8d81bdebb006b",
+              "quickjs": "205f03c22028001f205fd801dc28013103bf03b8d81bdebb006b"
+            },
+            "rust": {
+              "r": "205f03c22028001f205fd801dc28013103bf03b8d81bdebb006b"
+            }
+          },
+          {
+            "label": "string#1225",
+            "source": "units",
+            "task": {
+              "op": "toLowerCase",
+              "units": "03c2daa2dd64d806dca000c9002d002da7ce"
+            },
+            "engines": {
+              "v8": "03c2daa2dd64d806dcc000e9002d002da7ce",
+              "jsc": "03c2daa2dd64d806dcc000e9002d002da7cf",
+              "quickjs": "03c2daa2dd64d806dcc000e9002d002da7cf"
+            },
+            "rust": {
+              "r": "03c2daa2dd64d806dcc000e9002d002da7cf"
+            }
+          },
+          {
+            "label": "string#1249",
+            "source": "units",
+            "task": {
+              "op": "toLowerCase",
+              "units": "212bd83add00205f0001202920291e9ea7d2000dd802dd40005a3811"
+            },
+            "engines": {
+              "v8": "00e5d83add22205f00012029202900dfa7d2000dd802dd40007a3811",
+              "jsc": "00e5d83add22205f00012029202900dfa7d3000dd802dd40007a3811",
+              "quickjs": "00e5d83add22205f00012029202900dfa7d3000dd802dd40007a3811"
+            },
+            "rust": {
+              "r": "00e5d83add22205f00012029202900dfa7d3000dd802dd40007a3811"
+            }
+          },
+          {
+            "label": "string#1303",
+            "source": "units",
+            "task": {
+              "op": "toLowerCase",
+              "units": "1680d9ccdd9600a0d835dc001680a7ce47f0fffd003000090131212a"
+            },
+            "engines": {
+              "v8": "1680d9ccdd9600a0d835dc001680a7ce47f0fffd003000090131006b",
+              "jsc": "1680d9ccdd9600a0d835dc001680a7cf47f0fffd003000090131006b",
+              "quickjs": "1680d9ccdd9600a0d835dc001680a7cf47f0fffd003000090131006b"
+            },
+            "rust": {
+              "r": "1680d9ccdd9600a0d835dc001680a7cf47f0fffd003000090131006b"
+            }
+          },
+          {
+            "label": "string#1411",
+            "source": "units",
+            "task": {
+              "op": "toLowerCase",
+              "units": "2029d81bdea01e9e00ad039100c9000a1680d888dfb04ebb013177f3"
+            },
+            "engines": {
+              "v8": "2029d81bdea000df00ad03b100e9000a1680d888dfb04ebb013177f3",
+              "jsc": "2029d81bdebb00df00ad03b100e9000a1680d888dfb04ebb013177f3",
+              "quickjs": "2029d81bdebb00df00ad03b100e9000a1680d888dfb04ebb013177f3"
+            },
+            "rust": {
+              "r": "2029d81bdebb00df00ad03b100e9000a1680d888dfb04ebb013177f3"
+            }
+          },
+          {
+            "label": "string#1525",
+            "source": "units",
+            "task": {
+              "op": "toLowerCase",
+              "units": "2000d81bdeb8212a1680a37af662"
+            },
+            "engines": {
+              "v8": "2000d81bdeb8006b1680a37af662",
+              "jsc": "2000d81bded3006b1680a37af662",
+              "quickjs": "2000d81bded3006b1680a37af662"
+            },
+            "rust": {
+              "r": "2000d81bded3006b1680a37af662"
+            }
+          },
+          {
+            "label": "string#1567",
+            "source": "units",
+            "task": {
+              "op": "toLowerCase",
+              "units": "d935df09a7d4002d00629800dbffdfff03c3039f"
+            },
+            "engines": {
+              "v8": "d935df09a7d4002d00629800dbffdfff03c303bf",
+              "jsc": "d935df09a7d5002d00629800dbffdfff03c303bf",
+              "quickjs": "d935df09a7d5002d00629800dbffdfff03c303bf"
+            },
+            "rust": {
+              "r": "d935df09a7d5002d00629800dbffdfff03c303bf"
+            }
+          },
+          {
+            "label": "string#1705",
+            "source": "units",
+            "task": {
+              "op": "toLowerCase",
+              "units": "00ad202f1680d81bdea010a003f4205f0394592b0030"
+            },
+            "engines": {
+              "v8": "00ad202f1680d81bdea02d0003b8205f03b4592b0030",
+              "jsc": "00ad202f1680d81bdebb2d0003b8205f03b4592b0030",
+              "quickjs": "00ad202f1680d81bdebb2d0003b8205f03b4592b0030"
+            },
+            "rust": {
+              "r": "00ad202f1680d81bdebb2d0003b8205f03b4592b0030"
+            }
+          },
+          {
+            "label": "string#1735",
+            "source": "units",
+            "task": {
+              "op": "toLowerCase",
+              "units": "212600620041d801dc00feffd81bdeb800e9002f005c0394da26ddf32000"
+            },
+            "engines": {
+              "v8": "03c900620061d801dc28feffd81bdeb800e9002f005c03b4da26ddf32000",
+              "jsc": "03c900620061d801dc28feffd81bded300e9002f005c03b4da26ddf32000",
+              "quickjs": "03c900620061d801dc28feffd81bded300e9002f005c03b4da26ddf32000"
+            },
+            "rust": {
+              "r": "03c900620061d801dc28feffd81bded300e9002f005c03b4da26ddf32000"
+            }
+          },
+          {
+            "label": "string#1741",
+            "source": "units",
+            "task": {
+              "op": "toLowerCase",
+              "units": "212be99d200adc00f9c9a7ce42ef013001309aa400c9"
+            },
+            "engines": {
+              "v8": "00e5e99d200adc00f9c9a7ce42ef00690307006903079aa400e9",
+              "jsc": "00e5e99d200adc00f9c9a7cf42ef00690307006903079aa400e9",
+              "quickjs": "00e5e99d200adc00f9c9a7cf42ef00690307006903079aa400e9"
+            },
+            "rust": {
+              "r": "00e5e99d200adc00f9c9a7cf42ef00690307006903079aa400e9"
+            }
+          }
+        ]
+      },
+      "environment": {
+        "node": "v22.20.0",
+        "v8": "12.4.254.21-node.33",
+        "nodeUnicode": "16.0",
+        "kernelUnicode": "17.0.0",
+        "rustToolchain": "1.98.1",
+        "ryuJs": "1.0.3",
+        "platform": "darwin 25.6.0 arm64",
+        "jsc": {
+          "path": "/System/Library/Frameworks/JavaScriptCore.framework/Versions/A/Helpers/jsc",
+          "macOS": "26.7.2"
+        },
+        "quickjs": "2026-06-04"
+      },
+      "durationSeconds": 6.7
+    }
+  ],
+  "updated": "2026-11-03"
+}
