@@ -155,9 +155,10 @@ jobs:
           # 러너 전용 프록시만 만들며 Homebrew cargo로 폴백하지 않는다.
           rustup_executable="$(command -v rustup)"
           proxy_directory="$(mktemp -d "${RUNNER_TEMP}/barochart-rustup.XXXXXX")"
-          for proxy in cargo rustc rustdoc rustfmt cargo-fmt cargo-clippy clippy-driver rustup; do
-            ln -s "${rustup_executable}" "${proxy_directory}/${proxy}"
+          for proxy in cargo rustc rustdoc rustfmt cargo-fmt cargo-clippy clippy-driver; do
+            ln -s "$(rustup which "${proxy}")" "${proxy_directory}/${proxy}"
           done
+          ln -s "${rustup_executable}" "${proxy_directory}/rustup"
           export BAROCHART_RUSTUP_BIN="${proxy_directory}"
           echo "BAROCHART_RUSTUP_BIN=${proxy_directory}" >> "${GITHUB_ENV}"
           cd ..
@@ -204,9 +205,10 @@ jobs:
           # 러너 전용 프록시만 만들며 Homebrew cargo로 폴백하지 않는다.
           rustup_executable="$(command -v rustup)"
           proxy_directory="$(mktemp -d "${RUNNER_TEMP}/barochart-rustup.XXXXXX")"
-          for proxy in cargo rustc rustdoc rustfmt cargo-fmt cargo-clippy clippy-driver rustup; do
-            ln -s "${rustup_executable}" "${proxy_directory}/${proxy}"
+          for proxy in cargo rustc rustdoc rustfmt cargo-fmt cargo-clippy clippy-driver; do
+            ln -s "$(rustup which "${proxy}")" "${proxy_directory}/${proxy}"
           done
+          ln -s "${rustup_executable}" "${proxy_directory}/rustup"
           export BAROCHART_RUSTUP_BIN="${proxy_directory}"
           echo "BAROCHART_RUSTUP_BIN=${proxy_directory}" >> "${GITHUB_ENV}"
           cd ..
@@ -284,9 +286,10 @@ jobs:
           # 러너 전용 프록시만 만들며 Homebrew cargo로 폴백하지 않는다.
           rustup_executable="$(command -v rustup)"
           proxy_directory="$(mktemp -d "${RUNNER_TEMP}/barochart-rustup.XXXXXX")"
-          for proxy in cargo rustc rustdoc rustfmt cargo-fmt cargo-clippy clippy-driver rustup; do
-            ln -s "${rustup_executable}" "${proxy_directory}/${proxy}"
+          for proxy in cargo rustc rustdoc rustfmt cargo-fmt cargo-clippy clippy-driver; do
+            ln -s "$(rustup which "${proxy}")" "${proxy_directory}/${proxy}"
           done
+          ln -s "${rustup_executable}" "${proxy_directory}/rustup"
           export BAROCHART_RUSTUP_BIN="${proxy_directory}"
           echo "BAROCHART_RUSTUP_BIN=${proxy_directory}" >> "${GITHUB_ENV}"
           cd ..

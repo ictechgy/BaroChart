@@ -58,6 +58,7 @@ test('native jobs exercise the optional Rust packages and keep the JS-only lane'
   assert.match(job,/rustup toolchain install/);
   assert.match(job,/node scripts\/rust\/cargo\.mjs fetch --locked/);
   assert.match(job,/BAROCHART_RUSTUP_BIN=/,'native jobs must publish explicit rustup proxies instead of assuming a Cargo-home layout');
+  assert.match(job,/rustup which "\$\{proxy\}"/,'proxies must point to the selected toolchain binary, not a package-manager rustup wrapper');
  }
  assert.match(ios,/node scripts\/rust\/build-xcframework\.mjs/);
  assert.match(ios,/BAROCHART_RUST_XCFRAMEWORK/);
