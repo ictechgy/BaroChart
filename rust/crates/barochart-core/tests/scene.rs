@@ -20,6 +20,11 @@ use scene::{
 };
 use scene_parts::{AxisTickFormat, SceneTheme};
 
+#[cfg(any(target_vendor = "apple", all(target_os = "linux", target_env = "gnu")))]
+use std::path::PathBuf;
+#[cfg(any(target_vendor = "apple", all(target_os = "linux", target_env = "gnu")))]
+use std::process::Command;
+
 const FIXTURE: &str = include_str!("../../../../test/fixtures/rust-model/scene-oracle.jsonl");
 
 fn parse(source: &str) -> JsValue {
@@ -153,6 +158,72 @@ fn rows(kind: &str) -> Vec<JsValue> {
         .map(parse)
         .filter(|row| optional(row, "kind").is_some_and(|value| text(value) == kind))
         .collect()
+}
+
+#[cfg(any(target_vendor = "apple", all(target_os = "linux", target_env = "gnu")))]
+fn native_scene_output() -> String {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let helper = root.join("test/fixtures/rust-model/generate-scene-native.mjs");
+    let fixture = root.join("test/fixtures/rust-model/scene-oracle.jsonl");
+    let node = std::env::var_os("BAROCHART_NODE").unwrap_or_else(|| "node".into());
+    let engine = if cfg!(target_vendor = "apple") {
+        "jsc"
+    } else {
+        "quickjs"
+    };
+    let output = Command::new(&node)
+        .current_dir(&root)
+        .arg(&helper)
+        .arg(&fixture)
+        .arg(engine)
+        .output()
+        .unwrap_or_else(|error| {
+            panic!(
+                "NoNode: cannot run native {engine} scene oracle with {:?}: {error}; set BAROCHART_NODE to Node 22",
+                node
+            )
+        });
+    assert!(
+        output.status.success(),
+        "native {engine} scene oracle failed ({}): {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let output_text = String::from_utf8_lossy(&output.stdout);
+    let mut output_rows = output_text
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(parse);
+    let row = output_rows
+        .next()
+        .unwrap_or_else(|| panic!("native {engine} scene oracle emitted no row"));
+    assert!(
+        output_rows.next().is_none(),
+        "native {engine} scene oracle emitted more than one row"
+    );
+    assert_eq!(text(get(&row, "scenarioId")), "scene-log");
+    text(get(&row, "expectedNative"))
+}
+
+fn expected_scene_value(
+    row: &JsValue,
+    #[cfg(not(target_arch = "wasm32"))] id: &str,
+    #[cfg(target_arch = "wasm32")] _id: &str,
+    #[cfg(any(target_vendor = "apple", all(target_os = "linux", target_env = "gnu")))]
+    native_scene: &str,
+) -> JsValue {
+    #[cfg(any(target_vendor = "apple", all(target_os = "linux", target_env = "gnu")))]
+    if id == "scene-log" {
+        return decode_wire(&parse(native_scene));
+    }
+    #[cfg(all(
+        not(target_arch = "wasm32"),
+        not(any(target_vendor = "apple", all(target_os = "linux", target_env = "gnu")))
+    ))]
+    if id == "scene-log" {
+        panic!("unsupported native scene oracle target; use Apple JSC or Linux GNU QuickJS");
+    }
+    decode_wire(get(row, "expectedV8"))
 }
 
 #[derive(Clone)]
@@ -555,12 +626,17 @@ impl Host for FixtureHost {
 
 #[test]
 fn actual_js_scene_commands_and_stats_match_renderer_neutral_build() {
+    #[cfg(any(target_vendor = "apple", all(target_os = "linux", target_env = "gnu")))]
+    let native_scene = native_scene_output();
     let host = FixtureHost;
     for row in rows("scene") {
         let id = text(get(&row, "id"));
         let spec = decode_wire(get(&row, "input"));
         let fixture = render_fixture(&spec);
-        let expected = decode_wire(get(&row, "expectedV8"));
+        #[cfg(any(target_vendor = "apple", all(target_os = "linux", target_env = "gnu")))]
+        let expected = expected_scene_value(&row, &id, &native_scene);
+        #[cfg(not(any(target_vendor = "apple", all(target_os = "linux", target_env = "gnu"))))]
+        let expected = expected_scene_value(&row, &id);
         let layout = layout_from_value(get(&expected, "layout"));
         let indexes: Vec<Option<RangeIndex>> = fixture
             .model
@@ -625,22 +701,11 @@ fn actual_js_scene_commands_and_stats_match_renderer_neutral_build() {
         })
         .unwrap();
         assert!(cache.len() <= 16);
-        if id == "scene-log" && cfg!(target_vendor = "apple") {
-            assert_eq!(
-                array(get(&actual, "commands")).len(),
-                array(get(&expected, "commands")).len()
-            );
-            assert_eq!(
-                json(&encode_wire(get(&actual, "stats"))),
-                json(&encode_wire(get(&expected, "stats")))
-            );
-        } else {
-            assert_eq!(
-                json(&encode_wire(&actual)),
-                json(get(&row, "expectedV8")),
-                "{id}"
-            );
-        }
+        assert_eq!(
+            json(&encode_wire(&actual)),
+            json(&encode_wire(&expected)),
+            "{id}"
+        );
     }
 }
 
