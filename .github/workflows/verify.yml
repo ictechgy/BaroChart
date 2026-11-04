@@ -118,7 +118,7 @@ jobs:
         run: node scripts/rust/cargo.mjs clippy --locked --workspace --all-targets -- -D warnings
 
       - name: Test the Rust workspace
-        run: node scripts/rust/cargo.mjs test --locked --workspace
+        run: node scripts/rust/cargo.mjs test --locked --workspace --no-fail-fast
 
       - name: Check banned patterns in ported Rust code
         run: node scripts/rust/check-bans.mjs

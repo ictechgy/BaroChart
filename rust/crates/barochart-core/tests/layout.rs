@@ -17,6 +17,13 @@ use model_state::{
 };
 use series_cache::SeriesCaches;
 
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+use std::collections::HashMap;
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+use std::path::PathBuf;
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+use std::process::Command;
+
 const FIXTURE: &str = include_str!("../../../../test/fixtures/rust-model/layout-oracle.jsonl");
 const SCHEMA: &str = "aster.rust-model-layout";
 const ORACLE_COMMIT: &str = "cbc4b296cfdba25f597f04d1aea238f221019bce";
@@ -154,6 +161,163 @@ fn fixture_rows() -> Vec<JsValue> {
         .filter(|line| !line.is_empty())
         .map(parse)
         .collect()
+}
+
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+struct NativeLayoutOutput {
+    expected: Option<String>,
+    error: Option<(String, JsString)>,
+}
+
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn native_layout_outputs(rows: &[JsValue]) -> HashMap<String, NativeLayoutOutput> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let helper = root.join("test/fixtures/rust-model/generate-layout-native-quickjs.mjs");
+    let fixture = root.join("test/fixtures/rust-model/layout-oracle.jsonl");
+    let node = std::env::var_os("BAROCHART_NODE").unwrap_or_else(|| "node".into());
+    let output = Command::new(&node)
+        .current_dir(&root)
+        .arg(&helper)
+        .arg(&fixture)
+        .output()
+        .unwrap_or_else(|error| {
+            panic!(
+                "NoNode: cannot run native QuickJS layout oracle with {:?}: {error}; set BAROCHART_NODE to Node 22",
+                node
+            )
+        });
+    assert!(
+        output.status.success(),
+        "native QuickJS layout oracle failed ({}): {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let mut result = HashMap::new();
+    for line in String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| !line.is_empty())
+    {
+        let row = parse(line);
+        let scenario = string(field(&row, "scenarioId")).to_string_lossy();
+        let expected = match field(&row, "expectedNativeQuickJs") {
+            JsValue::Null => None,
+            JsValue::String(value) => Some(value.to_string_lossy()),
+            value => panic!(
+                "{scenario}: native QuickJS expected output must be string/null, got {value:?}"
+            ),
+        };
+        let error = match field(&row, "errorNativeQuickJs") {
+            JsValue::Null => None,
+            value => Some((
+                string(field(value, "name")).to_string_lossy(),
+                string(field(value, "message")).clone(),
+            )),
+        };
+        assert!(
+            result
+                .insert(scenario.clone(), NativeLayoutOutput { expected, error })
+                .is_none(),
+            "native QuickJS layout oracle duplicated {scenario}"
+        );
+    }
+    assert_eq!(
+        result.len(),
+        rows.len(),
+        "native QuickJS layout oracle result count"
+    );
+    for row in rows {
+        let scenario = string(field(row, "scenarioId")).to_string_lossy();
+        let native = result
+            .get(&scenario)
+            .unwrap_or_else(|| panic!("native QuickJS layout oracle missed {scenario}"));
+        let fixture_has_error = !matches!(field(row, "error"), JsValue::Null);
+        assert_eq!(
+            native.error.is_some(),
+            fixture_has_error,
+            "native QuickJS layout oracle outcome changed for {scenario}"
+        );
+    }
+    result
+}
+
+fn expected_layout_error(
+    row: &JsValue,
+    #[cfg(all(target_os = "linux", target_env = "gnu"))] native_quickjs: &HashMap<
+        String,
+        NativeLayoutOutput,
+    >,
+) -> (String, JsString) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let expected = field(row, "error");
+        (
+            string(field(expected, "name")).to_string_lossy(),
+            string(field(expected, "message")).clone(),
+        )
+    }
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        let expected = optional_field(row, "errorJsc").unwrap_or_else(|| field(row, "error"));
+        (
+            string(field(expected, "name")).to_string_lossy(),
+            string(field(expected, "message")).clone(),
+        )
+    }
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    {
+        let scenario = string(field(row, "scenarioId")).to_string_lossy();
+        native_quickjs
+            .get(&scenario)
+            .and_then(|output| output.error.as_ref())
+            .map(|(name, message)| (name.clone(), message.clone()))
+            .unwrap_or_else(|| panic!("native QuickJS layout oracle has no error for {scenario}"))
+    }
+    #[cfg(all(
+        not(target_arch = "wasm32"),
+        not(any(target_os = "macos", target_os = "ios")),
+        not(all(target_os = "linux", target_env = "gnu"))
+    ))]
+    {
+        panic!("unsupported native layout oracle target; use Apple JSC or Linux GNU QuickJS")
+    }
+}
+
+fn expected_layout_text(
+    row: &JsValue,
+    #[cfg(all(target_os = "linux", target_env = "gnu"))] native_quickjs: &HashMap<
+        String,
+        NativeLayoutOutput,
+    >,
+) -> String {
+    #[cfg(target_arch = "wasm32")]
+    {
+        string(field(row, "expected")).to_string_lossy()
+    }
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        optional_field(row, "expectedJsc")
+            .map(string)
+            .unwrap_or_else(|| string(field(row, "expected")))
+            .to_string_lossy()
+    }
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    {
+        let scenario = string(field(row, "scenarioId")).to_string_lossy();
+        native_quickjs
+            .get(&scenario)
+            .and_then(|output| output.expected.as_ref())
+            .cloned()
+            .unwrap_or_else(|| panic!("native QuickJS layout oracle has no output for {scenario}"))
+    }
+    #[cfg(all(
+        not(target_arch = "wasm32"),
+        not(any(target_os = "macos", target_os = "ios")),
+        not(all(target_os = "linux", target_env = "gnu"))
+    ))]
+    {
+        panic!("unsupported native layout oracle target; use Apple JSC or Linux GNU QuickJS")
+    }
 }
 
 fn number_array(value: &JsValue) -> Vec<f64> {
@@ -889,13 +1053,14 @@ fn first_difference(actual: &JsValue, expected: &JsValue, path: &str) -> Option<
 fn public_model_layout_matches_exact_geometry_cache_and_live_closure_fixtures() {
     let rows = fixture_rows();
     assert_eq!(rows.len(), 17);
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    let native_quickjs = native_layout_outputs(&rows);
     let host = NoZones;
     let mut state = ModelDataState::new(StoreOptions::default(), Vec::new()).unwrap();
     for row in rows {
         assert_eq!(string(field(&row, "schema")), &key(SCHEMA));
         assert_eq!(string(field(&row, "oracleCommit")), &key(ORACLE_COMMIT));
         let expected_error = field(&row, "error");
-        let expected_jsc_error = optional_field(&row, "errorJsc").unwrap_or(expected_error);
         let result = run_fixture_row(&row, &mut state, &host);
         if !matches!(expected_error, JsValue::Null) {
             let error = result.err().unwrap_or_else(|| {
@@ -904,16 +1069,12 @@ fn public_model_layout_matches_exact_geometry_cache_and_live_closure_fixtures() 
                     string(field(&row, "scenarioId")).to_string_lossy()
                 )
             });
-            let expected = if cfg!(target_arch = "wasm32") {
-                expected_error
-            } else {
-                expected_jsc_error
-            };
-            assert_eq!(
-                error.name,
-                string(field(expected, "name")).to_string_lossy()
-            );
-            assert_eq!(error.message, string(field(expected, "message")).clone());
+            #[cfg(all(target_os = "linux", target_env = "gnu"))]
+            let expected = expected_layout_error(&row, &native_quickjs);
+            #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+            let expected = expected_layout_error(&row);
+            assert_eq!(error.name, expected.0);
+            assert_eq!(error.message, expected.1);
             continue;
         }
         let actual = result.unwrap_or_else(|error| {
@@ -922,16 +1083,12 @@ fn public_model_layout_matches_exact_geometry_cache_and_live_closure_fixtures() 
                 string(field(&row, "scenarioId")).to_string_lossy()
             )
         });
-        let expected_text = if cfg!(target_arch = "wasm32") {
-            string(field(&row, "expected"))
-        } else {
-            optional_field(&row, "expectedJsc")
-                .map(string)
-                .unwrap_or_else(|| string(field(&row, "expected")))
-        };
-        let expected =
-            decode(&parse_json_utf16(expected_text.as_units(), JsonMode::Standard).unwrap());
-        if stringify(&actual) != expected_text.to_string_lossy() {
+        #[cfg(all(target_os = "linux", target_env = "gnu"))]
+        let expected_text = expected_layout_text(&row, &native_quickjs);
+        #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+        let expected_text = expected_layout_text(&row);
+        let expected = decode(&parse_json(expected_text.as_bytes(), JsonMode::Standard).unwrap());
+        if stringify(&actual) != expected_text {
             panic!(
                 "{}: first difference: {}",
                 string(field(&row, "scenarioId")).to_string_lossy(),
@@ -941,7 +1098,7 @@ fn public_model_layout_matches_exact_geometry_cache_and_live_closure_fixtures() 
         }
         assert_eq!(
             stringify(&actual),
-            expected_text.to_string_lossy(),
+            expected_text,
             "{}: exact layout wire output/order",
             string(field(&row, "scenarioId")).to_string_lossy()
         );
