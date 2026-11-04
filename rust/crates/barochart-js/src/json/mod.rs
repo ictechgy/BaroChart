@@ -16,9 +16,12 @@ mod value;
 mod write;
 
 pub use object::JsObject;
-pub use parse::{parse_json, parse_json_utf16, parse_json_utf16_with, parse_json_with};
+pub use parse::{
+    JsonFailure, parse_json, parse_json_scoped, parse_json_utf16, parse_json_utf16_scoped,
+    parse_json_utf16_with, parse_json_with,
+};
 pub use value::JsValue;
-pub use write::{stringify_json, stringify_json_with};
+pub use write::{stringify_json, stringify_json_scoped, stringify_json_with};
 
 /// JSON 문법 선택.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

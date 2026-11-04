@@ -1,6 +1,7 @@
 use barochart_core::{indicator_helpers, indicator_params, indicator_types, native_checkpoints};
 
 use barochart_js::json::{JsObject, JsValue, JsonMode, parse_json_utf16};
+use barochart_js::memory::{MemoryAccount, MemoryContext, OomStyle};
 use barochart_js::string::JsString;
 use indicator_helpers::exact_state_equal;
 use indicator_params::validate_indicator_params;
@@ -141,4 +142,44 @@ fn footprint_counts_special_markers_utf16_and_nodes_without_mutating_state() {
         )))
         .is_err()
     );
+}
+
+#[test]
+fn actual_checkpoint_payload_account_moves_on_publish_and_releases_on_drop() {
+    let account = MemoryAccount::new(1 << 20, OomStyle::InternalErrorLowercase);
+    let budget =
+        NativeCheckpointBudget::new_with_memory(4_096, MemoryContext::accounted(&account)).unwrap();
+    let mut map = ema_map(budget.clone());
+    map.set(0.0, value("{}")).unwrap();
+    assert!(map.accounted_bytes() > map.encoded_bytes() as u64);
+    assert_eq!(
+        account.snapshot().requested_live_bytes,
+        map.accounted_bytes()
+    );
+    map.set(256.0, value(r#"{"e":{"count":20,"sum":0,"value":1}}"#))
+        .unwrap();
+    assert!(map.accounted_bytes() > map.encoded_bytes() as u64);
+    let (records, memory) = map.publish_entries_accounted().unwrap();
+    assert_eq!(records.len(), 2);
+    assert_eq!(
+        records.iter().map(|(index, _)| *index).collect::<Vec<_>>(),
+        [0, 256]
+    );
+    assert_eq!(map.accounted_bytes(), 0);
+    assert_eq!(budget.used_bytes(), 0);
+    assert_eq!(
+        account.snapshot().requested_live_bytes,
+        memory.requested_bytes()
+    );
+    drop((records, memory, map));
+    assert_eq!(account.snapshot().requested_live_bytes, 0);
+
+    let limited = MemoryAccount::new(16, OomStyle::InternalErrorLowercase);
+    let budget =
+        NativeCheckpointBudget::new_with_memory(4_096, MemoryContext::accounted(&limited)).unwrap();
+    let mut map = ema_map(budget);
+    let error = map.set(0.0, value("{}")).unwrap_err();
+    assert_eq!(error.code.as_deref(), Some("__BAROCHART_OOM_LIMIT__"));
+    assert_eq!(map.accounted_bytes(), 0);
+    assert_eq!(limited.snapshot().requested_live_bytes, 0);
 }

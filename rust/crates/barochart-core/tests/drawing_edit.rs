@@ -114,9 +114,9 @@ fn group_translation_is_prepared_atomically_and_preserves_source_z_order() {
         }
     );
     assert_eq!(store.undo_stack().len(), 3);
-    assert!(store.undo());
+    assert!(store.undo().unwrap());
     assert_eq!(store.items()[0].points[0].price, 2.0);
-    assert!(store.redo());
+    assert!(store.redo().unwrap());
     assert_eq!(store.items()[0].points[0].price, 0.0);
 }
 
@@ -159,7 +159,7 @@ fn duplicate_options_precede_gesture_and_duplicates_follow_store_order() {
     )
     .unwrap();
     assert_eq!(result.changed, 2);
-    let created = result.created.unwrap();
+    let created = result.created.as_ref().unwrap();
     assert_eq!(created[0].source_id, key("first"));
     assert_eq!(created[1].source_id, key("second"));
     assert_eq!(store.items()[2].id, key("drawing-1"));

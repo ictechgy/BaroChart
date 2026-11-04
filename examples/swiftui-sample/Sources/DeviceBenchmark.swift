@@ -1,4 +1,4 @@
-import BaroChart
+@_spi(BaroChartValidation) import BaroChart
 import Darwin
 import Foundation
 import UIKit
@@ -9,14 +9,25 @@ import UIKit
 @MainActor
 enum DeviceBenchmark {
     static var isRequested: Bool { ProcessInfo.processInfo.arguments.contains("-barochart-benchmark") }
+    private static var backend: String {
+        let arguments = ProcessInfo.processInfo.arguments
+        return arguments.firstIndex(of: "-barochart-backend").flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil } ?? "javascript"
+    }
+    private static var runId: String {
+        let arguments = ProcessInfo.processInfo.arguments
+        return arguments.firstIndex(of: "-barochart-run-id").flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil } ?? "missing-run-id"
+    }
 
     /// 측정 전체를 실행해 JSON 문자열로 돌려준다
     static func run() -> String {
-        var result: [String: Any] = ["device": deviceModel(), "os": UIDevice.current.systemVersion, "scale": UIScreen.main.scale,
+        var result: [String: Any] = ["backend": backend, "runId": runId, "percentileMethod": "nearest-rank", "fixtureId": "seeded-sine-bars-10k-ema20-v1", "physicalDevice": ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] == nil, "device": deviceModel(), "os": UIDevice.current.systemVersion, "scale": UIScreen.main.scale,
                                      "method": "offscreen BaroChartUIView layer render on the device CPU; not display FPS"]
         do {
             result["startup"] = try startup()
-            result["pan10k"] = try pan(bars: 10_000)
+            let panResult = try pan(bars: 10_000)
+            result["pan10k"] = panResult
+            result["actualBackend"] = panResult["actualBackend"]
+            result["backendVerified"] = (panResult["actualBackend"] as? String) == backend
         } catch {
             result["error"] = String(describing: error)
         }
@@ -33,7 +44,8 @@ enum DeviceBenchmark {
         let data = bars(10_000)
         for run in 0..<12 {
             let start = DispatchTime.now().uptimeNanoseconds
-            let engine = try BaroChartEngine(options: BaroChartEngineOptions())
+            let engine = try BaroChartValidation.makeEngine(options: BaroChartEngineOptions(), backend: backend)
+            guard try BaroChartValidation.actualBackend(for: engine) == backend else { throw NSError(domain: "BaroChartValidation", code: 2) }
             try engine.setBars(data)
             let view = BaroChartUIView(engine: engine, frame: CGRect(x: 0, y: 0, width: 390, height: 320))
             view.contentScaleFactor = UIScreen.main.scale
@@ -46,8 +58,10 @@ enum DeviceBenchmark {
     }
 
     /// 1만 봉에서 보이는 범위를 120번 옮기며 프레임마다 렌더 시간을 잰다
-    private static func pan(bars count: Int) throws -> [String: Double] {
-        let engine = try BaroChartEngine(options: BaroChartEngineOptions())
+    private static func pan(bars count: Int) throws -> [String: Any] {
+        let engine = try BaroChartValidation.makeEngine(options: BaroChartEngineOptions(), backend: backend)
+        let actualBackend = try BaroChartValidation.actualBackend(for: engine)
+        guard actualBackend == backend else { throw NSError(domain: "BaroChartValidation", code: 2) }
         defer { do { try engine.close() } catch { print("Benchmark engine close failed: \(error)") } }
         try engine.setBars(bars(count))
         try engine.addIndicator(.ema(period: 20), id: "ema")
@@ -57,6 +71,11 @@ enum DeviceBenchmark {
         try engine.setVisibleRange(BaroChartVisibleRange(from: Double(count - 200), to: Double(count)))
         view.setNeedsDisplay(); view.layer.displayIfNeeded()
         var samples: [Double] = []
+        for warmup in 0..<2 {
+            let from = Double(count - 206 - warmup * 3)
+            try engine.setVisibleRange(BaroChartVisibleRange(from: from, to: from + 200))
+            view.setNeedsDisplay(); view.layer.displayIfNeeded()
+        }
         for frame in 0..<120 {
             let start = DispatchTime.now().uptimeNanoseconds
             let from = Double(count - 200 - frame * 3)
@@ -64,15 +83,18 @@ enum DeviceBenchmark {
             view.setNeedsDisplay(); view.layer.displayIfNeeded()
             samples.append(Double(DispatchTime.now().uptimeNanoseconds - start) / 1e6)
         }
-        var out = summary(samples)
+        var out: [String: Any] = summary(samples)
+        out["actualBackend"] = actualBackend
         out["footprintMB"] = footprintMB()
+        out["runtimeAllocationBytes"] = NSNull()
+        out["runtimeAllocationNote"] = "Swift FFI does not expose requested Rust runtime bytes; phys_footprint is reported separately."
         view.dispose()
         return out
     }
 
     private static func summary(_ values: [Double]) -> [String: Double] {
         let sorted = values.sorted()
-        return ["p50Ms": sorted[sorted.count / 2], "p95Ms": sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.95))], "maxMs": sorted.last ?? 0, "runs": Double(sorted.count)]
+        return ["p50Ms": sorted[min(sorted.count - 1, Int(ceil(Double(sorted.count) * 0.50)) - 1)], "p95Ms": sorted[min(sorted.count - 1, Int(ceil(Double(sorted.count) * 0.95)) - 1)], "maxMs": sorted.last ?? 0, "runs": Double(sorted.count)]
     }
 
     private static func bars(_ count: Int) -> [BaroChartBar] {

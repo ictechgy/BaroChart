@@ -3,10 +3,12 @@
 #![forbid(unsafe_code)]
 
 use std::collections::VecDeque;
+use std::ops::Deref;
 use std::sync::{Arc, Weak};
 
 use barochart_js::error::JsError;
 use barochart_js::json::{JsObject, JsValue};
+use barochart_js::memory::{MemoryContext, MemoryGroup, MemoryScope, OomStyle};
 use barochart_js::num::{
     NumberDialect, js_max, js_min, number_to_string_with, to_fixed_with, to_precision,
 };
@@ -62,21 +64,56 @@ pub trait DrawingProjection {
 struct CacheEntry {
     drawing: Weak<Drawing>,
     geometry_key: JsString,
-    commands: Arc<[JsValue]>,
+    _key_memory: MemoryGroup,
+    commands: Arc<OwnedDrawingGeometry>,
+}
+
+/// 캐시와 소비자가 Arc로 공유하는 한 drawing command payload다.
+pub struct OwnedDrawingGeometry {
+    commands: Vec<JsValue>,
+    memory: MemoryGroup,
+}
+
+impl OwnedDrawingGeometry {
+    /// command Vec와 DOM payload가 보유한 requested bytes다.
+    pub fn requested_bytes(&self) -> u64 {
+        self.memory.requested_bytes()
+    }
+}
+
+impl Deref for OwnedDrawingGeometry {
+    type Target = [JsValue];
+
+    fn deref(&self) -> &Self::Target {
+        &self.commands
+    }
 }
 
 /// Per-chart bounded geometry cache. Dead drawing identities never match a later allocation.
 pub struct DrawingGeometryCache {
     capacity: usize,
     entries: VecDeque<CacheEntry>,
+    _entries_memory: MemoryGroup,
+    memory: MemoryContext,
 }
 
 impl DrawingGeometryCache {
     pub fn new(capacity: usize) -> Self {
-        Self {
+        Self::new_with_memory(
             capacity,
-            entries: VecDeque::with_capacity(capacity),
-        }
+            MemoryContext::unaccounted(OomStyle::RangeErrorCapitalized),
+        )
+        .expect("unaccounted drawing cache allocation failed")
+    }
+
+    /// 지정한 엔진 account에서 cache entry capacity를 allocation 전에 예약한다.
+    pub fn new_with_memory(capacity: usize, memory: MemoryContext) -> Result<Self, JsError> {
+        Ok(Self {
+            capacity,
+            entries: VecDeque::new(),
+            _entries_memory: MemoryGroup::empty(memory.clone()),
+            memory,
+        })
     }
 
     pub fn len(&self) -> usize {
@@ -92,7 +129,11 @@ impl DrawingGeometryCache {
             .retain(|entry| entry.drawing.strong_count() > 0);
     }
 
-    fn get(&mut self, drawing: &Arc<Drawing>, geometry_key: &JsString) -> Option<Arc<[JsValue]>> {
+    fn get(
+        &mut self,
+        drawing: &Arc<Drawing>,
+        geometry_key: &JsString,
+    ) -> Option<Arc<OwnedDrawingGeometry>> {
         self.purge_dead();
         let index = self.entries.iter().position(|entry| {
             entry.geometry_key == *geometry_key
@@ -111,20 +152,65 @@ impl DrawingGeometryCache {
         &mut self,
         drawing: &Arc<Drawing>,
         geometry_key: &JsString,
-        commands: Arc<[JsValue]>,
-    ) {
+        commands: Arc<OwnedDrawingGeometry>,
+    ) -> Result<(), JsError> {
         if self.capacity == 0 || geometry_key.as_units().is_empty() {
-            return;
+            return Ok(());
         }
+        let mut scope = self.memory.scope();
+        let geometry_key = geometry_key
+            .try_clone_scoped(&mut scope)
+            .map_err(|failure| failure.into_js_error())?;
+        let requested = usize::try_from(scope.requested_bytes())
+            .map_err(|_| self.memory.allocation_failure().into_js_error())?;
+        let key_memory = scope
+            .split_persistent(requested)
+            .map_err(|failure| failure.into_js_error())?;
         self.purge_dead();
         while self.entries.len() >= self.capacity {
             self.entries.pop_front();
         }
+        self.ensure_entry_capacity()?;
         self.entries.push_back(CacheEntry {
             drawing: Arc::downgrade(drawing),
-            geometry_key: geometry_key.clone(),
+            geometry_key,
+            _key_memory: key_memory,
             commands,
         });
+        Ok(())
+    }
+
+    fn ensure_entry_capacity(&mut self) -> Result<(), JsError> {
+        if self.entries.len() < self.entries.capacity() || self.entries.len() >= self.capacity {
+            return Ok(());
+        }
+        let current = self.entries.capacity();
+        let target = if current == 0 {
+            1
+        } else {
+            std::cmp::min(current.saturating_mul(2), self.capacity)
+        };
+        let bytes = target
+            .checked_mul(std::mem::size_of::<CacheEntry>())
+            .ok_or_else(|| self.memory.allocation_failure().into_js_error())?;
+        let mut next_memory = self
+            .memory
+            .reserve_group(bytes)
+            .map_err(|failure| failure.into_js_error())?;
+        let mut next = VecDeque::new();
+        next.try_reserve_exact(target)
+            .map_err(|_| self.memory.allocation_failure().into_js_error())?;
+        let actual = next
+            .capacity()
+            .checked_mul(std::mem::size_of::<CacheEntry>())
+            .ok_or_else(|| self.memory.allocation_failure().into_js_error())?;
+        next_memory
+            .try_resize(actual)
+            .map_err(|failure| failure.into_js_error())?;
+        next.append(&mut self.entries);
+        self.entries = next;
+        self._entries_memory = next_memory;
+        Ok(())
     }
 }
 
@@ -137,16 +223,32 @@ pub fn drawing_geometry<P: DrawingProjection>(
     current_store: &BarStore,
     layout: &P,
     dialect: NumberDialect,
-) -> Result<Arc<[JsValue]>, JsError> {
+) -> Result<Arc<OwnedDrawingGeometry>, JsError> {
     let key = layout.geometry_key();
     if !key.as_units().is_empty()
         && let Some(commands) = cache.get(drawing, key)
     {
         return Ok(commands);
     }
-    let commands: Arc<[JsValue]> =
-        calculate_geometry(drawing, model, current_view, current_store, layout, dialect)?.into();
-    cache.insert(drawing, key, Arc::clone(&commands));
+    let mut scope = cache.memory.scope();
+    let mut temporary = cache.memory.scope();
+    let commands = calculate_geometry_internal(
+        drawing,
+        model,
+        current_view,
+        current_store,
+        layout,
+        dialect,
+        &mut scope,
+        &mut temporary,
+    )?;
+    let requested = usize::try_from(scope.requested_bytes())
+        .map_err(|_| cache.memory.allocation_failure().into_js_error())?;
+    let memory = scope
+        .split_persistent(requested)
+        .map_err(|failure| failure.into_js_error())?;
+    let commands = Arc::new(OwnedDrawingGeometry { commands, memory });
+    cache.insert(drawing, key, Arc::clone(&commands))?;
     Ok(commands)
 }
 
@@ -159,6 +261,54 @@ pub fn calculate_geometry<P: DrawingProjection>(
     layout: &P,
     dialect: NumberDialect,
 ) -> Result<Vec<JsValue>, JsError> {
+    let mut scope = MemoryScope::unaccounted(OomStyle::RangeErrorCapitalized);
+    let mut temporary = MemoryScope::unaccounted(OomStyle::RangeErrorCapitalized);
+    calculate_geometry_internal(
+        drawing,
+        model,
+        current_view,
+        current_store,
+        layout,
+        dialect,
+        &mut scope,
+        &mut temporary,
+    )
+}
+
+/// Exact display-list projection을 scoped fallible allocation으로 만든다.
+pub fn calculate_geometry_scoped<P: DrawingProjection>(
+    drawing: &Drawing,
+    model: &ModelState,
+    current_view: VisibleRange,
+    current_store: &BarStore,
+    layout: &P,
+    dialect: NumberDialect,
+    scope: &mut MemoryScope,
+) -> Result<Vec<JsValue>, JsError> {
+    let mut temporary = MemoryScope::unaccounted(scope.allocation_failure().style());
+    calculate_geometry_internal(
+        drawing,
+        model,
+        current_view,
+        current_store,
+        layout,
+        dialect,
+        scope,
+        &mut temporary,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn calculate_geometry_internal<P: DrawingProjection>(
+    drawing: &Drawing,
+    model: &ModelState,
+    current_view: VisibleRange,
+    current_store: &BarStore,
+    layout: &P,
+    dialect: NumberDialect,
+    scope: &mut MemoryScope,
+    temporary: &mut MemoryScope,
+) -> Result<Vec<JsValue>, JsError> {
     if drawing.visible == Some(false) {
         return Ok(Vec::new());
     }
@@ -170,20 +320,17 @@ pub fn calculate_geometry<P: DrawingProjection>(
     ) else {
         return Ok(Vec::new());
     };
-    let points: Vec<ScreenPoint> = drawing
-        .points
-        .iter()
-        .map(|point| {
-            layout.to_screen(
-                current_view,
-                current_store,
-                point.time,
-                point.price,
-                &drawing.panel,
-                drawing.axis_id.as_ref(),
-            )
-        })
-        .collect();
+    let mut points = try_vec_capacity(drawing.points.len(), temporary)?;
+    for point in drawing.points.iter() {
+        points.push(layout.to_screen(
+            current_view,
+            current_store,
+            point.time,
+            point.price,
+            &drawing.panel,
+            drawing.axis_id.as_ref(),
+        ));
+    }
     if points
         .iter()
         .any(|point| !point.x.is_finite() || !point.y.is_finite())
@@ -193,17 +340,21 @@ pub fn calculate_geometry<P: DrawingProjection>(
     let a = points[0];
     let b = points.get(1).copied().unwrap_or(a);
     let c = points.get(2).copied().unwrap_or(b);
-    let color = drawing
+    let color = match drawing
         .style
         .as_ref()
-        .and_then(|style| style.color.clone())
-        .unwrap_or_else(|| JsString::from_str("#f5b85a"));
+        .and_then(|style| style.color.as_ref())
+    {
+        Some(color) => try_clone_string(color, temporary)?,
+        None => JsString::try_from_str("#f5b85a", temporary)
+            .map_err(|failure| failure.into_js_error())?,
+    };
     let width = drawing
         .style
         .as_ref()
         .and_then(|style| style.width)
         .unwrap_or(1.5);
-    let clip = vec![
+    let clip = [
         axis.left(),
         axis.top(),
         axis.right() - axis.left(),
@@ -214,93 +365,105 @@ pub fn calculate_geometry<P: DrawingProjection>(
     if drawing.kind.is_position() {
         let metrics = position_metrics_for(drawing)?;
         let extent = points[3];
-        let target_fill = drawing
-            .style
-            .as_ref()
-            .and_then(|style| style.fill.as_ref())
-            .map(JsString::to_string_lossy)
-            .unwrap_or_else(|| String::from("#26a69a44"));
-        for (level, fill) in [(b, String::from("#ef535044")), (c, target_fill)] {
-            commands.push(position_box(BoxCommand {
-                x: a.x,
-                y: js_min(&[a.y, level.y]),
-                width: extent.x - a.x,
-                height: (a.y - level.y).abs(),
-                fill: &fill,
-                color: &color,
-                stroke: width,
-                clip: &clip,
-            }));
+        let target_fill = match drawing.style.as_ref().and_then(|style| style.fill.as_ref()) {
+            Some(fill) => JsValue::String(try_clone_string(fill, scope)?),
+            None => text("#26a69a44", scope)?,
+        };
+        for (level, fill) in [(b, text("#ef535044", scope)?), (c, target_fill)] {
+            let command = position_box(
+                BoxCommand {
+                    x: a.x,
+                    y: js_min(&[a.y, level.y]),
+                    width: extent.x - a.x,
+                    height: (a.y - level.y).abs(),
+                    fill,
+                    color: &color,
+                    stroke: width,
+                    clip: &clip,
+                },
+                scope,
+            )?;
+            push_command(&mut commands, command, scope)?;
         }
         push_line(
             &mut commands,
-            vec![a.x, a.y, extent.x, a.y],
+            f64_vec(&[a.x, a.y, extent.x, a.y], temporary)?,
             &color,
             width,
             &clip,
             None,
-        );
+            scope,
+        )?;
         let direction = if metrics.direction == "long" {
             "Long"
         } else {
             "Short"
         };
-        commands.push(text_command(
-            a.x + 4.0,
-            a.y - 4.0,
-            &format!(
-                "{direction} entry {} · R/R {}",
-                number_to_string_with(metrics.entry, dialect),
-                to_precision(metrics.ratio, 6)
-            ),
-            &color,
-            &clip,
-        ));
-        commands.push(text_command(
-            a.x + 4.0,
-            b.y - 4.0,
-            &format!(
-                "Stop {} · Δ {} · {} of |entry|",
-                number_to_string_with(metrics.stop, dialect),
-                to_precision(metrics.risk, 6),
-                percent_text(metrics.risk_percent)
-            ),
-            &color,
-            &clip,
-        ));
-        commands.push(text_command(
-            a.x + 4.0,
-            c.y - 4.0,
-            &format!(
-                "Target {} · Δ {} · {} of |entry|",
-                number_to_string_with(metrics.target, dialect),
-                to_precision(metrics.reward, 6),
-                percent_text(metrics.reward_percent)
-            ),
-            &color,
-            &clip,
-        ));
+        for command in [
+            text_command(
+                a.x + 4.0,
+                a.y - 4.0,
+                &format!(
+                    "{direction} entry {} · R/R {}",
+                    number_to_string_with(metrics.entry, dialect),
+                    to_precision(metrics.ratio, 6)
+                ),
+                &color,
+                &clip,
+                scope,
+            )?,
+            text_command(
+                a.x + 4.0,
+                b.y - 4.0,
+                &format!(
+                    "Stop {} · Δ {} · {} of |entry|",
+                    number_to_string_with(metrics.stop, dialect),
+                    to_precision(metrics.risk, 6),
+                    percent_text(metrics.risk_percent)
+                ),
+                &color,
+                &clip,
+                scope,
+            )?,
+            text_command(
+                a.x + 4.0,
+                c.y - 4.0,
+                &format!(
+                    "Target {} · Δ {} · {} of |entry|",
+                    number_to_string_with(metrics.target, dialect),
+                    to_precision(metrics.reward, 6),
+                    percent_text(metrics.reward_percent)
+                ),
+                &color,
+                &clip,
+                scope,
+            )?,
+        ] {
+            push_command(&mut commands, command, scope)?;
+        }
         return Ok(commands);
     }
 
     match drawing.kind {
         DrawingType::Horizontal => push_line(
             &mut commands,
-            vec![axis.left(), a.y, axis.right(), a.y],
+            f64_vec(&[axis.left(), a.y, axis.right(), a.y], temporary)?,
             &color,
             width,
             &clip,
             None,
-        ),
+            scope,
+        )?,
         DrawingType::Trendline | DrawingType::Measurement => {
             push_line(
                 &mut commands,
-                vec![a.x, a.y, b.x, b.y],
+                f64_vec(&[a.x, a.y, b.x, b.y], temporary)?,
                 &color,
                 width,
                 &clip,
                 None,
-            );
+                scope,
+            )?;
             if drawing.kind == DrawingType::Measurement {
                 let delta = drawing.points[1].price - drawing.points[0].price;
                 let percent = if drawing.points[0].price == 0.0 {
@@ -313,7 +476,7 @@ pub fn calculate_geometry<P: DrawingProjection>(
                 };
                 let bars = layout.index(current_view, b.x) - layout.index(current_view, a.x);
                 let seconds = (drawing.points[1].time - drawing.points[0].time) / 1_000.0;
-                commands.push(text_command(
+                let command = text_command(
                     (a.x + b.x) / 2.0,
                     js_min(&[a.y, b.y]) - 8.0,
                     &format!(
@@ -324,38 +487,43 @@ pub fn calculate_geometry<P: DrawingProjection>(
                     ),
                     &color,
                     &clip,
-                ));
+                    scope,
+                )?;
+                push_command(&mut commands, command, scope)?;
             }
         }
         DrawingType::Ray | DrawingType::ExtendedLine => push_line(
             &mut commands,
-            extended_segment(a, b, axis, drawing.kind == DrawingType::Ray),
+            extended_segment(a, b, axis, drawing.kind == DrawingType::Ray, temporary)?,
             &color,
             width,
             &clip,
             None,
-        ),
+            scope,
+        )?,
         DrawingType::Channel => {
             push_line(
                 &mut commands,
-                extended_segment(a, b, axis, false),
+                extended_segment(a, b, axis, false, temporary)?,
                 &color,
                 width,
                 &clip,
                 None,
-            );
+                scope,
+            )?;
             let parallel = ScreenPoint {
                 x: c.x + b.x - a.x,
                 y: c.y + b.y - a.y,
             };
             push_line(
                 &mut commands,
-                extended_segment(c, parallel, axis, false),
+                extended_segment(c, parallel, axis, false, temporary)?,
                 &color,
                 width,
                 &clip,
                 None,
-            );
+                scope,
+            )?;
             let middle = ScreenPoint {
                 x: (a.x + c.x) / 2.0,
                 y: (a.y + c.y) / 2.0,
@@ -366,12 +534,13 @@ pub fn calculate_geometry<P: DrawingProjection>(
             };
             push_line(
                 &mut commands,
-                extended_segment(middle, middle_end, axis, false),
+                extended_segment(middle, middle_end, axis, false, temporary)?,
                 &color,
                 width,
                 &clip,
                 Some([4.0, 4.0]),
-            );
+                scope,
+            )?;
         }
         DrawingType::Fibonacci | DrawingType::FibExtension => {
             let fibonacci = [0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0];
@@ -395,28 +564,34 @@ pub fn calculate_geometry<P: DrawingProjection>(
                 }
                 push_line(
                     &mut commands,
-                    vec![
-                        a.x,
-                        y,
-                        if drawing.kind == DrawingType::FibExtension {
-                            axis.right()
-                        } else {
-                            b.x
-                        },
-                        y,
-                    ],
+                    f64_vec(
+                        &[
+                            a.x,
+                            y,
+                            if drawing.kind == DrawingType::FibExtension {
+                                axis.right()
+                            } else {
+                                b.x
+                            },
+                            y,
+                        ],
+                        temporary,
+                    )?,
                     &color,
                     width,
                     &clip,
                     None,
-                );
-                commands.push(text_command(
+                    scope,
+                )?;
+                let command = text_command(
                     js_min(&[a.x, b.x]) + 4.0,
                     y - 3.0,
                     &format!("{}%", to_fixed_with(ratio * 100.0, 1, dialect)),
                     &color,
                     &clip,
-                ));
+                    scope,
+                )?;
+                push_command(&mut commands, command, scope)?;
             }
         }
         DrawingType::FibFan => {
@@ -429,69 +604,82 @@ pub fn calculate_geometry<P: DrawingProjection>(
                 if target.y.is_finite() {
                     push_line(
                         &mut commands,
-                        extended_segment(a, target, axis, true),
+                        extended_segment(a, target, axis, true, temporary)?,
                         &color,
                         width,
                         &clip,
                         None,
-                    );
+                        scope,
+                    )?;
                 }
             }
-            commands.push(text_command(
-                a.x,
-                a.y - 8.0,
-                "38.2 / 50 / 61.8",
-                &color,
-                &clip,
-            ));
+            let command = text_command(a.x, a.y - 8.0, "38.2 / 50 / 61.8", &color, &clip, scope)?;
+            push_command(&mut commands, command, scope)?;
         }
         DrawingType::FibTimezones => {
             for ratio in [0.0, 1.0, 2.0, 3.0, 5.0, 8.0, 13.0, 21.0, 34.0] {
                 let x = a.x + (b.x - a.x) * ratio;
                 push_line(
                     &mut commands,
-                    vec![x, axis.top(), x, axis.bottom()],
+                    f64_vec(&[x, axis.top(), x, axis.bottom()], temporary)?,
                     &color,
                     width,
                     &clip,
                     None,
-                );
-                commands.push(text_command(
+                    scope,
+                )?;
+                let command = text_command(
                     x + 3.0,
                     axis.top() + 28.0,
                     &number_to_string_with(ratio, dialect),
                     &color,
                     &clip,
-                ));
+                    scope,
+                )?;
+                push_command(&mut commands, command, scope)?;
             }
         }
         DrawingType::Freehand => {
-            let mut coordinates = Vec::with_capacity(points.len().saturating_sub(1) * 4);
+            let coordinate_count = points.len().saturating_sub(1).saturating_mul(4);
+            let mut coordinates = try_vec_capacity(coordinate_count, temporary)?;
             for pair in points.windows(2) {
                 coordinates.extend([pair[0].x, pair[0].y, pair[1].x, pair[1].y]);
             }
-            push_line(&mut commands, coordinates, &color, width, &clip, None);
+            push_line(
+                &mut commands,
+                coordinates,
+                &color,
+                width,
+                &clip,
+                None,
+                scope,
+            )?;
         }
         DrawingType::Text => {
-            let value = drawing
-                .text
-                .as_ref()
-                .map(JsString::to_string_lossy)
-                .unwrap_or_else(|| String::from("Note"));
-            commands.push(text_command(a.x, a.y, &value, &color, &clip));
+            let value = match drawing.text.as_ref() {
+                Some(value) => try_clone_string(value, scope)?,
+                None => JsString::try_from_str("Note", scope)
+                    .map_err(|failure| failure.into_js_error())?,
+            };
+            let command = text_command_js(a.x, a.y, value, &color, &clip, scope)?;
+            push_command(&mut commands, command, scope)?;
         }
         DrawingType::Rectangle | DrawingType::Ellipse => {
-            commands.push(shape_command(ShapeCommand {
-                kind: drawing.kind,
-                x: js_min(&[a.x, b.x]),
-                y: js_min(&[a.y, b.y]),
-                width: (a.x - b.x).abs(),
-                height: (a.y - b.y).abs(),
-                color: &color,
-                stroke: width,
-                fill: drawing.style.as_ref().and_then(|style| style.fill.as_ref()),
-                clip: &clip,
-            }));
+            let command = shape_command(
+                ShapeCommand {
+                    kind: drawing.kind,
+                    x: js_min(&[a.x, b.x]),
+                    y: js_min(&[a.y, b.y]),
+                    width: (a.x - b.x).abs(),
+                    height: (a.y - b.y).abs(),
+                    color: &color,
+                    stroke: width,
+                    fill: drawing.style.as_ref().and_then(|style| style.fill.as_ref()),
+                    clip: &clip,
+                },
+                scope,
+            )?;
+            push_command(&mut commands, command, scope)?;
         }
         DrawingType::LongPosition | DrawingType::ShortPosition => {
             unreachable!("position handled above")
@@ -512,11 +700,12 @@ fn extended_segment<A: DrawingAxisView>(
     end: ScreenPoint,
     axis: &A,
     ray: bool,
-) -> Vec<f64> {
+    scope: &mut MemoryScope,
+) -> Result<Vec<f64>, JsError> {
     let dx = end.x - start.x;
     let dy = end.y - start.y;
     if dx == 0.0 && dy == 0.0 {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let mut low = if ray { 0.0 } else { f64::NEG_INFINITY };
     let mut high = f64::INFINITY;
@@ -526,7 +715,7 @@ fn extended_segment<A: DrawingAxisView>(
     ] {
         if delta == 0.0 {
             if origin < min || origin > max {
-                return Vec::new();
+                return Ok(Vec::new());
             }
         } else {
             let first = (min - origin) / delta;
@@ -536,14 +725,17 @@ fn extended_segment<A: DrawingAxisView>(
         }
     }
     if low <= high {
-        vec![
-            start.x + dx * low,
-            start.y + dy * low,
-            start.x + dx * high,
-            start.y + dy * high,
-        ]
+        f64_vec(
+            &[
+                start.x + dx * low,
+                start.y + dy * low,
+                start.x + dx * high,
+                start.y + dy * high,
+            ],
+            scope,
+        )
     } else {
-        Vec::new()
+        Ok(Vec::new())
     }
 }
 
@@ -554,33 +746,61 @@ fn push_line(
     width: f64,
     clip: &[f64],
     dash: Option<[f64; 2]>,
-) {
+    scope: &mut MemoryScope,
+) -> Result<(), JsError> {
     if coordinates.is_empty() {
-        return;
+        return Ok(());
     }
-    commands.push(object([
-        ("op", text("lines")),
-        ("coords", numbers(&coordinates)),
-        ("color", JsValue::String(color.clone())),
-        ("width", JsValue::Number(width)),
-        ("clip", numbers(clip)),
-        (
-            "dash",
-            dash.map_or(JsValue::Null, |values| numbers(&values)),
-        ),
-    ]));
+    let dash = match dash {
+        Some(values) => numbers(&values, scope)?,
+        None => JsValue::Null,
+    };
+    let command = object(
+        [
+            ("op", text("lines", scope)?),
+            ("coords", numbers(&coordinates, scope)?),
+            ("color", JsValue::String(try_clone_string(color, scope)?)),
+            ("width", JsValue::Number(width)),
+            ("clip", numbers(clip, scope)?),
+            ("dash", dash),
+        ],
+        scope,
+    )?;
+    push_command(commands, command, scope)
 }
 
-fn text_command(x: f64, y: f64, value: &str, color: &JsString, clip: &[f64]) -> JsValue {
-    object([
-        ("op", text("text")),
-        ("x", JsValue::Number(x)),
-        ("y", JsValue::Number(y)),
-        ("text", text(value)),
-        ("color", JsValue::String(color.clone())),
-        ("font", text("12px monospace")),
-        ("clip", numbers(clip)),
-    ])
+fn text_command(
+    x: f64,
+    y: f64,
+    value: &str,
+    color: &JsString,
+    clip: &[f64],
+    scope: &mut MemoryScope,
+) -> Result<JsValue, JsError> {
+    let value = JsString::try_from_str(value, scope).map_err(|failure| failure.into_js_error())?;
+    text_command_js(x, y, value, color, clip, scope)
+}
+
+fn text_command_js(
+    x: f64,
+    y: f64,
+    value: JsString,
+    color: &JsString,
+    clip: &[f64],
+    scope: &mut MemoryScope,
+) -> Result<JsValue, JsError> {
+    object(
+        [
+            ("op", text("text", scope)?),
+            ("x", JsValue::Number(x)),
+            ("y", JsValue::Number(y)),
+            ("text", JsValue::String(value)),
+            ("color", JsValue::String(try_clone_string(color, scope)?)),
+            ("font", text("12px monospace", scope)?),
+            ("clip", numbers(clip, scope)?),
+        ],
+        scope,
+    )
 }
 
 struct BoxCommand<'a> {
@@ -588,24 +808,30 @@ struct BoxCommand<'a> {
     y: f64,
     width: f64,
     height: f64,
-    fill: &'a str,
+    fill: JsValue,
     color: &'a JsString,
     stroke: f64,
     clip: &'a [f64],
 }
 
-fn position_box(input: BoxCommand<'_>) -> JsValue {
-    object([
-        ("op", text("box")),
-        ("x", JsValue::Number(input.x)),
-        ("y", JsValue::Number(input.y)),
-        ("w", JsValue::Number(input.width)),
-        ("h", JsValue::Number(input.height)),
-        ("fill", text(input.fill)),
-        ("color", JsValue::String(input.color.clone())),
-        ("width", JsValue::Number(input.stroke)),
-        ("clip", numbers(input.clip)),
-    ])
+fn position_box(input: BoxCommand<'_>, scope: &mut MemoryScope) -> Result<JsValue, JsError> {
+    object(
+        [
+            ("op", text("box", scope)?),
+            ("x", JsValue::Number(input.x)),
+            ("y", JsValue::Number(input.y)),
+            ("w", JsValue::Number(input.width)),
+            ("h", JsValue::Number(input.height)),
+            ("fill", input.fill),
+            (
+                "color",
+                JsValue::String(try_clone_string(input.color, scope)?),
+            ),
+            ("width", JsValue::Number(input.stroke)),
+            ("clip", numbers(input.clip, scope)?),
+        ],
+        scope,
+    )
 }
 
 struct ShapeCommand<'a> {
@@ -620,44 +846,107 @@ struct ShapeCommand<'a> {
     clip: &'a [f64],
 }
 
-fn shape_command(input: ShapeCommand<'_>) -> JsValue {
-    object([
-        (
-            "op",
-            text(if input.kind == DrawingType::Rectangle {
-                "box"
-            } else {
-                "ellipse"
-            }),
-        ),
-        ("x", JsValue::Number(input.x)),
-        ("y", JsValue::Number(input.y)),
-        ("w", JsValue::Number(input.width)),
-        ("h", JsValue::Number(input.height)),
-        ("color", JsValue::String(input.color.clone())),
-        ("width", JsValue::Number(input.stroke)),
-        (
-            "fill",
-            input
-                .fill
-                .map_or(JsValue::Undefined, |value| JsValue::String(value.clone())),
-        ),
-        ("clip", numbers(input.clip)),
-    ])
+fn shape_command(input: ShapeCommand<'_>, scope: &mut MemoryScope) -> Result<JsValue, JsError> {
+    let fill = match input.fill {
+        Some(value) => JsValue::String(try_clone_string(value, scope)?),
+        None => JsValue::Undefined,
+    };
+    object(
+        [
+            (
+                "op",
+                text(
+                    if input.kind == DrawingType::Rectangle {
+                        "box"
+                    } else {
+                        "ellipse"
+                    },
+                    scope,
+                )?,
+            ),
+            ("x", JsValue::Number(input.x)),
+            ("y", JsValue::Number(input.y)),
+            ("w", JsValue::Number(input.width)),
+            ("h", JsValue::Number(input.height)),
+            (
+                "color",
+                JsValue::String(try_clone_string(input.color, scope)?),
+            ),
+            ("width", JsValue::Number(input.stroke)),
+            ("fill", fill),
+            ("clip", numbers(input.clip, scope)?),
+        ],
+        scope,
+    )
 }
 
-fn numbers(values: &[f64]) -> JsValue {
-    JsValue::Array(values.iter().copied().map(JsValue::Number).collect())
+fn f64_vec(values: &[f64], scope: &mut MemoryScope) -> Result<Vec<f64>, JsError> {
+    let mut output = try_vec_capacity(values.len(), scope)?;
+    output.extend_from_slice(values);
+    Ok(output)
 }
 
-fn text(value: &str) -> JsValue {
-    JsValue::String(JsString::from_str(value))
+fn numbers(values: &[f64], scope: &mut MemoryScope) -> Result<JsValue, JsError> {
+    let mut output = try_vec_capacity(values.len(), scope)?;
+    output.extend(values.iter().copied().map(JsValue::Number));
+    Ok(JsValue::Array(output))
 }
 
-fn object<const N: usize>(entries: [(&str, JsValue); N]) -> JsValue {
-    let mut output = JsObject::new();
+fn text(value: &str, scope: &mut MemoryScope) -> Result<JsValue, JsError> {
+    JsString::try_from_str(value, scope)
+        .map(JsValue::String)
+        .map_err(|failure| failure.into_js_error())
+}
+
+fn object<const N: usize>(
+    entries: [(&str, JsValue); N],
+    scope: &mut MemoryScope,
+) -> Result<JsValue, JsError> {
+    let mut output = try_vec_capacity(N, scope)?;
     for (key, value) in entries {
-        output.insert(JsString::from_str(key), value);
+        output.push((
+            JsString::try_from_str(key, scope).map_err(|failure| failure.into_js_error())?,
+            value,
+        ));
     }
-    JsValue::Object(output)
+    JsObject::try_from_entries_scoped(output, scope)
+        .map(JsValue::Object)
+        .map_err(|failure| failure.into_js_error())
+}
+
+fn try_vec_capacity<T>(capacity: usize, scope: &mut MemoryScope) -> Result<Vec<T>, JsError> {
+    let bytes = capacity
+        .checked_mul(std::mem::size_of::<T>())
+        .ok_or_else(|| scope.allocation_failure().into_js_error())?;
+    scope
+        .try_grow(bytes)
+        .map_err(|failure| failure.into_js_error())?;
+    let mut output = Vec::new();
+    output
+        .try_reserve_exact(capacity)
+        .map_err(|_| scope.allocation_failure().into_js_error())?;
+    Ok(output)
+}
+
+fn try_clone_string(value: &JsString, scope: &mut MemoryScope) -> Result<JsString, JsError> {
+    value
+        .try_clone_scoped(scope)
+        .map_err(|failure| failure.into_js_error())
+}
+
+fn push_command(
+    commands: &mut Vec<JsValue>,
+    command: JsValue,
+    scope: &mut MemoryScope,
+) -> Result<(), JsError> {
+    if commands.len() == commands.capacity() {
+        scope
+            .try_grow(std::mem::size_of::<JsValue>())
+            .map_err(|failure| failure.into_js_error())?;
+        commands
+            .try_reserve_exact(1)
+            .map_err(|_| scope.allocation_failure().into_js_error())?;
+    }
+    commands.push(command);
+    Ok(())
 }

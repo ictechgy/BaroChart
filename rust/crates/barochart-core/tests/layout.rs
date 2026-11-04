@@ -6,11 +6,12 @@ use barochart_js::error::JsError;
 use barochart_js::json::{
     JsObject, JsValue, JsonMode, parse_json, parse_json_utf16, stringify_json_with,
 };
+use barochart_js::memory::{MemoryAccount, MemoryContext, OomStyle};
 use barochart_js::num::{NumberDialect, js_max, js_min};
 use barochart_js::string::JsString;
 use data::{Bar, ModelDataState, StoreOptions};
 use indicator_engine::{IndicatorEngine, IndicatorEngineOptions};
-use layout::{Layout, LayoutAxis, create_layout};
+use layout::{Layout, LayoutAxis, create_layout, create_layout_with_memory};
 use model_state::{
     DrawingUsage, IndicatorProjection, InteractionGuard, ModelContext, ModelState, Series,
 };
@@ -1028,4 +1029,67 @@ fn series_cache_threshold_is_a_block_index_and_keeps_nonowning_queries() {
         512
     );
     assert!(!caches.has_gaps(&id, values, 65_024, 65_536).unwrap());
+}
+
+#[test]
+fn accounted_layout_arc_shares_one_lease_and_releases_on_last_owner() {
+    let state = ModelDataState::new(StoreOptions::default(), Vec::new()).unwrap();
+    let mut model = ModelState::new(state.store(), &parse("{}")).unwrap();
+    let mut indicators = IndicatorEngine::new(IndicatorEngineOptions::default()).unwrap();
+    let mut caches = SeriesCaches::new();
+    let account = MemoryAccount::new(8 << 20, OomStyle::InternalErrorLowercase);
+    let context = MemoryContext::accounted(&account);
+
+    let layout = create_layout_with_memory(
+        &mut model,
+        state.store(),
+        &mut indicators,
+        &NoZones,
+        &mut caches,
+        640.0,
+        360.0,
+        &context,
+    )
+    .unwrap();
+    assert!(layout.requested_bytes() > 0);
+    assert_eq!(
+        account.snapshot().requested_live_bytes,
+        layout.requested_bytes()
+    );
+
+    let layout = std::sync::Arc::new(layout);
+    let retained = std::sync::Arc::clone(&layout);
+    assert_eq!(
+        account.snapshot().requested_live_bytes,
+        layout.requested_bytes()
+    );
+    drop(layout);
+    assert!(account.snapshot().requested_live_bytes > 0);
+    drop(retained);
+    assert_eq!(account.snapshot().requested_live_bytes, 0);
+}
+
+#[test]
+fn layout_quota_failure_releases_the_whole_candidate() {
+    let state = ModelDataState::new(StoreOptions::default(), Vec::new()).unwrap();
+    let mut model = ModelState::new(state.store(), &parse("{}")).unwrap();
+    let mut indicators = IndicatorEngine::new(IndicatorEngineOptions::default()).unwrap();
+    let mut caches = SeriesCaches::new();
+    let account = MemoryAccount::new(1, OomStyle::InternalErrorLowercase);
+    let context = MemoryContext::accounted(&account);
+
+    let error = create_layout_with_memory(
+        &mut model,
+        state.store(),
+        &mut indicators,
+        &NoZones,
+        &mut caches,
+        640.0,
+        360.0,
+        &context,
+    )
+    .unwrap_err();
+    assert_eq!(error.name, "InternalError");
+    assert_eq!(error.message.to_string_lossy(), "out of memory");
+    assert_eq!(account.snapshot().requested_live_bytes, 0);
 }

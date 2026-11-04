@@ -5,13 +5,18 @@
 
 use barochart_js::error::JsError;
 use barochart_js::json::{JsObject, JsValue};
+use barochart_js::memory::{MemoryContext, MemoryFailure, MemoryGroup, MemoryScope, OomStyle};
 use barochart_js::num::NumberDialect;
 use barochart_js::string::JsString;
 
 use crate::batch_options::BatchOptions;
-use crate::checkpoint_codec::{safe_checkpoint_parse_with, safe_checkpoint_stringify_with};
+use crate::checkpoint_codec::{
+    safe_checkpoint_parse_scoped, safe_checkpoint_stringify_scoped, safe_checkpoint_stringify_with,
+};
 use crate::contracts::identifier;
-use crate::data::{Bar, BatchEvent, BatchReceipt, Committed, DataChange, ModelDataState};
+use crate::data::{
+    Bar, BatchEvent, BatchReceipt, Committed, DataChange, DataIdentity, ModelDataState,
+};
 
 /// JS `Number.MAX_SAFE_INTEGER`다.
 pub const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
@@ -44,6 +49,7 @@ const COUNTER_KEYS: &[&str] = &[
 /// 수집 queue의 안정 오류다.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IngestionError {
+    name: &'static str,
     code: String,
     message: JsString,
 }
@@ -61,7 +67,7 @@ impl ApplyDataError {
     /// 오류 이름이다.
     pub fn name(&self) -> &str {
         match self {
-            Self::Ingestion(_) => "IngestionError",
+            Self::Ingestion(error) => error.name(),
             Self::Store(error) => error.name,
         }
     }
@@ -86,6 +92,7 @@ impl ApplyDataError {
 impl IngestionError {
     fn new(code: &str, message: impl AsRef<str>) -> Self {
         Self {
+            name: "IngestionError",
             code: code.to_owned(),
             message: JsString::from_str(message.as_ref()),
         }
@@ -93,9 +100,28 @@ impl IngestionError {
 
     fn with_message(code: &str, message: JsString) -> Self {
         Self {
+            name: "IngestionError",
             code: code.to_owned(),
             message,
         }
+    }
+
+    fn from_js_error(error: JsError) -> Self {
+        Self {
+            name: error.name,
+            code: error.code.unwrap_or_default(),
+            message: bounded_message(&error.message),
+        }
+    }
+
+    fn from_memory_failure(failure: MemoryFailure) -> Self {
+        Self::from_js_error(failure.into_js_error())
+    }
+
+    /// JS 오류 이름이다. 일반 ingestion 오류는 `IngestionError`이고, resource OOM은
+    /// backend에 맞는 `InternalError` 또는 `RangeError`를 유지한다.
+    pub fn name(&self) -> &str {
+        self.name
     }
 
     /// 안정 오류 코드다.
@@ -106,6 +132,15 @@ impl IngestionError {
     /// UTF-16 오류 문구다.
     pub fn message(&self) -> &JsString {
         &self.message
+    }
+
+    /// JS 경계가 그대로 전달할 오류다. reserved OOM code도 보존한다.
+    pub fn into_js_error(self) -> JsError {
+        let mut error = JsError::new(self.name, self.message);
+        if !self.code.is_empty() {
+            error.code = Some(self.code);
+        }
+        error
     }
 }
 
@@ -118,7 +153,14 @@ fn bounded_message(message: &JsString) -> JsString {
 }
 
 fn ingestion_from_js(code: &str, error: JsError) -> IngestionError {
-    IngestionError::with_message(code, bounded_message(&error.message))
+    if error.code.as_deref().is_some_and(|code| {
+        code == barochart_js::memory::OOM_LIMIT_CODE
+            || code == barochart_js::memory::OOM_SYSTEM_CODE
+    }) {
+        IngestionError::from_js_error(error)
+    } else {
+        IngestionError::with_message(code, bounded_message(&error.message))
+    }
 }
 
 fn key_is(key: &JsString, expected: &str) -> bool {
@@ -250,6 +292,22 @@ fn parse_policy(
     allow_budget_mismatch: bool,
     store_max_bars: usize,
 ) -> Result<IngestionPolicy, IngestionError> {
+    parse_policy_bounds(
+        data.store().length(),
+        data.store().bytes(),
+        input,
+        allow_budget_mismatch,
+        store_max_bars,
+    )
+}
+
+fn parse_policy_bounds(
+    length: usize,
+    bytes: usize,
+    input: &JsValue,
+    allow_budget_mismatch: bool,
+    store_max_bars: usize,
+) -> Result<IngestionPolicy, IngestionError> {
     let row = record(input, POLICY_KEYS, "Ingestion policy", "INVALID_INPUT")?;
     let undefined = JsValue::Undefined;
     let stream = property(row, "streamId").unwrap_or(&undefined);
@@ -304,9 +362,7 @@ fn parse_policy(
         DEFAULT_STORE_BYTES as f64,
         "maxStoreBytes",
     )? as usize;
-    if !allow_budget_mismatch
-        && (data.store().length() > max_stored_bars || data.store().bytes() > max_store_bytes)
-    {
+    if !allow_budget_mismatch && (length > max_stored_bars || bytes > max_store_bytes) {
         return Err(IngestionError::new(
             "STORE_BUDGET",
             "Current history exceeds ingestion admission budget",
@@ -399,6 +455,17 @@ fn parse_bar(value: &JsValue) -> Result<Bar, IngestionError> {
 
 /// append/update/correction 배열을 getter 없는 소유 event로 snapshot한다.
 pub fn snapshot_ingestion_events(input: &JsValue) -> Result<Vec<IngestionEvent>, IngestionError> {
+    let memory = MemoryContext::unaccounted(OomStyle::RangeErrorCapitalized);
+    snapshot_ingestion_events_with_memory(input, &memory).map(|(events, _)| events)
+}
+
+/// append/update/correction 배열을 fallible하게 소유 snapshot한다.
+///
+/// 반환된 [`MemoryGroup`]은 `events`가 실제로 소비되는 동안 함께 살아 있어야 한다.
+pub fn snapshot_ingestion_events_with_memory(
+    input: &JsValue,
+    memory: &MemoryContext,
+) -> Result<(Vec<IngestionEvent>, MemoryGroup), IngestionError> {
     let JsValue::Array(events) = input else {
         return Err(IngestionError::new(
             "INVALID_INPUT",
@@ -411,10 +478,9 @@ pub fn snapshot_ingestion_events(input: &JsValue) -> Result<Vec<IngestionEvent>,
             "1–4096 ordered events required",
         ));
     }
-    let mut output = Vec::new();
-    output
-        .try_reserve_exact(events.len())
-        .map_err(|_| IngestionError::new("INVALID_INPUT", "1–4096 ordered events required"))?;
+    let (mut output, memory_group) = memory
+        .try_vec_capacity(events.len())
+        .map_err(IngestionError::from_memory_failure)?;
     for event in events {
         let row = record(event, &["kind", "bar"], "Event", "INVALID_INPUT")?;
         let kind = match property(row, "kind") {
@@ -433,7 +499,7 @@ pub fn snapshot_ingestion_events(input: &JsValue) -> Result<Vec<IngestionEvent>,
         let bar = parse_bar(property(row, "bar").unwrap_or(&JsValue::Undefined))?;
         output.push(IngestionEvent { kind, bar });
     }
-    Ok(output)
+    Ok((output, memory_group))
 }
 
 fn event_value(event: IngestionEvent) -> JsValue {
@@ -558,7 +624,6 @@ impl LastError {
     }
 }
 
-#[derive(Clone)]
 struct EventRing {
     time: Vec<f64>,
     open: Vec<f64>,
@@ -567,19 +632,37 @@ struct EventRing {
     close: Vec<f64>,
     volume: Vec<f64>,
     kinds: Vec<u8>,
+    /// 여섯 f64 열과 kind 열의 실제 capacity를 한 번에 소유하는 회계 묶음이다.
+    /// 선언 순서를 payload 뒤로 둬 drop 때 Vec가 먼저 해제되게 한다.
+    #[allow(dead_code)]
+    memory: MemoryGroup,
 }
 
 impl EventRing {
-    fn new(capacity: usize) -> Self {
-        Self {
-            time: vec![0.0; capacity],
-            open: vec![0.0; capacity],
-            high: vec![0.0; capacity],
-            low: vec![0.0; capacity],
-            close: vec![0.0; capacity],
-            volume: vec![0.0; capacity],
-            kinds: vec![0; capacity],
-        }
+    fn new(capacity: usize, memory: &MemoryContext) -> Result<Self, MemoryFailure> {
+        let (time, mut group) = memory.try_vec_filled(capacity, 0.0_f64)?;
+        let (open, open_group) = memory.try_vec_filled(capacity, 0.0_f64)?;
+        group.absorb(open_group)?;
+        let (high, high_group) = memory.try_vec_filled(capacity, 0.0_f64)?;
+        group.absorb(high_group)?;
+        let (low, low_group) = memory.try_vec_filled(capacity, 0.0_f64)?;
+        group.absorb(low_group)?;
+        let (close, close_group) = memory.try_vec_filled(capacity, 0.0_f64)?;
+        group.absorb(close_group)?;
+        let (volume, volume_group) = memory.try_vec_filled(capacity, 0.0_f64)?;
+        group.absorb(volume_group)?;
+        let (kinds, kinds_group) = memory.try_vec_filled(capacity, 0_u8)?;
+        group.absorb(kinds_group)?;
+        Ok(Self {
+            time,
+            open,
+            high,
+            low,
+            close,
+            volume,
+            kinds,
+            memory: group,
+        })
     }
 
     fn write(&mut self, index: usize, event: IngestionEvent) {
@@ -607,7 +690,6 @@ impl EventRing {
     }
 }
 
-#[derive(Clone)]
 struct IngestionSession {
     policy: IngestionPolicy,
     source_serial: f64,
@@ -630,15 +712,30 @@ struct IngestionSession {
 }
 
 impl IngestionSession {
-    fn new(data: &ModelDataState, policy: IngestionPolicy) -> Self {
+    fn new(data: &ModelDataState, policy: IngestionPolicy) -> Result<Self, IngestionError> {
+        Self::new_with_source(
+            data.store().serial(),
+            data.store().version(),
+            policy,
+            data.store().memory_context(),
+        )
+    }
+
+    fn new_with_source(
+        serial: f64,
+        version: f64,
+        policy: IngestionPolicy,
+        memory: &MemoryContext,
+    ) -> Result<Self, IngestionError> {
         let capacity = std::cmp::min(
             policy.max_queued_events,
             policy.max_queued_bytes / INGESTION_BYTES,
         );
-        Self {
-            source_serial: data.store().serial(),
-            source_version: data.store().version(),
-            ring: Some(EventRing::new(capacity)),
+        let ring = EventRing::new(capacity, memory).map_err(IngestionError::from_memory_failure)?;
+        Ok(Self {
+            source_serial: serial,
+            source_version: version,
+            ring: Some(ring),
             capacity,
             head: 0,
             count: 0,
@@ -654,7 +751,7 @@ impl IngestionSession {
             lease_serial: 0,
             active_lease: None,
             policy,
-        }
+        })
     }
 
     fn active(&self) -> Result<(), IngestionError> {
@@ -704,11 +801,17 @@ impl IngestionSession {
         Ok(())
     }
 
-    fn prefix(&self, count: usize) -> Vec<IngestionEvent> {
+    fn prefix_with_memory(
+        &self,
+        count: usize,
+        memory: &MemoryContext,
+    ) -> Result<(Vec<IngestionEvent>, MemoryGroup), MemoryFailure> {
         let ring = self.ring.as_ref().expect("open session owns ring");
-        (0..count)
-            .map(|offset| ring.read((self.head + offset) % self.capacity))
-            .collect()
+        let (mut events, group) = memory.try_vec_capacity(count)?;
+        for offset in 0..count {
+            events.push(ring.read((self.head + offset) % self.capacity));
+        }
+        Ok((events, group))
     }
 
     fn reject(&mut self, error: IngestionError, events: usize) -> IngestionError {
@@ -877,7 +980,7 @@ impl IngestionCompactionError {
     /// JS 오류 이름이다.
     pub fn name(&self) -> &str {
         match self {
-            Self::Busy(_) => "IngestionError",
+            Self::Busy(error) => error.name(),
             Self::State(error) => error.name,
         }
     }
@@ -912,6 +1015,9 @@ pub struct IngestionCompactionPlan {
     leased: bool,
     closed: bool,
     events: Vec<IngestionEvent>,
+    /// plan이 events를 보유하는 동안 유지하는 실제 scratch reservation이다.
+    #[allow(dead_code)]
+    events_memory: MemoryGroup,
     document: Option<JsString>,
 }
 
@@ -924,6 +1030,43 @@ impl ReleaseReceipt {
             ("ownedBytes", value_number(0.0)),
         ])
     }
+}
+
+/// Workspace metadata에 이미 검증된 store의 입장 조건이다. 실제 OHLCV를 만들지 않는다.
+#[derive(Clone, Copy)]
+pub struct IngestionStoreShape {
+    /// 논리 행 수다.
+    pub length: usize,
+    /// 현재 power-of-two capacity다.
+    pub capacity: usize,
+    /// store의 행 한도다.
+    pub max_bars: usize,
+    /// 대상 store version이다.
+    pub version: f64,
+}
+
+/// Source parser로 검증·정규화한 pending 없는 수집 문서다.
+pub struct ValidatedWorkspaceIngestion {
+    /// 동일 키 순서의 canonical 문서다.
+    pub text: JsString,
+    /// 여섯 열과 kind 배열의 ring capacity다.
+    pub capacity: usize,
+}
+
+/// 검증된 async lease 동안만 빌리는 수집 ring의 실제 allocation slice다.
+pub struct AsyncIngestionBufferView<'a> {
+    /// time/open/high/low/close/volume 순서의 전체 capacity 열이다.
+    pub columns: [&'a [f64]; 6],
+    /// 전체 capacity의 event kind 배열이다.
+    pub kinds: &'a [u8],
+}
+
+/// 한 model의 optional session lease와 필수 async fence를 함께 해제하는 token이다.
+pub struct AsyncIngestionLease {
+    owner: DataIdentity,
+    session: Option<u64>,
+    epoch: Option<u64>,
+    released: bool,
 }
 
 /// 모델 data와 attached ingestion session의 leaf 소유자다.
@@ -983,6 +1126,9 @@ impl IngestionOwner {
                 leased: false,
                 closed: false,
                 events: Vec::new(),
+                events_memory: MemoryGroup::empty(MemoryContext::unaccounted(
+                    OomStyle::RangeErrorCapitalized,
+                )),
                 document: None,
             });
         };
@@ -1005,11 +1151,16 @@ impl IngestionOwner {
                 "Compaction pending source version changed",
             )));
         }
-        let events = session.prefix(session.count);
+        let memory = self.data.store().memory_context().clone();
+        let (events, events_memory) = session
+            .prefix_with_memory(session.count, &memory)
+            .map_err(|failure| IngestionCompactionError::State(failure.into_js_error()))?;
         if policy == PendingDataPolicy::PreserveRetained {
             let store = self.data.store();
             let mut tail = store.columns().time[store.length() - 1];
-            let mut appended = Vec::new();
+            let (mut appended, appended_memory) = memory
+                .try_vec_capacity(events.len())
+                .map_err(|failure| IngestionCompactionError::State(failure.into_js_error()))?;
             for event in &events {
                 crate::data::validate_bar(&event.bar, f64::NEG_INFINITY)
                     .map_err(IngestionCompactionError::State)?;
@@ -1045,6 +1196,8 @@ impl IngestionOwner {
                     }
                 }
             }
+            drop(appended);
+            drop(appended_memory);
         }
         Ok(IngestionCompactionPlan {
             session: true,
@@ -1060,6 +1213,7 @@ impl IngestionOwner {
             leased: session.leased,
             closed: session.closed,
             events,
+            events_memory,
             document: Some(self.save().map_err(IngestionCompactionError::Busy)?),
         })
     }
@@ -1080,7 +1234,15 @@ impl IngestionOwner {
                     && session.draining == plan.draining
                     && session.leased == plan.leased
                     && session.closed == plan.closed
-                    && session.prefix(session.count) == plan.events
+                    && session
+                        .prefix_with_memory(session.count, self.data.store().memory_context())
+                        .ok()
+                        .is_some_and(|(events, scratch)| {
+                            let matches = events == plan.events;
+                            drop(events);
+                            drop(scratch);
+                            matches
+                        })
                     && self.save().ok().as_ref() == plan.document.as_ref()
             }
             _ => false,
@@ -1131,6 +1293,84 @@ impl IngestionOwner {
         }
     }
 
+    /// Session이 없어도 model fence를 얻고, 있으면 동일 호출에서 session lease도 얻는다.
+    pub fn acquire_async_lease(&mut self) -> Result<AsyncIngestionLease, IngestionError> {
+        self.active_owner()?;
+        let session = if self.session.is_some() {
+            Some(self.acquire_lease()?)
+        } else {
+            None
+        };
+        self.acquire_fence();
+        Ok(AsyncIngestionLease {
+            owner: self.data.store().data_identity(),
+            session,
+            epoch: self.session.as_ref().map(|session| session.epoch.to_bits()),
+            released: false,
+        })
+    }
+
+    /// Params admission이 lease를 유지한 현재 ring bytes를 복제 없이 센다.
+    pub fn async_buffer_view(
+        &self,
+        lease: &AsyncIngestionLease,
+    ) -> Option<AsyncIngestionBufferView<'_>> {
+        if !self.validate_async_lease(lease) {
+            return None;
+        }
+        let ring = self.session.as_ref()?.ring.as_ref()?;
+        Some(AsyncIngestionBufferView {
+            columns: [
+                &ring.time,
+                &ring.open,
+                &ring.high,
+                &ring.low,
+                &ring.close,
+                &ring.volume,
+            ],
+            kinds: &ring.kinds,
+        })
+    }
+
+    /// Source capture가 session lease/fence의 교체·해제·dispose를 관찰한다.
+    /// Store columns/version 교체는 별도 data capture token이 검사한다.
+    pub fn validate_async_lease(&self, lease: &AsyncIngestionLease) -> bool {
+        if lease.released
+            || self.disposed
+            || self.fences == 0
+            || !lease.owner.same_store(&self.data.store().data_identity())
+        {
+            return false;
+        }
+        match (lease.session, self.session.as_ref()) {
+            (None, None) => true,
+            (Some(token), Some(session)) => {
+                session.active_lease == Some(token)
+                    && session.leased
+                    && !session.closed
+                    && lease.epoch == Some(session.epoch.to_bits())
+            }
+            _ => false,
+        }
+    }
+
+    /// Dispose 뒤에도 같은 model의 fence를 한 번만 해제한다. 다른 owner token은 소비하지 않는다.
+    pub fn release_async_lease(&mut self, lease: &mut AsyncIngestionLease) -> bool {
+        if lease.released || !lease.owner.same_store(&self.data.store().data_identity()) {
+            return false;
+        }
+        if let (Some(token), Some(session)) = (lease.session, self.session.as_mut())
+            && session.active_lease == Some(token)
+        {
+            session.active_lease = None;
+            session.leased = false;
+            session.epoch += 1.0;
+        }
+        self.release_fence();
+        lease.released = true;
+        true
+    }
+
     /// async/prepare/workspace fence를 얻는다.
     pub fn acquire_fence(&mut self) {
         self.fences = self.fences.saturating_add(1);
@@ -1156,7 +1396,7 @@ impl IngestionOwner {
         }
         let store_max_bars = self.data.store().max_bars();
         let policy = parse_policy(&self.data, input, false, store_max_bars)?;
-        let candidate = IngestionSession::new(&self.data, policy);
+        let candidate = IngestionSession::new(&self.data, policy)?;
         self.session = Some(candidate);
         self.stats()
     }
@@ -1186,8 +1426,11 @@ impl IngestionOwner {
                 "Packet",
                 "INVALID_INPUT",
             )?;
-            let events =
-                snapshot_ingestion_events(property(row, "events").unwrap_or(&JsValue::Undefined))?;
+            let memory = self.data.store().memory_context().clone();
+            let (events, events_memory) = snapshot_ingestion_events_with_memory(
+                property(row, "events").unwrap_or(&JsValue::Undefined),
+                &memory,
+            )?;
             snapshotted = events.len();
             let session = self.session.as_mut().unwrap();
             session.active()?;
@@ -1240,12 +1483,15 @@ impl IngestionOwner {
                     *event,
                 );
             }
+            let event_count = events.len();
+            drop(events);
+            drop(events_memory);
             if session.count == 0 {
                 session.first_pending_sequence = first;
             }
-            session.count += events.len();
-            session.next_sequence += events.len() as f64;
-            session.counters.accepted += events.len() as f64;
+            session.count += event_count;
+            session.next_sequence += event_count as f64;
+            session.counters.accepted += event_count as f64;
             session.epoch += 1.0;
             if session.count as f64 > session.counters.peak_pending_events {
                 session.counters.peak_pending_events = session.count as f64;
@@ -1253,7 +1499,7 @@ impl IngestionOwner {
             session.counters.peak_pending_bytes =
                 session.counters.peak_pending_events * INGESTION_BYTES as f64;
             Ok(EnqueueReceipt {
-                events: events.len(),
+                events: event_count,
                 first_sequence: first,
                 next_sequence: session.next_sequence,
                 pending_events: session.count,
@@ -1318,7 +1564,10 @@ impl IngestionOwner {
             });
         }
         let count = std::cmp::min(requested, session.count);
-        let events = session.prefix(count);
+        let memory = self.data.store().memory_context().clone();
+        let (events, events_memory) = session
+            .prefix_with_memory(count, &memory)
+            .map_err(IngestionError::from_memory_failure)?;
         let first_sequence = session.first_pending_sequence;
         session.draining = true;
         let result = if external_values
@@ -1331,17 +1580,30 @@ impl IngestionOwner {
                 "Length-changing ingestion requires host realignment of external values",
             ))
         } else {
-            let options = BatchOptions {
-                max_bars: Some(value_number(session.policy.max_stored_bars as f64)),
-                max_store_bytes: Some(value_number(session.policy.max_store_bytes as f64)),
-                skip_unchanged: None,
-            };
-            let batch: Vec<BatchEvent> = events.iter().copied().map(batch_event).collect();
-            self.data
-                .store_mut()
-                .apply_events(&batch, &options)
-                .map_err(|error| ingestion_from_js("DRAIN_FAILED", error))
+            let options = BatchOptions::from_scalar_values(
+                Some(value_number(session.policy.max_stored_bars as f64)),
+                Some(value_number(session.policy.max_store_bytes as f64)),
+                None,
+            );
+            match memory.try_vec_capacity(events.len()) {
+                Err(error) => Err(IngestionError::from_memory_failure(error)),
+                Ok((mut batch, batch_memory)) => {
+                    for event in &events {
+                        batch.push(batch_event(*event));
+                    }
+                    let result = self
+                        .data
+                        .store_mut()
+                        .apply_events(&batch, &options)
+                        .map_err(|error| ingestion_from_js("DRAIN_FAILED", error));
+                    drop(batch);
+                    drop(batch_memory);
+                    result
+                }
+            }
         };
+        drop(events);
+        drop(events_memory);
         let session = self.session.as_mut().unwrap();
         session.draining = false;
         match result {
@@ -1371,10 +1633,14 @@ impl IngestionOwner {
                     message: bounded_message(error.message()),
                     message_first: false,
                 });
-                Err(IngestionError::with_message(
-                    "DRAIN_FAILED",
-                    bounded_message(error.message()),
-                ))
+                if error.name() == "IngestionError" {
+                    Err(IngestionError::with_message(
+                        "DRAIN_FAILED",
+                        bounded_message(error.message()),
+                    ))
+                } else {
+                    Err(error)
+                }
             }
         }
     }
@@ -1494,10 +1760,55 @@ impl IngestionOwner {
 
     /// session 문서를 canonical checkpoint JSON으로 저장한다.
     pub fn save(&self) -> Result<JsString, IngestionError> {
+        let mut scope = MemoryScope::unaccounted(self.data.store().memory_context().oom_style());
+        self.save_scoped(&mut scope)
+    }
+
+    /// Caller serialization scope에 canonical document 결과 allocation을 유지한다.
+    pub fn save_scoped(&self, scope: &mut MemoryScope) -> Result<JsString, IngestionError> {
         self.active_owner()?;
         let session = self.configured()?;
         session.active()?;
         let (paused, last_error) = session.source_status(&self.data);
+        let memory = self.data.store().memory_context().clone();
+        let (document, payload_memory) =
+            Self::session_document(session, paused, last_error, &memory)
+                .map_err(IngestionError::from_memory_failure)?;
+        let result = safe_checkpoint_stringify_scoped(&document, self.dialect, scope)
+            .map_err(|error| ingestion_from_js("INVALID_INPUT", error));
+        drop(document);
+        drop(payload_memory);
+        result
+    }
+
+    /// Canonical document와 exact UTF-16 result group을 함께 소유해 돌려준다.
+    pub fn save_with_memory(&self) -> Result<(JsString, MemoryGroup), IngestionError> {
+        let memory = self.data.store().memory_context();
+        let mut scope = memory.scope();
+        let text = self.save_scoped(&mut scope)?;
+        let bytes = text.len_utf16().saturating_mul(std::mem::size_of::<u16>());
+        let group = scope
+            .split_persistent(bytes)
+            .map_err(IngestionError::from_memory_failure)?;
+        Ok((text, group))
+    }
+
+    fn session_document(
+        session: &IngestionSession,
+        paused: bool,
+        last_error: Option<LastError>,
+        memory: &MemoryContext,
+    ) -> Result<(JsValue, MemoryGroup), MemoryFailure> {
+        let (events, events_memory) = session.prefix_with_memory(session.count, memory)?;
+        let (mut event_values, event_values_memory) = memory.try_vec_capacity(events.len())?;
+        for event in &events {
+            event_values.push(event_value(*event));
+        }
+        drop(events);
+        drop(events_memory);
+        let payload_memory = event_values_memory;
+        // `payload_memory` is declared before `document`, so the document's Vec payload drops
+        // first when this function returns or the caller explicitly releases both values.
         let document = object([
             ("schema", value_string("aster.ingestion")),
             ("version", value_number(1.0)),
@@ -1519,25 +1830,88 @@ impl IngestionOwner {
                         "firstSequence",
                         value_number(session.first_pending_sequence),
                     ),
-                    (
-                        "events",
-                        JsValue::Array(
-                            session
-                                .prefix(session.count)
-                                .into_iter()
-                                .map(event_value)
-                                .collect(),
-                        ),
-                    ),
+                    ("events", JsValue::Array(event_values)),
                 ]),
             ),
         ]);
-        safe_checkpoint_stringify_with(&document, self.dialect)
-            .map_err(|error| ingestion_from_js("INVALID_INPUT", error))
+        Ok((document, payload_memory))
+    }
+
+    fn session_document_unaccounted(
+        session: &IngestionSession,
+        paused: bool,
+        last_error: Option<LastError>,
+    ) -> JsValue {
+        let memory = MemoryContext::unaccounted(OomStyle::RangeErrorCapitalized);
+        Self::session_document(session, paused, last_error, &memory)
+            .expect("unaccounted ingestion document allocation")
+            .0
+    }
+
+    /// TargetCreate가 실제 열을 할당·복사하기 전에 동일 parser로 수집 문서를 검증한다.
+    pub fn validate_workspace_restore_document(
+        shape: IngestionStoreShape,
+        text: &JsValue,
+        dialect: NumberDialect,
+    ) -> Result<ValidatedWorkspaceIngestion, JsError> {
+        if !matches!(text, JsValue::String(value) if value.len_utf16() <= 32768) {
+            return Err(js_error(
+                "RangeError",
+                "Native workspace ingestion document limit",
+            ));
+        }
+        let candidate = Self::restore_candidate_for_shape(shape, 0.0, text, dialect)
+            .map_err(IngestionError::into_js_error)?;
+        if candidate.count != 0 {
+            return Err(js_error("TypeError", "Native workspace pending ingestion"));
+        }
+        let document = Self::session_document_unaccounted(
+            &candidate,
+            candidate.paused,
+            candidate.last_error.clone(),
+        );
+        let text = safe_checkpoint_stringify_with(&document, dialect)?;
+        Ok(ValidatedWorkspaceIngestion {
+            text,
+            capacity: candidate.capacity,
+        })
     }
 
     fn restore_candidate(&self, text: &JsValue) -> Result<IngestionSession, IngestionError> {
-        let parsed = safe_checkpoint_parse_with(text, self.dialect)
+        let store = self.data.store();
+        Self::restore_candidate_for_shape_with_memory(
+            IngestionStoreShape {
+                length: store.length(),
+                capacity: store.capacity(),
+                max_bars: store.max_bars(),
+                version: store.version(),
+            },
+            store.serial(),
+            text,
+            self.dialect,
+            store.memory_context(),
+        )
+    }
+
+    fn restore_candidate_for_shape(
+        shape: IngestionStoreShape,
+        serial: f64,
+        text: &JsValue,
+        dialect: NumberDialect,
+    ) -> Result<IngestionSession, IngestionError> {
+        let memory = MemoryContext::unaccounted(OomStyle::RangeErrorCapitalized);
+        Self::restore_candidate_for_shape_with_memory(shape, serial, text, dialect, &memory)
+    }
+
+    fn restore_candidate_for_shape_with_memory(
+        shape: IngestionStoreShape,
+        serial: f64,
+        text: &JsValue,
+        dialect: NumberDialect,
+        memory: &MemoryContext,
+    ) -> Result<IngestionSession, IngestionError> {
+        let mut scope = memory.scope();
+        let parsed = safe_checkpoint_parse_scoped(text, dialect, &mut scope)
             .map_err(|error| ingestion_from_js("INVALID_DOCUMENT", error))?;
         let document = record(
             &parsed,
@@ -1572,14 +1946,15 @@ impl IngestionOwner {
                 "Ingestion schema/version/state",
             ));
         }
-        let store_max_bars = self.data.store().max_bars();
-        let policy = parse_policy(
-            &self.data,
+        let policy = parse_policy_bounds(
+            shape.length,
+            shape.capacity.saturating_mul(96),
             property(document, "policy").unwrap_or(&JsValue::Undefined),
             false,
-            store_max_bars,
+            shape.max_bars,
         )?;
-        let mut candidate = IngestionSession::new(&self.data, policy);
+        let mut candidate =
+            IngestionSession::new_with_source(serial, shape.version, policy, memory)?;
         let undefined_counters = JsValue::Undefined;
         let counters_value = property(document, "counters").unwrap_or(&undefined_counters);
         let counters_object = record(counters_value, COUNTER_KEYS, "Counters", "INVALID_INPUT")?;
@@ -1648,10 +2023,10 @@ impl IngestionOwner {
         if pending_values.len() > candidate.capacity {
             return Err(IngestionError::new("INVALID_DOCUMENT", "Pending count"));
         }
-        let events = if pending_values.is_empty() {
-            Vec::new()
+        let (events, events_memory) = if pending_values.is_empty() {
+            (Vec::new(), MemoryGroup::empty(memory.clone()))
         } else {
-            snapshot_ingestion_events(pending_events_value)?
+            snapshot_ingestion_events_with_memory(pending_events_value, memory)?
         };
         let next_sequence = integer_document(
             property(document, "nextSequence").unwrap_or(&JsValue::Undefined),
@@ -1746,7 +2121,10 @@ impl IngestionOwner {
         for (index, event) in events.iter().enumerate() {
             ring.write(index, *event);
         }
-        candidate.count = events.len();
+        let pending_count = events.len();
+        drop(events);
+        drop(events_memory);
+        candidate.count = pending_count;
         candidate.first_pending_sequence = first_pending;
         candidate.next_sequence = next_sequence;
         candidate.counters = counters;
@@ -1826,32 +2204,48 @@ impl IngestionOwner {
         external_values: bool,
     ) -> Result<Committed<BatchReceipt>, ApplyDataError> {
         self.active_owner().map_err(ApplyDataError::Ingestion)?;
-        let events = snapshot_ingestion_events(input).map_err(ApplyDataError::Ingestion)?;
+        let memory = self.data.store().memory_context().clone();
+        let (events, events_memory) = snapshot_ingestion_events_with_memory(input, &memory)
+            .map_err(ApplyDataError::Ingestion)?;
         if external_values
             && events
                 .iter()
                 .any(|event| event.kind == IngestionKind::Append)
         {
+            drop(events);
+            drop(events_memory);
             return Err(ApplyDataError::Ingestion(IngestionError::new(
                 "EXTERNAL_ALIGNMENT",
                 "Length-changing batches require host realignment of external values",
             )));
         }
-        let batch: Vec<BatchEvent> = events.iter().copied().map(batch_event).collect();
+        let (mut batch, batch_memory) = memory
+            .try_vec_capacity(events.len())
+            .map_err(IngestionError::from_memory_failure)
+            .map_err(ApplyDataError::Ingestion)?;
+        for event in &events {
+            batch.push(batch_event(*event));
+        }
+        drop(events);
+        drop(events_memory);
         let policy = self.session.as_ref().map(|session| session.policy.clone());
-        let options = BatchOptions {
-            max_bars: policy
+        let options = BatchOptions::from_scalar_values(
+            policy
                 .as_ref()
                 .map(|policy| value_number(policy.max_stored_bars as f64)),
-            max_store_bytes: policy
+            policy
                 .as_ref()
                 .map(|policy| value_number(policy.max_store_bytes as f64)),
-            skip_unchanged: Some(skip_unchanged),
-        };
-        self.data
+            Some(skip_unchanged),
+        );
+        let result = self
+            .data
             .store_mut()
             .apply_events(&batch, &options)
-            .map_err(ApplyDataError::Store)
+            .map_err(ApplyDataError::Store);
+        drop(batch);
+        drop(batch_memory);
+        result
     }
 
     /// unchanged batch host 봉투다.
@@ -1859,8 +2253,19 @@ impl IngestionOwner {
         &mut self,
         input: &JsValue,
     ) -> Result<JsValue, ApplyDataError> {
+        self.native_apply_unchanged_data_events_committed(input, false)
+            .map(|committed| committed.value)
+    }
+
+    /// 원본 batch 영수증과 모델에 발행할 변경을 함께 돌려준다.
+    pub fn native_apply_unchanged_data_events_committed(
+        &mut self,
+        input: &JsValue,
+        external_values: bool,
+    ) -> Result<Committed<JsValue>, ApplyDataError> {
         let before = self.data.store().version();
-        let committed = self.apply_data_events(input, true)?;
+        let committed =
+            self.apply_data_events_with_external_values(input, true, external_values)?;
         let receipt = &committed.value;
         let after = self.data.store().version();
         let receipt_value = object([
@@ -1877,7 +2282,7 @@ impl IngestionOwner {
                 JsValue::Bool(receipt.unchanged.unwrap_or(false)),
             ),
         ]);
-        Ok(object([
+        let value = object([
             ("schema", value_string("aster.native-data-batch")),
             ("version", value_number(1.0)),
             ("beforeVersion", value_number(before)),
@@ -1887,7 +2292,11 @@ impl IngestionOwner {
                 JsValue::Bool(receipt.unchanged.unwrap_or(false)),
             ),
             ("receipt", receipt_value),
-        ]))
+        ]);
+        Ok(Committed {
+            value,
+            change: committed.change,
+        })
     }
 
     /// close 정리에서 session을 닫되 attached slot은 유지한다.
@@ -1954,14 +2363,30 @@ impl IngestionOwner {
         })();
         Ok(match result {
             Ok(result) => object([("result", result)]),
-            Err(error) => object([(
-                "error",
-                object([
-                    ("name", value_string("IngestionError")),
-                    ("code", value_string(error.code())),
-                    ("message", JsValue::String(bounded_message(error.message()))),
-                ]),
-            )]),
+            Err(error) => {
+                // Native command envelopes intentionally catch all source/resource errors.
+                // Reserved OOM tags must not cross this caught boundary; direct Core callers
+                // still receive them through `IngestionError::into_js_error`.
+                let is_reserved_oom = matches!(
+                    error.code(),
+                    barochart_js::memory::OOM_LIMIT_CODE | barochart_js::memory::OOM_SYSTEM_CODE
+                );
+                let code = if error.name() == "IngestionError" && !is_reserved_oom {
+                    error.code()
+                } else if operation == "loadDataIngestion" {
+                    "INVALID_DOCUMENT"
+                } else {
+                    "INVALID_INPUT"
+                };
+                object([(
+                    "error",
+                    object([
+                        ("name", value_string("IngestionError")),
+                        ("code", value_string(code)),
+                        ("message", JsValue::String(bounded_message(error.message()))),
+                    ]),
+                )])
+            }
         })
     }
 

@@ -10,11 +10,13 @@
 //! `std::mem::take`로 꺼낸다(기본값은 `Undefined`).
 
 use std::fmt;
+use std::mem::size_of;
 use std::slice;
 
 use super::JsonMode;
-use super::object::{JsObject, ObjectIter};
+use super::object::{JsObject, JsObjectBuilder, ObjectIter};
 use super::write::stringify_json;
+use crate::memory::{MemoryFailure, MemoryScope};
 use crate::string::JsString;
 
 /// JS 값. 커널이 다루는 JSON 값과 `undefined`다.
@@ -38,6 +40,21 @@ pub enum JsValue {
 }
 
 impl JsValue {
+    /// 이 값과 모든 자식·객체 키를 반복형 scoped fallible allocation으로 깊게 복제한다.
+    ///
+    /// 키 순서, `undefined`, -0과 NaN payload를 보존한다. wide 객체는 parser builder와 같은
+    /// amortized 수집 경로를 써서 numeric key마다 sorted vector를 이동하지 않는다.
+    pub fn try_clone_scoped(&self, scope: &mut MemoryScope) -> Result<Self, MemoryFailure> {
+        match self {
+            Self::Undefined => Ok(Self::Undefined),
+            Self::Null => Ok(Self::Null),
+            Self::Bool(flag) => Ok(Self::Bool(*flag)),
+            Self::Number(number) => Ok(Self::Number(*number)),
+            Self::String(text) => text.try_clone_scoped(scope).map(Self::String),
+            Self::Array(_) | Self::Object(_) => clone_tree_scoped(self, scope),
+        }
+    }
+
     /// 배열이나 객체인지 본다.
     fn is_container(&self) -> bool {
         matches!(self, Self::Array(_) | Self::Object(_))
@@ -229,4 +246,119 @@ fn clone_tree(root: &JsValue) -> JsValue {
         }
     }
     finished
+}
+
+/// scoped 깊은 복제 중인 컨테이너 하나다.
+enum ScopedCloneFrame<'a> {
+    Array {
+        source: slice::Iter<'a, JsValue>,
+        target: Vec<JsValue>,
+    },
+    Object {
+        source: ObjectIter<'a>,
+        target: JsObjectBuilder,
+        key: JsString,
+    },
+}
+
+impl<'a> ScopedCloneFrame<'a> {
+    fn open(value: &'a JsValue, scope: &mut MemoryScope) -> Result<Option<Self>, MemoryFailure> {
+        match value {
+            JsValue::Array(items) => {
+                let bytes = items
+                    .len()
+                    .checked_mul(size_of::<JsValue>())
+                    .ok_or_else(|| scope.allocation_failure())?;
+                scope.try_grow(bytes)?;
+                let mut target = Vec::new();
+                target
+                    .try_reserve_exact(items.len())
+                    .map_err(|_| scope.allocation_failure())?;
+                Ok(Some(Self::Array {
+                    source: items.iter(),
+                    target,
+                }))
+            }
+            JsValue::Object(object) => Ok(Some(Self::Object {
+                source: object.entries(),
+                target: JsObjectBuilder::new(),
+                key: JsString::default(),
+            })),
+            _ => Ok(None),
+        }
+    }
+
+    fn next_child(
+        &mut self,
+        scope: &mut MemoryScope,
+    ) -> Result<Option<&'a JsValue>, MemoryFailure> {
+        match self {
+            Self::Array { source, .. } => Ok(source.next()),
+            Self::Object { source, key, .. } => match source.next() {
+                Some((name, value)) => {
+                    *key = name.try_clone_scoped(scope)?;
+                    Ok(Some(value))
+                }
+                None => Ok(None),
+            },
+        }
+    }
+
+    fn attach(&mut self, child: JsValue, scope: &mut MemoryScope) -> Result<(), MemoryFailure> {
+        match self {
+            Self::Array { target, .. } => {
+                target.push(child);
+                Ok(())
+            }
+            Self::Object { target, key, .. } => target.insert(std::mem::take(key), child, scope),
+        }
+    }
+
+    fn finish(self) -> JsValue {
+        match self {
+            Self::Array { target, .. } => JsValue::Array(target),
+            Self::Object { target, .. } => JsValue::Object(target.finish()),
+        }
+    }
+}
+
+fn clone_tree_scoped(root: &JsValue, scope: &mut MemoryScope) -> Result<JsValue, MemoryFailure> {
+    let Some(first) = ScopedCloneFrame::open(root, scope)? else {
+        return root.try_clone_scoped(scope);
+    };
+    let mut stack = Vec::new();
+    push_clone_frame(&mut stack, first, scope)?;
+    let mut finished = JsValue::Undefined;
+    while let Some(frame) = stack.last_mut() {
+        match frame.next_child(scope)? {
+            Some(child) => match ScopedCloneFrame::open(child, scope)? {
+                Some(child_frame) => push_clone_frame(&mut stack, child_frame, scope)?,
+                None => frame.attach(child.try_clone_scoped(scope)?, scope)?,
+            },
+            None => {
+                let done = match stack.pop() {
+                    Some(frame) => frame.finish(),
+                    None => JsValue::Undefined,
+                };
+                match stack.last_mut() {
+                    Some(parent) => parent.attach(done, scope)?,
+                    None => finished = done,
+                }
+            }
+        }
+    }
+    Ok(finished)
+}
+
+fn push_clone_frame<'a>(
+    stack: &mut Vec<ScopedCloneFrame<'a>>,
+    frame: ScopedCloneFrame<'a>,
+    scope: &mut MemoryScope,
+) -> Result<(), MemoryFailure> {
+    scope.try_grow(size_of::<ScopedCloneFrame<'a>>())?;
+    stack
+        .try_reserve(1)
+        .map_err(|_| scope.allocation_failure())?;
+    stack.push(frame);
+    Ok(())
 }

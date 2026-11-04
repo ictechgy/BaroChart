@@ -306,14 +306,14 @@ fn transaction_error_precedes_canonical_size_and_load_undoes_as_one_identity_sna
         .load(&saved, &DrawingDocumentContext::default())
         .unwrap();
     assert_eq!(receiver.undo_stack().len(), history_len + 1);
-    assert!(receiver.undo());
+    assert!(receiver.undo().unwrap());
     assert!(
         before
             .iter()
             .zip(receiver.items())
             .all(|(a, b)| Arc::ptr_eq(a, b))
     );
-    assert!(receiver.redo());
+    assert!(receiver.redo().unwrap());
     assert_eq!(receiver.save().unwrap(), saved);
 }
 

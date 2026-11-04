@@ -64,9 +64,9 @@ fn add_edit_remove_select_and_auto_transactions_preserve_immutable_identity_rule
         store.items()[0].style.as_ref().unwrap()
     ));
     let edited = store.items()[0].clone();
-    assert!(store.undo());
+    assert!(store.undo().unwrap());
     assert!(Arc::ptr_eq(&before, &store.items()[0]));
-    assert!(store.redo());
+    assert!(store.redo().unwrap());
     assert!(Arc::ptr_eq(&edited, &store.items()[0]));
 
     let after_redo = store.items()[0].clone();
@@ -138,7 +138,7 @@ fn generated_serial_survives_undo_cancel_and_document_load() {
     let mut store = DrawingStore::with_defaults(NumberDialect::Ecma);
     let first = store.add(&horizontal("", 1.0, 2.0, None)).unwrap();
     assert_eq!(first, key("drawing-1"));
-    assert!(store.undo());
+    assert!(store.undo().unwrap());
     let second = store.add(&horizontal("", 2.0, 3.0, None)).unwrap();
     assert_eq!(second, key("drawing-2"));
 

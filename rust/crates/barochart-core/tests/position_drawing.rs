@@ -4,19 +4,19 @@ use std::sync::Arc;
 
 use barochart_js::json::{JsonMode, stringify_json};
 use barochart_js::string::JsString;
-use drawing_types::{Drawing, DrawingPoint, DrawingType};
+use drawing_types::{Drawing, DrawingPoint, DrawingPoints, DrawingType};
 use position_drawing::{
     drawing_document_version, position_metrics_for, validate_drawing_document_version,
 };
 
 fn position(kind: DrawingType, entry: f64, stop: f64, target: f64) -> Drawing {
-    Drawing {
-        id: JsString::from_str("p"),
-        panel: JsString::from_str("price"),
-        locked: None,
-        style: None,
+    Drawing::from_parts_unaccounted(
+        &JsString::from_str("p"),
+        &JsString::from_str("price"),
+        None,
+        None,
         kind,
-        points: Arc::from([
+        DrawingPoints::from_vec_unaccounted(vec![
             DrawingPoint {
                 time: 10.0,
                 price: entry,
@@ -34,11 +34,11 @@ fn position(kind: DrawingType, entry: f64, stop: f64, target: f64) -> Drawing {
                 price: entry,
             },
         ]),
-        text: None,
-        visible: None,
-        axis_id: None,
-        series_id: None,
-    }
+        None,
+        None,
+        None,
+        None,
+    )
 }
 
 #[test]
@@ -89,7 +89,7 @@ fn position_validation_reports_anchor_order_before_metric_order() {
     let mut mismatch = position(DrawingType::LongPosition, 50.0, 40.0, 70.0);
     let mut points = mismatch.points.to_vec();
     points[1].time = 11.0;
-    mismatch.points = Arc::from(points);
+    mismatch.points = DrawingPoints::from_vec_unaccounted(points);
     let error = position_metrics_for(&mismatch).unwrap_err();
     assert_eq!(error.name, "RangeError");
     assert_eq!(
@@ -135,20 +135,23 @@ fn ratio_overflow_and_underflow_fail_without_epsilon_tolerance() {
 #[test]
 fn document_versions_are_minimal_and_feature_checked() {
     let mut ordinary = position(DrawingType::Horizontal, 1.0, 0.0, 0.0);
-    ordinary.points = Arc::from([DrawingPoint {
+    ordinary.points = DrawingPoints::from_vec_unaccounted(vec![DrawingPoint {
         time: 1.0,
         price: 2.0,
     }]);
-    assert_eq!(drawing_document_version(&[Arc::new(ordinary.clone())]), 1);
+    let cloned = |drawing: &Drawing| {
+        Arc::new(barochart_core::drawing_validation::validate_drawing(&drawing.to_value()).unwrap())
+    };
+    assert_eq!(drawing_document_version(&[cloned(&ordinary)]), 1);
     ordinary.axis_id = Some(JsString::from_str("axis"));
-    assert_eq!(drawing_document_version(&[Arc::new(ordinary.clone())]), 2);
+    assert_eq!(drawing_document_version(&[cloned(&ordinary)]), 2);
     assert!(validate_drawing_document_version(&ordinary, 1.0).is_err());
 
     let mut position = position(DrawingType::LongPosition, 5.0, 4.0, 6.0);
-    assert_eq!(drawing_document_version(&[Arc::new(position.clone())]), 3);
+    assert_eq!(drawing_document_version(&[cloned(&position)]), 3);
     assert!(validate_drawing_document_version(&position, 2.0).is_err());
     position.visible = Some(true);
-    assert_eq!(drawing_document_version(&[Arc::new(position.clone())]), 4);
+    assert_eq!(drawing_document_version(&[cloned(&position)]), 4);
     assert!(validate_drawing_document_version(&position, 3.0).is_err());
     assert!(validate_drawing_document_version(&position, 4.0).is_ok());
 }

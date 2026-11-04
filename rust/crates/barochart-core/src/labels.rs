@@ -3,11 +3,13 @@
 #![forbid(unsafe_code)]
 
 use barochart_js::error::JsError;
-use barochart_js::json::{JsObject, JsValue, JsonMode, parse_json_utf16_with};
+use barochart_js::json::{JsObject, JsValue};
+use barochart_js::memory::{MemoryScope, OomStyle};
 use barochart_js::num::NumberDialect;
 use barochart_js::string::{JsString, is_js_whitespace};
 
-use crate::contracts::js_to_string_with;
+use crate::coercion::string_units_to_number_scoped;
+use crate::contracts::{js_to_string_scoped, js_to_string_with};
 
 /// 보수적인 이식용 글자 치수다. 네이티브 글리프를 측정하지 않는다.
 #[derive(Clone, Copy, Debug)]
@@ -78,8 +80,18 @@ impl LabelFit {
 
 /// 렌더러와 독립적인 레이아웃에서 사용하는 레이블 너비 모델이다.
 pub fn label_metrics(font: &JsValue, dialect: NumberDialect) -> Result<LabelMetrics, JsError> {
-    let font = js_to_string_with(font, dialect)?;
-    let size = regex_font_size(&font, dialect)?;
+    let mut scope = MemoryScope::unaccounted(OomStyle::RangeErrorCapitalized);
+    label_metrics_scoped(font, dialect, &mut scope)
+}
+
+/// 레이블 글꼴 ToString과 숫자 캡처를 호출 scope의 fallible allocation으로 읽는다.
+pub fn label_metrics_scoped(
+    font: &JsValue,
+    dialect: NumberDialect,
+    scope: &mut MemoryScope,
+) -> Result<LabelMetrics, JsError> {
+    let font = js_to_string_scoped(font, dialect, scope)?;
+    let size = regex_font_size_scoped(&font, dialect, scope)?;
     Ok(LabelMetrics {
         size,
         ascent: size * 1.12,
@@ -244,7 +256,11 @@ pub fn panel_title(
     Ok(JsString::from_utf16(output))
 }
 
-fn regex_font_size(font: &JsString, dialect: NumberDialect) -> Result<f64, JsError> {
+fn regex_font_size_scoped(
+    font: &JsString,
+    dialect: NumberDialect,
+    scope: &mut MemoryScope,
+) -> Result<f64, JsError> {
     let units = font.as_units();
     let mut start = 0usize;
     while start < units.len() {
@@ -257,7 +273,7 @@ fn regex_font_size(font: &JsString, dialect: NumberDialect) -> Result<f64, JsErr
             start += 1;
         }
         if units.get(start..start + 2) == Some(&[b'p' as u16, b'x' as u16]) {
-            return Ok(parse_number_capture(&units[token_start..start], dialect));
+            return string_units_to_number_scoped(&units[token_start..start], dialect, scope);
         }
     }
     Ok(12.0)
@@ -265,57 +281,6 @@ fn regex_font_size(font: &JsString, dialect: NumberDialect) -> Result<f64, JsErr
 
 fn font_regex_unit(unit: u16) -> bool {
     (b'0' as u16..=b'9' as u16).contains(&unit) || unit == b'.' as u16
-}
-
-/// 제한된 `[0-9.]+` 정규식 캡처를 읽을 때 JS JSON 숫자 파서를 재사용한다.
-///
-/// 캡처를 유효한 JSON 숫자 문법으로만 정규화한다. 앞자리 0은 제거하고 앞이나 뒤의
-/// 소수점에는 0을 붙인다. 그 밖의 캡처는 JS NaN으로 처리한다.
-fn parse_number_capture(capture: &[u16], dialect: NumberDialect) -> f64 {
-    let dots = capture
-        .iter()
-        .enumerate()
-        .filter_map(|(index, unit)| (*unit == b'.' as u16).then_some(index))
-        .collect::<Vec<_>>();
-    if dots.len() > 1 {
-        return f64::NAN;
-    }
-    let (integer, fraction) = if let Some(dot) = dots.first().copied() {
-        (&capture[..dot], Some(&capture[dot + 1..]))
-    } else {
-        (capture, None)
-    };
-    if !integer
-        .iter()
-        .chain(fraction.into_iter().flatten())
-        .any(|unit| (b'0' as u16..=b'9' as u16).contains(unit))
-    {
-        return f64::NAN;
-    }
-    let significant_integer = integer
-        .iter()
-        .position(|unit| *unit != b'0' as u16)
-        .map_or(&integer[integer.len().saturating_sub(1)..], |index| {
-            &integer[index..]
-        });
-    let mut normalized = Vec::with_capacity(capture.len() + 2);
-    if significant_integer.is_empty() {
-        normalized.push(b'0' as u16);
-    } else {
-        normalized.extend_from_slice(significant_integer);
-    }
-    if let Some(fraction) = fraction {
-        normalized.push(b'.' as u16);
-        if fraction.is_empty() {
-            normalized.push(b'0' as u16);
-        } else {
-            normalized.extend_from_slice(fraction);
-        }
-    }
-    match parse_json_utf16_with(&normalized, JsonMode::Standard, dialect) {
-        Ok(JsValue::Number(value)) => value,
-        _ => f64::NAN,
-    }
 }
 
 fn collapse_js_whitespace(value: &JsString) -> JsString {

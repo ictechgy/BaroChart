@@ -7,6 +7,7 @@ use std::collections::HashSet;
 
 use barochart_js::error::JsError;
 use barochart_js::json::{JsObject, JsValue};
+use barochart_js::memory::{MemoryScope, OomStyle};
 use barochart_js::num::{NumberDialect, js_round, number_to_string_with};
 use barochart_js::string::{JsString, is_js_whitespace};
 
@@ -178,13 +179,13 @@ fn object(value: &JsValue) -> Option<&JsObject> {
 fn is_reserved(key: &JsString) -> bool {
     RESERVED_RECORD_KEYS
         .iter()
-        .any(|reserved| key.as_units() == reserved.encode_utf16().collect::<Vec<_>>())
+        .any(|reserved| key.as_units().iter().copied().eq(reserved.encode_utf16()))
 }
 
 fn contains(allowed: &[&str], key: &JsString) -> bool {
     allowed
         .iter()
-        .any(|candidate| key.as_units() == candidate.encode_utf16().collect::<Vec<_>>())
+        .any(|candidate| key.as_units().iter().copied().eq(candidate.encode_utf16()))
 }
 
 fn text_with_units(prefix: &str, middle: &JsString, suffix: &str) -> JsString {
@@ -235,28 +236,20 @@ pub fn option_record(value: &JsValue, keys: &[&str], label: &str) -> Result<(), 
     let Some(object) = object(value) else {
         return Err(type_error(format!("{label}: object required")));
     };
-    let has_offending_key = object
+    let offending = object
         .iter()
-        .any(|(key, _)| is_reserved(key) || !contains(keys, key));
-    if !has_offending_key {
-        return Ok(());
-    }
-    let allowed: Vec<&str> = keys
-        .iter()
-        .copied()
-        .filter(|key| !RESERVED_RECORD_KEYS.contains(key))
-        .collect();
-    for key in canonical_keys(value, &allowed)? {
-        if is_reserved(&key) || !contains(keys, &key) {
-            return Err(JsError::new(
-                "TypeError",
-                text_with_units(
-                    &format!("{label}: unsupported field "),
-                    &key.slice(0, Some(64)),
-                    "",
-                ),
-            ));
-        }
+        .map(|(key, _)| key)
+        .filter(|key| is_reserved(key) || !contains(keys, key))
+        .min();
+    if let Some(key) = offending {
+        return Err(JsError::new(
+            "TypeError",
+            text_with_units(
+                &format!("{label}: unsupported field "),
+                &key.slice(0, Some(64)),
+                "",
+            ),
+        ));
     }
     Ok(())
 }
@@ -544,30 +537,130 @@ pub fn portable_font(value: &JsValue) -> Result<JsString, JsError> {
     Ok(trimmed.clone())
 }
 
-fn own_record(value: &JsValue) -> JsObject {
-    let mut output = JsObject::new();
+fn scoped_vec_capacity<T>(capacity: usize, scope: &mut MemoryScope) -> Result<Vec<T>, JsError> {
+    let bytes = capacity
+        .checked_mul(std::mem::size_of::<T>())
+        .ok_or_else(|| scope.allocation_failure().into_js_error())?;
+    scope
+        .try_grow(bytes)
+        .map_err(|failure| failure.into_js_error())?;
+    let mut output = Vec::new();
+    output
+        .try_reserve_exact(capacity)
+        .map_err(|_| scope.allocation_failure().into_js_error())?;
+    Ok(output)
+}
+
+fn index_key_scoped(index: usize, scope: &mut MemoryScope) -> Result<JsString, JsError> {
+    let mut digits = [0_u8; 40];
+    let mut cursor = digits.len();
+    let mut value = index;
+    loop {
+        cursor -= 1;
+        digits[cursor] = b'0' + (value % 10) as u8;
+        value /= 10;
+        if value == 0 {
+            break;
+        }
+    }
+    let text = std::str::from_utf8(&digits[cursor..]).expect("decimal digits are UTF-8");
+    JsString::try_from_str(text, scope).map_err(|failure| failure.into_js_error())
+}
+
+fn own_record_scoped(value: &JsValue, scope: &mut MemoryScope) -> Result<JsObject, JsError> {
     match value {
-        JsValue::Object(object) => {
-            for (key, value) in object.iter() {
-                output.insert(key.clone(), value.clone());
-            }
+        JsValue::Object(_) => {
+            let mut cloned = value
+                .try_clone_scoped(scope)
+                .map_err(|failure| failure.into_js_error())?;
+            let JsValue::Object(output) = &mut cloned else {
+                unreachable!("object clone preserves its variant")
+            };
+            Ok(std::mem::take(output))
         }
         JsValue::Array(values) => {
+            let mut entries = scoped_vec_capacity(values.len(), scope)?;
             for (index, value) in values.iter().enumerate() {
-                output.insert(JsString::from_str(&index.to_string()), value.clone());
+                entries.push((
+                    index_key_scoped(index, scope)?,
+                    value
+                        .try_clone_scoped(scope)
+                        .map_err(|failure| failure.into_js_error())?,
+                ));
             }
+            JsObject::try_from_entries_scoped(entries, scope)
+                .map_err(|failure| failure.into_js_error())
         }
         JsValue::String(value) => {
+            let mut entries = scoped_vec_capacity(value.len_utf16(), scope)?;
             for (index, unit) in value.as_units().iter().enumerate() {
-                output.insert(
-                    JsString::from_str(&index.to_string()),
-                    JsValue::String(JsString::from_utf16(vec![*unit])),
-                );
+                let bytes = std::mem::size_of::<u16>();
+                scope
+                    .try_grow(bytes)
+                    .map_err(|failure| failure.into_js_error())?;
+                let mut units = Vec::new();
+                units
+                    .try_reserve_exact(1)
+                    .map_err(|_| scope.allocation_failure().into_js_error())?;
+                units.push(*unit);
+                entries.push((
+                    index_key_scoped(index, scope)?,
+                    JsValue::String(JsString::from_utf16(units)),
+                ));
             }
+            JsObject::try_from_entries_scoped(entries, scope)
+                .map_err(|failure| failure.into_js_error())
         }
-        JsValue::Undefined | JsValue::Null | JsValue::Bool(_) | JsValue::Number(_) => {}
+        JsValue::Undefined | JsValue::Null | JsValue::Bool(_) | JsValue::Number(_) => {
+            Ok(JsObject::new())
+        }
     }
-    output
+}
+
+fn style_property<'a>(value: &'a JsValue, name: &str) -> Option<&'a JsValue> {
+    let JsValue::Object(object) = value else {
+        return None;
+    };
+    object.iter().find_map(|(key, value)| {
+        key.as_units()
+            .iter()
+            .copied()
+            .eq(name.encode_utf16())
+            .then_some(value)
+    })
+}
+
+fn validate_style_scalars(
+    value: &JsValue,
+    colors: &[&str],
+    preserve_hex: bool,
+) -> Result<(), JsError> {
+    for key in colors {
+        let Some(current) = style_property(value, key) else {
+            continue;
+        };
+        if matches!(current, JsValue::Undefined)
+            || *key == "fill" && matches!(current, JsValue::Null)
+        {
+            continue;
+        }
+        let keep_hex = preserve_hex
+            && matches!(current, JsValue::String(color) if {
+                let units = color.as_units();
+                matches!(units.len(), 7 | 9)
+                    && units[0] == b'#' as u16
+                    && units[1..].iter().all(|unit| hex_value(*unit).is_some())
+            });
+        if !keep_hex {
+            portable_color(current)?;
+        }
+    }
+    if let Some(font) = style_property(value, "font")
+        && !matches!(font, JsValue::Undefined)
+    {
+        portable_font(font)?;
+    }
+    Ok(())
 }
 
 /// 원본 객체 키 순서를 유지하면서 이식 가능한 스타일 필드를 정규화한다.
@@ -576,7 +669,21 @@ pub fn portable_style(
     colors: &[&str],
     preserve_hex: bool,
 ) -> Result<JsValue, JsError> {
-    let mut output = own_record(value);
+    let mut scope = MemoryScope::unaccounted(OomStyle::RangeErrorCapitalized);
+    portable_style_scoped(value, colors, preserve_hex, &mut scope)
+}
+
+/// 원본 key 순서와 scalar 오류 우선순위를 유지하며 스타일 snapshot을 scoped fallible allocation으로 만든다.
+pub fn portable_style_scoped(
+    value: &JsValue,
+    colors: &[&str],
+    preserve_hex: bool,
+    scope: &mut MemoryScope,
+) -> Result<JsValue, JsError> {
+    // Source는 object spread 뒤 colors/font 순서로 scalar를 읽는다. 큰 raw record를
+    // 복제하기 전에 같은 순서로 검증해 scalar 오류가 quota 오류보다 먼저 보이게 한다.
+    validate_style_scalars(value, colors, preserve_hex)?;
+    let mut output = own_record_scoped(value, scope)?;
     for key in colors {
         let property = JsString::from_str(key);
         let Some(current) = output.get(&property).cloned() else {
@@ -617,53 +724,133 @@ fn to_primitive_error() -> JsError {
     type_error(message)
 }
 
-/// JSON 값 경계에서 JS ToString(string hint)을 수행하며 WTF-16과 대상 숫자 방언을 보존한다.
-pub fn js_to_string_with(value: &JsValue, dialect: NumberDialect) -> Result<JsString, JsError> {
+/// JSON 값 경계에서 JS ToString(string hint)을 수행하며 모든 가변 버퍼를 호출 scope에 선계상한다.
+pub fn js_to_string_scoped(
+    value: &JsValue,
+    dialect: NumberDialect,
+    scope: &mut MemoryScope,
+) -> Result<JsString, JsError> {
     enum Action<'a> {
         Value(&'a JsValue, bool),
-        Comma,
+        Array(&'a [JsValue], usize),
     }
+    fn reserve<T>(
+        values: &mut Vec<T>,
+        additional: usize,
+        scope: &mut MemoryScope,
+    ) -> Result<(), JsError> {
+        if additional <= values.capacity().saturating_sub(values.len()) {
+            return Ok(());
+        }
+        let needed = values
+            .len()
+            .checked_add(additional)
+            .ok_or_else(|| scope.allocation_failure().into_js_error())?;
+        let capacity = std::cmp::max(
+            std::cmp::max(needed, values.capacity().saturating_mul(2)),
+            4,
+        );
+        let additional_capacity = capacity.saturating_sub(values.capacity());
+        let bytes = additional_capacity
+            .checked_mul(std::mem::size_of::<T>())
+            .ok_or_else(|| scope.allocation_failure().into_js_error())?;
+        scope
+            .try_grow(bytes)
+            .map_err(|failure| failure.into_js_error())?;
+        values
+            .try_reserve_exact(capacity.saturating_sub(values.len()))
+            .map_err(|_| scope.allocation_failure().into_js_error())
+    }
+    fn push<T>(values: &mut Vec<T>, value: T, scope: &mut MemoryScope) -> Result<(), JsError> {
+        reserve(values, 1, scope)?;
+        values.push(value);
+        Ok(())
+    }
+    fn extend(
+        output: &mut Vec<u16>,
+        units: impl IntoIterator<Item = u16>,
+        length: usize,
+        scope: &mut MemoryScope,
+    ) -> Result<(), JsError> {
+        reserve(output, length, scope)?;
+        output.extend(units);
+        Ok(())
+    }
+
     let mut output = Vec::new();
-    let mut stack = vec![Action::Value(value, false)];
+    let mut stack = Vec::new();
+    let to_string_key = JsString::from_str("toString");
+    push(&mut stack, Action::Value(value, false), scope)?;
     while let Some(action) = stack.pop() {
         match action {
-            Action::Comma => output.push(b',' as u16),
+            Action::Array(values, index) => {
+                let Some(value) = values.get(index) else {
+                    continue;
+                };
+                if index != 0 {
+                    push(&mut output, b',' as u16, scope)?;
+                }
+                push(&mut stack, Action::Array(values, index + 1), scope)?;
+                push(&mut stack, Action::Value(value, true), scope)?;
+            }
             Action::Value(value, in_array) => match value {
                 JsValue::Undefined if in_array => {}
-                JsValue::Undefined => output.extend("undefined".encode_utf16()),
+                JsValue::Undefined => extend(
+                    &mut output,
+                    "undefined".encode_utf16(),
+                    "undefined".len(),
+                    scope,
+                )?,
                 JsValue::Null if in_array => {}
-                JsValue::Null => output.extend("null".encode_utf16()),
+                JsValue::Null => extend(&mut output, "null".encode_utf16(), "null".len(), scope)?,
                 JsValue::Bool(value) => {
-                    output.extend(if *value { "true" } else { "false" }.encode_utf16())
+                    let text = if *value { "true" } else { "false" };
+                    extend(&mut output, text.encode_utf16(), text.len(), scope)?;
                 }
                 JsValue::Number(value) => {
-                    output.extend(number_to_string_with(*value, dialect).encode_utf16())
+                    let text = number_to_string_with(*value, dialect);
+                    let length = text.encode_utf16().count();
+                    extend(&mut output, text.encode_utf16(), length, scope)?;
                 }
-                JsValue::String(value) => output.extend_from_slice(value.as_units()),
+                JsValue::String(value) => extend(
+                    &mut output,
+                    value.as_units().iter().copied(),
+                    value.len_utf16(),
+                    scope,
+                )?,
                 JsValue::Object(object) => {
-                    if object.get(&JsString::from_str("toString")).is_some() {
+                    if object.get(&to_string_key).is_some() {
                         return Err(to_primitive_error());
                     }
-                    output.extend("[object Object]".encode_utf16());
+                    extend(
+                        &mut output,
+                        "[object Object]".encode_utf16(),
+                        "[object Object]".len(),
+                        scope,
+                    )?;
                 }
                 JsValue::Array(values) => {
-                    let mut first = true;
-                    let mut actions = Vec::with_capacity(values.len().saturating_mul(2));
-                    for item in values {
-                        if !first {
-                            actions.push(Action::Comma);
-                        }
-                        first = false;
-                        actions.push(Action::Value(item, true));
-                    }
-                    for action in actions.into_iter().rev() {
-                        stack.push(action);
-                    }
+                    push(&mut stack, Action::Array(values, 0), scope)?;
                 }
             },
         }
     }
     Ok(JsString::from_utf16(output))
+}
+
+/// 기존 호출자가 쓰는 비회계 호환 래퍼다.
+pub fn js_to_string_with(value: &JsValue, dialect: NumberDialect) -> Result<JsString, JsError> {
+    let mut scope = MemoryScope::unaccounted(OomStyle::RangeErrorCapitalized);
+    js_to_string_scoped(value, dialect, &mut scope)
+}
+
+/// `ToNumber`가 만들 수 있는 문자열 정규화 버퍼를 먼저 계상한 뒤 기존 숫자 의미를 적용한다.
+pub fn js_to_number_scoped(
+    value: &JsValue,
+    dialect: NumberDialect,
+    scope: &mut MemoryScope,
+) -> Result<f64, JsError> {
+    crate::coercion::js_to_number_scoped(value, dialect, scope)
 }
 
 /// 텍스트 값의 ToString을 한 번 수행한 뒤 파싱 없이 JSON 컨테이너 깊이를 검사한다.
@@ -682,7 +869,19 @@ pub fn assert_json_text_depth_with(
     message: &str,
     dialect: NumberDialect,
 ) -> Result<JsString, JsError> {
-    let text = js_to_string_with(value, dialect)?;
+    let mut scope = MemoryScope::unaccounted(OomStyle::RangeErrorCapitalized);
+    assert_json_text_depth_with_scoped(value, limit, message, dialect, &mut scope)
+}
+
+/// 지정한 수 방언으로 텍스트를 scoped `ToString`하고 JSON 컨테이너 깊이를 검사한다.
+pub fn assert_json_text_depth_with_scoped(
+    value: &JsValue,
+    limit: usize,
+    message: &str,
+    dialect: NumberDialect,
+    scope: &mut MemoryScope,
+) -> Result<JsString, JsError> {
+    let text = js_to_string_scoped(value, dialect, scope)?;
     let mut depth = 0usize;
     let mut in_string = false;
     let mut escaped = false;

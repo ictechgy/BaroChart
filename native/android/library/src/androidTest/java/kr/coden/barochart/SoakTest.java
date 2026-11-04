@@ -28,6 +28,8 @@ public class SoakTest {
     private static final String TAG = "BaroChartSoak";
     private final Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
     private final double minutes = Double.parseDouble(InstrumentationRegistry.getArguments().getString("soakMinutes", "0.2"));
+    private final String backend = InstrumentationRegistry.getArguments().getString("backend", "javascript");
+    private final String runId = InstrumentationRegistry.getArguments().getString("runId", "missing-run-id");
 
     private interface MainBody { void run() throws Exception; }
 
@@ -43,7 +45,9 @@ public class SoakTest {
         return out;
     }
 
-    private static void report(String name, JSONObject report) {
+    private void report(String name, JSONObject report) {
+        try { report.put("runId", runId).put("backend", backend); }
+        catch (org.json.JSONException error) { throw new IllegalStateException("Soak report metadata failed", error); }
         Log.i(TAG, "BAROCHART_SOAK_REPORT " + name + " " + report);
     }
 
@@ -52,7 +56,7 @@ public class SoakTest {
         AtomicReference<BaroChartEngine> engineRef = new AtomicReference<>();
         AtomicReference<BaroChartView> viewRef = new AtomicReference<>();
         onMain(() -> {
-            BaroChartEngine engine = BaroChartEngine.create(context, EngineOptions.defaults());
+            BaroChartEngine engine = BaroChartValidation.create(context, EngineOptions.defaults(), backend);
             engine.setBars(data);
             engine.addIndicator(Indicator.ema(20), "ema");
             engine.addSeries(Series.builder("ema-line", SeriesType.LINE).indicator("ema").build());
@@ -69,7 +73,8 @@ public class SoakTest {
             ticks[0]++;
             onMain(() -> streamTick(engineRef.get(), viewRef.get(), data, ticks[0], target));
             if (System.nanoTime() >= nextSample) {
-                samples.put(new JSONObject().put("seconds", (System.nanoTime() - started) / 1e9).put("pssKiB", Debug.getPss()));
+                samples.put(new JSONObject().put("seconds", (System.nanoTime() - started) / 1e9).put("pssKiB", Debug.getPss())
+                    .put("runtimeRequestedBytes", engineRef.get().runtimeMetrics().optLong("requestedLiveBytes", -1)));
                 nextSample = System.nanoTime() + sampleEvery;
             }
             Thread.sleep(100);
@@ -154,16 +159,20 @@ public class SoakTest {
     @Test public void createDisposeCycles() throws Exception {
         int cycles = minutes >= 15 ? 500 : 40, warmup = minutes >= 15 ? 50 : 10;
         List<double[]> samples = new ArrayList<>();
+        List<double[]> requestedSamples = new ArrayList<>();
         Bitmap target = Bitmap.createBitmap(320, 240, Bitmap.Config.ARGB_8888);
         List<Bar> data = Collections.unmodifiableList(bars(200));
         for (int cycle = 0; cycle < cycles; cycle++) {
+            final int currentCycle = cycle;
             if (cycle >= warmup && (cycle - warmup) % 25 == 0) samples.add(new double[] {cycle, Debug.getPss()});
             onMain(() -> {
-                BaroChartEngine engine = BaroChartEngine.create(context, EngineOptions.defaults());
+                BaroChartEngine engine = BaroChartValidation.create(context, EngineOptions.defaults(), backend);
                 engine.setBars(data);
                 BaroChartView view = new BaroChartView(context, engine);
                 view.layout(0, 0, 320, 240);
                 view.draw(new Canvas(target));
+                if (currentCycle >= warmup && (currentCycle - warmup) % 25 == 0)
+                    requestedSamples.add(new double[] {currentCycle, engine.runtimeMetrics().optLong("requestedLiveBytes", -1)});
                 engine.close();
             });
         }
@@ -173,6 +182,9 @@ public class SoakTest {
         JSONArray series = new JSONArray();
         for (double[] sample : samples) series.put(new JSONObject().put("cycle", sample[0]).put("pssKiB", sample[1]));
         verdict.put("samples", series);
+        JSONArray requested = new JSONArray();
+        for (double[] sample : requestedSamples) requested.put(new JSONObject().put("cycle", sample[0]).put("requestedRuntimeBytes", sample[1]));
+        verdict.put("requestedRuntimeAllocationSamples", requested).put("memoryAccounting", "requested runtime bytes are reported separately from process PSS");
         report("android-create-dispose", verdict);
         if (minutes >= 15) assertTrue(verdict.toString(), verdict.getBoolean("passed"));
     }

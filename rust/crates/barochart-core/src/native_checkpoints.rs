@@ -3,14 +3,16 @@
 #![forbid(unsafe_code)]
 
 use std::collections::BTreeMap;
+use std::mem::size_of;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use barochart_js::error::JsError;
 use barochart_js::json::JsValue;
+use barochart_js::memory::{MemoryContext, MemoryGroup, MemoryScope, OomStyle};
 use barochart_js::num::number_to_string;
 use barochart_js::string::JsString;
 
-use crate::checkpoint_codec::{safe_checkpoint_parse, safe_checkpoint_stringify};
+use crate::checkpoint_codec::{safe_checkpoint_parse_scoped, safe_checkpoint_stringify_scoped};
 use crate::indicator_checkpoint::validate_checkpoint_state;
 use crate::indicator_params::OrderedIndicatorParams;
 use crate::indicator_types::IndicatorProgram;
@@ -190,8 +192,17 @@ pub fn native_checkpoint_footprint(state: &JsValue) -> Result<NativeCheckpointFo
 }
 
 fn native_checkpoint_text(state: &JsValue) -> Result<(JsString, usize), JsError> {
+    let mut scope = MemoryScope::unaccounted(OomStyle::RangeErrorCapitalized);
+    native_checkpoint_text_scoped(state, &mut scope)
+}
+
+fn native_checkpoint_text_scoped(
+    state: &JsValue,
+    scope: &mut MemoryScope,
+) -> Result<(JsString, usize), JsError> {
     let footprint = native_checkpoint_footprint(state)?;
-    let text = safe_checkpoint_stringify(state)?;
+    let text =
+        safe_checkpoint_stringify_scoped(state, barochart_js::num::NumberDialect::PLATFORM, scope)?;
     if text.len_utf16() * 2 != footprint.encoded_bytes {
         return Err(type_error("Native checkpoint serialization changed"));
     }
@@ -208,11 +219,20 @@ struct Ledger {
 #[derive(Clone, Debug)]
 pub struct NativeCheckpointBudget {
     ledger: Arc<Mutex<Ledger>>,
+    memory: MemoryContext,
 }
 
 impl NativeCheckpointBudget {
     /// 고정 상한의 빈 ledger를 만든다.
     pub fn new(max_bytes: usize) -> Result<Self, JsError> {
+        Self::new_with_memory(
+            max_bytes,
+            MemoryContext::unaccounted(OomStyle::RangeErrorCapitalized),
+        )
+    }
+
+    /// 논리 budget과 별개로 실제 checkpoint payload를 과금할 context를 선택한다.
+    pub fn new_with_memory(max_bytes: usize, memory: MemoryContext) -> Result<Self, JsError> {
         if max_bytes > NATIVE_CHECKPOINT_TOTAL_BYTES {
             return Err(range_error("Native checkpoint total byte limit"));
         }
@@ -221,6 +241,7 @@ impl NativeCheckpointBudget {
                 used: 0,
                 limit: max_bytes,
             })),
+            memory,
         })
     }
 
@@ -256,6 +277,11 @@ impl NativeCheckpointBudget {
     pub fn max_bytes(&self) -> usize {
         self.lock().limit
     }
+
+    /// 실제 payload account context다.
+    pub fn memory_context(&self) -> &MemoryContext {
+        &self.memory
+    }
 }
 
 /// 검증된 JSON text를 오름차순 index로 보관하는 bounded staging map이다.
@@ -264,8 +290,9 @@ pub struct NativeCheckpointMap {
     params: OrderedIndicatorParams,
     budget: NativeCheckpointBudget,
     block: usize,
-    records: BTreeMap<usize, JsString>,
+    records: Vec<(usize, JsString)>,
     encoded_bytes: usize,
+    memory: MemoryGroup,
     disposed: bool,
 }
 
@@ -280,15 +307,75 @@ impl NativeCheckpointMap {
         if block == 0 || block > NATIVE_CHECKPOINT_MAX_INDEX {
             return Err(type_error("Native checkpoint context"));
         }
+        let memory = MemoryGroup::empty(budget.memory_context().clone());
         Ok(Self {
             program,
             params,
             budget,
             block,
-            records: BTreeMap::new(),
+            records: Vec::new(),
             encoded_bytes: 0,
+            memory,
             disposed: false,
         })
+    }
+
+    fn position(&self, index: usize) -> Result<usize, usize> {
+        self.records
+            .binary_search_by_key(&index, |(record_index, _)| *record_index)
+    }
+
+    fn record(&self, index: usize) -> Option<&JsString> {
+        self.position(index)
+            .ok()
+            .map(|position| &self.records[position].1)
+    }
+
+    fn slot_bytes(&self) -> usize {
+        self.records
+            .capacity()
+            .saturating_mul(size_of::<(usize, JsString)>())
+    }
+
+    fn owned_bytes(&self) -> usize {
+        self.encoded_bytes.saturating_add(self.slot_bytes())
+    }
+
+    fn ensure_insert_capacity(&mut self) -> Result<(), JsError> {
+        if self.records.len() < self.records.capacity() {
+            return Ok(());
+        }
+        let old_bytes = self.slot_bytes();
+        let mut candidate = self
+            .memory
+            .context()
+            .reserve_group(size_of::<(usize, JsString)>())
+            .map_err(|failure| failure.into_js_error())?;
+        self.records
+            .try_reserve_exact(1)
+            .map_err(|_| self.memory.context().allocation_failure().into_js_error())?;
+        let added = self
+            .slot_bytes()
+            .checked_sub(old_bytes)
+            .ok_or_else(|| type_error("Native checkpoint memory"))?;
+        candidate
+            .try_resize(added)
+            .map_err(|failure| failure.into_js_error())?;
+        self.memory
+            .absorb(candidate)
+            .map_err(|failure| failure.into_js_error())
+    }
+
+    fn parse_record(&self, text: &JsString) -> Result<JsValue, JsError> {
+        let mut scope = self.memory.context().scope();
+        let parse_text = text
+            .try_clone_scoped(&mut scope)
+            .map_err(|failure| failure.into_js_error())?;
+        safe_checkpoint_parse_scoped(
+            &JsValue::String(parse_text),
+            barochart_js::num::NumberDialect::PLATFORM,
+            &mut scope,
+        )
     }
 
     fn active(&self) -> Result<(), JsError> {
@@ -323,21 +410,43 @@ impl NativeCheckpointMap {
     pub fn set(&mut self, index: f64, state: JsValue) -> Result<(), JsError> {
         self.active()?;
         let index = self.set_index(index)?;
-        let (text, new_bytes) = native_checkpoint_text(&state)?;
-        let owned = safe_checkpoint_parse(&JsValue::String(text.clone()))?;
+        let mut scope = self.memory.context().scope();
+        let (text, new_bytes) = native_checkpoint_text_scoped(&state, &mut scope)?;
+        let parse_text = text
+            .try_clone_scoped(&mut scope)
+            .map_err(|failure| failure.into_js_error())?;
+        let owned = safe_checkpoint_parse_scoped(
+            &JsValue::String(parse_text),
+            barochart_js::num::NumberDialect::PLATFORM,
+            &mut scope,
+        )?;
         let validated =
             validate_checkpoint_state(self.program, &self.params, &owned, index as f64)?;
-        let (validated_text, validated_bytes) = native_checkpoint_text(&validated)?;
+        let (validated_text, validated_bytes) =
+            native_checkpoint_text_scoped(&validated, &mut scope)?;
         if validated_text != text || validated_bytes != new_bytes {
             return Err(type_error("Native checkpoint validator mutated state"));
         }
-        let old_bytes = self
-            .records
-            .get(&index)
-            .map_or(0, |text| text.len_utf16() * 2);
+        let old_bytes = self.record(index).map_or(0, |text| text.len_utf16() * 2);
+        let text_memory = scope
+            .split_persistent(new_bytes)
+            .map_err(|failure| failure.into_js_error())?;
+        let position = self.position(index);
+        if position.is_err() {
+            self.ensure_insert_capacity()?;
+        }
         self.budget.charge(old_bytes, new_bytes)?;
-        self.records.insert(index, text);
+        self.memory
+            .absorb(text_memory)
+            .map_err(|failure| failure.into_js_error())?;
+        match position {
+            Ok(position) => self.records[position].1 = text,
+            Err(position) => self.records.insert(position, (index, text)),
+        }
         self.encoded_bytes = self.encoded_bytes - old_bytes + new_bytes;
+        self.memory
+            .try_resize(self.owned_bytes())
+            .map_err(|failure| failure.into_js_error())?;
         Ok(())
     }
 
@@ -347,9 +456,8 @@ impl NativeCheckpointMap {
         let Some(index) = Self::lookup_index(index) else {
             return Ok(None);
         };
-        self.records
-            .get(&index)
-            .map(|text| safe_checkpoint_parse(&JsValue::String(text.clone())))
+        self.record(index)
+            .map(|text| self.parse_record(text))
             .transpose()
     }
 
@@ -359,13 +467,17 @@ impl NativeCheckpointMap {
         let Some(index) = Self::lookup_index(index) else {
             return Ok(false);
         };
-        let Some(text) = self.records.get(&index) else {
+        let Ok(position) = self.position(index) else {
             return Ok(false);
         };
+        let text = &self.records[position].1;
         let bytes = text.len_utf16() * 2;
         self.budget.charge(bytes, 0)?;
-        self.records.remove(&index);
+        self.records.remove(position);
         self.encoded_bytes -= bytes;
+        self.memory
+            .try_resize(self.owned_bytes())
+            .map_err(|failure| failure.into_js_error())?;
         Ok(true)
     }
 
@@ -373,15 +485,22 @@ impl NativeCheckpointMap {
     pub fn clear(&mut self) -> Result<(), JsError> {
         self.active()?;
         self.budget.charge(self.encoded_bytes, 0)?;
-        self.records.clear();
+        self.records = Vec::new();
         self.encoded_bytes = 0;
+        self.memory
+            .try_resize(self.owned_bytes())
+            .map_err(|failure| failure.into_js_error())?;
         Ok(())
     }
 
     /// 오름차순 checkpoint index 사본이다.
     pub fn keys(&self) -> Result<Vec<f64>, JsError> {
         self.active()?;
-        Ok(self.records.keys().map(|index| *index as f64).collect())
+        let mut keys = Vec::new();
+        keys.try_reserve_exact(self.records.len())
+            .map_err(|_| self.memory.context().allocation_failure().into_js_error())?;
+        keys.extend(self.records.iter().map(|(index, _)| *index as f64));
+        Ok(keys)
     }
 
     /// 0부터 `length`까지 block 경계가 빠짐없이 있고 각 record가 여전히 유효한지 검사한다.
@@ -407,7 +526,7 @@ impl NativeCheckpointMap {
             if *index != ordinal * self.block {
                 return Err(type_error("Native checkpoint history boundary"));
             }
-            let state = safe_checkpoint_parse(&JsValue::String(text.clone()))?;
+            let state = self.parse_record(text)?;
             let validated =
                 validate_checkpoint_state(self.program, &self.params, &state, *index as f64)?;
             let (validated_text, _) = native_checkpoint_text(&validated)?;
@@ -420,19 +539,54 @@ impl NativeCheckpointMap {
 
     /// 평범한 오름차순 map을 만든 뒤 staging map을 영구 retire한다.
     pub fn publish(&mut self) -> Result<BTreeMap<usize, JsValue>, JsError> {
+        self.publish_accounted().map(|(records, _)| records)
+    }
+
+    /// 검증된 state map과 이미 과금된 payload group을 함께 이동하고 staging text를 retire한다.
+    pub fn publish_accounted(
+        &mut self,
+    ) -> Result<(BTreeMap<usize, JsValue>, MemoryGroup), JsError> {
+        let (entries, memory) = self.publish_entries_accounted()?;
+        Ok((entries.into_iter().collect(), memory))
+    }
+
+    /// 검증된 state를 fallibly reservable sorted entries와 moved group으로 게시한다.
+    pub fn publish_entries_accounted(
+        &mut self,
+    ) -> Result<(Vec<(usize, JsValue)>, MemoryGroup), JsError> {
         self.active()?;
-        let mut ordinary = BTreeMap::new();
+        let (mut ordinary, mut output_memory) = self
+            .memory
+            .context()
+            .try_vec_capacity(self.records.len())
+            .map_err(|failure| failure.into_js_error())?;
         for (index, text) in &self.records {
-            ordinary.insert(
-                *index,
-                safe_checkpoint_parse(&JsValue::String(text.clone()))?,
-            );
+            let mut scope = self.memory.context().scope();
+            let parse_text = text
+                .try_clone_scoped(&mut scope)
+                .map_err(|failure| failure.into_js_error())?;
+            let state = safe_checkpoint_parse_scoped(
+                &JsValue::String(parse_text),
+                barochart_js::num::NumberDialect::PLATFORM,
+                &mut scope,
+            )?;
+            let bytes = native_checkpoint_footprint(&state)?.logical_bytes;
+            let state_memory = scope
+                .split_persistent(bytes)
+                .map_err(|failure| failure.into_js_error())?;
+            output_memory
+                .absorb(state_memory)
+                .map_err(|failure| failure.into_js_error())?;
+            ordinary.push((*index, state));
         }
         self.budget.charge(self.encoded_bytes, 0)?;
-        self.records.clear();
+        self.records = Vec::new();
         self.encoded_bytes = 0;
+        self.memory
+            .try_resize(0)
+            .map_err(|failure| failure.into_js_error())?;
         self.disposed = true;
-        Ok(ordinary)
+        Ok((ordinary, output_memory))
     }
 
     /// staging map을 idempotent하게 retire하고 남은 과금을 환불한다.
@@ -441,8 +595,11 @@ impl NativeCheckpointMap {
             return Ok(());
         }
         self.budget.charge(self.encoded_bytes, 0)?;
-        self.records.clear();
+        self.records = Vec::new();
         self.encoded_bytes = 0;
+        self.memory
+            .try_resize(0)
+            .map_err(|failure| failure.into_js_error())?;
         self.disposed = true;
         Ok(())
     }
@@ -455,6 +612,11 @@ impl NativeCheckpointMap {
     /// 이 map이 ledger에 과금한 UTF-16 JSON byte 수다.
     pub fn encoded_bytes(&self) -> usize {
         self.encoded_bytes
+    }
+
+    /// actual encoded UTF-16 payload account bytes다.
+    pub fn accounted_bytes(&self) -> u64 {
+        self.memory.requested_bytes()
     }
 }
 

@@ -7,6 +7,9 @@
 //! - `trim`은 JS 공백 표를 쓴다. Rust `str::trim`은 U+0085를 지우고 U+FEFF를 남겨 JS와 다르다.
 
 use std::fmt;
+use std::mem::size_of;
+
+use crate::memory::{MemoryFailure, MemoryScope};
 
 /// WTF-16 문자열. 단독 서로게이트를 담을 수 있다(코어가 slice로 쌍을 가를 수 있으므로).
 ///
@@ -24,9 +27,40 @@ impl JsString {
         Self(s.encode_utf16().collect())
     }
 
+    /// UTF-8 문자열을 scoped fallible UTF-16 allocation으로 복사한다.
+    pub fn try_from_str(s: &str, scope: &mut MemoryScope) -> Result<Self, MemoryFailure> {
+        let length = s.encode_utf16().count();
+        let bytes = length
+            .checked_mul(size_of::<u16>())
+            .ok_or_else(|| scope.allocation_failure())?;
+        scope.try_grow(bytes)?;
+        let mut units = Vec::new();
+        units
+            .try_reserve_exact(length)
+            .map_err(|_| scope.allocation_failure())?;
+        units.extend(s.encode_utf16());
+        Ok(Self(units))
+    }
+
     /// UTF-16 코드 단위를 그대로 담는다. 단독 서로게이트도 검사 없이 받는다.
     pub fn from_utf16(units: Vec<u16>) -> Self {
         Self(units)
+    }
+
+    /// 같은 WTF-16 units를 scoped fallible allocation으로 복제한다.
+    pub fn try_clone_scoped(&self, scope: &mut MemoryScope) -> Result<Self, MemoryFailure> {
+        let bytes = self
+            .0
+            .len()
+            .checked_mul(size_of::<u16>())
+            .ok_or_else(|| scope.allocation_failure())?;
+        scope.try_grow(bytes)?;
+        let mut units = Vec::new();
+        units
+            .try_reserve_exact(self.0.len())
+            .map_err(|_| scope.allocation_failure())?;
+        units.extend_from_slice(&self.0);
+        Ok(Self(units))
     }
 
     /// `String.prototype.length`: UTF-16 코드 단위 수
@@ -52,6 +86,13 @@ impl JsString {
     ///
     /// 공백 문자는 모두 BMP라 코드 단위로 보면 된다. 단독 서로게이트는 공백이 아니라 남는다.
     pub fn trim(&self) -> JsString {
+        Self(self.trimmed_units().to_vec())
+    }
+
+    /// `String.prototype.trim` 결과를 allocation 없이 원본 WTF-16 구간으로 빌린다.
+    ///
+    /// 숫자 coercion처럼 결과를 즉시 읽기만 하는 경로가 큰 입력을 복제하지 않도록 한다.
+    pub fn trimmed_units(&self) -> &[u16] {
         let start = self
             .0
             .iter()
@@ -62,10 +103,7 @@ impl JsString {
             .iter()
             .rposition(|&unit| !is_js_whitespace(unit))
             .map_or(start, |last| last + 1);
-        match self.0.get(start..end) {
-            Some(units) => Self(units.to_vec()),
-            None => Self::default(),
-        }
+        self.0.get(start..end).unwrap_or_default()
     }
 
     /// `String.prototype.toLowerCase`: 언어와 무관한 전체 유니코드 소문자 변환.
@@ -96,6 +134,29 @@ impl JsString {
     /// `json::parse_json_utf16(text.as_units(), mode)`로 읽는다.
     pub fn to_string_lossy(&self) -> String {
         String::from_utf16_lossy(&self.0)
+    }
+
+    /// 잘못된 surrogate를 U+FFFD로 바꾸되 UTF-8 buffer를 allocation 전에 예약한다.
+    pub fn try_to_string_lossy_scoped(
+        &self,
+        scope: &mut MemoryScope,
+    ) -> Result<String, MemoryFailure> {
+        let mut length = 0usize;
+        for scalar in char::decode_utf16(self.0.iter().copied()) {
+            let scalar = scalar.unwrap_or(char::REPLACEMENT_CHARACTER);
+            length = length
+                .checked_add(scalar.len_utf8())
+                .ok_or_else(|| scope.allocation_failure())?;
+        }
+        scope.try_grow(length)?;
+        let mut result = String::new();
+        result
+            .try_reserve_exact(length)
+            .map_err(|_| scope.allocation_failure())?;
+        for scalar in char::decode_utf16(self.0.iter().copied()) {
+            result.push(scalar.unwrap_or(char::REPLACEMENT_CHARACTER));
+        }
+        Ok(result)
     }
 
     /// UTF-16 코드 단위를 빌려준다.

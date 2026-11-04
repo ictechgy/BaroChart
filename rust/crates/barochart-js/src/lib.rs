@@ -6,6 +6,7 @@
 //! - `num`: `Number#toString`, `toFixed`/`toPrecision`/`toExponential`,
 //!   `Math.round`/`min`/`max`/`sign`, `ToInt32`/`ToUint32`, `Object.is`
 //! - `math`: 엔진마다 다른 `Math.log`/`exp`/`hypot`(기기는 플랫폼 libm, wasm32는 호스트 import)
+//! - `memory`: 엔진별 requested-byte 회계와 output 수명 lease
 //! - `string`: UTF-16 코드 단위로 세는 WTF-16 문자열(`JsString`)과 JS 공백 표
 //! - `json`: 키 순서를 보존하는 `JsValue`·`JsObject`와 손으로 쓴 파서·writer(무손실 모드 포함, 재귀 없음)
 //! - `date`: `Date.UTC`, TimeClip, `toISOString`, 그레고리력 변환, M0 시간대 계약의 엄격한 ISO 파서
@@ -24,5 +25,11 @@ pub mod date;
 pub mod error;
 pub mod json;
 pub mod math;
+pub mod memory;
 pub mod num;
 pub mod string;
+
+pub use memory::{
+    MemoryAccount, MemoryContext, MemoryFailure, MemoryGroup, MemoryLease, MemoryScope,
+    MemorySnapshot, OOM_LIMIT_CODE, OOM_SYSTEM_CODE, OomStyle, oom_style_from_error,
+};

@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use barochart_js::error::JsError;
 use barochart_js::json::{JsObject, JsValue};
+use barochart_js::memory::{MemoryScope, OomStyle};
 use barochart_js::string::JsString;
 
 use crate::drawing_types::{Drawing, DrawingPoint, DrawingType};
@@ -135,37 +136,71 @@ pub fn position_metrics_for_parts(
 }
 
 impl PositionMetrics {
-    /// 브리지 공개 결과 순서로 지표를 직렬화한다.
-    pub fn to_value(self) -> JsValue {
-        let mut metrics = JsObject::new();
-        metrics.insert(
-            JsString::from_str("direction"),
-            JsValue::String(JsString::from_str(self.direction)),
-        );
-        metrics.insert(
-            JsString::from_str("startTime"),
-            JsValue::Number(self.start_time),
-        );
-        metrics.insert(
-            JsString::from_str("endTime"),
-            JsValue::Number(self.end_time),
-        );
-        metrics.insert(JsString::from_str("entry"), JsValue::Number(self.entry));
-        metrics.insert(JsString::from_str("stop"), JsValue::Number(self.stop));
-        metrics.insert(JsString::from_str("target"), JsValue::Number(self.target));
-        metrics.insert(JsString::from_str("risk"), JsValue::Number(self.risk));
-        metrics.insert(JsString::from_str("reward"), JsValue::Number(self.reward));
-        metrics.insert(
-            JsString::from_str("riskPercent"),
-            self.risk_percent.map_or(JsValue::Null, JsValue::Number),
-        );
-        metrics.insert(
-            JsString::from_str("rewardPercent"),
-            self.reward_percent.map_or(JsValue::Null, JsValue::Number),
-        );
-        metrics.insert(JsString::from_str("ratio"), JsValue::Number(self.ratio));
-        JsValue::Object(metrics)
+    /// 브리지 공개 결과 순서로 지표를 caller scope에서 fallible 직렬화한다.
+    pub fn to_value_scoped(self, scope: &mut MemoryScope) -> Result<JsValue, JsError> {
+        let entries = [
+            (
+                JsString::try_from_str("direction", scope).map_err(memory_error)?,
+                JsValue::String(
+                    JsString::try_from_str(self.direction, scope).map_err(memory_error)?,
+                ),
+            ),
+            (
+                JsString::try_from_str("startTime", scope).map_err(memory_error)?,
+                JsValue::Number(self.start_time),
+            ),
+            (
+                JsString::try_from_str("endTime", scope).map_err(memory_error)?,
+                JsValue::Number(self.end_time),
+            ),
+            (
+                JsString::try_from_str("entry", scope).map_err(memory_error)?,
+                JsValue::Number(self.entry),
+            ),
+            (
+                JsString::try_from_str("stop", scope).map_err(memory_error)?,
+                JsValue::Number(self.stop),
+            ),
+            (
+                JsString::try_from_str("target", scope).map_err(memory_error)?,
+                JsValue::Number(self.target),
+            ),
+            (
+                JsString::try_from_str("risk", scope).map_err(memory_error)?,
+                JsValue::Number(self.risk),
+            ),
+            (
+                JsString::try_from_str("reward", scope).map_err(memory_error)?,
+                JsValue::Number(self.reward),
+            ),
+            (
+                JsString::try_from_str("riskPercent", scope).map_err(memory_error)?,
+                self.risk_percent.map_or(JsValue::Null, JsValue::Number),
+            ),
+            (
+                JsString::try_from_str("rewardPercent", scope).map_err(memory_error)?,
+                self.reward_percent.map_or(JsValue::Null, JsValue::Number),
+            ),
+            (
+                JsString::try_from_str("ratio", scope).map_err(memory_error)?,
+                JsValue::Number(self.ratio),
+            ),
+        ];
+        JsObject::try_from_entries_scoped(entries, scope)
+            .map(JsValue::Object)
+            .map_err(memory_error)
     }
+
+    /// 기존 테스트와 비회계 도구가 쓰는 지표 직렬화 wrapper다.
+    pub fn to_value(self) -> JsValue {
+        let mut scope = MemoryScope::unaccounted(OomStyle::RangeErrorCapitalized);
+        self.to_value_scoped(&mut scope)
+            .expect("unaccounted position metrics serialization")
+    }
+}
+
+fn memory_error(failure: barochart_js::memory::MemoryFailure) -> JsError {
+    failure.into_js_error()
 }
 
 fn type_error(message: &str) -> JsError {

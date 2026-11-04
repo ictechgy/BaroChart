@@ -6,11 +6,12 @@
 #![forbid(unsafe_code)]
 
 use barochart_js::error::JsError;
-use barochart_js::json::{JsValue, JsonMode, parse_json_utf16_with};
+use barochart_js::json::{JsValue, JsonFailure, JsonMode, parse_json_utf16_scoped};
+use barochart_js::memory::{MemoryScope, OomStyle};
 use barochart_js::num::{NumberDialect, number_to_string_with};
 use barochart_js::string::JsString;
 
-use crate::contracts::js_to_string_with;
+use crate::contracts::js_to_string_scoped;
 
 fn ascii_eq(value: &[u16], expected: &str) -> bool {
     value.iter().copied().eq(expected.encode_utf16())
@@ -83,8 +84,11 @@ fn power_two_integer(digits: &[u16], radix: u8, width: u32) -> Option<f64> {
     Some(f64::from_bits((exponent << 52) | fraction))
 }
 
-/// StringNumericLiteral의 십진 부분을 JSON 숫자 문법으로 바꾼다.
-fn normalized_decimal(value: &[u16]) -> Option<Vec<u16>> {
+/// StringNumericLiteral의 십진 부분을 scoped JSON 숫자 문법 버퍼로 바꾼다.
+fn normalized_decimal_scoped(
+    value: &[u16],
+    scope: &mut MemoryScope,
+) -> Result<Option<Vec<u16>>, JsError> {
     let mut index = 0usize;
     let negative = value.first() == Some(&(b'-' as u16));
     if matches!(value.first(), Some(unit) if *unit == b'+' as u16 || *unit == b'-' as u16) {
@@ -107,7 +111,7 @@ fn normalized_decimal(value: &[u16]) -> Option<Vec<u16>> {
     };
     let fraction_end = index;
     if integer_start == integer_end && fraction_start.is_none_or(|start| start == fraction_end) {
-        return None;
+        return Ok(None);
     }
     let exponent_start = index;
     if matches!(value.get(index), Some(unit) if *unit == b'e' as u16 || *unit == b'E' as u16) {
@@ -120,16 +124,29 @@ fn normalized_decimal(value: &[u16]) -> Option<Vec<u16>> {
             index += 1;
         }
         if digits == index {
-            return None;
+            return Ok(None);
         }
     }
     if index != value.len() {
-        return None;
+        return Ok(None);
     }
 
     let integer = &value[integer_start..integer_end];
     let first_nonzero = integer.iter().position(|unit| *unit != b'0' as u16);
-    let mut normalized = Vec::with_capacity(value.len() + 2);
+    let capacity = value
+        .len()
+        .checked_add(2)
+        .ok_or_else(|| scope.allocation_failure().into_js_error())?;
+    let bytes = capacity
+        .checked_mul(std::mem::size_of::<u16>())
+        .ok_or_else(|| scope.allocation_failure().into_js_error())?;
+    scope
+        .try_grow(bytes)
+        .map_err(|failure| failure.into_js_error())?;
+    let mut normalized = Vec::new();
+    normalized
+        .try_reserve_exact(capacity)
+        .map_err(|_| scope.allocation_failure().into_js_error())?;
     if negative {
         normalized.push(b'-' as u16);
     }
@@ -148,20 +165,39 @@ fn normalized_decimal(value: &[u16]) -> Option<Vec<u16>> {
     if exponent_start < value.len() {
         normalized.extend_from_slice(&value[exponent_start..]);
     }
-    Some(normalized)
+    Ok(Some(normalized))
 }
 
-fn string_to_number(value: &JsString, dialect: NumberDialect) -> f64 {
-    let trimmed = JsString::trim(value);
-    let value = trimmed.as_units();
+fn parse_number_failure(failure: JsonFailure) -> JsError {
+    match failure {
+        JsonFailure::Syntax(error) => error,
+        JsonFailure::Memory(failure) => failure.into_js_error(),
+    }
+}
+
+/// 빌린 WTF-16 StringNumericLiteral을 실제 fallible allocation 경계에서 Number로 바꾼다.
+pub(crate) fn string_units_to_number_scoped(
+    raw: &[u16],
+    dialect: NumberDialect,
+    scope: &mut MemoryScope,
+) -> Result<f64, JsError> {
+    let start = raw
+        .iter()
+        .position(|unit| !barochart_js::string::is_js_whitespace(*unit))
+        .unwrap_or(raw.len());
+    let end = raw
+        .iter()
+        .rposition(|unit| !barochart_js::string::is_js_whitespace(*unit))
+        .map_or(start, |last| last + 1);
+    let value = raw.get(start..end).unwrap_or_default();
     if value.is_empty() {
-        return 0.0;
+        return Ok(0.0);
     }
     if ascii_eq(value, "Infinity") || ascii_eq(value, "+Infinity") {
-        return f64::INFINITY;
+        return Ok(f64::INFINITY);
     }
     if ascii_eq(value, "-Infinity") {
-        return f64::NEG_INFINITY;
+        return Ok(f64::NEG_INFINITY);
     }
     if value.len() >= 2 && value[0] == b'0' as u16 {
         let parsed = match value[1] {
@@ -177,20 +213,33 @@ fn string_to_number(value: &JsString, dialect: NumberDialect) -> f64 {
             _ => None,
         };
         if let Some(parsed) = parsed {
-            return parsed;
+            return Ok(parsed);
         }
         if matches!(value[1], unit if unit == b'x' as u16 || unit == b'X' as u16 || unit == b'o' as u16 || unit == b'O' as u16 || unit == b'b' as u16 || unit == b'B' as u16)
         {
-            return f64::NAN;
+            return Ok(f64::NAN);
         }
     }
-    let Some(normalized) = normalized_decimal(value) else {
-        return f64::NAN;
+    let Some(normalized) = normalized_decimal_scoped(value, scope)? else {
+        return Ok(f64::NAN);
     };
-    match parse_json_utf16_with(&normalized, JsonMode::Standard, dialect) {
-        Ok(JsValue::Number(value)) => value,
-        _ => f64::NAN,
-    }
+    Ok(
+        match parse_json_utf16_scoped(&normalized, JsonMode::Standard, dialect, scope)
+            .map_err(parse_number_failure)?
+        {
+            JsValue::Number(value) => value,
+            _ => f64::NAN,
+        },
+    )
+}
+
+/// WTF-16 문자열의 `ToNumber`를 borrowed trim과 scoped fallible 정규화로 수행한다.
+pub fn string_to_number_scoped(
+    value: &JsString,
+    dialect: NumberDialect,
+    scope: &mut MemoryScope,
+) -> Result<f64, JsError> {
+    string_units_to_number_scoped(value.trimmed_units(), dialect, scope)
 }
 
 /// JSON 값 경계에서 ECMAScript `ToNumber`를 수행한다.
@@ -198,16 +247,26 @@ fn string_to_number(value: &JsString, dialect: NumberDialect) -> f64 {
 /// 배열·객체는 기존 `js_to_string_with`의 bounded `ToPrimitive`를 거쳐 문자열 숫자 문법으로 읽는다.
 /// 문자열 숫자가 문법에 맞지 않으면 오류가 아니라 NaN이며, 대상 숫자 방언은 긴 십진 반올림에 적용된다.
 pub fn js_to_number_with(value: &JsValue, dialect: NumberDialect) -> Result<f64, JsError> {
+    let mut scope = MemoryScope::unaccounted(OomStyle::RangeErrorCapitalized);
+    js_to_number_scoped(value, dialect, &mut scope)
+}
+
+/// JSON 값 경계의 `ToNumber`를 호출 scope의 실제 fallible allocation으로 수행한다.
+pub fn js_to_number_scoped(
+    value: &JsValue,
+    dialect: NumberDialect,
+    scope: &mut MemoryScope,
+) -> Result<f64, JsError> {
     Ok(match value {
         JsValue::Undefined => f64::NAN,
         JsValue::Null => 0.0,
         JsValue::Bool(false) => 0.0,
         JsValue::Bool(true) => 1.0,
         JsValue::Number(value) => *value,
-        JsValue::String(value) => string_to_number(value, dialect),
+        JsValue::String(value) => string_to_number_scoped(value, dialect, scope)?,
         JsValue::Array(_) | JsValue::Object(_) => {
-            let primitive = js_to_string_with(value, dialect)?;
-            string_to_number(&primitive, dialect)
+            let primitive = js_to_string_scoped(value, dialect, scope)?;
+            string_to_number_scoped(&primitive, dialect, scope)?
         }
     })
 }
@@ -221,17 +280,52 @@ pub fn js_add_number_with(
     right: &JsValue,
     dialect: NumberDialect,
 ) -> Result<JsValue, JsError> {
+    let mut scope = MemoryScope::unaccounted(OomStyle::RangeErrorCapitalized);
+    js_add_number_scoped(left, right, dialect, &mut scope)
+}
+
+/// 숫자-왼쪽 `+`의 문자열 결합·숫자 변환 allocation을 호출 scope에서 수행한다.
+pub fn js_add_number_scoped(
+    left: f64,
+    right: &JsValue,
+    dialect: NumberDialect,
+    scope: &mut MemoryScope,
+) -> Result<JsValue, JsError> {
     if matches!(
         right,
         JsValue::String(_) | JsValue::Array(_) | JsValue::Object(_)
     ) {
-        let right = js_to_string_with(right, dialect)?;
+        let converted;
+        let right = match right {
+            JsValue::String(right) => right,
+            JsValue::Array(_) | JsValue::Object(_) => {
+                converted = js_to_string_scoped(right, dialect, scope)?;
+                &converted
+            }
+            _ => unreachable!("string branch checked above"),
+        };
         let left = number_to_string_with(left, dialect);
-        let mut units = Vec::with_capacity(left.encode_utf16().count() + right.len_utf16());
+        let length = left
+            .encode_utf16()
+            .count()
+            .checked_add(right.len_utf16())
+            .ok_or_else(|| scope.allocation_failure().into_js_error())?;
+        let bytes = length
+            .checked_mul(std::mem::size_of::<u16>())
+            .ok_or_else(|| scope.allocation_failure().into_js_error())?;
+        scope
+            .try_grow(bytes)
+            .map_err(|failure| failure.into_js_error())?;
+        let mut units = Vec::new();
+        units
+            .try_reserve_exact(length)
+            .map_err(|_| scope.allocation_failure().into_js_error())?;
         units.extend(left.encode_utf16());
         units.extend_from_slice(right.as_units());
         Ok(JsValue::String(JsString::from_utf16(units)))
     } else {
-        Ok(JsValue::Number(left + js_to_number_with(right, dialect)?))
+        Ok(JsValue::Number(
+            left + js_to_number_scoped(right, dialect, scope)?,
+        ))
     }
 }

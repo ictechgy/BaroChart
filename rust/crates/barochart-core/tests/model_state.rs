@@ -176,9 +176,11 @@ fn coercion_target() -> &'static str {
 
 #[test]
 fn model_reuses_common_coercion_without_a_local_number_grammar() {
-    assert!(MODEL_SOURCE.contains("use crate::coercion::{js_add_number_with, js_to_number_with};"));
-    assert!(MODEL_SOURCE.contains("js_to_number_with("));
-    assert!(MODEL_SOURCE.contains("js_add_number_with("));
+    assert!(
+        MODEL_SOURCE.contains("use crate::coercion::{js_add_number_scoped, js_to_number_scoped};")
+    );
+    assert!(MODEL_SOURCE.contains("js_to_number_scoped("));
+    assert!(MODEL_SOURCE.contains("js_add_number_scoped("));
     for duplicate in [
         "fn numeric_coercion(",
         "fn parse_js_number(",
@@ -994,9 +996,10 @@ fn typed_value_attachment_is_owned_revisioned_and_omitted_from_portable_wire() {
             .is_none()
     );
     let raw = model.series[0].raw_record();
-    let raw_values = array(get(&raw, "values"));
-    assert!(number(&raw_values[0]).is_nan());
-    assert_eq!(number(&raw_values[1]).to_bits(), (-0.0_f64).to_bits());
+    assert!(object(&raw).get(&JsString::from_str("values")).is_none());
+    let values = model.series[0].values.as_ref().unwrap();
+    assert!(values[0].is_nan());
+    assert_eq!(values[1].to_bits(), (-0.0_f64).to_bits());
     assert_eq!(model.series_values_revision(), None);
 
     let before = model.snapshot();

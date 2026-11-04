@@ -96,7 +96,7 @@ jobs:
           echo "CARGO_HOME=${CARGO_HOME:-unset}"
           command -v rustup cargo || true
           rustup --version
-          rustup toolchain install --no-self-update
+          rustup toolchain install --no-self-update --component rust-src
           rustup show active-toolchain
 
       - name: Check Rust formatting
@@ -122,6 +122,9 @@ jobs:
 
       - name: Check banned patterns in ported Rust code
         run: node scripts/rust/check-bans.mjs
+
+      - name: Prepare checksum-locked WASM EH dependencies in the project cache
+        run: python3 scripts/rust/prepare-wasm-eh.py --download --json > "${RUNNER_TEMP}/wasm-eh-preparation.json"
 
       - name: Run the real WASM harness without toolchain skips
         env:

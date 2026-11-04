@@ -1,4 +1,4 @@
-import BaroChart
+@_spi(BaroChartValidation) import BaroChart
 import Foundation
 import Observation
 
@@ -30,7 +30,9 @@ final class ChartModel {
     init() {
         bars = Self.syntheticBars(count: 240)
         do {
-            engine = try BaroChartEngine(options: Self.layout())
+            let arguments = ProcessInfo.processInfo.arguments
+            let selectedBackend = arguments.firstIndex(of: "-barochart-backend").flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil } ?? "javascript"
+            engine = try BaroChartValidation.makeEngine(options: Self.layout(), backend: selectedBackend)
             try engine.setBars(bars)
             try configureStudies()
             try engine.fit()

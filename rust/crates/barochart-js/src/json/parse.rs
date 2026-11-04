@@ -19,10 +19,13 @@
 //!   바이트 진입점은 바이트 위치라 비ASCII 문자 뒤에서 JS 문자열 위치와 다르고, 코드 단위 진입점은 JS 문자열 위치다.
 
 use std::borrow::Cow;
+use std::mem::size_of;
 use std::ops::Range;
 
+use super::object::JsObjectBuilder;
 use super::{JsObject, JsValue, JsonMode};
 use crate::error::JsError;
+use crate::memory::{MemoryFailure, MemoryScope, OomStyle};
 use crate::num::NumberDialect;
 use crate::string::JsString;
 
@@ -80,7 +83,18 @@ pub fn parse_json_with(
     mode: JsonMode,
     dialect: NumberDialect,
 ) -> Result<JsValue, JsError> {
-    Parser::new(Utf8Source(text), mode, dialect).parse_document()
+    let mut scope = MemoryScope::unaccounted(OomStyle::RangeErrorCapitalized);
+    parse_json_scoped(text, mode, dialect, &mut scope).map_err(json_failure_to_js)
+}
+
+/// UTF-8 JSON·BCJSON을 scoped fallible allocation으로 읽는다.
+pub fn parse_json_scoped(
+    text: &[u8],
+    mode: JsonMode,
+    dialect: NumberDialect,
+    scope: &mut MemoryScope,
+) -> Result<JsValue, JsonFailure> {
+    Parser::new(Utf8Source(text), mode, dialect, scope).parse_document()
 }
 
 /// `JSON.parse(text)`(Standard) 또는 BCJSON 파싱(Lossless)을 JS 문자열(WTF-16 코드 단위)에 한다.
@@ -108,7 +122,53 @@ pub fn parse_json_utf16_with(
     mode: JsonMode,
     dialect: NumberDialect,
 ) -> Result<JsValue, JsError> {
-    Parser::new(Utf16Source(text), mode, dialect).parse_document()
+    let mut scope = MemoryScope::unaccounted(OomStyle::RangeErrorCapitalized);
+    parse_json_utf16_scoped(text, mode, dialect, &mut scope).map_err(json_failure_to_js)
+}
+
+/// WTF-16 JSON·BCJSON을 scoped fallible allocation으로 읽는다.
+pub fn parse_json_utf16_scoped(
+    text: &[u16],
+    mode: JsonMode,
+    dialect: NumberDialect,
+    scope: &mut MemoryScope,
+) -> Result<JsValue, JsonFailure> {
+    Parser::new(Utf16Source(text), mode, dialect, scope).parse_document()
+}
+
+/// JSON 문법/값 오류와 allocation/account 실패를 구분한다.
+#[derive(Debug)]
+pub enum JsonFailure {
+    /// 기존 parser `SyntaxError`다.
+    Syntax(JsError),
+    /// scoped allocation/account 실패다.
+    Memory(MemoryFailure),
+}
+
+impl From<MemoryFailure> for JsonFailure {
+    fn from(value: MemoryFailure) -> Self {
+        Self::Memory(value)
+    }
+}
+
+impl From<JsError> for JsonFailure {
+    fn from(value: JsError) -> Self {
+        Self::Syntax(value)
+    }
+}
+
+fn json_failure_to_js(failure: JsonFailure) -> JsError {
+    match failure {
+        JsonFailure::Syntax(error) => error,
+        JsonFailure::Memory(failure) => match failure.style() {
+            OomStyle::InternalErrorLowercase => {
+                JsError::new("InternalError", JsString::from_str("out of memory"))
+            }
+            OomStyle::RangeErrorCapitalized => {
+                JsError::new("RangeError", JsString::from_str("Out of memory"))
+            }
+        },
+    }
 }
 
 /// ASCII가 아닌 원문 단위를 문법 바이트로 볼 때 쓰는 값. 어느 문법 문자와도 같지 않고 0x20 이상이라
@@ -133,7 +193,11 @@ trait Source {
     /// 문법을 확인한 수 리터럴 구간을 문자열로 빌려준다. ASCII가 아닌 단위가 있으면 `None`이다.
     ///
     /// - `range`: 원문 구간
-    fn ascii_text(&self, range: Range<usize>) -> Option<Cow<'_, str>>;
+    fn ascii_text<'a>(
+        &'a self,
+        range: Range<usize>,
+        scope: &mut MemoryScope,
+    ) -> Result<Option<Cow<'a, str>>, MemoryFailure>;
 
     /// 진단용으로 위치의 원문 단위를 적는다(`byte 0xc2`, `code unit 0x00a0`).
     ///
@@ -163,12 +227,18 @@ impl Source for Utf8Source<'_> {
         }
     }
 
-    fn ascii_text(&self, range: Range<usize>) -> Option<Cow<'_, str>> {
-        let bytes = self.0.get(range)?;
-        bytes
+    fn ascii_text<'a>(
+        &'a self,
+        range: Range<usize>,
+        _scope: &mut MemoryScope,
+    ) -> Result<Option<Cow<'a, str>>, MemoryFailure> {
+        let Some(bytes) = self.0.get(range) else {
+            return Ok(None);
+        };
+        Ok(bytes
             .is_ascii()
             .then(|| std::str::from_utf8(bytes).ok().map(Cow::Borrowed))
-            .flatten()
+            .flatten())
     }
 
     fn describe_unit(&self, position: usize) -> String {
@@ -197,13 +267,23 @@ impl Source for Utf16Source<'_> {
         Ok(())
     }
 
-    fn ascii_text(&self, range: Range<usize>) -> Option<Cow<'_, str>> {
-        self.0
-            .get(range)?
-            .iter()
-            .map(|&unit| u8::try_from(unit).ok().filter(u8::is_ascii).map(char::from))
-            .collect::<Option<String>>()
-            .map(Cow::Owned)
+    fn ascii_text<'a>(
+        &'a self,
+        range: Range<usize>,
+        scope: &mut MemoryScope,
+    ) -> Result<Option<Cow<'a, str>>, MemoryFailure> {
+        let Some(units) = self.0.get(range) else {
+            return Ok(None);
+        };
+        if !units.iter().all(|&unit| unit <= 0x7f) {
+            return Ok(None);
+        }
+        scope.try_grow(units.len())?;
+        let mut text = String::new();
+        text.try_reserve_exact(units.len())
+            .map_err(|_| scope.allocation_failure())?;
+        text.extend(units.iter().map(|&unit| char::from(unit as u8)));
+        Ok(Some(Cow::Owned(text)))
     }
 
     fn describe_unit(&self, position: usize) -> String {
@@ -221,7 +301,7 @@ enum Frame {
     /// 객체와, 값을 기다리는 멤버의 키
     Object {
         /// 지금까지의 멤버
-        object: JsObject,
+        object: JsObjectBuilder,
         /// 지금 읽는 값의 키
         key: JsString,
     },
@@ -236,7 +316,7 @@ enum Separator {
 }
 
 /// 입력 위치를 들고 다니는 파서 상태
-struct Parser<S: Source> {
+struct Parser<'a, S: Source> {
     /// 원문(UTF-8 바이트 또는 UTF-16 코드 단위)
     source: S,
     /// 다음에 읽을 원문 위치(원문 단위)
@@ -245,25 +325,28 @@ struct Parser<S: Source> {
     mode: JsonMode,
     /// 숫자 파싱 방언
     dialect: NumberDialect,
+    /// 이 parse 수명의 fallible temporary 회계다.
+    scope: &'a mut MemoryScope,
 }
 
-impl<S: Source> Parser<S> {
+impl<'a, S: Source> Parser<'a, S> {
     /// 원문 처음에서 시작하는 파서
     ///
     /// - `source`: 원문
     /// - `mode`: 문법
     /// - `dialect`: 숫자 파싱 방언
-    fn new(source: S, mode: JsonMode, dialect: NumberDialect) -> Self {
+    fn new(source: S, mode: JsonMode, dialect: NumberDialect, scope: &'a mut MemoryScope) -> Self {
         Self {
             source,
             position: 0,
             mode,
             dialect,
+            scope,
         }
     }
 
     /// 문서 하나(앞뒤 공백 포함)를 읽는다. 값 뒤에 다른 글자가 있으면 오류다.
-    fn parse_document(&mut self) -> Result<JsValue, JsError> {
+    fn parse_document(&mut self) -> Result<JsValue, JsonFailure> {
         let mut stack: Vec<Frame> = Vec::new();
         loop {
             if let Some(value) = self.begin_value(&mut stack)?
@@ -283,16 +366,17 @@ impl<S: Source> Parser<S> {
         &mut self,
         stack: &mut Vec<Frame>,
         mut value: JsValue,
-    ) -> Result<Option<JsValue>, JsError> {
+    ) -> Result<Option<JsValue>, JsonFailure> {
         loop {
             let separator = match stack.last_mut() {
                 None => return Ok(Some(value)),
                 Some(Frame::Array(items)) => {
+                    reserve_vec(items, 1, self.scope)?;
                     items.push(value);
                     self.separator(b']', "',' or ']' after an array element")?
                 }
                 Some(Frame::Object { object, key }) => {
-                    object.insert(std::mem::take(key), value);
+                    object.insert(std::mem::take(key), value, self.scope)?;
                     let separator = self.separator(b'}', "',' or '}' after an object member")?;
                     if let Separator::Next = separator {
                         *key = self.parse_key()?;
@@ -310,7 +394,7 @@ impl<S: Source> Parser<S> {
     /// 값 하나를 시작한다. 원시 값이나 빈 컨테이너면 다 만든 값을, 내용이 있는 컨테이너면 프레임을 쌓고 `None`을 돌려준다.
     ///
     /// - `stack`: 만들고 있는 컨테이너들
-    fn begin_value(&mut self, stack: &mut Vec<Frame>) -> Result<Option<JsValue>, JsError> {
+    fn begin_value(&mut self, stack: &mut Vec<Frame>) -> Result<Option<JsValue>, JsonFailure> {
         self.skip_whitespace();
         match self.peek() {
             Some(b'[') => {
@@ -319,6 +403,7 @@ impl<S: Source> Parser<S> {
                 if self.eat(b']') {
                     return Ok(Some(JsValue::Array(Vec::new())));
                 }
+                reserve_vec(stack, 1, self.scope)?;
                 stack.push(Frame::Array(Vec::new()));
                 Ok(None)
             }
@@ -329,8 +414,9 @@ impl<S: Source> Parser<S> {
                     return Ok(Some(JsValue::Object(JsObject::new())));
                 }
                 let key = self.parse_key()?;
+                reserve_vec(stack, 1, self.scope)?;
                 stack.push(Frame::Object {
-                    object: JsObject::new(),
+                    object: JsObjectBuilder::new(),
                     key,
                 });
                 Ok(None)
@@ -342,7 +428,7 @@ impl<S: Source> Parser<S> {
     /// 최상위 값 뒤에는 공백만 올 수 있다.
     ///
     /// - `value`: 다 읽은 최상위 값
-    fn finish_document(&mut self, value: JsValue) -> Result<JsValue, JsError> {
+    fn finish_document(&mut self, value: JsValue) -> Result<JsValue, JsonFailure> {
         self.skip_whitespace();
         match self.peek() {
             None => Ok(value),
@@ -354,7 +440,7 @@ impl<S: Source> Parser<S> {
     ///
     /// - `close`: 닫는 괄호(`]` 또는 `}`)
     /// - `expected`: 오류 문구에 쓸 기대 내용
-    fn separator(&mut self, close: u8, expected: &str) -> Result<Separator, JsError> {
+    fn separator(&mut self, close: u8, expected: &str) -> Result<Separator, JsonFailure> {
         self.skip_whitespace();
         if self.eat(b',') {
             Ok(Separator::Next)
@@ -366,7 +452,7 @@ impl<S: Source> Parser<S> {
     }
 
     /// 객체 멤버의 키와 `:`를 읽는다.
-    fn parse_key(&mut self) -> Result<JsString, JsError> {
+    fn parse_key(&mut self) -> Result<JsString, JsonFailure> {
         self.skip_whitespace();
         if self.peek() != Some(b'"') {
             return Err(self.unexpected("'\"' to start an object key"));
@@ -380,7 +466,7 @@ impl<S: Source> Parser<S> {
     }
 
     /// 원시 값(문자열, 수, 리터럴, Lossless 토큰)을 읽는다.
-    fn parse_scalar(&mut self) -> Result<JsValue, JsError> {
+    fn parse_scalar(&mut self) -> Result<JsValue, JsonFailure> {
         let lossless = self.mode == JsonMode::Lossless;
         match self.peek() {
             Some(b'"') => self.parse_string().map(JsValue::String),
@@ -401,7 +487,7 @@ impl<S: Source> Parser<S> {
     ///
     /// - `word`: 리터럴 철자
     /// - `value`: 맞으면 돌려줄 값
-    fn parse_literal(&mut self, word: &str, value: JsValue) -> Result<JsValue, JsError> {
+    fn parse_literal(&mut self, word: &str, value: JsValue) -> Result<JsValue, JsonFailure> {
         if self.eat_word(word) {
             Ok(value)
         } else {
@@ -414,7 +500,7 @@ impl<S: Source> Parser<S> {
     /// 문법을 확인한 텍스트만 `str::parse::<f64>`에 넘긴다(Rust 파서는 `+1`, `.5`, `inf` 같은 JSON 밖 형식도 받으므로).
     /// 명시 지수가 크면(앞의 0을 뺀 숫자가 `LARGE_EXPONENT_DIGITS`자리 이상) 그대로 넘기지 않고
     /// `parse_normalized_number`로 정규화한다. dec2flt가 명시 지수를 65536 근처에서 포화시키기 때문이다.
-    fn parse_number(&mut self) -> Result<f64, JsError> {
+    fn parse_number(&mut self) -> Result<f64, JsonFailure> {
         let start = self.position;
         let negative = self.eat(b'-');
         if negative && self.mode == JsonMode::Lossless && self.peek() == Some(b'I') {
@@ -468,7 +554,7 @@ impl<S: Source> Parser<S> {
         // 문법을 확인한 ASCII라 문자열 변환과 f64 파싱은 실패하지 않는다. 실패하면 위치를 담아 SyntaxError로 알린다
         let literal = self
             .source
-            .ascii_text(start..self.position)
+            .ascii_text(start..self.position, self.scope)?
             .ok_or_else(|| self.error_at(start, "number is not ASCII"))?;
         literal
             .parse::<f64>()
@@ -483,7 +569,11 @@ impl<S: Source> Parser<S> {
     /// 반올림한다. QuickJS 방언은 처음 38자리 뒤를 버린다. 유효 숫자가 없으면 부호 있는 0이다(`-0e999999` → -0).
     /// - `start`: 수가 시작한 위치(오류 위치)
     /// - `parts`: 문법을 확인한 수의 구간들
-    fn parse_normalized_number(&self, start: usize, parts: &NumberParts) -> Result<f64, JsError> {
+    fn parse_normalized_number(
+        &mut self,
+        start: usize,
+        parts: &NumberParts,
+    ) -> Result<f64, JsonFailure> {
         let integer_length = parts.integer.len();
         let digit_at = |index: usize| {
             let position = if index < integer_length {
@@ -527,7 +617,14 @@ impl<S: Source> Parser<S> {
         } else if leading < MIN_DECIMAL_EXPONENT {
             0.0
         } else {
-            let mut text = String::with_capacity(last - first + 8);
+            let capacity = last
+                .checked_sub(first)
+                .and_then(|digits| digits.checked_add(8))
+                .ok_or_else(|| self.scope.allocation_failure())?;
+            self.scope.try_grow(capacity)?;
+            let mut text = String::new();
+            text.try_reserve_exact(capacity)
+                .map_err(|_| self.scope.allocation_failure())?;
             text.push(char::from(digit_at(first)));
             if last > first {
                 text.push('.');
@@ -558,7 +655,7 @@ impl<S: Source> Parser<S> {
     ///
     /// 특수 단위(따옴표, 역슬래시, C0 제어 문자) 사이의 원문 구간을 한 번에 옮긴다(바이트 원문은 UTF-8로 검사한다).
     /// 특수 단위는 모두 ASCII라 다중 바이트 문자 안에 나타나지 않으므로 구간 경계가 문자를 가르지 않는다.
-    fn parse_string(&mut self) -> Result<JsString, JsError> {
+    fn parse_string(&mut self) -> Result<JsString, JsonFailure> {
         self.position += 1;
         let mut units: Vec<u16> = Vec::new();
         loop {
@@ -582,7 +679,7 @@ impl<S: Source> Parser<S> {
     /// 다음 특수 단위(따옴표, 역슬래시, C0 제어 문자) 앞까지의 원문 구간을 코드 단위로 옮긴다.
     ///
     /// - `units`: 문자열 코드 단위
-    fn copy_raw_run(&mut self, units: &mut Vec<u16>) -> Result<(), JsError> {
+    fn copy_raw_run(&mut self, units: &mut Vec<u16>) -> Result<(), JsonFailure> {
         let start = self.position;
         while let Some(byte) = self.peek() {
             if byte == b'"' || byte == b'\\' || byte < 0x20 {
@@ -590,6 +687,7 @@ impl<S: Source> Parser<S> {
             }
             self.position += 1;
         }
+        reserve_vec(units, self.position.saturating_sub(start), self.scope)?;
         self.source
             .push_run(start..self.position, units)
             .map_err(|invalid| {
@@ -604,7 +702,7 @@ impl<S: Source> Parser<S> {
     /// 역슬래시 이스케이프 하나를 읽어 코드 단위를 붙인다. 역슬래시에 있을 때 부른다.
     ///
     /// - `units`: 문자열 코드 단위
-    fn parse_escape(&mut self, units: &mut Vec<u16>) -> Result<(), JsError> {
+    fn parse_escape(&mut self, units: &mut Vec<u16>) -> Result<(), JsonFailure> {
         let escape_start = self.position;
         self.position += 1;
         let unit = match self.peek() {
@@ -618,6 +716,7 @@ impl<S: Source> Parser<S> {
             Some(b't') => 0x09,
             Some(b'u') => {
                 self.position += 1;
+                reserve_vec(units, 1, self.scope)?;
                 units.push(self.parse_hex4(escape_start)?);
                 return Ok(());
             }
@@ -629,6 +728,7 @@ impl<S: Source> Parser<S> {
             }
         };
         self.position += 1;
+        reserve_vec(units, 1, self.scope)?;
         units.push(unit);
         Ok(())
     }
@@ -636,7 +736,7 @@ impl<S: Source> Parser<S> {
     /// `\u` 뒤의 16진 숫자 네 개를 읽는다(대소문자 무관). 서로게이트도 검사 없이 그대로 받는다.
     ///
     /// - `escape_start`: 오류 위치로 쓸 역슬래시 위치
-    fn parse_hex4(&mut self, escape_start: usize) -> Result<u16, JsError> {
+    fn parse_hex4(&mut self, escape_start: usize) -> Result<u16, JsonFailure> {
         const REASON: &str = "invalid \\u escape; expected four hexadecimal digits";
         let mut unit: u16 = 0;
         for offset in 0..4 {
@@ -672,7 +772,7 @@ impl<S: Source> Parser<S> {
     /// 십진 숫자가 하나 이상 있어야 하는 자리를 읽는다.
     ///
     /// - `expected`: 숫자가 없을 때 오류 문구에 쓸 기대 내용
-    fn require_digits(&mut self, expected: &str) -> Result<(), JsError> {
+    fn require_digits(&mut self, expected: &str) -> Result<(), JsonFailure> {
         if !self.peek().is_some_and(|byte| byte.is_ascii_digit()) {
             return Err(self.unexpected(expected));
         }
@@ -713,7 +813,7 @@ impl<S: Source> Parser<S> {
     /// 지금 위치에서 예상하지 못한 입력을 만난 오류. 보이는 ASCII는 글자로, 나머지는 16진 원문 단위로 적는다.
     ///
     /// - `expected`: 그 자리에 와야 했던 내용
-    fn unexpected(&self, expected: &str) -> JsError {
+    fn unexpected(&self, expected: &str) -> JsonFailure {
         let found = match self.peek() {
             None => String::from("end of input"),
             Some(byte) if byte.is_ascii_graphic() => format!("'{}'", char::from(byte)),
@@ -725,7 +825,7 @@ impl<S: Source> Parser<S> {
     /// 지금 위치의 `SyntaxError`
     ///
     /// - `reason`: 원인과 고칠 방향
-    fn error(&self, reason: &str) -> JsError {
+    fn error(&self, reason: &str) -> JsonFailure {
         self.error_at(self.position, reason)
     }
 
@@ -733,15 +833,15 @@ impl<S: Source> Parser<S> {
     ///
     /// - `position`: 원문 위치(바이트 원문은 바이트, 코드 단위 원문은 코드 단위)
     /// - `reason`: 원인과 고칠 방향
-    fn error_at(&self, position: usize, reason: &str) -> JsError {
+    fn error_at(&self, position: usize, reason: &str) -> JsonFailure {
         let prefix = match self.mode {
             JsonMode::Standard => "JSON",
             JsonMode::Lossless => "BCJSON",
         };
-        JsError::new(
+        JsonFailure::Syntax(JsError::new(
             "SyntaxError",
             JsString::from_str(&format!("{prefix}: {position} {reason}")),
-        )
+        ))
     }
 }
 
@@ -758,7 +858,21 @@ fn saturating_i64(value: usize) -> i64 {
 fn close_frame(frame: Option<Frame>) -> JsValue {
     match frame {
         Some(Frame::Array(items)) => JsValue::Array(items),
-        Some(Frame::Object { object, .. }) => JsValue::Object(object),
+        Some(Frame::Object { object, .. }) => JsValue::Object(object.finish()),
         None => JsValue::Undefined,
     }
+}
+
+fn reserve_vec<T>(
+    values: &mut Vec<T>,
+    additional: usize,
+    scope: &mut MemoryScope,
+) -> Result<(), JsonFailure> {
+    let bytes = additional
+        .checked_mul(size_of::<T>())
+        .ok_or_else(|| scope.allocation_failure())?;
+    scope.try_grow(bytes)?;
+    values
+        .try_reserve(additional)
+        .map_err(|_| JsonFailure::Memory(scope.allocation_failure()))
 }

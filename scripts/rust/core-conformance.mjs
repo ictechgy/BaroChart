@@ -12,6 +12,11 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const VECTOR_DIRECTORY = join(ROOT, 'test/fixtures/rust-core-vectors');
 const hash = text => createHash('sha256').update(text).digest('hex');
 
+/** This corpus uses the supported Node 22 oracle; Node 26 has a reproduced JSON.parse defect. */
+export function assertOracleRuntime(runtime = process.versions) {
+  assert.equal(runtime.node?.split('.')[0], '22', 'Core conformance requires the pinned Node 22 oracle');
+}
+
 // Only data enters the realm. defineProperty preserves own __proto__ and undefined.
 const MATERIALIZE = `globalThis.__bcMaterialize=function build(node){
  const tag=node[0],value=node[1];
@@ -33,6 +38,7 @@ function dataTree(value) {
 
 /** Evaluates the actual shipped bundle once and reuses its state for every call. */
 export async function createJavaScriptOracle() {
+  assertOracleRuntime();
   const context = vm.createContext({Intl});
   vm.runInContext(await readFile(join(ROOT, 'native/Resources/aster-core.js'), 'utf8'), context, {timeout: 5_000});
   vm.runInContext(MATERIALIZE, context);
@@ -54,6 +60,9 @@ function outcomeText(outcome) {
 
 /** Runs the calls and observations in one fixture without recreating either side. */
 export async function runScenario(scenario) {
+  assertOracleRuntime();
+  assert.equal(scenario.metadata?.schema, 'aster.rust-core-vectors', 'fixture schema');
+  assert.equal(scenario.metadata?.version, 1, 'fixture version');
   const manifestText = await readFile(join(VECTOR_DIRECTORY, 'manifest.json'), 'utf8');
   const manifest = JSON.parse(manifestText);
   const bundle = await readFile(join(ROOT, 'native/Resources/aster-core.js'));
@@ -85,7 +94,7 @@ export async function runScenario(scenario) {
 }
 
 export async function readScenarios() {
-  const paths = (await readdir(VECTOR_DIRECTORY)).filter(path => path.endsWith('.jsonl')).sort();
+  const paths = (await readdir(VECTOR_DIRECTORY)).filter(path => path.endsWith('.jsonl') && !path.endsWith('.leaf.jsonl')).sort();
   return (await Promise.all(paths.map(async path => (await readFile(join(VECTOR_DIRECTORY, path), 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line))))).flat();
 }
 
@@ -107,6 +116,7 @@ async function main() {
   for (const scenario of selected) reports.push(await runScenario(scenario));
   const output = JSON.stringify(reports, null, 2) + '\n';
   const outputAt = args.indexOf('--output');
+  assert.ok(outputAt < 0 || args[outputAt + 1] && !args[outputAt + 1].startsWith('--'), '--output requires a file');
   if (outputAt >= 0) await writeFile(resolve(args[outputAt + 1]), output);
   process.stdout.write(output);
   if (reports.some(report => !report.equal)) process.exitCode = 1;

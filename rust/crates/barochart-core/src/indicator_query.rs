@@ -4,11 +4,12 @@
 
 use barochart_js::error::JsError;
 use barochart_js::json::JsValue;
+use barochart_js::memory::MemoryScope;
 use barochart_js::num::NumberDialect;
 use barochart_js::string::JsString;
 
 use crate::Host;
-use crate::contracts::js_to_string_with;
+use crate::contracts::js_to_string_scoped;
 use crate::data::BarStore;
 use crate::indicator_engine::{IndicatorEngine, IndicatorRead};
 
@@ -96,14 +97,20 @@ impl IndicatorPoint {
     }
 }
 
-fn output_key(read: IndicatorRead<'_>, output: Option<&JsValue>) -> Result<JsString, JsError> {
+fn output_key(
+    read: IndicatorRead<'_>,
+    output: Option<&JsValue>,
+    scope: &mut MemoryScope,
+) -> Result<JsString, JsError> {
     match output {
-        None | Some(JsValue::Null | JsValue::Undefined) => Ok(JsString::from_str(
+        None | Some(JsValue::Null | JsValue::Undefined) => JsString::try_from_str(
             read.output_names()
                 .first()
                 .expect("definitions have outputs"),
-        )),
-        Some(value) => js_to_string_with(value, NumberDialect::PLATFORM),
+            scope,
+        )
+        .map_err(|failure| failure.into_js_error()),
+        Some(value) => js_to_string_scoped(value, NumberDialect::PLATFORM, scope),
     }
 }
 
@@ -125,8 +132,21 @@ pub fn indicator_values<'a>(
     id: &JsValue,
     output: Option<&JsValue>,
 ) -> Result<&'a [f64], JsError> {
-    let read = engine.get(store, host, id)?;
-    let key = output_key(read, output)?;
+    let mut scope = engine.memory_context().scope();
+    indicator_values_scoped(engine, store, host, id, output, &mut scope)
+}
+
+/// caller scope에서 id/output coercion payload를 유지하며 named raw 출력을 빌린다.
+pub fn indicator_values_scoped<'a>(
+    engine: &'a mut IndicatorEngine,
+    store: &BarStore,
+    host: &dyn Host,
+    id: &JsValue,
+    output: Option<&JsValue>,
+    scope: &mut MemoryScope,
+) -> Result<&'a [f64], JsError> {
+    let read = engine.get_scoped(store, host, id, scope)?;
+    let key = output_key(read, output, scope)?;
     let index =
         output_index(read, &key).ok_or_else(|| ordinary_error("Missing indicator output"))?;
     Ok(read
@@ -144,6 +164,22 @@ pub fn indicator_value_at(
     index: f64,
     options: IndicatorQueryOptions,
 ) -> Result<IndicatorPoint, JsError> {
+    let mut scope = engine.memory_context().scope();
+    indicator_value_at_scoped(engine, store, host, id, output, index, options, &mut scope)
+}
+
+/// caller scope에서 output coercion payload를 유지하며 raw/plot 한 값을 읽는다.
+#[allow(clippy::too_many_arguments)]
+pub fn indicator_value_at_scoped(
+    engine: &mut IndicatorEngine,
+    store: &BarStore,
+    host: &dyn Host,
+    id: &JsValue,
+    output: Option<&JsValue>,
+    index: f64,
+    options: IndicatorQueryOptions,
+    scope: &mut MemoryScope,
+) -> Result<IndicatorPoint, JsError> {
     if !safe_integer(index)
         || options.as_of_index < -1
         || options.as_of_index >= store.length() as i64
@@ -153,8 +189,8 @@ pub fn indicator_value_at(
     if engine.entry(id).is_none() {
         return Err(ordinary_error("Missing indicator"));
     }
-    let read = engine.get(store, host, id)?;
-    let key = output_key(read, output)?;
+    let read = engine.get_scoped(store, host, id, scope)?;
+    let key = output_key(read, output, scope)?;
     let output_index =
         output_index(read, &key).ok_or_else(|| ordinary_error("Missing indicator output"))?;
     let output_name = read.output_names()[output_index];

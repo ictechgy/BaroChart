@@ -2,6 +2,7 @@
 
 use barochart_js::error::JsError;
 use barochart_js::json::{JsObject, JsValue};
+use barochart_js::memory::{MemoryContext, MemoryGroup, OomStyle};
 use barochart_js::string::JsString;
 use std::sync::Arc;
 
@@ -218,15 +219,80 @@ pub struct Columns {
 }
 
 impl Columns {
-    fn zeroed(capacity: usize) -> Self {
-        Self {
-            time: vec![0.0; capacity],
-            open: vec![0.0; capacity],
-            high: vec![0.0; capacity],
-            low: vec![0.0; capacity],
-            close: vec![0.0; capacity],
-            volume: vec![0.0; capacity],
-        }
+    fn bytes(&self) -> usize {
+        [
+            self.time.capacity(),
+            self.open.capacity(),
+            self.high.capacity(),
+            self.low.capacity(),
+            self.close.capacity(),
+            self.volume.capacity(),
+        ]
+        .into_iter()
+        .sum::<usize>()
+            * 8
+    }
+
+    fn try_zeroed(capacity: usize, memory: &MemoryContext) -> Result<(Self, MemoryGroup), JsError> {
+        let (time, mut group) = memory
+            .try_vec_filled(capacity, 0.0)
+            .map_err(|failure| failure.into_js_error())?;
+        let (open, open_group) = memory
+            .try_vec_filled(capacity, 0.0)
+            .map_err(|failure| failure.into_js_error())?;
+        group
+            .absorb(open_group)
+            .map_err(|failure| failure.into_js_error())?;
+        let (high, high_group) = memory
+            .try_vec_filled(capacity, 0.0)
+            .map_err(|failure| failure.into_js_error())?;
+        group
+            .absorb(high_group)
+            .map_err(|failure| failure.into_js_error())?;
+        let (low, low_group) = memory
+            .try_vec_filled(capacity, 0.0)
+            .map_err(|failure| failure.into_js_error())?;
+        group
+            .absorb(low_group)
+            .map_err(|failure| failure.into_js_error())?;
+        let (close, close_group) = memory
+            .try_vec_filled(capacity, 0.0)
+            .map_err(|failure| failure.into_js_error())?;
+        group
+            .absorb(close_group)
+            .map_err(|failure| failure.into_js_error())?;
+        let (volume, volume_group) = memory
+            .try_vec_filled(capacity, 0.0)
+            .map_err(|failure| failure.into_js_error())?;
+        group
+            .absorb(volume_group)
+            .map_err(|failure| failure.into_js_error())?;
+        Ok((
+            Self {
+                time,
+                open,
+                high,
+                low,
+                close,
+                volume,
+            },
+            group,
+        ))
+    }
+
+    fn try_clone_with_memory(
+        &self,
+        memory: &MemoryContext,
+    ) -> Result<(Self, MemoryGroup), JsError> {
+        let capacity = self.time.capacity();
+        let (mut columns, group) = Self::try_zeroed(capacity, memory)?;
+        columns.time.copy_from_slice(&self.time);
+        columns.open.copy_from_slice(&self.open);
+        columns.high.copy_from_slice(&self.high);
+        columns.low.copy_from_slice(&self.low);
+        columns.close.copy_from_slice(&self.close);
+        columns.volume.copy_from_slice(&self.volume);
+        Ok((columns, group))
     }
 
     fn bar(&self, index: usize) -> Bar {
@@ -496,6 +562,7 @@ pub struct BarStore {
     time_version: f64,
     columns: Columns,
     index: RangeIndex,
+    memory: MemoryGroup,
 }
 
 /// 계산 task가 보유해 allocator 주소 재사용과 무관하게 source를 식별하는 토큰이다.
@@ -529,6 +596,7 @@ pub struct StoreCompactionCandidate {
     source_capacity: usize,
     columns: Columns,
     index: RangeIndex,
+    memory: MemoryGroup,
     receipt: StoreCompactionReceipt,
 }
 
@@ -570,12 +638,20 @@ impl Clone for BarStore {
             time_version: self.time_version,
             columns: self.columns.clone(),
             index: self.index.clone(),
+            memory: MemoryContext::unaccounted(OomStyle::RangeErrorCapitalized)
+                .reserve_group(self.bytes())
+                .expect("unaccounted store clone memory"),
         }
     }
 }
 
 impl BarStore {
-    fn new(serial: f64, options: StoreOptions, bars: Vec<Bar>) -> Result<Self, JsError> {
+    fn new(
+        serial: f64,
+        options: StoreOptions,
+        bars: Vec<Bar>,
+        memory: MemoryContext,
+    ) -> Result<Self, JsError> {
         if !options.timeframe_ms.is_finite()
             || options.timeframe_ms <= 0.0
             || !options.time_origin.is_finite()
@@ -590,8 +666,12 @@ impl BarStore {
                 RESOURCE_LIMITS.max_bars
             )));
         }
-        let columns = Columns::zeroed(INITIAL_CAPACITY);
-        let index = RangeIndex::new(0, &[], &[], Some(&[]), INITIAL_CAPACITY, false)?;
+        let (columns, mut owner_memory) = Columns::try_zeroed(INITIAL_CAPACITY, &memory)?;
+        let (index, index_memory) =
+            RangeIndex::new_with_memory(0, &[], &[], Some(&[]), INITIAL_CAPACITY, false, &memory)?;
+        owner_memory
+            .absorb(index_memory)
+            .map_err(|failure| failure.into_js_error())?;
         let mut store = Self {
             owner_identity: Arc::new(()),
             columns_identity: Arc::new(()),
@@ -605,6 +685,7 @@ impl BarStore {
             time_version: 0.0,
             columns,
             index,
+            memory: owner_memory,
         };
         store.set_data(bars)?;
         Ok(store)
@@ -633,6 +714,14 @@ impl BarStore {
     pub fn max_bars(&self) -> usize {
         self.max_bars
     }
+    /// 문서·캡처가 현재 저장소의 가상 시간과 한도를 읽는 불변 snapshot이다.
+    pub fn store_options(&self) -> StoreOptions {
+        StoreOptions {
+            timeframe_ms: self.timeframe_ms,
+            time_origin: self.time_origin,
+            max_bars: self.max_bars,
+        }
+    }
     /// store version이다.
     pub fn version(&self) -> f64 {
         self.version
@@ -645,6 +734,14 @@ impl BarStore {
     pub fn bytes(&self) -> usize {
         self.capacity * BYTES_PER_CAPACITY
     }
+    /// 이 store persistent payload가 선택한 memory context다.
+    pub fn memory_context(&self) -> &MemoryContext {
+        self.memory.context()
+    }
+    /// account group과 authoritative store formula가 같은지 확인할 때 쓰는 값이다.
+    pub fn accounted_bytes(&self) -> u64 {
+        self.memory.requested_bytes()
+    }
     /// 열을 빌린다.
     pub fn columns(&self) -> &Columns {
         &self.columns
@@ -652,6 +749,30 @@ impl BarStore {
     /// volume/price range index를 빌린다.
     pub fn index(&self) -> &RangeIndex {
         &self.index
+    }
+
+    fn try_clone_candidate(&self) -> Result<Self, JsError> {
+        let context = self.memory.context().clone();
+        let (columns, mut memory) = self.columns.try_clone_with_memory(&context)?;
+        let (index, index_memory) = self.index.try_clone_with_memory(&context)?;
+        memory
+            .absorb(index_memory)
+            .map_err(|failure| failure.into_js_error())?;
+        Ok(Self {
+            owner_identity: Arc::new(()),
+            columns_identity: Arc::new(()),
+            serial: self.serial,
+            length: self.length,
+            capacity: self.capacity,
+            max_bars: self.max_bars,
+            timeframe_ms: self.timeframe_ms,
+            time_origin: self.time_origin,
+            version: self.version,
+            time_version: self.time_version,
+            columns,
+            index,
+            memory,
+        })
     }
 
     /// 앞 history를 제거할 새 열과 RangeIndex를 만들되 live store는 바꾸지 않는다.
@@ -676,18 +797,23 @@ impl BarStore {
             return Err(range_error("Compaction source peak byte budget"));
         }
         let removed = self.length - keep;
-        let mut columns = Columns::zeroed(capacity);
+        let context = self.memory.context().clone();
+        let (mut columns, mut memory) = Columns::try_zeroed(capacity, &context)?;
         for target in 0..keep {
             columns.write(target, self.columns.bar(removed + target));
         }
-        let index = RangeIndex::new(
+        let (index, index_memory) = RangeIndex::new_with_memory(
             keep,
             &columns.low,
             &columns.high,
             Some(&columns.volume),
             capacity,
             false,
+            &context,
         )?;
+        memory
+            .absorb(index_memory)
+            .map_err(|failure| failure.into_js_error())?;
         let receipt = StoreCompactionReceipt {
             removed,
             length: keep,
@@ -707,6 +833,7 @@ impl BarStore {
             source_capacity: self.capacity,
             columns,
             index,
+            memory,
             receipt,
         })
     }
@@ -734,12 +861,14 @@ impl BarStore {
         let StoreCompactionCandidate {
             columns,
             index,
+            memory,
             receipt,
             ..
         } = candidate;
         self.columns = columns;
         self.columns_identity = Arc::new(());
         self.index = index;
+        self.memory = memory;
         self.length = receipt.length;
         self.capacity = receipt.capacity;
         self.version = receipt.version;
@@ -761,27 +890,50 @@ impl BarStore {
 
     /// 모든 행을 소유 snapshot한 뒤 한 번 교체한다.
     pub fn set_data(&mut self, bars: Vec<Bar>) -> Result<Committed<()>, JsError> {
+        self.set_data_with_reply_gate(bars, &mut || Ok(()))
+    }
+
+    /// 모든 행을 검증·stage한 뒤 고정 reply admission 직전에 한 번 게시한다.
+    pub fn set_data_with_reply_gate(
+        &mut self,
+        bars: Vec<Bar>,
+        gate: &mut dyn FnMut() -> Result<(), JsError>,
+    ) -> Result<Committed<()>, JsError> {
         let length = bars.len();
         if length > self.max_bars {
             return Err(range_error(&format!("Bar count: limit {}", self.max_bars)));
         }
         let capacity = capacity_for(length);
-        let mut columns = Columns::zeroed(capacity);
+        let context = self.memory.context().clone();
+        let (mut columns, mut memory) = Columns::try_zeroed(capacity, &context)?;
         let mut previous = f64::NEG_INFINITY;
         for (index, bar) in bars.into_iter().enumerate() {
             validate_bar(&bar, previous)?;
             previous = bar.time;
             columns.write(index, bar);
         }
-        let index = RangeIndex::new(
+        let (index, index_memory) = RangeIndex::new_with_memory(
             length,
             &columns.low,
             &columns.high,
             Some(&columns.volume),
             capacity,
             false,
+            &context,
         )?;
-        self.commit_replacement(columns, index, length, capacity, ChangeKind::Reset, None)
+        memory
+            .absorb(index_memory)
+            .map_err(|failure| failure.into_js_error())?;
+        self.commit_replacement_with_reply_gate(
+            columns,
+            index,
+            memory,
+            length,
+            capacity,
+            ChangeKind::Reset,
+            None,
+            gate,
+        )
     }
 
     /// 인정된 숫자 열을 모두 검증한 뒤 소유 Float64 열로 교체한다.
@@ -789,6 +941,16 @@ impl BarStore {
         &mut self,
         input: &ColumnInputs<'_>,
         length: Option<usize>,
+    ) -> Result<Committed<()>, JsError> {
+        self.set_columns_with_reply_gate(input, length, &mut || Ok(()))
+    }
+
+    /// 인정된 숫자 열을 모두 검증·stage한 뒤 고정 reply admission 직전에 게시한다.
+    pub fn set_columns_with_reply_gate(
+        &mut self,
+        input: &ColumnInputs<'_>,
+        length: Option<usize>,
+        gate: &mut dyn FnMut() -> Result<(), JsError>,
     ) -> Result<Committed<()>, JsError> {
         let length = match length {
             Some(length) => length,
@@ -808,7 +970,8 @@ impl BarStore {
             return Err(type_error("Numeric column arrays required"));
         }
         let capacity = capacity_for(length);
-        let mut columns = Columns::zeroed(capacity);
+        let context = self.memory.context().clone();
+        let (mut columns, mut memory) = Columns::try_zeroed(capacity, &context)?;
         for (source, target) in sources.into_iter().zip([
             &mut columns.time,
             &mut columns.open,
@@ -820,16 +983,28 @@ impl BarStore {
             source.copy_into(target, length)?;
         }
         validate_columns(&columns, length)?;
-        let index = RangeIndex::new(
+        let (index, index_memory) = RangeIndex::new_with_memory(
             length,
             &columns.low,
             &columns.high,
             Some(&columns.volume),
             capacity,
             false,
+            &context,
         )?;
-        let mut committed =
-            self.commit_replacement(columns, index, length, capacity, ChangeKind::Reset, None)?;
+        memory
+            .absorb(index_memory)
+            .map_err(|failure| failure.into_js_error())?;
+        let mut committed = self.commit_replacement_with_reply_gate(
+            columns,
+            index,
+            memory,
+            length,
+            capacity,
+            ChangeKind::Reset,
+            None,
+            gate,
+        )?;
         if let Some(change) = committed.change.as_mut() {
             change.added_present = true;
         }
@@ -846,6 +1021,23 @@ impl BarStore {
 
     /// 새 마지막 행을 원자적으로 붙인다.
     pub fn append(&mut self, bar: Bar) -> Result<Committed<usize>, JsError> {
+        self.append_with_optional_reply_gate(bar, None)
+    }
+
+    /// 새 마지막 행을 stage한 뒤 고정 reply admission 직전에 게시한다.
+    pub fn append_with_reply_gate(
+        &mut self,
+        bar: Bar,
+        gate: &mut dyn FnMut() -> Result<(), JsError>,
+    ) -> Result<Committed<usize>, JsError> {
+        self.append_with_optional_reply_gate(bar, Some(gate))
+    }
+
+    fn append_with_optional_reply_gate(
+        &mut self,
+        bar: Bar,
+        gate: Option<&mut dyn FnMut() -> Result<(), JsError>>,
+    ) -> Result<Committed<usize>, JsError> {
         if self.length + 1 > self.max_bars {
             return Err(range_error(&format!("Bar count: limit {}", self.max_bars)));
         }
@@ -861,8 +1053,24 @@ impl BarStore {
             return Err(range_error("Volume sum overflow"));
         }
         let index = self.length;
+        if let Some(gate) = gate {
+            let mut staged = self.try_clone_candidate()?;
+            staged.reserve_for(self.length + 1)?;
+            staged.index.update(index, bar.low, bar.high, bar.volume)?;
+            staged.columns.write(index, bar);
+            staged.length += 1;
+            staged.version += 1.0;
+            staged.time_version += 1.0;
+            let change = staged.change(index, staged.length, ChangeKind::Append, None, None);
+            gate()?;
+            self.adopt_staged(staged);
+            return Ok(Committed {
+                value: index,
+                change: Some(change),
+            });
+        }
         if self.length == self.capacity {
-            let mut staged = self.clone();
+            let mut staged = self.try_clone_candidate()?;
             staged.reserve_for(self.length + 1)?;
             staged.index.update(index, bar.low, bar.high, bar.volume)?;
             staged.columns.write(index, bar);
@@ -886,6 +1094,25 @@ impl BarStore {
 
     /// 기존 행을 같은 시각으로 원자 교체한다.
     pub fn update(&mut self, index: usize, bar: Bar) -> Result<Committed<()>, JsError> {
+        self.update_with_optional_reply_gate(index, bar, None)
+    }
+
+    /// 기존 행 교체를 stage한 뒤 고정 reply admission 직전에 게시한다.
+    pub fn update_with_reply_gate(
+        &mut self,
+        index: usize,
+        bar: Bar,
+        gate: &mut dyn FnMut() -> Result<(), JsError>,
+    ) -> Result<Committed<()>, JsError> {
+        self.update_with_optional_reply_gate(index, bar, Some(gate))
+    }
+
+    fn update_with_optional_reply_gate(
+        &mut self,
+        index: usize,
+        bar: Bar,
+        gate: Option<&mut dyn FnMut() -> Result<(), JsError>>,
+    ) -> Result<Committed<()>, JsError> {
         if index >= self.length {
             return Err(range_error("Bar index"));
         }
@@ -894,6 +1121,19 @@ impl BarStore {
             return Err(range_error(
                 "An edit cannot change time; reload to insert/reorder",
             ));
+        }
+        if let Some(gate) = gate {
+            let mut staged = self.try_clone_candidate()?;
+            staged.index.update(index, bar.low, bar.high, bar.volume)?;
+            staged.columns.write(index, bar);
+            staged.version += 1.0;
+            let change = staged.change(index, index + 1, ChangeKind::Update, None, None);
+            gate()?;
+            self.adopt_staged(staged);
+            return Ok(Committed {
+                value: (),
+                change: Some(change),
+            });
         }
         self.index.update(index, bar.low, bar.high, bar.volume)?;
         self.columns.write(index, bar);
@@ -907,13 +1147,26 @@ impl BarStore {
 
     /// 더 이른 행을 한 번에 앞에 붙인다. 빈 입력은 no-op이다.
     pub fn prepend(&mut self, bars: Vec<Bar>) -> Result<Committed<()>, JsError> {
+        self.prepend_with_reply_gate(bars, &mut || Ok(()))
+    }
+
+    /// 더 이른 행을 stage한 뒤 고정 reply admission 직전에 게시한다.
+    pub fn prepend_with_reply_gate(
+        &mut self,
+        bars: Vec<Bar>,
+        gate: &mut dyn FnMut() -> Result<(), JsError>,
+    ) -> Result<Committed<()>, JsError> {
         if bars.is_empty() {
             return Ok(Committed {
                 value: (),
                 change: None,
             });
         }
-        if bars.len() + self.length > self.max_bars {
+        let combined_length = bars
+            .len()
+            .checked_add(self.length)
+            .ok_or_else(|| range_error(&format!("Bar count: limit {}", self.max_bars)))?;
+        if combined_length > self.max_bars {
             return Err(range_error(&format!("Bar count: limit {}", self.max_bars)));
         }
         if self.length != 0
@@ -926,10 +1179,16 @@ impl BarStore {
             ));
         }
         let added = bars.len();
-        let mut combined = bars;
+        let (mut combined, _scratch) = self
+            .memory
+            .context()
+            .try_vec_capacity(combined_length)
+            .map_err(|failure| failure.into_js_error())?;
+        combined.extend(bars);
         combined.extend((0..self.length).map(|index| self.columns.bar(index)));
         let capacity = capacity_for(combined.len());
-        let mut columns = Columns::zeroed(capacity);
+        let context = self.memory.context().clone();
+        let (mut columns, mut memory) = Columns::try_zeroed(capacity, &context)?;
         let mut previous = f64::NEG_INFINITY;
         for (position, bar) in combined.into_iter().enumerate() {
             validate_bar(&bar, previous)?;
@@ -937,21 +1196,27 @@ impl BarStore {
             columns.write(position, bar);
         }
         let length = self.length + added;
-        let index = RangeIndex::new(
+        let (index, index_memory) = RangeIndex::new_with_memory(
             length,
             &columns.low,
             &columns.high,
             Some(&columns.volume),
             capacity,
             false,
+            &context,
         )?;
-        self.commit_replacement(
+        memory
+            .absorb(index_memory)
+            .map_err(|failure| failure.into_js_error())?;
+        self.commit_replacement_with_reply_gate(
             columns,
             index,
+            memory,
             length,
             capacity,
             ChangeKind::Prepend,
             Some(added),
+            gate,
         )
     }
 
@@ -959,6 +1224,15 @@ impl BarStore {
         &mut self,
         source: Columns,
         length: usize,
+    ) -> Result<Committed<()>, JsError> {
+        self.set_owned_columns_with_reply_gate(source, length, &mut || Ok(()))
+    }
+
+    fn set_owned_columns_with_reply_gate(
+        &mut self,
+        source: Columns,
+        length: usize,
+        gate: &mut dyn FnMut() -> Result<(), JsError>,
     ) -> Result<Committed<()>, JsError> {
         if length > self.max_bars {
             return Err(range_error(&format!("Bar count: limit {}", self.max_bars)));
@@ -977,7 +1251,8 @@ impl BarStore {
             return Err(type_error("Numeric column arrays required"));
         }
         let capacity = capacity_for(length);
-        let mut columns = Columns::zeroed(capacity);
+        let context = self.memory.context().clone();
+        let (mut columns, mut memory) = Columns::try_zeroed(capacity, &context)?;
         columns.time[..length].copy_from_slice(&source.time[..length]);
         columns.open[..length].copy_from_slice(&source.open[..length]);
         columns.high[..length].copy_from_slice(&source.high[..length]);
@@ -985,16 +1260,28 @@ impl BarStore {
         columns.close[..length].copy_from_slice(&source.close[..length]);
         columns.volume[..length].copy_from_slice(&source.volume[..length]);
         validate_columns(&columns, length)?;
-        let index = RangeIndex::new(
+        let (index, index_memory) = RangeIndex::new_with_memory(
             length,
             &columns.low,
             &columns.high,
             Some(&columns.volume),
             capacity,
             false,
+            &context,
         )?;
-        let mut committed =
-            self.commit_replacement(columns, index, length, capacity, ChangeKind::Reset, None)?;
+        memory
+            .absorb(index_memory)
+            .map_err(|failure| failure.into_js_error())?;
+        let mut committed = self.commit_replacement_with_reply_gate(
+            columns,
+            index,
+            memory,
+            length,
+            capacity,
+            ChangeKind::Reset,
+            None,
+            gate,
+        )?;
         if let Some(change) = committed.change.as_mut() {
             change.added_present = true;
         }
@@ -1075,7 +1362,10 @@ impl BarStore {
             return Ok(Vec::new());
         }
         let count = std::cmp::min(end - start, max_buckets);
-        let mut output = Vec::with_capacity(count);
+        let mut output = Vec::new();
+        output
+            .try_reserve_exact(count)
+            .map_err(|_| self.memory.context().allocation_failure().into_js_error())?;
         for bucket in 0..count {
             // 최대 2^22봉의 곱은 2^44까지 커지므로 wasm32 usize 곱을 피한다.
             let from = start + (bucket as u64 * (end - start) as u64 / count as u64) as usize;
@@ -1101,6 +1391,25 @@ impl BarStore {
         &mut self,
         events: &[BatchEvent],
         options: &BatchOptions,
+    ) -> Result<Committed<BatchReceipt>, JsError> {
+        self.apply_events_with_optional_reply_gate(events, options, None)
+    }
+
+    /// Batch를 전부 stage한 뒤 고정 reply admission 직전에 게시한다.
+    pub fn apply_events_with_reply_gate(
+        &mut self,
+        events: &[BatchEvent],
+        options: &BatchOptions,
+        gate: &mut dyn FnMut() -> Result<(), JsError>,
+    ) -> Result<Committed<BatchReceipt>, JsError> {
+        self.apply_events_with_optional_reply_gate(events, options, Some(gate))
+    }
+
+    fn apply_events_with_optional_reply_gate(
+        &mut self,
+        events: &[BatchEvent],
+        options: &BatchOptions,
+        gate: Option<&mut dyn FnMut() -> Result<(), JsError>>,
     ) -> Result<Committed<BatchReceipt>, JsError> {
         if events.is_empty() || events.len() > 4096 {
             return Err(range_error("Data batch event count must be 1..4096"));
@@ -1139,10 +1448,14 @@ impl BarStore {
                 "Data batch store byte budget limit {max_bytes}"
             )));
         }
-        let mut staged = self.clone();
+        let mut staged = self.try_clone_candidate()?;
         let mut from = length;
         let mut to = 0;
-        let mut touched = Vec::new();
+        let (mut touched, _touched_memory) = self
+            .memory
+            .context()
+            .try_vec_capacity(events.len())
+            .map_err(|failure| failure.into_js_error())?;
         for event in events {
             let (index, bar) = match event {
                 BatchEvent::Append(bar) => {
@@ -1215,9 +1528,16 @@ impl BarStore {
             unchanged: (options.skip_unchanged == Some(true)).then_some(false),
         };
         let change = staged.change(from, to, ChangeKind::Batch, None, Some(appended));
-        if staged.capacity == self.capacity {
+        if let Some(gate) = gate {
+            gate()?;
+            self.adopt_staged(staged);
+        } else if staged.capacity == self.capacity {
             self.index.copy_tree_from(&staged.index)?;
-            let mut committed = vec![false; staged.length];
+            let (mut committed, _committed_memory) = self
+                .memory
+                .context()
+                .try_vec_filled(staged.length, false)
+                .map_err(|failure| failure.into_js_error())?;
             for (index, _) in touched {
                 if !committed[index] {
                     self.columns.write(index, staged.columns.bar(index));
@@ -1276,6 +1596,47 @@ impl BarStore {
         }
     }
 
+    /// 단일 event를 전부 stage한 뒤 고정 reply admission 직전에 게시한다.
+    pub fn apply_event_with_reply_gate(
+        &mut self,
+        event: DataEvent,
+        batch_options: &BatchOptions,
+        gate: &mut dyn FnMut() -> Result<(), JsError>,
+    ) -> Result<Committed<DataEventValue>, JsError> {
+        match event {
+            DataEvent::Reset(ResetData::Bars(bars)) => self
+                .set_data_with_reply_gate(bars, gate)
+                .map(|result| result.map_value(DataEventValue::None)),
+            DataEvent::Reset(ResetData::Columns { columns, length }) => self
+                .set_owned_columns_with_reply_gate(columns, length, gate)
+                .map(|result| result.map_value(DataEventValue::None)),
+            DataEvent::Append(bar) => self
+                .append_with_reply_gate(bar, gate)
+                .map(|result| result.map_with(DataEventValue::Index)),
+            DataEvent::Update(bar) => {
+                if self.length == 0 || bar.time != self.columns.time[self.length - 1] {
+                    return Err(range_error("Update is only the current bar"));
+                }
+                self.update_with_reply_gate(self.length - 1, bar, gate)
+                    .map(|result| result.map_value(DataEventValue::None))
+            }
+            DataEvent::Correction(bar) => {
+                let index = self.lower_bound(bar.time);
+                if index == self.length || self.columns.time[index] != bar.time {
+                    return Err(range_error("Correction requires an existing timestamp"));
+                }
+                self.update_with_reply_gate(index, bar, gate)
+                    .map(|result| result.map_value(DataEventValue::None))
+            }
+            DataEvent::Prepend(bars) => self
+                .prepend_with_reply_gate(bars, gate)
+                .map(|result| result.map_value(DataEventValue::None)),
+            DataEvent::Batch(events) => self
+                .apply_events_with_reply_gate(&events, batch_options, gate)
+                .map(|result| result.map_with(DataEventValue::Batch)),
+        }
+    }
+
     fn append_staged(&mut self, bar: Bar) -> Result<(), JsError> {
         validate_bar(
             &bar,
@@ -1310,42 +1671,53 @@ impl BarStore {
         while capacity < required {
             capacity *= 2;
         }
-        let mut columns = Columns::zeroed(capacity);
+        let context = self.memory.context().clone();
+        let (mut columns, mut memory) = Columns::try_zeroed(capacity, &context)?;
         columns.time[..self.length].copy_from_slice(&self.columns.time[..self.length]);
         columns.open[..self.length].copy_from_slice(&self.columns.open[..self.length]);
         columns.high[..self.length].copy_from_slice(&self.columns.high[..self.length]);
         columns.low[..self.length].copy_from_slice(&self.columns.low[..self.length]);
         columns.close[..self.length].copy_from_slice(&self.columns.close[..self.length]);
         columns.volume[..self.length].copy_from_slice(&self.columns.volume[..self.length]);
-        let index = RangeIndex::new(
+        let (index, index_memory) = RangeIndex::new_with_memory(
             self.length,
             &columns.low,
             &columns.high,
             Some(&columns.volume),
             capacity,
             false,
+            &context,
         )?;
+        memory
+            .absorb(index_memory)
+            .map_err(|failure| failure.into_js_error())?;
         let columns_identity = Arc::new(());
         self.capacity = capacity;
         self.columns = columns;
         self.columns_identity = columns_identity;
         self.index = index;
+        self.memory = memory;
         Ok(())
     }
 
-    fn commit_replacement(
+    #[allow(clippy::too_many_arguments)]
+    fn commit_replacement_with_reply_gate(
         &mut self,
         columns: Columns,
         index: RangeIndex,
+        memory: MemoryGroup,
         length: usize,
         capacity: usize,
         kind: ChangeKind,
         added: Option<usize>,
+        gate: &mut dyn FnMut() -> Result<(), JsError>,
     ) -> Result<Committed<()>, JsError> {
         let columns_identity = Arc::new(());
+        gate()?;
         self.columns = columns;
         self.columns_identity = columns_identity;
         self.index = index;
+        self.memory = memory;
         self.length = length;
         self.capacity = capacity;
         self.version += 1.0;
@@ -1415,17 +1787,376 @@ pub struct ModelDataState {
 impl ModelDataState {
     /// 첫 store를 serial 1로 만든다.
     pub fn new(options: StoreOptions, bars: Vec<Bar>) -> Result<Self, JsError> {
-        Self::with_serial(1.0, options, bars)
+        Self::new_with_memory(
+            options,
+            bars,
+            MemoryContext::unaccounted(OomStyle::RangeErrorCapitalized),
+        )
+    }
+
+    /// 첫 store를 explicit engine memory context에서 만든다.
+    pub fn new_with_memory(
+        options: StoreOptions,
+        bars: Vec<Bar>,
+        memory: MemoryContext,
+    ) -> Result<Self, JsError> {
+        Self::with_serial_and_memory(1.0, options, bars, memory)
+    }
+
+    /// Workspace target이 이미 소유한 여섯 열을 재복사하지 않고 실제 store로 채택한다.
+    ///
+    /// 호출자가 target runtime의 store serial과 source에서 파생한 version을 명시한다.
+    /// 모든 옵션·열·행·tree 조건은 후보 안에서 먼저 검증되며 전역 serial을 소비하지 않는다.
+    pub fn from_workspace_columns(
+        serial: f64,
+        options: StoreOptions,
+        columns: Columns,
+        length: usize,
+        version: f64,
+        time_version: f64,
+    ) -> Result<Self, JsError> {
+        Self::from_owned_columns(
+            serial,
+            options,
+            columns,
+            length,
+            version,
+            time_version,
+            true,
+            None,
+        )
+    }
+
+    /// Workspace target이 bounded validation과 tree build를 이미 끝낸 여섯 열/index를
+    /// 재검사·재계산하지 않고 O(1) shape 확인 뒤 실제 store로 채택한다.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_validated_workspace_columns(
+        serial: f64,
+        options: StoreOptions,
+        columns: Columns,
+        index: RangeIndex,
+        length: usize,
+        version: f64,
+        time_version: f64,
+    ) -> Result<Self, JsError> {
+        Self::from_validated_owned_columns(
+            serial,
+            options,
+            columns,
+            index,
+            length,
+            version,
+            time_version,
+            true,
+            None,
+        )
+    }
+
+    /// Native correction snapshot이 bounded validation과 tree build를 끝낸 spare-capacity
+    /// payload를 O(1) shape 확인 뒤 실제 store로 채택한다.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_validated_native_snapshot_columns(
+        serial: f64,
+        options: StoreOptions,
+        columns: Columns,
+        index: RangeIndex,
+        length: usize,
+        version: f64,
+        time_version: f64,
+    ) -> Result<Self, JsError> {
+        Self::from_validated_owned_columns(
+            serial,
+            options,
+            columns,
+            index,
+            length,
+            version,
+            time_version,
+            false,
+            None,
+        )
+    }
+
+    /// Native target이 이미 과금한 columns+index group을 재청구 없이 채택한다.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_validated_native_snapshot_columns_with_memory(
+        serial: f64,
+        options: StoreOptions,
+        columns: Columns,
+        index: RangeIndex,
+        length: usize,
+        version: f64,
+        time_version: f64,
+        memory: MemoryGroup,
+    ) -> Result<Self, JsError> {
+        Self::from_validated_owned_columns(
+            serial,
+            options,
+            columns,
+            index,
+            length,
+            version,
+            time_version,
+            false,
+            Some(memory),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn from_validated_owned_columns(
+        serial: f64,
+        options: StoreOptions,
+        columns: Columns,
+        index: RangeIndex,
+        length: usize,
+        version: f64,
+        time_version: f64,
+        require_minimal_capacity: bool,
+        memory: Option<MemoryGroup>,
+    ) -> Result<Self, JsError> {
+        if !serial.is_finite() || serial.fract() != 0.0 || serial < 1.0 {
+            return Err(range_error("Workspace store serial"));
+        }
+        if !options.timeframe_ms.is_finite()
+            || options.timeframe_ms <= 0.0
+            || !options.time_origin.is_finite()
+        {
+            return Err(range_error("Workspace store options"));
+        }
+        if options.max_bars > RESOURCE_LIMITS.max_bars as usize || length > options.max_bars {
+            return Err(range_error("Workspace store length"));
+        }
+        if !version.is_finite()
+            || version.fract() != 0.0
+            || version < 0.0
+            || version > 9_007_199_254_740_991.0
+            || !time_version.is_finite()
+            || time_version.fract() != 0.0
+            || time_version < 0.0
+            || time_version > 9_007_199_254_740_991.0
+        {
+            return Err(range_error("Workspace store version"));
+        }
+        let capacity = columns.time.len();
+        if (require_minimal_capacity && capacity != capacity_for(length))
+            || (!require_minimal_capacity
+                && (capacity < INITIAL_CAPACITY
+                    || !capacity.is_power_of_two()
+                    || capacity > RESOURCE_LIMITS.max_bars as usize
+                    || length > capacity))
+            || [
+                columns.open.len(),
+                columns.high.len(),
+                columns.low.len(),
+                columns.close.len(),
+                columns.volume.len(),
+            ]
+            .into_iter()
+            .any(|size| size != capacity)
+            || index.size() != capacity
+            || index.finite_counts()
+            || index.root_sum().is_none_or(|sum| !sum.is_finite())
+        {
+            return Err(type_error("Workspace store columns/index"));
+        }
+        let expected_memory = columns
+            .bytes()
+            .checked_add(index.bytes())
+            .ok_or_else(|| type_error("Workspace store memory"))?;
+        let memory = match memory {
+            Some(memory) if memory.requested_bytes() == expected_memory as u64 => memory,
+            Some(_) => return Err(type_error("Workspace store memory")),
+            None => MemoryContext::unaccounted(OomStyle::RangeErrorCapitalized)
+                .reserve_group(expected_memory)
+                .map_err(|failure| failure.into_js_error())?,
+        };
+        Ok(Self {
+            store: BarStore {
+                owner_identity: Arc::new(()),
+                columns_identity: Arc::new(()),
+                serial,
+                length,
+                capacity,
+                max_bars: options.max_bars,
+                timeframe_ms: options.timeframe_ms,
+                time_origin: options.time_origin,
+                version,
+                time_version,
+                columns,
+                index,
+                memory,
+            },
+        })
+    }
+
+    /// Native async/params snapshot이 보존한 spare power-of-two capacity와 여섯 열을
+    /// 재복사하지 않고 실제 store로 채택한다. Local maxBars보다 큰 최소/올림 capacity는
+    /// 기존 `BarStore`와 같이 허용하되 logical length와 전역 한도는 그대로 검증한다.
+    pub fn from_native_snapshot_columns(
+        serial: f64,
+        options: StoreOptions,
+        columns: Columns,
+        length: usize,
+        version: f64,
+        time_version: f64,
+    ) -> Result<Self, JsError> {
+        Self::from_owned_columns(
+            serial,
+            options,
+            columns,
+            length,
+            version,
+            time_version,
+            false,
+            None,
+        )
+    }
+
+    /// Native target이 이미 과금한 columns group을 이동하고 index bytes만 추가 예약한다.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_native_snapshot_columns_with_memory(
+        serial: f64,
+        options: StoreOptions,
+        columns: Columns,
+        length: usize,
+        version: f64,
+        time_version: f64,
+        memory: MemoryGroup,
+    ) -> Result<Self, JsError> {
+        Self::from_owned_columns(
+            serial,
+            options,
+            columns,
+            length,
+            version,
+            time_version,
+            false,
+            Some(memory),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn from_owned_columns(
+        serial: f64,
+        options: StoreOptions,
+        columns: Columns,
+        length: usize,
+        version: f64,
+        time_version: f64,
+        require_minimal_capacity: bool,
+        memory: Option<MemoryGroup>,
+    ) -> Result<Self, JsError> {
+        if !serial.is_finite() || serial.fract() != 0.0 || serial < 1.0 {
+            return Err(range_error("Workspace store serial"));
+        }
+        if !options.timeframe_ms.is_finite()
+            || options.timeframe_ms <= 0.0
+            || !options.time_origin.is_finite()
+        {
+            return Err(range_error("Workspace store options"));
+        }
+        if options.max_bars > RESOURCE_LIMITS.max_bars as usize || length > options.max_bars {
+            return Err(range_error("Workspace store length"));
+        }
+        if !version.is_finite()
+            || version.fract() != 0.0
+            || version < 0.0
+            || version > 9_007_199_254_740_991.0
+            || !time_version.is_finite()
+            || time_version.fract() != 0.0
+            || time_version < 0.0
+            || time_version > 9_007_199_254_740_991.0
+        {
+            return Err(range_error("Workspace store version"));
+        }
+        let capacity = columns.time.len();
+        if (require_minimal_capacity && capacity != capacity_for(length))
+            || (!require_minimal_capacity
+                && (capacity < INITIAL_CAPACITY
+                    || !capacity.is_power_of_two()
+                    || capacity > RESOURCE_LIMITS.max_bars as usize
+                    || length > capacity))
+            || [
+                columns.open.len(),
+                columns.high.len(),
+                columns.low.len(),
+                columns.close.len(),
+                columns.volume.len(),
+            ]
+            .into_iter()
+            .any(|size| size != capacity)
+        {
+            return Err(type_error("Workspace store columns"));
+        }
+        validate_columns(&columns, length)?;
+        let (context, mut memory) = match memory {
+            Some(memory) if memory.requested_bytes() == columns.bytes() as u64 => {
+                (memory.context().clone(), memory)
+            }
+            Some(_) => return Err(type_error("Workspace store memory")),
+            None => {
+                let context = MemoryContext::unaccounted(OomStyle::RangeErrorCapitalized);
+                let memory = context
+                    .reserve_group(columns.bytes())
+                    .map_err(|failure| failure.into_js_error())?;
+                (context, memory)
+            }
+        };
+        let (index, index_memory) = RangeIndex::new_with_memory(
+            length,
+            &columns.low,
+            &columns.high,
+            Some(&columns.volume),
+            capacity,
+            false,
+            &context,
+        )?;
+        memory
+            .absorb(index_memory)
+            .map_err(|failure| failure.into_js_error())?;
+        Ok(Self {
+            store: BarStore {
+                owner_identity: Arc::new(()),
+                columns_identity: Arc::new(()),
+                serial,
+                length,
+                capacity,
+                max_bars: options.max_bars,
+                timeframe_ms: options.timeframe_ms,
+                time_origin: options.time_origin,
+                version,
+                time_version,
+                columns,
+                index,
+                memory,
+            },
+        })
     }
 
     /// 엔진이 소비한 store identity로 후보 상태를 만든다.
+    #[allow(dead_code)]
     pub(crate) fn with_serial(
         serial: f64,
         options: StoreOptions,
         bars: Vec<Bar>,
     ) -> Result<Self, JsError> {
+        Self::with_serial_and_memory(
+            serial,
+            options,
+            bars,
+            MemoryContext::unaccounted(OomStyle::RangeErrorCapitalized),
+        )
+    }
+
+    /// Engine이 선택한 context에서 serial을 소비하지 않은 store 후보를 만든다.
+    pub(crate) fn with_serial_and_memory(
+        serial: f64,
+        options: StoreOptions,
+        bars: Vec<Bar>,
+        memory: MemoryContext,
+    ) -> Result<Self, JsError> {
         Ok(Self {
-            store: BarStore::new(serial, options, bars)?,
+            store: BarStore::new(serial, options, bars, memory)?,
         })
     }
 
@@ -1442,6 +2173,20 @@ impl ModelDataState {
 
 /// 결정적 합성 열을 JS LCG와 같은 binary64 연산 순서로 만든다.
 pub fn seeded_columns(length: usize, seed: u32) -> Result<Columns, JsError> {
+    seeded_columns_with_memory(
+        length,
+        seed,
+        &MemoryContext::unaccounted(OomStyle::RangeErrorCapitalized),
+    )
+    .map(|(columns, _)| columns)
+}
+
+/// 결정적 합성 열을 explicit memory context에서 fallible allocation한다.
+pub fn seeded_columns_with_memory(
+    length: usize,
+    seed: u32,
+    memory: &MemoryContext,
+) -> Result<(Columns, MemoryGroup), JsError> {
     if length > RESOURCE_LIMITS.max_bars as usize {
         return Err(range_error(&format!(
             "Synthetic bar count: limit {}",
@@ -1450,7 +2195,7 @@ pub fn seeded_columns(length: usize, seed: u32) -> Result<Columns, JsError> {
     }
     let mut state = seed;
     let mut price = 100.0;
-    let mut columns = Columns::zeroed(length);
+    let (mut columns, group) = Columns::try_zeroed(length, memory)?;
     let mut random = || {
         state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
         f64::from(state) / 4_294_967_296.0
@@ -1469,7 +2214,7 @@ pub fn seeded_columns(length: usize, seed: u32) -> Result<Columns, JsError> {
         columns.low[index] = if low > 0.01 { low } else { 0.01 };
         columns.volume[index] = (100.0 + random() * 9_900.0).floor();
     }
-    Ok(columns)
+    Ok((columns, group))
 }
 
 fn validate_columns(columns: &Columns, length: usize) -> Result<(), JsError> {

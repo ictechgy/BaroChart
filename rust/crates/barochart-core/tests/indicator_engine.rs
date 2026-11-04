@@ -6,6 +6,7 @@ use barochart_core::data::seeded_columns;
 use barochart_core::data::{Bar, BatchEvent, DataChange, ModelDataState, StoreOptions};
 use barochart_core::{Host, HostError};
 use barochart_js::json::{JsObject, JsValue, JsonMode, parse_json};
+use barochart_js::memory::{MemoryAccount, MemoryContext, OomStyle};
 use barochart_js::string::JsString;
 use std::collections::BTreeMap;
 
@@ -891,4 +892,71 @@ fn unknown_source_nan_and_pressure_negative_zero_bits_survive_engine_storage() {
             .to_bits(),
         (-0.0f64).to_bits()
     );
+}
+
+#[test]
+fn indicator_output_capacity_is_accounted_and_denial_removes_detached_entry() {
+    let data = store(seeded_bars(16, 42));
+    let host = NoZones;
+    let limited = MemoryAccount::new(127, OomStyle::InternalErrorLowercase);
+    let mut denied = IndicatorEngine::new_with_memory(
+        IndicatorEngineOptions::default(),
+        MemoryContext::accounted(&limited),
+    )
+    .unwrap();
+    let error = denied
+        .add(data.store(), &host, &text("s"), &text("sma"), &params(&[]))
+        .unwrap_err();
+    assert_eq!(error.code.as_deref(), Some("__BAROCHART_OOM_LIMIT__"));
+    assert!(denied.is_empty());
+    assert_eq!(denied.accounted_bytes(), 0);
+    assert_eq!(limited.snapshot().requested_live_bytes, 0);
+
+    let account = MemoryAccount::new(0, OomStyle::RangeErrorCapitalized);
+    let mut engine = IndicatorEngine::new_with_memory(
+        IndicatorEngineOptions::default(),
+        MemoryContext::accounted(&account),
+    )
+    .unwrap();
+    engine
+        .add(data.store(), &host, &text("s"), &text("sma"), &params(&[]))
+        .unwrap();
+    assert_eq!(engine.accounted_bytes(), 228);
+    assert_eq!(account.snapshot().requested_live_bytes, 228);
+    assert!(engine.remove(&text("s")));
+    assert_eq!(engine.accounted_bytes(), 0);
+    assert_eq!(account.snapshot().requested_live_bytes, 0);
+}
+
+#[test]
+fn native_capture_job_group_splits_into_target_without_recharging_payload() {
+    let data = store(seeded_bars(16, 42));
+    let host = NoZones;
+    let account = MemoryAccount::new(0, OomStyle::RangeErrorCapitalized);
+    let context = MemoryContext::accounted(&account);
+    let mut source =
+        IndicatorEngine::new_with_memory(IndicatorEngineOptions::default(), context.clone())
+            .unwrap();
+    source
+        .add(data.store(), &host, &text("s"), &text("sma"), &params(&[]))
+        .unwrap();
+    let source_bytes = source.accounted_bytes();
+    let (token, snapshots, job_memory) = source
+        .capture_native_entries_with_memory(data.store(), &context)
+        .unwrap();
+    assert!(source.validate_native_capture(data.store(), &token));
+    assert!(job_memory.requested_bytes() >= source_bytes);
+    assert!(account.snapshot().requested_live_bytes > source_bytes);
+
+    let mut target =
+        IndicatorEngine::new_with_memory(IndicatorEngineOptions::default(), context).unwrap();
+    let stage = target
+        .stage_native_restore_with_memory(data.store(), snapshots, job_memory)
+        .unwrap();
+    assert_eq!(account.snapshot().requested_live_bytes, source_bytes * 2);
+    target.publish_native_restore(data.store(), stage).unwrap();
+    assert_eq!(target.accounted_bytes(), source_bytes);
+    assert_eq!(account.snapshot().requested_live_bytes, source_bytes * 2);
+    drop((source, target));
+    assert_eq!(account.snapshot().requested_live_bytes, 0);
 }

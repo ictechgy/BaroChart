@@ -1,17 +1,19 @@
 //! 이동·스타일·표시·복제·삭제 그룹 편집을 준비한 뒤 원자적으로 적용한다.
 
 use std::collections::HashSet;
+use std::mem::size_of;
 use std::sync::Arc;
 
 use barochart_js::error::JsError;
-use barochart_js::json::{JsObject, JsValue, JsonMode, stringify_json_with};
+use barochart_js::json::{JsObject, JsValue, JsonMode, stringify_json_scoped};
+use barochart_js::memory::{MemoryContext, MemoryGroup, MemoryScope, OomStyle};
 use barochart_js::num::NumberDialect;
 use barochart_js::string::JsString;
 
-use crate::contracts::{RESOURCE_LIMITS, canonical_keys, identifier, portable_style};
-use crate::drawing_types::{Drawing, DrawingPoint, DrawingStyle};
-use crate::drawing_validation::{canonical_drawing_value, validate_drawing};
-use crate::drawings::DrawingStore;
+use crate::contracts::{RESOURCE_LIMITS, identifier, portable_color, portable_font};
+use crate::drawing_types::{Drawing, DrawingPoint, DrawingPoints, DrawingStyle};
+use crate::drawing_validation::canonical_drawing_value_scoped;
+use crate::drawings::{DrawingFrame, DrawingStore};
 use crate::position_drawing::drawing_document_version;
 
 /// 0이 아닌 그룹 이동에 필요한 패널·축·시리즈 메타데이터다.
@@ -103,7 +105,7 @@ pub struct DrawingDuplicateCreated {
 }
 
 /// 그룹 편집 브리지 작업에서 공통으로 사용하는 영수증이다.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct DrawingEditReceipt {
     /// 변경하거나 생성한 레코드 수다.
     pub changed: usize,
@@ -111,35 +113,85 @@ pub struct DrawingEditReceipt {
     pub created: Option<Vec<DrawingDuplicateCreated>>,
     /// 커밋 후 무효화 콜백이 오류를 냈는지 나타낸다.
     pub invalidation_failed: bool,
+    _memory: MemoryGroup,
 }
 
 impl DrawingEditReceipt {
+    /// 공개 영수증을 caller scope에서 fallible 직렬화한다.
+    pub fn to_value_scoped(&self, scope: &mut MemoryScope) -> Result<JsValue, JsError> {
+        let mut entries = scoped_entries(3, scope)?;
+        entries.push((
+            JsString::try_from_str("changed", scope).map_err(memory_error)?,
+            JsValue::Number(self.changed as f64),
+        ));
+        let created_lookup = self
+            .created
+            .as_ref()
+            .map(|_| JsString::try_from_str("created", scope).map_err(memory_error))
+            .transpose()?;
+        if let Some(key) = &created_lookup {
+            entries.push((
+                key.try_clone_scoped(scope).map_err(memory_error)?,
+                JsValue::Undefined,
+            ));
+        }
+        entries.push((
+            JsString::try_from_str("invalidationFailed", scope).map_err(memory_error)?,
+            JsValue::Bool(self.invalidation_failed),
+        ));
+        // created rows를 만들기 전에 outer receipt allocation을 끝낸다.
+        let mut receipt =
+            JsObject::try_from_entries_scoped(entries, scope).map_err(memory_error)?;
+        if let Some(created) = &self.created {
+            let bytes = created
+                .len()
+                .checked_mul(size_of::<JsValue>())
+                .ok_or_else(|| scope.allocation_failure().into_js_error())?;
+            scope.try_grow(bytes).map_err(memory_error)?;
+            let mut rows = Vec::new();
+            rows.try_reserve_exact(created.len())
+                .map_err(|_| scope.allocation_failure().into_js_error())?;
+            for row in created {
+                let row_entries = [
+                    (
+                        JsString::try_from_str("sourceId", scope).map_err(memory_error)?,
+                        JsValue::String(
+                            row.source_id
+                                .try_clone_scoped(scope)
+                                .map_err(memory_error)?,
+                        ),
+                    ),
+                    (
+                        JsString::try_from_str("id", scope).map_err(memory_error)?,
+                        JsValue::String(row.id.try_clone_scoped(scope).map_err(memory_error)?),
+                    ),
+                ];
+                rows.push(JsValue::Object(
+                    JsObject::try_from_entries_scoped(row_entries, scope).map_err(memory_error)?,
+                ));
+            }
+            *receipt
+                .get_mut(
+                    created_lookup
+                        .as_ref()
+                        .expect("created placeholder key exists"),
+                )
+                .expect("created placeholder exists") = JsValue::Array(rows);
+        }
+        Ok(JsValue::Object(receipt))
+    }
+
     /// 공개 영수증을 브리지 키 순서로 직렬화한다.
     pub fn to_value(&self) -> JsValue {
-        let mut receipt = JsObject::new();
-        receipt.insert(key("changed"), JsValue::Number(self.changed as f64));
-        if let Some(created) = &self.created {
-            receipt.insert(
-                key("created"),
-                JsValue::Array(
-                    created
-                        .iter()
-                        .map(|row| {
-                            let mut value = JsObject::new();
-                            value.insert(key("sourceId"), JsValue::String(row.source_id.clone()));
-                            value.insert(key("id"), JsValue::String(row.id.clone()));
-                            JsValue::Object(value)
-                        })
-                        .collect(),
-                ),
-            );
-        }
-        receipt.insert(
-            key("invalidationFailed"),
-            JsValue::Bool(self.invalidation_failed),
-        );
-        JsValue::Object(receipt)
+        let mut scope = MemoryScope::unaccounted(OomStyle::RangeErrorCapitalized);
+        self.to_value_scoped(&mut scope)
+            .expect("unaccounted drawing edit receipt serialization")
     }
+}
+
+// created Vec만 밖으로 이동해 receipt lease보다 오래 살 수 없게 한다.
+impl Drop for DrawingEditReceipt {
+    fn drop(&mut self) {}
 }
 
 /// 선택한 드로잉을 원시 좌표 기준으로 이동한다.
@@ -193,37 +245,49 @@ pub fn delete_drawings(
 
 /// 그룹 편집에서 쓰는 이식 가능한 부분 스타일 패치 계약을 적용한다.
 pub fn drawing_style_patch(value: &JsValue) -> Result<DrawingStyle, JsError> {
+    drawing_style_patch_with_memory(
+        value,
+        &MemoryContext::unaccounted(OomStyle::RangeErrorCapitalized),
+    )
+}
+
+fn drawing_style_patch_with_memory(
+    value: &JsValue,
+    memory: &MemoryContext,
+) -> Result<DrawingStyle, JsError> {
     let record = plain_record(value, "Drawing style plain record required")?;
     if record.is_empty() {
         return Err(type_error("Drawing style nonempty defined patch required"));
     }
-    for field in canonical_keys(value, &["color", "fill", "width", "font"])? {
-        if !["color", "fill", "width", "font"]
-            .iter()
-            .any(|allowed| field == JsString::from_str(allowed))
+    for field in ["color", "fill", "width", "font"] {
+        if field_value(record, field)
+            .is_some_and(|value| matches!(value, JsValue::Undefined | JsValue::Null))
         {
-            return Err(type_error("Drawing style fields"));
-        }
-        let patch_value = record.get(&field).expect("canonical key exists");
-        if matches!(patch_value, JsValue::Undefined | JsValue::Null) {
             return Err(type_error("Drawing style nonempty defined patch required"));
         }
     }
-    let normalized = portable_style(value, &["color", "fill"], false)?;
-    let normalized = plain_record(&normalized, "Drawing style plain record required")?;
-    let width = match normalized.get(&key("width")) {
+    if record.iter().any(|(field, _)| {
+        !["color", "fill", "width", "font"]
+            .iter()
+            .any(|allowed| allowed.encode_utf16().eq(field.as_units().iter().copied()))
+    }) {
+        return Err(type_error("Drawing style fields"));
+    }
+    let color = field_value(record, "color")
+        .map(portable_color)
+        .transpose()?;
+    let fill = field_value(record, "fill")
+        .map(portable_color)
+        .transpose()?;
+    let font = field_value(record, "font").map(portable_font).transpose()?;
+    let width = match field_value(record, "width") {
         None => None,
         Some(JsValue::Number(width)) if width.is_finite() && (0.1..=50.0).contains(width) => {
             Some(*width)
         }
         Some(_) => return Err(range_error("Stroke width")),
     };
-    Ok(DrawingStyle {
-        color: string_field(normalized, "color"),
-        width,
-        fill: string_field(normalized, "fill"),
-        font: string_field(normalized, "font"),
-    })
+    DrawingStyle::try_from_borrowed(color.as_ref(), width, fill.as_ref(), font.as_ref(), memory)
 }
 
 #[derive(Clone, Copy)]
@@ -270,12 +334,15 @@ fn group_edit(
     if let Some(guard) = context.owner_guard {
         guard()?;
     }
+    let memory = store.memory_context().clone();
+    let mut group_scope = memory.scope();
 
     // JS 복제는 수명주기·제스처 검사보다 먼저 옵션을 정규화한다.
     let duplicate_options = if matches!(operation, Operation::Duplicate) {
-        Some(translation_record(
+        Some(translation_record_scoped(
             options_value.expect("duplicate takes options"),
             &["deltaTimeMs", "deltaPrice"],
+            &mut group_scope,
         )?)
     } else {
         None
@@ -324,17 +391,19 @@ fn group_edit(
     };
     let binding_context = context.bindings.unwrap_or(empty_bindings);
 
-    let ids = translation_list(ids_value, 128)?;
+    let ids = translation_list_scoped(ids_value, 128, &mut group_scope)?;
     let options_record = match operation {
         Operation::Delete | Operation::Visibility => None,
-        Operation::Duplicate => duplicate_options.clone(),
-        Operation::Translate => Some(translation_record(
+        Operation::Duplicate => duplicate_options,
+        Operation::Translate => Some(translation_record_scoped(
             options_value.expect("translation takes options"),
             &["deltaTimeMs", "deltaPrice"],
+            &mut group_scope,
         )?),
-        Operation::Style => Some(translation_record(
+        Operation::Style => Some(translation_record_scoped(
             options_value.expect("style takes options"),
             &["color", "fill", "width", "font"],
+            &mut group_scope,
         )?),
     };
     let options = options_value;
@@ -342,11 +411,10 @@ fn group_edit(
         return Err(range_error("Drawing group edit requires 1..128 ids"));
     }
 
-    let mut selected = HashSet::with_capacity(ids.len());
+    let mut selected = HashSet::new();
+    try_hashset_capacity(&mut selected, ids.len(), &mut group_scope)?;
     for id in &ids {
-        let value = JsValue::String(id.clone());
-        identifier(&value, "Drawing id")?;
-        if !selected.insert(id.clone()) {
+        if !selected.insert(id) {
             return Err(type_error("Duplicate drawing id"));
         }
     }
@@ -375,32 +443,46 @@ fn group_edit(
             (0.0, 0.0)
         };
     let style_patch = if matches!(operation, Operation::Style) {
-        let record = options_record
-            .as_ref()
-            .expect("style options parsed")
-            .clone();
-        drawing_style_patch(&JsValue::Object(record))?
+        let record = options_record.as_ref().expect("style options parsed");
+        drawing_style_patch_with_memory(
+            &JsValue::Object(clone_object_scoped(record, &mut group_scope)?),
+            &memory,
+        )?
     } else {
-        DrawingStyle {
-            color: None,
-            width: None,
-            fill: None,
-            font: None,
-        }
+        DrawingStyle::empty(&memory)
     };
     validate_store_config_for_group(store)?;
     if matches!(operation, Operation::Duplicate) && store.serial > 9_007_199_254_740_991 {
         return Err(range_error("Drawing duplication serial"));
     }
 
-    let mut next = store.items.clone();
-    let mut seen = HashSet::with_capacity(store.items.len());
-    let mut binding: Option<(JsString, Option<JsString>, Option<JsString>)> = None;
+    let extra = if matches!(operation, Operation::Duplicate) {
+        ids.len()
+    } else {
+        0
+    };
+    let next_capacity = store
+        .items
+        .len()
+        .checked_add(extra)
+        .ok_or_else(|| memory.allocation_failure().into_js_error())?;
+    let (mut next, next_memory) = memory
+        .try_vec_capacity(next_capacity)
+        .map_err(memory_error)?;
+    next.extend(store.items.iter().cloned());
+    let mut seen = HashSet::new();
+    try_hashset_capacity(&mut seen, store.items.len(), &mut group_scope)?;
+    let mut binding: Option<&Drawing> = None;
     let mut changed = 0usize;
     let mut point_count = 0usize;
     let mut text_count = 0usize;
-    let mut pending_copies = Vec::new();
-    let mut created = Vec::new();
+    let mut pending_copies = scoped_vec_capacity(ids.len(), &mut group_scope)?;
+    let mut receipt_scope = memory.scope();
+    let mut created = if matches!(operation, Operation::Duplicate) {
+        scoped_vec_capacity(ids.len(), &mut receipt_scope)?
+    } else {
+        Vec::new()
+    };
     let mut next_serial = store.serial;
     let mut clear_selected = matches!(operation, Operation::Delete)
         && store
@@ -413,27 +495,28 @@ fn group_edit(
         if point_count > store.config.max_points {
             return Err(range_error("Drawing group edit point limit"));
         }
-        validate_drawing(&current.to_value())?;
-        let before = current.as_ref().clone();
-        text_count = text_count.saturating_add(before.text_len_utf16());
-        if !seen.insert(before.id.clone()) {
+        let current_value = current.to_value_scoped(&mut group_scope)?;
+        let _validated =
+            crate::drawing_validation::validate_drawing_with_memory(&current_value, &memory)?;
+        drop(_validated);
+        text_count = text_count.saturating_add(current.text_len_utf16());
+        if !seen.insert(&current.id) {
             return Err(type_error("Duplicate drawing id"));
         }
-        if !selected.contains(&before.id) {
+        if !selected.contains(&current.id) {
             continue;
         }
-        if before.locked == Some(true) && operation.needs_locked_writable() {
+        if current.locked == Some(true) && operation.needs_locked_writable() {
             return Err(error("Error", "Drawing is locked"));
         }
         if matches!(operation, Operation::Delete) {
-            next[index] = Arc::new(before);
             changed += 1;
             continue;
         }
         if matches!(operation, Operation::Visibility) {
             let visible = visibility.expect("visibility checked");
-            if (before.visible != Some(false)) != visible {
-                let mut candidate = before;
+            if (current.visible != Some(false)) != visible {
+                let mut candidate = current.try_clone_with_memory(&memory)?;
                 candidate.visible = Some(visible);
                 next[index] = Arc::new(candidate);
                 changed += 1;
@@ -444,10 +527,10 @@ fn group_edit(
             continue;
         }
         if matches!(operation, Operation::Style) {
-            let previous = before.style.as_deref();
-            let merged = merge_style(previous, &style_patch);
+            let previous = current.style.as_deref();
             if !style_patch_matches(previous, &style_patch) {
-                let mut candidate = before;
+                let merged = merge_style(previous, &style_patch, &memory)?;
+                let mut candidate = current.try_clone_with_memory(&memory)?;
                 candidate.style = Some(Arc::new(merged));
                 next[index] = Arc::new(candidate);
                 changed += 1;
@@ -456,43 +539,44 @@ fn group_edit(
         }
 
         if metadata {
-            validate_binding(&before, binding.as_ref(), binding_context)?;
-            binding = Some((
-                before.panel.clone(),
-                before.axis_id.clone(),
-                before.series_id.clone(),
-            ));
+            validate_binding(current, binding, binding_context)?;
+            binding = Some(current);
         }
-        let mut anchors = Vec::with_capacity(before.points.len());
         let mut moved = false;
-        for point in before.points.iter() {
-            let time = if delta_time == 0.0 {
-                point.time
-            } else {
-                point.time + delta_time
-            };
-            let price = if delta_price == 0.0 {
-                point.price
-            } else {
-                point.price + delta_price
-            };
-            moved |= time != point.time || price != point.price;
-            anchors.push(DrawingPoint { time, price });
-        }
         let candidate_points = if matches!(operation, Operation::Duplicate) && !metadata {
-            before.points.clone()
+            current.points.clone()
         } else {
-            Arc::from(anchors)
+            let (mut anchors, anchors_memory) = memory
+                .try_vec_capacity(current.points.len())
+                .map_err(memory_error)?;
+            for point in current.points.iter() {
+                let time = if delta_time == 0.0 {
+                    point.time
+                } else {
+                    point.time + delta_time
+                };
+                let price = if delta_price == 0.0 {
+                    point.price
+                } else {
+                    point.price + delta_price
+                };
+                moved |= time != point.time || price != point.price;
+                anchors.push(DrawingPoint { time, price });
+            }
+            DrawingPoints::try_from_vec(anchors, anchors_memory)?
         };
-        let mut candidate = before.clone();
+        let mut candidate = current.try_clone_with_memory(&memory)?;
         candidate.points = candidate_points;
         if matches!(operation, Operation::Duplicate) {
             candidate.locked = Some(false);
-            pending_copies.push(candidate);
+            pending_copies.push(Arc::new(candidate));
             changed += 1;
         } else if moved {
             let candidate = Arc::new(candidate);
-            validate_drawing(&candidate.to_value())?;
+            let candidate_value = candidate.to_value_scoped(&mut group_scope)?;
+            let _validated =
+                crate::drawing_validation::validate_drawing_with_memory(&candidate_value, &memory)?;
+            drop(_validated);
             next[index] = candidate;
             changed += 1;
         }
@@ -529,32 +613,52 @@ fn group_edit(
                 }
                 next_serial += 1;
                 attempts += 1;
-                let candidate_id = JsString::from_str(&format!("drawing-{next_serial}"));
-                if !seen.contains(&candidate_id) {
-                    break candidate_id;
+                let mut attempt_scope = memory.scope();
+                let candidate_id =
+                    JsString::try_from_str(&format!("drawing-{next_serial}"), &mut attempt_scope)
+                        .map_err(memory_error)?;
+                if !seen.contains(&candidate_id)
+                    && !created
+                        .iter()
+                        .any(|created: &DrawingDuplicateCreated| created.id == candidate_id)
+                {
+                    break candidate_id
+                        .try_clone_scoped(&mut receipt_scope)
+                        .map_err(memory_error)?;
                 }
             };
-            seen.insert(new_id.clone());
+            let source_id = candidate
+                .id
+                .try_clone_scoped(&mut receipt_scope)
+                .map_err(memory_error)?;
+            let duplicate = Arc::new(candidate.try_clone_with_id(&new_id, &memory)?);
             created.push(DrawingDuplicateCreated {
-                source_id: candidate.id.clone(),
-                id: new_id.clone(),
+                source_id,
+                id: new_id,
             });
-            let mut duplicate = candidate;
-            duplicate.id = new_id;
-            next.push(Arc::new(duplicate));
+            next.push(duplicate);
         }
-        if serialized_document_length(&next, store.dialect) > store.config.max_document_chars {
+        if serialized_document_length(&next, store.dialect, &memory)?
+            > store.config.max_document_chars
+        {
             return Err(range_error("Drawing duplication document limit"));
         }
     }
     if matches!(operation, Operation::Delete) {
         next.retain(|drawing| !selected.contains(&drawing.id));
     }
+    let next = DrawingFrame::try_from_vec(next, next_memory)?;
 
+    let receipt_bytes = usize::try_from(receipt_scope.requested_bytes())
+        .map_err(|_| receipt_scope.allocation_failure().into_js_error())?;
+    let receipt_memory = receipt_scope
+        .split_persistent(receipt_bytes)
+        .map_err(memory_error)?;
     let mut receipt = DrawingEditReceipt {
         changed,
         created: matches!(operation, Operation::Duplicate).then_some(created),
         invalidation_failed: false,
+        _memory: receipt_memory,
     };
     if changed == 0 {
         if let Some(guard) = context.owner_guard {
@@ -564,56 +668,38 @@ fn group_edit(
     }
 
     let current_snapshot = store.snapshot();
-    let current_weight = validated_snapshot_weight(&current_snapshot, store.dialect)?;
+    let current_weight = validated_snapshot_weight(&current_snapshot, store.dialect, &memory)?;
     if current_weight > store.config.history_bytes {
         return Err(range_error(
             "Drawing group edit undo snapshot exceeds historyBytes",
         ));
     }
-    let mut history = Vec::with_capacity(store.undo_stack.len() + 1);
-    let mut history_weights = Vec::with_capacity(store.undo_stack.len() + 1);
     let mut prior_history_bytes = 0usize;
-    for snapshot in &store.undo_stack {
+    for snapshot in store.undo_stack.iter() {
         if snapshot.len() > store.config.max_drawings {
             return Err(range_error("Drawing group edit array limit/shape"));
         }
-        let weight = validated_snapshot_weight(snapshot, store.dialect)?;
+        let weight = validated_snapshot_weight(snapshot, store.dialect, &memory)?;
         prior_history_bytes = prior_history_bytes.saturating_add(weight);
         if prior_history_bytes > RESOURCE_LIMITS.max_history_bytes as usize {
             return Err(range_error(
                 "Drawing group edit retained history resource limit",
             ));
         }
-        history.push(snapshot.clone());
-        history_weights.push(weight);
     }
-    history.push(current_snapshot);
-    history_weights.push(current_weight);
-    let mut retained_bytes = history_weights.iter().copied().sum::<usize>();
-    let mut trim_start = 0usize;
-    while history.len() - trim_start > store.config.history_limit
-        || retained_bytes > store.config.history_bytes
-    {
-        retained_bytes = retained_bytes.saturating_sub(history_weights[trim_start]);
-        trim_start += 1;
-    }
-    let next_undo = history[trim_start..].to_vec();
-    let next_redo = Vec::new();
     if let Some(guard) = context.owner_guard {
         guard()?;
     }
 
     // 준비와 예산 검사가 끝났다. 관찰자에게 알리기 전에 준비된 상태를 모두 설치한다.
-    store.items = next;
-    store.undo_stack = next_undo;
-    store.redo_stack = next_redo;
-    store.retained_history_bytes = retained_bytes;
-    if clear_selected {
-        store.selected = None;
-    }
-    if matches!(operation, Operation::Duplicate) {
-        store.serial = next_serial;
-    }
+    store.publish_mutation(next, |store| {
+        if clear_selected {
+            store.clear_selection();
+        }
+        if matches!(operation, Operation::Duplicate) {
+            store.serial = next_serial;
+        }
+    })?;
     if let Some(invalidate) = context.invalidate.as_deref_mut()
         && invalidate(operation.invalidation()).is_err()
     {
@@ -624,21 +710,22 @@ fn group_edit(
 
 fn validate_binding(
     drawing: &Drawing,
-    previous: Option<&(JsString, Option<JsString>, Option<JsString>)>,
+    previous: Option<&Drawing>,
     bindings: DrawingBindingContext<'_>,
 ) -> Result<(), JsError> {
-    let current = (
-        drawing.panel.clone(),
-        drawing.axis_id.clone(),
-        drawing.series_id.clone(),
-    );
-    if previous.is_some_and(|previous| previous != &current) {
+    if previous.is_some_and(|previous| {
+        previous.panel != drawing.panel
+            || previous.axis_id != drawing.axis_id
+            || previous.series_id != drawing.series_id
+    }) {
         return Err(error(
             "Error",
             "Drawing group edit requires identical panel/axis/series binding",
         ));
     }
-    let (panel, axis, series) = &current;
+    let panel = &drawing.panel;
+    let axis = &drawing.axis_id;
+    let series = &drawing.series_id;
     let panel_found = bindings.panels.iter().any(|value| value.id == *panel);
     let axis_found = axis.as_ref().is_none_or(|axis| {
         bindings
@@ -675,59 +762,99 @@ fn validate_store_config_for_group(store: &DrawingStore) -> Result<(), JsError> 
 fn validated_snapshot_weight(
     snapshot: &[Arc<Drawing>],
     dialect: NumberDialect,
+    memory: &MemoryContext,
 ) -> Result<usize, JsError> {
     let mut bytes = snapshot.len().saturating_mul(8);
     for drawing in snapshot {
-        let value = canonical_drawing_value(drawing);
-        validate_drawing(&value)?;
-        let text = stringify(&value, dialect);
+        let mut scope = memory.scope();
+        let value = canonical_drawing_value_scoped(drawing, &mut scope)?;
+        let _validated = crate::drawing_validation::validate_drawing_with_memory(&value, memory)?;
+        drop(_validated);
+        let text = stringify_scoped(&value, dialect, &mut scope)?;
         bytes = bytes.saturating_add(2usize.saturating_mul(utf16_len(&text)));
     }
     Ok(bytes)
 }
 
-fn serialized_document_length(drawings: &[Arc<Drawing>], dialect: NumberDialect) -> usize {
+fn serialized_document_length(
+    drawings: &[Arc<Drawing>],
+    dialect: NumberDialect,
+    memory: &MemoryContext,
+) -> Result<usize, JsError> {
+    let mut scope = memory.scope();
     let version = drawing_document_version(drawings);
-    let mut document = JsObject::new();
-    document.insert(
-        key("schema"),
-        JsValue::String(JsString::from_str("aster.drawings")),
-    );
-    document.insert(key("version"), JsValue::Number(f64::from(version)));
-    document.insert(
-        key("drawings"),
-        JsValue::Array(drawings.iter().map(|drawing| drawing.to_value()).collect()),
-    );
-    utf16_len(&stringify(&JsValue::Object(document), dialect))
+    let drawings_lookup = JsString::try_from_str("drawings", &mut scope).map_err(memory_error)?;
+    let entries = [
+        (
+            JsString::try_from_str("schema", &mut scope).map_err(memory_error)?,
+            JsValue::String(
+                JsString::try_from_str("aster.drawings", &mut scope).map_err(memory_error)?,
+            ),
+        ),
+        (
+            JsString::try_from_str("version", &mut scope).map_err(memory_error)?,
+            JsValue::Number(f64::from(version)),
+        ),
+        (
+            drawings_lookup
+                .try_clone_scoped(&mut scope)
+                .map_err(memory_error)?,
+            JsValue::Undefined,
+        ),
+    ];
+    let mut document =
+        JsObject::try_from_entries_scoped(entries, &mut scope).map_err(memory_error)?;
+    let mut values = scoped_vec_capacity(drawings.len(), &mut scope)?;
+    for drawing in drawings {
+        values.push(drawing.to_value_scoped(&mut scope)?);
+    }
+    *document
+        .get_mut(&drawings_lookup)
+        .expect("drawings placeholder exists") = JsValue::Array(values);
+    let document = JsValue::Object(document);
+    Ok(utf16_len(&stringify_scoped(
+        &document, dialect, &mut scope,
+    )?))
 }
 
-fn translation_list(value: &JsValue, maximum: usize) -> Result<Vec<JsString>, JsError> {
+fn translation_list_scoped(
+    value: &JsValue,
+    maximum: usize,
+    scope: &mut MemoryScope,
+) -> Result<Vec<JsString>, JsError> {
     let JsValue::Array(items) = value else {
         return Err(type_error("Drawing group edit plain array required"));
     };
     if items.len() > maximum {
         return Err(range_error("Drawing group edit array limit/shape"));
     }
-    items
-        .iter()
-        .map(|value| match value {
-            JsValue::String(value) => Ok(value.clone()),
-            _ => Err(type_error("Drawing id: string limit 128")),
-        })
-        .collect()
+    let mut ids = scoped_vec_capacity(items.len(), scope)?;
+    for value in items {
+        let id = identifier(value, "Drawing id")?;
+        ids.push(id.try_clone_scoped(scope).map_err(memory_error)?);
+    }
+    Ok(ids)
 }
 
-fn translation_record(value: &JsValue, allowed: &[&str]) -> Result<JsObject, JsError> {
+fn translation_record_scoped(
+    value: &JsValue,
+    allowed: &[&str],
+    scope: &mut MemoryScope,
+) -> Result<JsObject, JsError> {
     let record = plain_record(value, "Drawing group edit plain record required")?;
     for (field, _) in record.iter() {
         if !allowed
             .iter()
-            .any(|allowed| field == &JsString::from_str(allowed))
+            .any(|allowed| allowed.encode_utf16().eq(field.as_units().iter().copied()))
         {
             return Err(type_error("Drawing group edit fields"));
         }
     }
-    Ok(record.clone())
+    let mut cloned = value.try_clone_scoped(scope).map_err(memory_error)?;
+    match &mut cloned {
+        JsValue::Object(record) => Ok(std::mem::take(record)),
+        _ => unreachable!("plain record was checked"),
+    }
 }
 
 fn plain_record<'a>(value: &'a JsValue, message: &str) -> Result<&'a JsObject, JsError> {
@@ -738,62 +865,68 @@ fn plain_record<'a>(value: &'a JsValue, message: &str) -> Result<&'a JsObject, J
 }
 
 fn number_field(record: &JsObject, field: &str) -> Option<Option<f64>> {
-    record.get(&key(field)).map(|value| match value {
+    field_value(record, field).map(|value| match value {
         JsValue::Number(value) => Some(*value),
         _ => None,
     })
 }
 
-fn string_field(record: &JsObject, field: &str) -> Option<JsString> {
-    match record.get(&key(field)) {
-        Some(JsValue::String(value)) => Some(value.clone()),
-        _ => None,
-    }
+fn field_value<'a>(record: &'a JsObject, field: &str) -> Option<&'a JsValue> {
+    record
+        .iter()
+        .find(|(name, _)| field.encode_utf16().eq(name.as_units().iter().copied()))
+        .map(|(_, value)| value)
 }
 
-fn merge_style(previous: Option<&DrawingStyle>, patch: &DrawingStyle) -> DrawingStyle {
-    let empty = DrawingStyle {
-        color: None,
-        width: None,
-        fill: None,
-        font: None,
-    };
-    let previous = previous.unwrap_or(&empty);
-    DrawingStyle {
-        color: patch.color.clone().or_else(|| previous.color.clone()),
-        width: patch.width.or(previous.width),
-        fill: patch.fill.clone().or_else(|| previous.fill.clone()),
-        font: patch.font.clone().or_else(|| previous.font.clone()),
-    }
+fn merge_style(
+    previous: Option<&DrawingStyle>,
+    patch: &DrawingStyle,
+    memory: &MemoryContext,
+) -> Result<DrawingStyle, JsError> {
+    DrawingStyle::try_from_borrowed(
+        patch
+            .color
+            .as_ref()
+            .or_else(|| previous.and_then(|value| value.color.as_ref())),
+        patch
+            .width
+            .or_else(|| previous.and_then(|value| value.width)),
+        patch
+            .fill
+            .as_ref()
+            .or_else(|| previous.and_then(|value| value.fill.as_ref())),
+        patch
+            .font
+            .as_ref()
+            .or_else(|| previous.and_then(|value| value.font.as_ref())),
+        memory,
+    )
 }
 
 fn style_patch_matches(previous: Option<&DrawingStyle>, patch: &DrawingStyle) -> bool {
-    let empty = DrawingStyle {
-        color: None,
-        width: None,
-        fill: None,
-        font: None,
-    };
-    let previous = previous.unwrap_or(&empty);
     patch
         .color
         .as_ref()
-        .is_none_or(|value| previous.color.as_ref() == Some(value))
+        .is_none_or(|value| previous.and_then(|value| value.color.as_ref()) == Some(value))
         && patch
             .width
-            .is_none_or(|value| previous.width == Some(value))
+            .is_none_or(|value| previous.and_then(|value| value.width) == Some(value))
         && patch
             .fill
             .as_ref()
-            .is_none_or(|value| previous.fill.as_ref() == Some(value))
+            .is_none_or(|value| previous.and_then(|value| value.fill.as_ref()) == Some(value))
         && patch
             .font
             .as_ref()
-            .is_none_or(|value| previous.font.as_ref() == Some(value))
+            .is_none_or(|value| previous.and_then(|value| value.font.as_ref()) == Some(value))
 }
 
-fn stringify(value: &JsValue, dialect: NumberDialect) -> Vec<u8> {
-    stringify_json_with(value, JsonMode::Standard, dialect)
+fn stringify_scoped(
+    value: &JsValue,
+    dialect: NumberDialect,
+    scope: &mut MemoryScope,
+) -> Result<Vec<u8>, JsError> {
+    stringify_json_scoped(value, JsonMode::Standard, dialect, scope).map_err(memory_error)
 }
 
 fn utf16_len(bytes: &[u8]) -> usize {
@@ -803,8 +936,52 @@ fn utf16_len(bytes: &[u8]) -> usize {
         .count()
 }
 
-fn key(value: &str) -> JsString {
-    JsString::from_str(value)
+fn scoped_entries(
+    capacity: usize,
+    scope: &mut MemoryScope,
+) -> Result<Vec<(JsString, JsValue)>, JsError> {
+    scoped_vec_capacity(capacity, scope)
+}
+
+fn clone_object_scoped(object: &JsObject, scope: &mut MemoryScope) -> Result<JsObject, JsError> {
+    let mut entries = scoped_entries(object.len(), scope)?;
+    for (key, value) in object.iter() {
+        entries.push((
+            key.try_clone_scoped(scope).map_err(memory_error)?,
+            value.try_clone_scoped(scope).map_err(memory_error)?,
+        ));
+    }
+    JsObject::try_from_entries_scoped(entries, scope).map_err(memory_error)
+}
+
+fn scoped_vec_capacity<T>(capacity: usize, scope: &mut MemoryScope) -> Result<Vec<T>, JsError> {
+    let bytes = capacity
+        .checked_mul(size_of::<T>())
+        .ok_or_else(|| scope.allocation_failure().into_js_error())?;
+    scope.try_grow(bytes).map_err(memory_error)?;
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(capacity)
+        .map_err(|_| scope.allocation_failure().into_js_error())?;
+    Ok(values)
+}
+
+fn try_hashset_capacity<T: Eq + std::hash::Hash>(
+    values: &mut HashSet<T>,
+    capacity: usize,
+    scope: &mut MemoryScope,
+) -> Result<(), JsError> {
+    let bytes = capacity
+        .checked_mul(size_of::<T>().saturating_add(size_of::<usize>()))
+        .ok_or_else(|| scope.allocation_failure().into_js_error())?;
+    scope.try_grow(bytes).map_err(memory_error)?;
+    values
+        .try_reserve(capacity)
+        .map_err(|_| scope.allocation_failure().into_js_error())
+}
+
+fn memory_error(failure: barochart_js::memory::MemoryFailure) -> JsError {
+    failure.into_js_error()
 }
 
 fn error(name: &'static str, message: &str) -> JsError {

@@ -4,14 +4,18 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use barochart_js::error::JsError;
-use barochart_js::json::{JsObject, JsValue, JsonMode, parse_json_utf16_with, stringify_json_with};
+use barochart_js::json::{
+    JsObject, JsValue, JsonFailure, JsonMode, parse_json_utf16_scoped, stringify_json_scoped,
+};
+use barochart_js::memory::{MemoryContext, MemoryGroup, MemoryScope, OomStyle};
 use barochart_js::num::NumberDialect;
 use barochart_js::string::JsString;
 
-use crate::contracts::{RESOURCE_LIMITS, assert_json_text_depth_with, bounded_text, option_record};
+use crate::contracts::{RESOURCE_LIMITS, option_record};
 use crate::drawing_types::Drawing;
 use crate::drawing_validation::{
-    canonicalize_drawing_value, copy_drawing_value, validate_document_version, validate_drawing,
+    canonicalize_drawing_value_scoped, copy_drawing_value_scoped, validate_document_version,
+    validate_drawing_with_memory,
 };
 use crate::position_drawing::drawing_document_version;
 
@@ -64,22 +68,83 @@ pub fn save_drawing_document(
     dialect: NumberDialect,
     transaction_active: bool,
 ) -> Result<JsString, JsError> {
+    save_drawing_document_with_memory(
+        drawings,
+        max_document_chars,
+        dialect,
+        transaction_active,
+        &MemoryContext::unaccounted(OomStyle::RangeErrorCapitalized),
+    )
+    .map(|(text, _)| text)
+}
+
+/// Drawing JSON text와 결과 수명 lease를 함께 만든다.
+pub fn save_drawing_document_with_memory(
+    drawings: &[Arc<Drawing>],
+    max_document_chars: usize,
+    dialect: NumberDialect,
+    transaction_active: bool,
+    memory: &MemoryContext,
+) -> Result<(JsString, MemoryGroup), JsError> {
     if transaction_active {
         return Err(error("Error", "Commit or cancel before saving"));
     }
     let version = drawing_document_version(drawings);
-    let mut document = JsObject::new();
-    document.insert(
-        key("schema"),
-        JsValue::String(JsString::from_str("aster.drawings")),
-    );
-    document.insert(key("version"), JsValue::Number(f64::from(version)));
-    document.insert(
-        key("drawings"),
-        JsValue::Array(drawings.iter().map(|drawing| drawing.to_value()).collect()),
-    );
-    let bytes = stringify_json_with(&JsValue::Object(document), JsonMode::Standard, dialect);
-    bounded_generated_text(&bytes, max_document_chars, "Drawing document")
+    let mut scope = memory.scope();
+    let drawings_key = JsString::try_from_str("drawings", &mut scope)
+        .map_err(|failure| failure.into_js_error())?;
+    let replace_drawings_key = drawings_key
+        .try_clone_scoped(&mut scope)
+        .map_err(|failure| failure.into_js_error())?;
+    let mut document = JsObject::try_from_entries_scoped(
+        [
+            (
+                JsString::try_from_str("schema", &mut scope)
+                    .map_err(|failure| failure.into_js_error())?,
+                JsValue::String(
+                    JsString::try_from_str("aster.drawings", &mut scope)
+                        .map_err(|failure| failure.into_js_error())?,
+                ),
+            ),
+            (
+                JsString::try_from_str("version", &mut scope)
+                    .map_err(|failure| failure.into_js_error())?,
+                JsValue::Number(f64::from(version)),
+            ),
+            (drawings_key, JsValue::Undefined),
+        ],
+        &mut scope,
+    )
+    .map_err(|failure| failure.into_js_error())?;
+    let mut values = Vec::new();
+    scope
+        .try_grow(drawings.len() * std::mem::size_of::<JsValue>())
+        .map_err(|failure| failure.into_js_error())?;
+    values
+        .try_reserve_exact(drawings.len())
+        .map_err(|_| scope.allocation_failure().into_js_error())?;
+    for drawing in drawings {
+        values.push(drawing.to_value_scoped(&mut scope)?);
+    }
+    document.insert(replace_drawings_key, JsValue::Array(values));
+    let bytes = stringify_json_scoped(
+        &JsValue::Object(document),
+        JsonMode::Standard,
+        dialect,
+        &mut scope,
+    )
+    .map_err(|failure| failure.into_js_error())?;
+    let temporary =
+        bounded_generated_text_scoped(&bytes, max_document_chars, "Drawing document", &mut scope)?;
+    let mut retained_scope = memory.scope();
+    let text = temporary
+        .try_clone_scoped(&mut retained_scope)
+        .map_err(|failure| failure.into_js_error())?;
+    let retained_bytes = text.len_utf16().saturating_mul(std::mem::size_of::<u16>());
+    let memory = retained_scope
+        .split_persistent(retained_bytes)
+        .map_err(|failure| failure.into_js_error())?;
+    Ok((text, memory))
 }
 
 /// 저장소 상태를 바꾸지 않고 전체 드로잉 문서를 검증·준비한다.
@@ -90,15 +155,47 @@ pub fn load_drawing_document(
     context: &DrawingDocumentContext<'_>,
     transaction_active: bool,
 ) -> Result<Vec<Arc<Drawing>>, JsError> {
-    let value = JsValue::String(text.clone());
-    let text = bounded_text(&value, limits.max_document_chars, "Drawing document", true)?;
-    let parsed_text = assert_json_text_depth_with(
-        &JsValue::String(text.clone()),
-        32,
-        "Drawing document depth limit",
+    load_drawing_document_with_memory(
+        text,
+        limits,
         dialect,
-    )?;
-    let document = parse_json_utf16_with(parsed_text.as_units(), JsonMode::Standard, dialect)?;
+        context,
+        transaction_active,
+        &MemoryContext::unaccounted(OomStyle::RangeErrorCapitalized),
+    )
+    .map(|(drawings, _)| drawings)
+}
+
+/// Drawing document를 scoped parse하고 outer pointer Vec group과 함께 돌려준다.
+pub fn load_drawing_document_with_memory(
+    text: &JsString,
+    limits: DrawingDocumentLimits,
+    dialect: NumberDialect,
+    context: &DrawingDocumentContext<'_>,
+    transaction_active: bool,
+    memory: &MemoryContext,
+) -> Result<(Vec<Arc<Drawing>>, MemoryGroup), JsError> {
+    if text.len_utf16() > limits.max_document_chars {
+        return Err(type_error(&format!(
+            "Drawing document: string limit {}",
+            limits.max_document_chars
+        )));
+    }
+    validate_text_depth(text, 32, "Drawing document depth limit")?;
+    let mut scope = memory.scope();
+    let input = text
+        .try_clone_scoped(&mut scope)
+        .map_err(|failure| failure.into_js_error())?;
+    let value = JsValue::String(input);
+    let JsValue::String(text) = &value else {
+        unreachable!()
+    };
+    let document =
+        match parse_json_utf16_scoped(text.as_units(), JsonMode::Standard, dialect, &mut scope) {
+            Ok(value) => value,
+            Err(JsonFailure::Syntax(error)) => return Err(error),
+            Err(JsonFailure::Memory(failure)) => return Err(failure.into_js_error()),
+        };
     option_record(
         &document,
         &["schema", "version", "drawings"],
@@ -121,9 +218,11 @@ pub fn load_drawing_document(
         return Err(type_error("Unsupported drawing document"));
     }
 
-    let mut drawings = Vec::with_capacity(raw_drawings.len());
+    let (mut drawings, drawings_memory) = memory
+        .try_vec_capacity(raw_drawings.len())
+        .map_err(|failure| failure.into_js_error())?;
     for raw in raw_drawings {
-        let drawing = validate_drawing(raw)?;
+        let drawing = validate_drawing_with_memory(raw, memory)?;
         validate_document_version(&drawing, version)?;
         if let Some(validate) = context.validate_binding
             && !validate(&drawing)?
@@ -135,31 +234,54 @@ pub fn load_drawing_document(
         {
             return Err(error("Error", "Missing drawing panel"));
         }
+        drop(drawing);
 
-        let mut copied = copy_drawing_value(raw, dialect)?;
+        let mut copied = copy_drawing_value_scoped(raw, dialect, &mut scope)?;
         if let Some(decode) = context.style_decoder
             && let JsValue::Object(record) = &mut copied
-            && let Some(style) = record.get(&key("style")).cloned()
+            && let Some(style) = record.get(&key("style"))
         {
+            let style = style
+                .try_clone_scoped(&mut scope)
+                .map_err(|failure| failure.into_js_error())?;
             record.insert(key("style"), decode(&style)?);
         }
-        let canonical = canonicalize_drawing_value(&copied)?;
-        drawings.push(Arc::new(validate_drawing(&canonical)?));
+        let canonical = canonicalize_drawing_value_scoped(&copied, &mut scope)?;
+        drawings.push(Arc::new(validate_drawing_with_memory(&canonical, memory)?));
     }
 
     enforce_drawing_budget(&drawings, limits)?;
-    let mut ids = HashSet::with_capacity(drawings.len());
-    if drawings
-        .iter()
-        .any(|drawing| !ids.insert(drawing.id.clone()))
-    {
-        return Err(type_error("Duplicate drawing ids"));
+    let mut ids = HashSet::new();
+    scope
+        .try_grow(
+            drawings
+                .len()
+                .saturating_mul(std::mem::size_of::<JsString>() + 32),
+        )
+        .map_err(|failure| failure.into_js_error())?;
+    ids.try_reserve(drawings.len())
+        .map_err(|_| scope.allocation_failure().into_js_error())?;
+    for drawing in &drawings {
+        let id = drawing
+            .id
+            .try_clone_scoped(&mut scope)
+            .map_err(|failure| failure.into_js_error())?;
+        if !ids.insert(id) {
+            return Err(type_error("Duplicate drawing ids"));
+        }
     }
     if transaction_active {
         return Err(error("Error", "Cannot load during a gesture"));
     }
-    save_drawing_document(&drawings, limits.max_document_chars, dialect, false)?;
-    Ok(drawings)
+    let roundtrip = save_drawing_document_with_memory(
+        &drawings,
+        limits.max_document_chars,
+        dialect,
+        false,
+        memory,
+    )?;
+    drop(roundtrip);
+    Ok((drawings, drawings_memory))
 }
 
 /// 저장소의 공개 드로잉 수 및 앵커 예산 검사를 적용한다.
@@ -182,12 +304,44 @@ pub fn enforce_drawing_budget(
     Ok(())
 }
 
-fn bounded_generated_text(bytes: &[u8], max: usize, label: &str) -> Result<JsString, JsError> {
+fn bounded_generated_text_scoped(
+    bytes: &[u8],
+    max: usize,
+    label: &str,
+    scope: &mut MemoryScope,
+) -> Result<JsString, JsError> {
     let text = std::str::from_utf8(bytes).expect("JSON writer emits valid UTF-8");
     if text.encode_utf16().count() > max {
         return Err(type_error(&format!("{label}: string limit {max}")));
     }
-    Ok(JsString::from_str(text))
+    JsString::try_from_str(text, scope).map_err(|failure| failure.into_js_error())
+}
+
+fn validate_text_depth(text: &JsString, limit: usize, message: &str) -> Result<(), JsError> {
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for unit in text.as_units() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if *unit == b'\\' as u16 {
+                escaped = true;
+            } else if *unit == b'"' as u16 {
+                in_string = false;
+            }
+        } else if *unit == b'"' as u16 {
+            in_string = true;
+        } else if *unit == b'{' as u16 || *unit == b'[' as u16 {
+            depth = depth.saturating_add(1);
+            if depth > limit {
+                return Err(range_error(message));
+            }
+        } else if (*unit == b'}' as u16 || *unit == b']' as u16) && depth > 0 {
+            depth -= 1;
+        }
+    }
+    Ok(())
 }
 
 fn object(value: &JsValue) -> Option<&JsObject> {

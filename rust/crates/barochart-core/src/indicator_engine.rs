@@ -3,21 +3,25 @@
 #![forbid(unsafe_code)]
 
 use std::collections::BTreeMap;
+use std::mem::size_of;
 use std::sync::Arc;
 
 use barochart_js::error::JsError;
 use barochart_js::json::JsValue;
+use barochart_js::memory::{MemoryContext, MemoryGroup, MemoryScope, OomStyle};
 use barochart_js::num::NumberDialect;
 use barochart_js::string::JsString;
 
 use crate::Host;
-use crate::contracts::{RESOURCE_LIMITS, identifier, js_to_string_with};
+use crate::contracts::{RESOURCE_LIMITS, identifier, js_to_string_scoped};
 use crate::data::{BarStore, ChangeKind, DataChange, DataIdentity};
+use crate::indicator_checkpoint::validate_checkpoint_state;
 use crate::indicator_dispatch::{self, IndicatorState};
 use crate::indicator_helpers::{canonical_checkpoint, exact_state_equal};
 use crate::indicator_params::validate_indicator_params;
 use crate::indicator_registry::IndicatorRegistry;
 use crate::indicator_types::{CreatedIndicator, IndicatorDefinition, IndicatorProgram};
+use crate::native_checkpoints::native_checkpoint_footprint;
 
 const DEFAULT_CHECKPOINT_SIZE: usize = 256;
 const DEFAULT_MAX_OUTPUT_BYTES: usize = 268_435_456;
@@ -46,9 +50,28 @@ fn calculation_error(name: &'static str, message: &str) -> JsError {
     error(name, message)
 }
 
-fn value_message(prefix: &str, value: &JsValue) -> Result<JsError, JsError> {
-    let value = js_to_string_with(value, NumberDialect::PLATFORM)?;
-    let mut message = prefix.encode_utf16().collect::<Vec<_>>();
+fn value_message(
+    prefix: &str,
+    value: &JsValue,
+    scope: &mut MemoryScope,
+) -> Result<JsError, JsError> {
+    let value = js_to_string_scoped(value, NumberDialect::PLATFORM, scope)?;
+    let length = prefix
+        .encode_utf16()
+        .count()
+        .checked_add(value.len_utf16())
+        .ok_or_else(|| scope.allocation_failure().into_js_error())?;
+    let bytes = length
+        .checked_mul(size_of::<u16>())
+        .ok_or_else(|| scope.allocation_failure().into_js_error())?;
+    scope
+        .try_grow(bytes)
+        .map_err(|failure| failure.into_js_error())?;
+    let mut message = Vec::new();
+    message
+        .try_reserve_exact(length)
+        .map_err(|_| scope.allocation_failure().into_js_error())?;
+    message.extend(prefix.encode_utf16());
     message.extend_from_slice(value.as_units());
     Ok(JsError::new("Error", JsString::from_utf16(message)))
 }
@@ -81,6 +104,23 @@ enum IndicatorPrototype {
     },
 }
 
+impl Clone for IndicatorPrototype {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Average(state) => Self::Average(Box::new((**state).clone())),
+            Self::Momentum(state) => Self::Momentum(Box::new((**state).clone())),
+            Self::Session(state) => Self::Session(Box::new((**state).clone())),
+            // Volume/pressure factories are deterministic from the validated definition.
+            // A published entry has already consumed `first`; a detached clone recreates
+            // the state lazily on its next calculation instead of copying hot state.
+            Self::Recreate { program, .. } => Self::Recreate {
+                program: *program,
+                first: None,
+            },
+        }
+    }
+}
+
 impl IndicatorPrototype {
     fn new(state: IndicatorState, program: IndicatorProgram) -> Self {
         match state {
@@ -109,6 +149,7 @@ impl IndicatorPrototype {
 
 struct IndicatorEntry {
     identity: Arc<u8>,
+    definition_identity: Arc<u8>,
     id: JsString,
     name: JsString,
     definition: IndicatorDefinition,
@@ -120,7 +161,7 @@ struct IndicatorEntry {
     length: usize,
     arrays: Vec<Vec<f64>>,
     arrays_epoch: u64,
-    checkpoints: BTreeMap<usize, JsValue>,
+    checkpoints: CheckpointTable,
     checkpoints_epoch: u64,
     revision: f64,
     computed_from: Option<usize>,
@@ -128,6 +169,112 @@ struct IndicatorEntry {
     prepared_version: Option<f64>,
     generation: Option<Arc<u8>>,
     running: Option<Arc<u8>>,
+}
+
+#[derive(Default)]
+struct CheckpointTable {
+    entries: Vec<(usize, JsValue)>,
+}
+
+impl CheckpointTable {
+    fn from_btree(source: BTreeMap<usize, JsValue>) -> Self {
+        Self {
+            entries: source.into_iter().collect(),
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    fn keys(&self) -> impl Iterator<Item = &usize> {
+        self.entries.iter().map(|(index, _)| index)
+    }
+
+    fn values(&self) -> impl Iterator<Item = &JsValue> {
+        self.entries.iter().map(|(_, value)| value)
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (&usize, &JsValue)> {
+        self.entries.iter().map(|(index, value)| (index, value))
+    }
+
+    fn get(&self, index: &usize) -> Option<&JsValue> {
+        self.position(*index)
+            .ok()
+            .map(|position| &self.entries[position].1)
+    }
+
+    fn first_key_value(&self) -> Option<(&usize, &JsValue)> {
+        self.entries.first().map(|(index, value)| (index, value))
+    }
+
+    fn next_after(&self, after: usize) -> Option<(&usize, &JsValue)> {
+        let position = self.entries.partition_point(|(index, _)| *index <= after);
+        self.entries
+            .get(position)
+            .map(|(index, value)| (index, value))
+    }
+
+    fn keys_after(&self, after: usize) -> impl Iterator<Item = usize> + '_ {
+        let position = self.entries.partition_point(|(index, _)| *index <= after);
+        self.entries[position..].iter().map(|(index, _)| *index)
+    }
+
+    fn insert(&mut self, index: usize, value: JsValue) -> Option<JsValue> {
+        match self.position(index) {
+            Ok(position) => Some(std::mem::replace(&mut self.entries[position].1, value)),
+            Err(position) => {
+                self.entries.insert(position, (index, value));
+                None
+            }
+        }
+    }
+
+    fn remove(&mut self, index: &usize) -> Option<JsValue> {
+        self.position(*index)
+            .ok()
+            .map(|position| self.entries.remove(position).1)
+    }
+
+    fn clear(&mut self) {
+        self.entries = Vec::new();
+    }
+
+    fn slot_bytes(&self) -> usize {
+        self.entries
+            .capacity()
+            .saturating_mul(size_of::<(usize, JsValue)>())
+    }
+
+    fn ensure_insert_capacity(&mut self, memory: &mut MemoryGroup) -> Result<(), JsError> {
+        if self.entries.len() < self.entries.capacity() {
+            return Ok(());
+        }
+        let old_bytes = self.slot_bytes();
+        let mut candidate = memory
+            .context()
+            .reserve_group(size_of::<(usize, JsValue)>())
+            .map_err(|failure| failure.into_js_error())?;
+        self.entries
+            .try_reserve_exact(1)
+            .map_err(|_| memory.context().allocation_failure().into_js_error())?;
+        let added = self
+            .slot_bytes()
+            .checked_sub(old_bytes)
+            .ok_or_else(|| type_error("Indicator checkpoint memory"))?;
+        candidate
+            .try_resize(added)
+            .map_err(|failure| failure.into_js_error())?;
+        memory
+            .absorb(candidate)
+            .map_err(|failure| failure.into_js_error())
+    }
+
+    fn position(&self, index: usize) -> Result<usize, usize> {
+        self.entries
+            .binary_search_by_key(&index, |(record_index, _)| *record_index)
+    }
 }
 
 /// 모델과 bridge가 entry를 바꾸지 않고 읽는 view다.
@@ -212,6 +359,27 @@ impl<'a> IndicatorEntryView<'a> {
     /// 현재 checkpoint index를 오름차순으로 복사한다.
     pub fn checkpoint_keys(self) -> Vec<usize> {
         self.entry.checkpoints.keys().copied().collect()
+    }
+
+    /// 현재 ordinary checkpoint record 수다.
+    pub fn checkpoint_len(self) -> usize {
+        self.entry.checkpoints.len()
+    }
+
+    /// 주어진 key 뒤의 다음 checkpoint를 allocation 없이 빌린다.
+    pub fn checkpoint_next(self, after: Option<usize>) -> Option<(usize, &'a JsValue)> {
+        match after {
+            Some(after) => self
+                .entry
+                .checkpoints
+                .next_after(after)
+                .map(|(index, value)| (*index, value)),
+            None => self
+                .entry
+                .checkpoints
+                .first_key_value()
+                .map(|(index, value)| (*index, value)),
+        }
     }
 
     /// checkpoint wire state를 key order 그대로 빌린다.
@@ -345,6 +513,121 @@ struct EngineEntrySnapshot {
     identity: Arc<u8>,
 }
 
+struct EngineEntryCapture {
+    id: JsString,
+    identity: Arc<u8>,
+    dirty: usize,
+    dirty_to: Option<usize>,
+    invalidated: bool,
+    length: usize,
+    revision_bits: u64,
+    arrays_epoch: u64,
+    arrays_len: usize,
+    checkpoints_epoch: u64,
+    checkpoints_len: usize,
+}
+
+/// Workspace source가 호출 사이에 borrow나 raw address를 보관하지 않고 실제
+/// engine/entry container와 entry metadata의 교체를 검증하는 Arc token이다.
+pub struct EngineEntryCaptureToken {
+    engine_identity: Arc<u8>,
+    entries_identity: Arc<u8>,
+    entries: Vec<EngineEntryCapture>,
+}
+
+/// Native async/params 전송이 보존해야 하는 한 entry의 실제 typed payload다.
+/// 생성은 engine capture를 통해서만 이뤄지며 private prototype은 이후 계산 의미를 보존한다.
+pub struct NativeIndicatorEntrySnapshot {
+    pub id: JsString,
+    pub name: JsString,
+    pub definition: IndicatorDefinition,
+    pub params: JsValue,
+    pub arrays: Vec<Vec<f64>>,
+    pub checkpoints: BTreeMap<usize, JsValue>,
+    pub revision: f64,
+    pub dirty: usize,
+    pub dirty_to: Option<usize>,
+    pub invalidated: bool,
+    pub length: usize,
+    pub computed_from: Option<usize>,
+    pub computed_until: Option<usize>,
+    pub prepared_version: Option<f64>,
+    prototype: IndicatorPrototype,
+    captured_definition: IndicatorDefinition,
+    captured_params: JsValue,
+}
+
+struct NativeStoreCapture {
+    identity: DataIdentity,
+    serial_bits: u64,
+    version_bits: u64,
+    time_version_bits: u64,
+    length: usize,
+    capacity: usize,
+}
+
+impl NativeStoreCapture {
+    fn capture(store: &BarStore) -> Self {
+        Self {
+            identity: store.data_identity(),
+            serial_bits: store.serial().to_bits(),
+            version_bits: store.version().to_bits(),
+            time_version_bits: store.time_version().to_bits(),
+            length: store.length(),
+            capacity: store.capacity(),
+        }
+    }
+
+    fn matches(&self, store: &BarStore) -> bool {
+        self.identity.matches(&store.data_identity())
+            && self.serial_bits == store.serial().to_bits()
+            && self.version_bits == store.version().to_bits()
+            && self.time_version_bits == store.time_version().to_bits()
+            && self.length == store.length()
+            && self.capacity == store.capacity()
+    }
+}
+
+/// Source store/engine/registry/options와 entry order/metadata를 묶은 native capture token이다.
+pub struct NativeIndicatorCaptureToken {
+    engine: EngineEntryCaptureToken,
+    store: NativeStoreCapture,
+    registry_names: Vec<&'static str>,
+    checkpoint_size: usize,
+    max_output_bytes: usize,
+}
+
+/// Frame key가 bound entry와 definition object identity만 보존하는 opaque token이다.
+pub struct IndicatorRenderEntryToken {
+    engine_identity: Arc<u8>,
+    id: JsString,
+    entry_identity: Arc<u8>,
+    definition_identity: Arc<u8>,
+}
+
+/// Empty target engine에 대해 검증된 detached all-entry restore 후보다.
+pub struct NativeIndicatorRestoreStage {
+    engine_identity: Arc<u8>,
+    entries_identity: Arc<u8>,
+    store: NativeStoreCapture,
+    registry_names: Vec<&'static str>,
+    checkpoint_size: usize,
+    max_output_bytes: usize,
+    entries: Vec<IndicatorEntry>,
+    memory: MemoryGroup,
+}
+
+/// 기존 entry 하나의 identity와 검증된 detached replacement를 묶는다.
+pub struct NativeIndicatorReplacementStage {
+    engine_identity: Arc<u8>,
+    entries_identity: Arc<u8>,
+    store: NativeStoreCapture,
+    previous_identity: Arc<u8>,
+    candidate: IndicatorEntry,
+    memory: MemoryGroup,
+    receipt: IndicatorPublishReceipt,
+}
+
 /// Compaction 전후 같은 entry order/identity를 보장하는 restart plan이다.
 pub struct IndicatorRestartPlan {
     engine_identity: Arc<u8>,
@@ -354,11 +637,13 @@ pub struct IndicatorRestartPlan {
 enum StagedIndicatorOperation {
     Add {
         entry: IndicatorEntry,
+        memory: MemoryGroup,
         receipt: IndicatorPublishReceipt,
     },
     Replace {
         previous: Arc<u8>,
         entry: IndicatorEntry,
+        memory: MemoryGroup,
         receipt: IndicatorPublishReceipt,
     },
     Noop {
@@ -607,11 +892,24 @@ pub struct IndicatorEngine {
     entries: Vec<IndicatorEntry>,
     calculation_depth: usize,
     identity: Arc<u8>,
+    entries_identity: Arc<u8>,
+    memory: MemoryGroup,
 }
 
 impl IndicatorEngine {
     /// 옵션을 검증하고 35 builtin과 정적 pressure가 등록된 runtime을 만든다.
     pub fn new(options: IndicatorEngineOptions) -> Result<Self, JsError> {
+        Self::new_with_memory(
+            options,
+            MemoryContext::unaccounted(OomStyle::RangeErrorCapitalized),
+        )
+    }
+
+    /// explicit engine memory context에 연결한 indicator runtime을 만든다.
+    pub fn new_with_memory(
+        options: IndicatorEngineOptions,
+        memory: MemoryContext,
+    ) -> Result<Self, JsError> {
         if options.checkpoint_size == 0 {
             return Err(range_error("Checkpoint size"));
         }
@@ -626,6 +924,8 @@ impl IndicatorEngine {
             entries: Vec::new(),
             calculation_depth: 0,
             identity: Arc::new(0),
+            entries_identity: Arc::new(0),
+            memory: MemoryGroup::empty(memory),
         })
     }
 
@@ -659,6 +959,16 @@ impl IndicatorEngine {
         self.entries.is_empty()
     }
 
+    /// persistent output/checkpoint payload가 선택한 memory context다.
+    pub fn memory_context(&self) -> &MemoryContext {
+        self.memory.context()
+    }
+
+    /// persistent output/checkpoint account bytes다.
+    pub fn accounted_bytes(&self) -> u64 {
+        self.memory.requested_bytes()
+    }
+
     /// runtime registry 이름을 source 순서로 복사한다.
     pub fn registry_names(&self) -> Vec<&'static str> {
         self.registry.entries().map(|entry| entry.name).collect()
@@ -669,11 +979,443 @@ impl IndicatorEngine {
         self.entries.iter().map(|entry| entry.id.clone()).collect()
     }
 
+    /// 내부 문서 builder가 entry id를 JS Map insertion 순서로 빌린다.
+    pub(crate) fn entry_ids_iter(&self) -> impl Iterator<Item = &JsString> {
+        self.entries.iter().map(|entry| &entry.id)
+    }
+
     /// read-only entry view를 찾는다. Map key처럼 비문자 값은 일치하지 않는다.
     pub fn entry(&self, id: &JsValue) -> Option<IndicatorEntryView<'_>> {
         self.entry_index(id).map(|index| IndicatorEntryView {
             entry: &self.entries[index],
         })
+    }
+
+    /// 현재 bound entry/definition identity를 frame key용 token으로 잡는다.
+    pub fn capture_render_entry(&self, id: &JsString) -> Option<IndicatorRenderEntryToken> {
+        let index = self.find_id(id)?;
+        let entry = &self.entries[index];
+        Some(IndicatorRenderEntryToken {
+            engine_identity: Arc::clone(&self.identity),
+            id: id.clone(),
+            entry_identity: Arc::clone(&entry.identity),
+            definition_identity: Arc::clone(&entry.definition_identity),
+        })
+    }
+
+    /// Token이 아직 같은 engine의 같은 entry/definition object를 가리키는지 본다.
+    pub fn validate_render_entry(&self, token: &IndicatorRenderEntryToken) -> bool {
+        if !Arc::ptr_eq(&self.identity, &token.engine_identity) {
+            return false;
+        }
+        let Some(index) = self.find_id(&token.id) else {
+            return false;
+        };
+        let entry = &self.entries[index];
+        Arc::ptr_eq(&entry.identity, &token.entry_identity)
+            && Arc::ptr_eq(&entry.definition_identity, &token.definition_identity)
+    }
+
+    /// Workspace `sourceRefs`가 관찰하는 engine/container/entry와 scalar metadata를 고정한다.
+    /// 출력 typed-array의 제자리 값 변경은 의도적으로 token에 포함하지 않는다.
+    pub fn capture_entries(&self) -> EngineEntryCaptureToken {
+        EngineEntryCaptureToken {
+            engine_identity: Arc::clone(&self.identity),
+            entries_identity: Arc::clone(&self.entries_identity),
+            entries: self
+                .entries
+                .iter()
+                .map(|entry| EngineEntryCapture {
+                    id: entry.id.clone(),
+                    identity: Arc::clone(&entry.identity),
+                    dirty: entry.dirty,
+                    dirty_to: entry.dirty_to,
+                    invalidated: entry.invalidated,
+                    length: entry.length,
+                    revision_bits: entry.revision.to_bits(),
+                    arrays_epoch: entry.arrays_epoch,
+                    arrays_len: entry.arrays.len(),
+                    checkpoints_epoch: entry.checkpoints_epoch,
+                    checkpoints_len: entry.checkpoints.len(),
+                })
+                .collect(),
+        }
+    }
+
+    /// Capture 뒤 container/entry 교체나 sourceRefs scalar 변경이 없었는지 확인한다.
+    pub fn validate_capture(&self, token: &EngineEntryCaptureToken) -> bool {
+        Arc::ptr_eq(&self.identity, &token.engine_identity)
+            && Arc::ptr_eq(&self.entries_identity, &token.entries_identity)
+            && self.entries.len() == token.entries.len()
+            && self
+                .entries
+                .iter()
+                .zip(&token.entries)
+                .all(|(entry, expected)| {
+                    entry.id == expected.id
+                        && Arc::ptr_eq(&entry.identity, &expected.identity)
+                        && entry.dirty == expected.dirty
+                        && entry.dirty_to == expected.dirty_to
+                        && entry.invalidated == expected.invalidated
+                        && entry.length == expected.length
+                        && entry.revision.to_bits() == expected.revision_bits
+                        && entry.arrays_epoch == expected.arrays_epoch
+                        && entry.arrays.len() == expected.arrays_len
+                        && entry.checkpoints_epoch == expected.checkpoints_epoch
+                        && entry.checkpoints.len() == expected.checkpoints_len
+                })
+    }
+
+    /// 큰 출력·checkpoint를 복제하지 않고 source identity와 metadata만 캡처한다.
+    pub fn capture_native_token(&self, store: &BarStore) -> NativeIndicatorCaptureToken {
+        NativeIndicatorCaptureToken {
+            engine: self.capture_entries(),
+            store: NativeStoreCapture::capture(store),
+            registry_names: self.registry_names(),
+            checkpoint_size: self.options.checkpoint_size,
+            max_output_bytes: self.options.max_output_bytes,
+        }
+    }
+
+    /// 실제 entry payload를 insertion order로 소유 복사하고 source token을 함께 만든다.
+    pub fn capture_native_entries(
+        &self,
+        store: &BarStore,
+    ) -> (
+        NativeIndicatorCaptureToken,
+        Vec<NativeIndicatorEntrySnapshot>,
+    ) {
+        let token = self.capture_native_token(store);
+        let entries = self
+            .entries
+            .iter()
+            .map(|entry| NativeIndicatorEntrySnapshot {
+                id: entry.id.clone(),
+                name: entry.name.clone(),
+                definition: entry.definition.clone(),
+                params: entry.params.clone(),
+                arrays: entry.arrays.clone(),
+                checkpoints: entry
+                    .checkpoints
+                    .iter()
+                    .map(|(index, state)| (*index, state.clone()))
+                    .collect(),
+                revision: entry.revision,
+                dirty: entry.dirty,
+                dirty_to: entry.dirty_to,
+                invalidated: entry.invalidated,
+                length: entry.length,
+                computed_from: entry.computed_from,
+                computed_until: entry.computed_until,
+                prepared_version: entry.prepared_version,
+                prototype: entry.prototype.clone(),
+                captured_definition: entry.definition.clone(),
+                captured_params: entry.params.clone(),
+            })
+            .collect();
+        (token, entries)
+    }
+
+    /// Native job 전송용 entry payload를 fallible clone하고 job group과 함께 돌려준다.
+    pub fn capture_native_entries_with_memory(
+        &self,
+        store: &BarStore,
+        memory: &MemoryContext,
+    ) -> Result<
+        (
+            NativeIndicatorCaptureToken,
+            Vec<NativeIndicatorEntrySnapshot>,
+            MemoryGroup,
+        ),
+        JsError,
+    > {
+        let token = self.capture_native_token(store);
+        let (mut entries, mut group) = memory
+            .try_vec_capacity(self.entries.len())
+            .map_err(|failure| failure.into_js_error())?;
+        let mut scope: MemoryScope = memory.scope();
+        for entry in &self.entries {
+            let id = entry
+                .id
+                .try_clone_scoped(&mut scope)
+                .map_err(|failure| failure.into_js_error())?;
+            let name = entry
+                .name
+                .try_clone_scoped(&mut scope)
+                .map_err(|failure| failure.into_js_error())?;
+            let params = entry
+                .params
+                .try_clone_scoped(&mut scope)
+                .map_err(|failure| failure.into_js_error())?;
+            let captured_params = entry
+                .params
+                .try_clone_scoped(&mut scope)
+                .map_err(|failure| failure.into_js_error())?;
+            let mut arrays = Vec::new();
+            let array_slots = entry
+                .arrays
+                .len()
+                .checked_mul(size_of::<Vec<f64>>())
+                .ok_or_else(|| memory.allocation_failure().into_js_error())?;
+            scope
+                .try_grow(array_slots)
+                .map_err(|failure| failure.into_js_error())?;
+            arrays
+                .try_reserve_exact(entry.arrays.len())
+                .map_err(|_| memory.allocation_failure().into_js_error())?;
+            for output in &entry.arrays {
+                let (values, values_memory) = memory
+                    .try_clone_slice(output)
+                    .map_err(|failure| failure.into_js_error())?;
+                group
+                    .absorb(values_memory)
+                    .map_err(|failure| failure.into_js_error())?;
+                arrays.push(values);
+            }
+            let mut checkpoints = BTreeMap::new();
+            for (index, state) in entry.checkpoints.iter() {
+                let node_bytes = size_of::<(usize, JsValue)>().saturating_add(16);
+                scope
+                    .try_grow(node_bytes)
+                    .map_err(|failure| failure.into_js_error())?;
+                checkpoints.insert(
+                    *index,
+                    state
+                        .try_clone_scoped(&mut scope)
+                        .map_err(|failure| failure.into_js_error())?,
+                );
+            }
+            entries.push(NativeIndicatorEntrySnapshot {
+                id,
+                name,
+                definition: entry.definition.clone(),
+                params,
+                arrays,
+                checkpoints,
+                revision: entry.revision,
+                dirty: entry.dirty,
+                dirty_to: entry.dirty_to,
+                invalidated: entry.invalidated,
+                length: entry.length,
+                computed_from: entry.computed_from,
+                computed_until: entry.computed_until,
+                prepared_version: entry.prepared_version,
+                prototype: entry.prototype.clone(),
+                captured_definition: entry.definition.clone(),
+                captured_params,
+            });
+        }
+        let temporary_bytes = usize::try_from(scope.requested_bytes())
+            .map_err(|_| memory.allocation_failure().into_js_error())?;
+        let persistent = scope
+            .split_persistent(temporary_bytes)
+            .map_err(|failure| failure.into_js_error())?;
+        group
+            .absorb(persistent)
+            .map_err(|failure| failure.into_js_error())?;
+        Ok((token, entries, group))
+    }
+
+    /// Native capture 뒤 source store/engine/registry/options가 그대로인지 확인한다.
+    pub fn validate_native_capture(
+        &self,
+        store: &BarStore,
+        token: &NativeIndicatorCaptureToken,
+    ) -> bool {
+        self.validate_capture(&token.engine)
+            && token.store.matches(store)
+            && self.registry_names() == token.registry_names
+            && self.options.checkpoint_size == token.checkpoint_size
+            && self.options.max_output_bytes == token.max_output_bytes
+    }
+
+    /// Empty target engine에 all-entry payload를 검증하되 live state는 바꾸지 않는다.
+    pub fn stage_native_restore(
+        &self,
+        store: &BarStore,
+        entries: Vec<NativeIndicatorEntrySnapshot>,
+    ) -> Result<NativeIndicatorRestoreStage, JsError> {
+        self.stage_native_restore_inner(store, entries, None)
+    }
+
+    /// Native job이 이미 과금한 all-entry payload group을 재청구 없이 stage로 이동한다.
+    pub fn stage_native_restore_with_memory(
+        &self,
+        store: &BarStore,
+        entries: Vec<NativeIndicatorEntrySnapshot>,
+        memory: MemoryGroup,
+    ) -> Result<NativeIndicatorRestoreStage, JsError> {
+        self.stage_native_restore_inner(store, entries, Some(memory))
+    }
+
+    fn stage_native_restore_inner(
+        &self,
+        store: &BarStore,
+        entries: Vec<NativeIndicatorEntrySnapshot>,
+        memory: Option<MemoryGroup>,
+    ) -> Result<NativeIndicatorRestoreStage, JsError> {
+        if !self.entries.is_empty() {
+            return Err(ordinary_error(
+                "Native indicator restore target must be empty",
+            ));
+        }
+        if entries.len() > RESOURCE_LIMITS.max_indicators as usize {
+            return Err(range_error("Indicator limit"));
+        }
+        let mut seen = Vec::new();
+        seen.try_reserve_exact(entries.len())
+            .map_err(|_| self.memory.context().allocation_failure().into_js_error())?;
+        let mut output_count = 0usize;
+        let mut staged = Vec::new();
+        staged
+            .try_reserve_exact(entries.len())
+            .map_err(|_| self.memory.context().allocation_failure().into_js_error())?;
+        for snapshot in entries {
+            if seen.iter().any(|id| id == &snapshot.id) {
+                return Err(ordinary_error("Duplicate indicator id"));
+            }
+            seen.push(snapshot.id.clone());
+            output_count = output_count
+                .checked_add(snapshot.definition.outputs.len())
+                .ok_or_else(|| range_error("Indicator output byte limit"))?;
+            self.validate_native_snapshot(store, &snapshot)?;
+            staged.push(Self::entry_from_native_snapshot(snapshot));
+        }
+        self.check_staged_output_budget(output_count, store.capacity())?;
+        let bytes = staged.iter().map(persistent_bytes).sum::<usize>();
+        let memory = match memory {
+            Some(mut memory)
+                if self.memory.context().shares_account(memory.context())
+                    && memory.requested_bytes() >= bytes as u64 =>
+            {
+                memory
+                    .split(bytes)
+                    .map_err(|failure| failure.into_js_error())?
+            }
+            Some(_) => return Err(type_error("Native indicator memory")),
+            None => self
+                .memory
+                .context()
+                .reserve_group(bytes)
+                .map_err(|failure| failure.into_js_error())?,
+        };
+        Ok(NativeIndicatorRestoreStage {
+            engine_identity: Arc::clone(&self.identity),
+            entries_identity: Arc::clone(&self.entries_identity),
+            store: NativeStoreCapture::capture(store),
+            registry_names: self.registry_names(),
+            checkpoint_size: self.options.checkpoint_size,
+            max_output_bytes: self.options.max_output_bytes,
+            entries: staged,
+            memory,
+        })
+    }
+
+    /// Target engine/store를 다시 확인한 뒤 모든 entry를 한 번에 게시한다.
+    pub fn publish_native_restore(
+        &mut self,
+        store: &BarStore,
+        stage: NativeIndicatorRestoreStage,
+    ) -> Result<(), JsError> {
+        if !Arc::ptr_eq(&self.identity, &stage.engine_identity)
+            || !Arc::ptr_eq(&self.entries_identity, &stage.entries_identity)
+            || !self.entries.is_empty()
+            || !stage.store.matches(store)
+            || self.registry_names() != stage.registry_names
+            || self.options.checkpoint_size != stage.checkpoint_size
+            || self.options.max_output_bytes != stage.max_output_bytes
+        {
+            return Err(calculation_error(
+                "StaleSourceError",
+                "Native indicator restore owner or source changed",
+            ));
+        }
+        self.entries = stage.entries;
+        self.memory = stage.memory;
+        self.entries_identity = Arc::new(0);
+        Ok(())
+    }
+
+    /// 한 entry replacement payload를 detached validation하고 이전 identity에 묶는다.
+    pub fn stage_native_replacement(
+        &self,
+        store: &BarStore,
+        id: &JsValue,
+        candidate: NativeIndicatorEntrySnapshot,
+    ) -> Result<NativeIndicatorReplacementStage, JsError> {
+        let Some(index) = self.entry_index(id) else {
+            return Err(ordinary_error("Missing indicator"));
+        };
+        let current = &self.entries[index];
+        if candidate.id != current.id
+            || candidate.name != current.name
+            || candidate.definition.program != current.definition.program
+            || candidate.definition.outputs != current.definition.outputs
+            || candidate.definition.outputs.iter().any(|output| {
+                candidate.definition.effective_plot_offset(output).to_bits()
+                    != current.definition.effective_plot_offset(output).to_bits()
+            })
+        {
+            return Err(type_error("Native indicator replacement definition"));
+        }
+        self.validate_native_snapshot(store, &candidate)?;
+        let candidate = Self::entry_from_native_snapshot(candidate);
+        let memory = self
+            .memory
+            .context()
+            .reserve_group(persistent_bytes(&candidate))
+            .map_err(|failure| failure.into_js_error())?;
+        let receipt = IndicatorPublishReceipt::from_entry(&candidate, true);
+        Ok(NativeIndicatorReplacementStage {
+            engine_identity: Arc::clone(&self.identity),
+            entries_identity: Arc::clone(&self.entries_identity),
+            store: NativeStoreCapture::capture(store),
+            previous_identity: Arc::clone(&current.identity),
+            candidate,
+            memory,
+            receipt,
+        })
+    }
+
+    /// 같은 slot의 entry identity가 유지된 경우에만 replacement를 원자 교체한다.
+    pub fn publish_native_replacement(
+        &mut self,
+        store: &BarStore,
+        stage: NativeIndicatorReplacementStage,
+    ) -> Result<IndicatorPublishReceipt, JsError> {
+        if !Arc::ptr_eq(&self.identity, &stage.engine_identity)
+            || !Arc::ptr_eq(&self.entries_identity, &stage.entries_identity)
+            || !stage.store.matches(store)
+        {
+            return Err(calculation_error(
+                "StaleSourceError",
+                "Native indicator replacement owner or source changed",
+            ));
+        }
+        let Some(index) = self
+            .entries
+            .iter()
+            .position(|entry| Arc::ptr_eq(&entry.identity, &stage.previous_identity))
+        else {
+            return Err(calculation_error(
+                "StaleSourceError",
+                "Native indicator replacement owner or source changed",
+            ));
+        };
+        let old_bytes = persistent_bytes(&self.entries[index]);
+        self.memory
+            .absorb(stage.memory)
+            .map_err(|failure| failure.into_js_error())?;
+        let final_bytes = self
+            .memory
+            .requested_bytes()
+            .checked_sub(old_bytes as u64)
+            .ok_or_else(|| type_error("Indicator memory"))?;
+        self.entries[index] = stage.candidate;
+        self.memory
+            .try_resize(final_bytes as usize)
+            .map_err(|failure| failure.into_js_error())?;
+        Ok(stage.receipt)
     }
 
     /// 현재 실제 entry identity/order를 compaction restart용으로 캡처한다.
@@ -729,6 +1471,9 @@ impl IndicatorEngine {
             entry.computed_until = Some(0);
             entry.prepared_version = None;
         }
+        self.memory
+            .try_resize(0)
+            .map_err(|failure| failure.into_js_error())?;
         Ok(())
     }
 
@@ -767,6 +1512,22 @@ impl IndicatorEngine {
         name: &JsValue,
         params: &JsValue,
     ) -> Result<IndicatorPublishReceipt, JsError> {
+        let mut scope = MemoryScope::unaccounted(self.memory_context().oom_style());
+        self.stage_add_scoped(stage, store, host, id, name, params, &mut scope)
+    }
+
+    /// caller scope에서 동적 unknown-name 오류 payload를 유지하며 additive entry를 staging한다.
+    #[allow(clippy::too_many_arguments)]
+    pub fn stage_add_scoped(
+        &self,
+        stage: &mut IndicatorEngineStage,
+        store: &BarStore,
+        host: &dyn Host,
+        id: &JsValue,
+        name: &JsValue,
+        params: &JsValue,
+        scope: &mut MemoryScope,
+    ) -> Result<IndicatorPublishReceipt, JsError> {
         self.ensure_stage_current(
             stage,
             store,
@@ -791,7 +1552,7 @@ impl IndicatorEngine {
             _ => None,
         };
         let Some(metadata) = metadata else {
-            return Err(value_message("Unknown indicator: ", name)?);
+            return Err(value_message("Unknown indicator: ", name, scope)?);
         };
         let created = indicator_dispatch::create(metadata.program, params, host)?;
         self.ensure_stage_current(
@@ -810,7 +1571,7 @@ impl IndicatorEngine {
             created,
             store.length(),
         );
-        self.compute_staged_entry(
+        let memory = self.compute_staged_entry(
             stage,
             store,
             host,
@@ -820,6 +1581,7 @@ impl IndicatorEngine {
         let receipt = IndicatorPublishReceipt::from_entry(&entry, true);
         stage.operations.push(StagedIndicatorOperation::Add {
             entry,
+            memory,
             receipt: receipt.clone(),
         });
         stage.projected_entries += 1;
@@ -893,7 +1655,7 @@ impl IndicatorEngine {
             created,
             store.length(),
         );
-        self.compute_staged_entry(
+        let memory = self.compute_staged_entry(
             stage,
             store,
             host,
@@ -904,6 +1666,7 @@ impl IndicatorEngine {
         stage.operations.push(StagedIndicatorOperation::Replace {
             previous: Arc::clone(&current.identity),
             entry,
+            memory,
             receipt: receipt.clone(),
         });
         Ok(receipt)
@@ -929,16 +1692,35 @@ impl IndicatorEngine {
             }
         };
         self.ensure_stage_current(&stage, store, stale)?;
-        let mut receipts = Vec::with_capacity(stage.operations.len());
+        let mut receipts = Vec::new();
+        receipts
+            .try_reserve_exact(stage.operations.len())
+            .map_err(|_| self.memory.context().allocation_failure().into_js_error())?;
+        let additions = stage
+            .operations
+            .iter()
+            .filter(|operation| matches!(operation, StagedIndicatorOperation::Add { .. }))
+            .count();
+        self.entries
+            .try_reserve(additions)
+            .map_err(|_| self.memory.context().allocation_failure().into_js_error())?;
         for operation in stage.operations {
             match operation {
-                StagedIndicatorOperation::Add { entry, receipt } => {
+                StagedIndicatorOperation::Add {
+                    entry,
+                    memory,
+                    receipt,
+                } => {
+                    self.memory
+                        .absorb(memory)
+                        .map_err(|failure| failure.into_js_error())?;
                     self.entries.push(entry);
                     receipts.push(receipt);
                 }
                 StagedIndicatorOperation::Replace {
                     previous,
                     entry,
+                    memory,
                     receipt,
                 } => {
                     let index = self
@@ -946,7 +1728,19 @@ impl IndicatorEngine {
                         .iter()
                         .position(|current| Arc::ptr_eq(&current.identity, &previous))
                         .expect("stage guard retained replacement entry");
+                    let old_bytes = persistent_bytes(&self.entries[index]);
+                    self.memory
+                        .absorb(memory)
+                        .map_err(|failure| failure.into_js_error())?;
+                    let final_bytes = self
+                        .memory
+                        .requested_bytes()
+                        .checked_sub(old_bytes as u64)
+                        .ok_or_else(|| type_error("Indicator memory"))?;
                     self.entries[index] = entry;
+                    self.memory
+                        .try_resize(final_bytes as usize)
+                        .map_err(|failure| failure.into_js_error())?;
                     receipts.push(receipt);
                 }
                 StagedIndicatorOperation::Noop { receipt } => receipts.push(receipt),
@@ -964,6 +1758,20 @@ impl IndicatorEngine {
         name: &JsValue,
         params: &JsValue,
     ) -> Result<IndicatorRead<'a>, JsError> {
+        let mut scope = MemoryScope::unaccounted(self.memory_context().oom_style());
+        self.add_scoped(store, host, id, name, params, &mut scope)
+    }
+
+    /// caller scope에서 동적 unknown-name 오류 payload를 유지하며 entry를 eager 추가한다.
+    pub fn add_scoped<'a>(
+        &'a mut self,
+        store: &BarStore,
+        host: &dyn Host,
+        id: &JsValue,
+        name: &JsValue,
+        params: &JsValue,
+        scope: &mut MemoryScope,
+    ) -> Result<IndicatorRead<'a>, JsError> {
         let id = identifier(id, "Indicator id")?.clone();
         validate_indicator_params(params)?;
         if self.entries.len() >= RESOURCE_LIMITS.max_indicators as usize {
@@ -977,7 +1785,7 @@ impl IndicatorEngine {
             _ => None,
         };
         let Some(metadata) = metadata else {
-            return Err(value_message("Unknown indicator: ", name)?);
+            return Err(value_message("Unknown indicator: ", name, scope)?);
         };
         let created = indicator_dispatch::create(metadata.program, params, host)?;
         let definition = created.definition;
@@ -986,6 +1794,7 @@ impl IndicatorEngine {
         let prototype = IndicatorPrototype::new(created.state, definition.program);
         self.entries.push(IndicatorEntry {
             identity: Arc::clone(&entry_identity),
+            definition_identity: Arc::new(0),
             id: id.clone(),
             name: JsString::from_str(metadata.name),
             definition,
@@ -997,7 +1806,7 @@ impl IndicatorEngine {
             length: 0,
             arrays: Vec::new(),
             arrays_epoch: 0,
-            checkpoints: BTreeMap::new(),
+            checkpoints: CheckpointTable::default(),
             checkpoints_epoch: 0,
             revision: 0.0,
             computed_from: None,
@@ -1013,7 +1822,15 @@ impl IndicatorEngine {
             if let Some(index) = self.find_id(&id)
                 && Arc::ptr_eq(&self.entries[index].identity, &entry_identity)
             {
+                let old_bytes = persistent_bytes(&self.entries[index]);
                 self.entries.remove(index);
+                let final_bytes = self
+                    .memory
+                    .requested_bytes()
+                    .saturating_sub(old_bytes as u64);
+                self.memory
+                    .try_resize(final_bytes as usize)
+                    .map_err(|failure| failure.into_js_error())?;
             }
             return Err(error);
         }
@@ -1026,7 +1843,15 @@ impl IndicatorEngine {
         let Some(index) = self.entry_index(id) else {
             return false;
         };
+        let old_bytes = persistent_bytes(&self.entries[index]);
         self.entries.remove(index);
+        let final_bytes = self
+            .memory
+            .requested_bytes()
+            .saturating_sub(old_bytes as u64);
+        self.memory
+            .try_resize(final_bytes as usize)
+            .expect("indicator memory shrink");
         true
     }
 
@@ -1038,10 +1863,118 @@ impl IndicatorEngine {
         checkpoints: BTreeMap<usize, JsValue>,
         prepared_version: Option<f64>,
     ) -> Result<(), JsError> {
+        let bytes = checkpoints.values().try_fold(0usize, |total, state| {
+            total
+                .checked_add(native_checkpoint_footprint(state)?.logical_bytes)
+                .ok_or_else(|| type_error("Indicator checkpoint memory"))
+        })?;
+        let memory = self
+            .memory
+            .context()
+            .reserve_group(bytes)
+            .map_err(|failure| failure.into_js_error())?;
+        self.install_checkpoints_with_memory(id, checkpoints, prepared_version, memory)
+    }
+
+    /// Native staging이 이미 과금한 checkpoint payload를 재청구 없이 설치한다.
+    pub fn install_checkpoints_with_memory(
+        &mut self,
+        id: &JsValue,
+        checkpoints: BTreeMap<usize, JsValue>,
+        prepared_version: Option<f64>,
+        mut memory: MemoryGroup,
+    ) -> Result<(), JsError> {
         let Some(index) = self.entry_index(id) else {
             return Err(ordinary_error("Missing indicator"));
         };
+        let state_bytes = checkpoints.values().try_fold(0usize, |total, state| {
+            total
+                .checked_add(native_checkpoint_footprint(state)?.logical_bytes)
+                .ok_or_else(|| type_error("Indicator checkpoint memory"))
+        })?;
+        if memory.requested_bytes() != state_bytes as u64 {
+            return Err(type_error("Indicator checkpoint memory"));
+        }
+        let (mut checkpoint_entries, slot_memory) = memory
+            .context()
+            .try_vec_capacity(checkpoints.len())
+            .map_err(|failure| failure.into_js_error())?;
+        checkpoint_entries.extend(checkpoints);
+        memory
+            .absorb(slot_memory)
+            .map_err(|failure| failure.into_js_error())?;
+        let checkpoints = CheckpointTable {
+            entries: checkpoint_entries,
+        };
+        let expected = state_bytes
+            .checked_add(checkpoints.slot_bytes())
+            .ok_or_else(|| type_error("Indicator checkpoint memory"))?;
+        if memory.requested_bytes() != expected as u64 {
+            return Err(type_error("Indicator checkpoint memory"));
+        }
+        let old_bytes = checkpoint_bytes(&self.entries[index]);
+        self.memory
+            .absorb(memory)
+            .map_err(|failure| failure.into_js_error())?;
+        let final_bytes = self
+            .memory
+            .requested_bytes()
+            .checked_sub(old_bytes as u64)
+            .ok_or_else(|| type_error("Indicator checkpoint memory"))?;
         self.entries[index].checkpoints = checkpoints;
+        self.memory
+            .try_resize(final_bytes as usize)
+            .map_err(|failure| failure.into_js_error())?;
+        self.entries[index].checkpoints_epoch =
+            self.entries[index].checkpoints_epoch.wrapping_add(1);
+        self.entries[index].prepared_version = prepared_version;
+        Ok(())
+    }
+
+    /// Native checkpoint map의 fallible sorted entries/group을 변환 allocation 없이 설치한다.
+    pub fn install_checkpoint_entries_with_memory(
+        &mut self,
+        id: &JsValue,
+        checkpoints: Vec<(usize, JsValue)>,
+        prepared_version: Option<f64>,
+        memory: MemoryGroup,
+    ) -> Result<(), JsError> {
+        let Some(index) = self.entry_index(id) else {
+            return Err(ordinary_error("Missing indicator"));
+        };
+        if checkpoints.windows(2).any(|pair| pair[0].0 >= pair[1].0) {
+            return Err(type_error("Indicator checkpoint order"));
+        }
+        let state_bytes = checkpoints.iter().try_fold(0usize, |total, (_, state)| {
+            total
+                .checked_add(native_checkpoint_footprint(state)?.logical_bytes)
+                .ok_or_else(|| type_error("Indicator checkpoint memory"))
+        })?;
+        let slot_bytes = checkpoints
+            .capacity()
+            .checked_mul(size_of::<(usize, JsValue)>())
+            .ok_or_else(|| type_error("Indicator checkpoint memory"))?;
+        let expected = state_bytes
+            .checked_add(slot_bytes)
+            .ok_or_else(|| type_error("Indicator checkpoint memory"))?;
+        if memory.requested_bytes() != expected as u64 {
+            return Err(type_error("Indicator checkpoint memory"));
+        }
+        let old_bytes = checkpoint_bytes(&self.entries[index]);
+        self.memory
+            .absorb(memory)
+            .map_err(|failure| failure.into_js_error())?;
+        let final_bytes = self
+            .memory
+            .requested_bytes()
+            .checked_sub(old_bytes as u64)
+            .ok_or_else(|| type_error("Indicator checkpoint memory"))?;
+        self.entries[index].checkpoints = CheckpointTable {
+            entries: checkpoints,
+        };
+        self.memory
+            .try_resize(final_bytes as usize)
+            .map_err(|failure| failure.into_js_error())?;
         self.entries[index].checkpoints_epoch =
             self.entries[index].checkpoints_epoch.wrapping_add(1);
         self.entries[index].prepared_version = prepared_version;
@@ -1053,6 +1986,12 @@ impl IndicatorEngine {
         if change.kind == ChangeKind::Compact {
             return;
         }
+        let clearing = matches!(change.kind, ChangeKind::Reset | ChangeKind::Prepend);
+        let removed_checkpoint_bytes = if clearing {
+            self.entries.iter().map(checkpoint_bytes).sum::<usize>()
+        } else {
+            0
+        };
         for entry in &mut self.entries {
             if entry.prepared_version == Some(store.version()) {
                 continue;
@@ -1075,6 +2014,15 @@ impl IndicatorEngine {
                 entry.length = 0;
             }
         }
+        if removed_checkpoint_bytes != 0 {
+            let final_bytes = self
+                .memory
+                .requested_bytes()
+                .saturating_sub(removed_checkpoint_bytes as u64);
+            self.memory
+                .try_resize(final_bytes as usize)
+                .expect("indicator checkpoint memory shrink");
+        }
     }
 
     /// 계산 generator를 끝까지 drain하고 clean view를 빌린다.
@@ -1084,6 +2032,21 @@ impl IndicatorEngine {
         host: &dyn Host,
         id: &JsValue,
     ) -> Result<IndicatorRead<'a>, JsError> {
+        let mut scope = MemoryScope::unaccounted(self.memory_context().oom_style());
+        self.get_scoped(store, host, id, &mut scope)
+    }
+
+    /// caller scope에서 동적 missing-id 오류 payload를 유지하며 clean output view를 빌린다.
+    pub fn get_scoped<'a>(
+        &'a mut self,
+        store: &BarStore,
+        host: &dyn Host,
+        id: &JsValue,
+        scope: &mut MemoryScope,
+    ) -> Result<IndicatorRead<'a>, JsError> {
+        if self.entry_index(id).is_none() {
+            return Err(value_message("Missing indicator: ", id, scope)?);
+        }
         self.run_to_completion(store, host, id, DEFAULT_CALCULATION_CHUNK)?;
         self.read(store, id)
             .ok_or_else(|| ordinary_error("Missing indicator"))
@@ -1105,6 +2068,114 @@ impl IndicatorEngine {
         self.entries.clear();
     }
 
+    fn validate_native_snapshot(
+        &self,
+        store: &BarStore,
+        snapshot: &NativeIndicatorEntrySnapshot,
+    ) -> Result<(), JsError> {
+        identifier(&JsValue::String(snapshot.id.clone()), "Indicator id")?;
+        if !definition_same(&snapshot.definition, &snapshot.captured_definition)
+            || !exact_state_equal(&snapshot.params, &snapshot.captured_params)
+        {
+            return Err(type_error("Native indicator snapshot definition changed"));
+        }
+        let Some(metadata) = self.registry.lookup(&snapshot.name) else {
+            return Err(type_error("Native indicator registry binding"));
+        };
+        if metadata.program != snapshot.definition.program
+            || metadata.provenance != snapshot.definition.provenance
+            || !snapshot
+                .name
+                .as_units()
+                .iter()
+                .copied()
+                .eq(metadata.name.encode_utf16())
+        {
+            return Err(type_error("Native indicator registry binding"));
+        }
+        let params = validate_indicator_params(&snapshot.params)?;
+        if !exact_state_equal(
+            &params.to_js_value(),
+            &snapshot.definition.params.to_js_value(),
+        ) {
+            return Err(type_error("Native indicator params binding"));
+        }
+        if snapshot.arrays.len() != snapshot.definition.outputs.len()
+            || snapshot
+                .arrays
+                .iter()
+                .any(|values| values.len() != store.capacity())
+        {
+            return Err(type_error("Native indicator output capacity"));
+        }
+        if snapshot
+            .arrays
+            .iter()
+            .flatten()
+            .any(|value| value.is_infinite())
+        {
+            return Err(type_error("Native indicator output finite/NaN"));
+        }
+        if !snapshot.revision.is_finite()
+            || snapshot.revision.fract() != 0.0
+            || snapshot.revision < 0.0
+            || snapshot.length > store.length()
+            || snapshot.dirty > store.length()
+            || snapshot
+                .dirty_to
+                .is_some_and(|value| value > store.length())
+            || snapshot
+                .computed_from
+                .is_some_and(|value| value > store.length())
+            || snapshot
+                .computed_until
+                .is_some_and(|value| value > store.length())
+            || snapshot
+                .prepared_version
+                .is_some_and(|value| !value.is_finite() || value.fract() != 0.0 || value < 0.0)
+        {
+            return Err(type_error("Native indicator entry metadata"));
+        }
+        for (index, state) in &snapshot.checkpoints {
+            if *index > store.length() || !index.is_multiple_of(self.options.checkpoint_size) {
+                return Err(type_error("Native indicator checkpoint boundary"));
+            }
+            validate_checkpoint_state(
+                snapshot.definition.program,
+                &snapshot.definition.params,
+                state,
+                *index as f64,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn entry_from_native_snapshot(snapshot: NativeIndicatorEntrySnapshot) -> IndicatorEntry {
+        IndicatorEntry {
+            identity: Arc::new(0),
+            definition_identity: Arc::new(0),
+            id: snapshot.id,
+            name: snapshot.name,
+            definition: snapshot.definition,
+            params: snapshot.params,
+            prototype: snapshot.prototype,
+            dirty: snapshot.dirty,
+            dirty_to: snapshot.dirty_to,
+            invalidated: snapshot.invalidated,
+            length: snapshot.length,
+            arrays: snapshot.arrays,
+            arrays_epoch: 1,
+            checkpoints: CheckpointTable::from_btree(snapshot.checkpoints),
+            checkpoints_epoch: 1,
+            revision: snapshot.revision,
+            computed_from: snapshot.computed_from,
+            computed_until: snapshot.computed_until,
+            prepared_version: snapshot.prepared_version,
+            generation: None,
+            running: None,
+        }
+    }
+
     fn entry_from_created(
         id: JsString,
         name: JsString,
@@ -1116,6 +2187,7 @@ impl IndicatorEngine {
         let prototype = IndicatorPrototype::new(created.state, definition.program);
         IndicatorEntry {
             identity: Arc::new(0),
+            definition_identity: Arc::new(0),
             id,
             name,
             definition,
@@ -1127,7 +2199,7 @@ impl IndicatorEngine {
             length: 0,
             arrays: Vec::new(),
             arrays_epoch: 0,
-            checkpoints: BTreeMap::new(),
+            checkpoints: CheckpointTable::default(),
             checkpoints_epoch: 0,
             revision: 0.0,
             computed_from: None,
@@ -1180,18 +2252,18 @@ impl IndicatorEngine {
         host: &dyn Host,
         entry: &mut IndicatorEntry,
         stale_message: &str,
-    ) -> Result<(), JsError> {
+    ) -> Result<MemoryGroup, JsError> {
         let capacity = store.capacity();
-        entry.arrays = entry
-            .definition
-            .outputs
-            .iter()
-            .map(|_| vec![f64::NAN; capacity])
-            .collect();
+        let (arrays, mut memory) = allocate_output_arrays(
+            entry.definition.outputs.len(),
+            capacity,
+            self.memory.context(),
+        )?;
+        entry.arrays = arrays;
         entry.arrays_epoch = 1;
         let length = store.length();
         if length == 0 {
-            return Ok(());
+            return Ok(memory);
         }
         let params = entry.params.clone();
         let mut state = entry.prototype.fresh(&params, host)?;
@@ -1199,7 +2271,7 @@ impl IndicatorEngine {
         let block = self.options.checkpoint_size;
         for index in 0..length {
             if index.is_multiple_of(block) {
-                entry.checkpoints.insert(index, state.snapshot());
+                stage_checkpoint(entry, &mut memory, index, state.snapshot())?;
                 self.ensure_stage_current(stage, store, stale_message)?;
             }
             let bar = store.at(index)?;
@@ -1216,7 +2288,7 @@ impl IndicatorEngine {
             }
         }
         if length.is_multiple_of(block) {
-            entry.checkpoints.insert(length, state.snapshot());
+            stage_checkpoint(entry, &mut memory, length, state.snapshot())?;
         }
         self.ensure_stage_current(stage, store, stale_message)?;
         entry.dirty = length;
@@ -1226,7 +2298,7 @@ impl IndicatorEngine {
         entry.revision = 1.0;
         entry.computed_from = Some(0);
         entry.computed_until = Some(length);
-        Ok(())
+        Ok(memory)
     }
 
     fn find_id(&self, id: &JsString) -> Option<usize> {
@@ -1337,7 +2409,8 @@ impl IndicatorEngine {
             return Err(range_error("Calculation chunk size"));
         }
         let Some(entry_index) = self.entry_index(&id) else {
-            return Err(value_message("Missing indicator: ", &id)?);
+            let mut scope = self.memory_context().scope();
+            return Err(value_message("Missing indicator: ", &id, &mut scope)?);
         };
         if self.entries[entry_index].running.is_some() {
             return Err(calculation_error(
@@ -1386,18 +2459,32 @@ impl IndicatorEngine {
             if bytes > self.options.max_output_bytes {
                 return Err(range_error("Indicator output byte limit"));
             }
+            let (mut next, next_memory) = allocate_output_arrays(
+                self.entries[entry_index].definition.outputs.len(),
+                capacity,
+                self.memory.context(),
+            )?;
             let old = &self.entries[entry_index].arrays;
-            let mut next = Vec::with_capacity(self.entries[entry_index].definition.outputs.len());
-            for output in 0..self.entries[entry_index].definition.outputs.len() {
-                let mut values = vec![f64::NAN; capacity];
+            for (output, values) in next.iter_mut().enumerate() {
                 if let Some(previous) = old.get(output) {
                     let count = std::cmp::min(capacity, previous.len());
                     values[..count].copy_from_slice(&previous[..count]);
                 }
-                next.push(values);
             }
             self.check_pending(&entry_identity, &token, &source, store)?;
+            let old_bytes = output_bytes(&self.entries[entry_index]);
+            self.memory
+                .absorb(next_memory)
+                .map_err(|failure| failure.into_js_error())?;
+            let final_bytes = self
+                .memory
+                .requested_bytes()
+                .checked_sub(old_bytes as u64)
+                .ok_or_else(|| type_error("Indicator memory"))?;
             self.entries[entry_index].arrays = next;
+            self.memory
+                .try_resize(final_bytes as usize)
+                .map_err(|failure| failure.into_js_error())?;
             self.entries[entry_index].arrays_epoch =
                 self.entries[entry_index].arrays_epoch.wrapping_add(1);
         }
@@ -1549,7 +2636,12 @@ impl IndicatorEngine {
                     active.computed_until = index;
                     return self.finish_active(active, store);
                 }
-                self.entries[entry_index].checkpoints.insert(index, state);
+                stage_checkpoint(
+                    &mut self.entries[entry_index],
+                    &mut self.memory,
+                    index,
+                    state,
+                )?;
                 self.check_active(active, store)?;
             }
             let bar = store.at(index)?;
@@ -1589,19 +2681,40 @@ impl IndicatorEngine {
             if active.total.is_multiple_of(active.block) {
                 let state = active.state.snapshot();
                 self.check_active(active, store)?;
-                self.entries[entry_index]
-                    .checkpoints
-                    .insert(active.total, state);
+                stage_checkpoint(
+                    &mut self.entries[entry_index],
+                    &mut self.memory,
+                    active.total,
+                    state,
+                )?;
                 self.check_active(active, store)?;
             }
             let stale = self.entries[entry_index]
                 .checkpoints
-                .range((active.total + 1)..)
-                .map(|(index, _)| *index)
+                .keys_after(active.total)
                 .collect::<Vec<_>>();
+            let mut removed_bytes = 0usize;
             for index in stale {
                 self.check_active(active, store)?;
+                removed_bytes = removed_bytes.saturating_add(
+                    self.entries[entry_index]
+                        .checkpoints
+                        .get(&index)
+                        .map(native_checkpoint_footprint)
+                        .transpose()?
+                        .map_or(0, |footprint| footprint.logical_bytes),
+                );
                 self.entries[entry_index].checkpoints.remove(&index);
+            }
+            if removed_bytes != 0 {
+                let final_bytes = self
+                    .memory
+                    .requested_bytes()
+                    .checked_sub(removed_bytes as u64)
+                    .ok_or_else(|| type_error("Indicator checkpoint memory"))?;
+                self.memory
+                    .try_resize(final_bytes as usize)
+                    .map_err(|failure| failure.into_js_error())?;
             }
         }
         let revision = active.revision + 1.0;
@@ -1640,11 +2753,106 @@ impl IndicatorEngine {
     }
 }
 
+fn definition_same(left: &IndicatorDefinition, right: &IndicatorDefinition) -> bool {
+    left.program == right.program
+        && left.provenance == right.provenance
+        && left.outputs == right.outputs
+        && exact_state_equal(&left.params.to_js_value(), &right.params.to_js_value())
+        && left.plot_offsets.len() == right.plot_offsets.len()
+        && left
+            .plot_offsets
+            .iter()
+            .zip(&right.plot_offsets)
+            .all(|(left, right)| {
+                left.output == right.output && left.value.to_bits() == right.value.to_bits()
+            })
+}
+
 fn stale_error() -> JsError {
     calculation_error(
         "StaleSourceError",
         "Stale indicator calculation: source changed or owner replaced, removed, or disposed",
     )
+}
+
+fn output_bytes(entry: &IndicatorEntry) -> usize {
+    entry
+        .arrays
+        .iter()
+        .map(|values| values.capacity().saturating_mul(8))
+        .sum()
+}
+
+fn checkpoint_bytes(entry: &IndicatorEntry) -> usize {
+    entry.checkpoints.slot_bytes()
+        + entry
+            .checkpoints
+            .values()
+            .map(|state| {
+                native_checkpoint_footprint(state)
+                    .expect("validated indicator checkpoint footprint")
+                    .logical_bytes
+            })
+            .sum::<usize>()
+}
+
+fn persistent_bytes(entry: &IndicatorEntry) -> usize {
+    output_bytes(entry).saturating_add(checkpoint_bytes(entry))
+}
+
+fn stage_checkpoint(
+    entry: &mut IndicatorEntry,
+    memory: &mut MemoryGroup,
+    index: usize,
+    state: JsValue,
+) -> Result<(), JsError> {
+    let new_bytes = native_checkpoint_footprint(&state)?.logical_bytes;
+    let old_bytes = entry
+        .checkpoints
+        .get(&index)
+        .map(native_checkpoint_footprint)
+        .transpose()?
+        .map_or(0, |footprint| footprint.logical_bytes);
+    let candidate = memory
+        .context()
+        .reserve_group(new_bytes)
+        .map_err(|failure| failure.into_js_error())?;
+    if entry.checkpoints.get(&index).is_none() {
+        entry.checkpoints.ensure_insert_capacity(memory)?;
+    }
+    memory
+        .absorb(candidate)
+        .map_err(|failure| failure.into_js_error())?;
+    entry.checkpoints.insert(index, state);
+    let final_bytes = memory
+        .requested_bytes()
+        .checked_sub(old_bytes as u64)
+        .ok_or_else(|| type_error("Indicator checkpoint memory"))?;
+    memory
+        .try_resize(final_bytes as usize)
+        .map_err(|failure| failure.into_js_error())
+}
+
+fn allocate_output_arrays(
+    outputs: usize,
+    capacity: usize,
+    memory: &MemoryContext,
+) -> Result<(Vec<Vec<f64>>, MemoryGroup), JsError> {
+    let mut arrays = Vec::new();
+    arrays
+        .try_reserve_exact(outputs)
+        .map_err(|_| memory.allocation_failure().into_js_error())?;
+    let mut group = MemoryGroup::empty(memory.clone());
+    for _ in 0..outputs {
+        let (values, values_memory) = memory
+            .try_vec_filled(capacity, f64::NAN)
+            .map_err(|failure| failure.into_js_error())?;
+        group
+            .absorb(values_memory)
+            .map_err(|failure| failure.into_js_error())?;
+        arrays.push(values);
+    }
+    Ok((arrays, group))
 }
 
 #[cfg(test)]

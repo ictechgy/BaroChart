@@ -6,6 +6,8 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.concurrent.atomic.AtomicReference;
 import org.json.JSONObject;
 import org.junit.Assume;
@@ -31,21 +33,65 @@ public class RustRuntimeTest {
         return BaroChartException.wrap(error);
     }
 
+    @Test public void explicitJavaScriptSurvivesRustDefaultAndBackendIsImmutable() {
+        Assume.assumeTrue(BuildConfig.BAROCHART_WITH_QUICKJS);
+        TestSupport.onMain(() -> {
+            EngineBackend previous = BaroChartEngine.getDefaultBackend();
+            try {
+                BaroChartEngine.setDefaultBackend(EngineBackend.RUST);
+                BaroChartEngine selected = BaroChartEngine.create(TestSupport.context(), EngineOptions.defaults(), EngineBackend.JAVASCRIPT);
+                try {
+                    assertEquals(EngineBackend.JAVASCRIPT, selected.backend());
+                } finally {
+                    selected.close();
+                }
+            } finally {
+                BaroChartEngine.setDefaultBackend(previous);
+            }
+        });
+    }
+
+    @Test public void legacyConstructorSnapshotsRustDefault() {
+        TestSupport.onMain(() -> {
+            EngineBackend previous = BaroChartEngine.getDefaultBackend();
+            try {
+                BaroChartEngine.setDefaultBackend(EngineBackend.RUST);
+                if (BuildConfig.BAROCHART_WITH_RUST) {
+                    BaroChartEngine selected = new BaroChartEngine(TestSupport.context(), 0);
+                    try { assertEquals(EngineBackend.RUST, selected.backend()); }
+                    finally { selected.close(); }
+                } else {
+                    try {
+                        new BaroChartEngine(TestSupport.context(), 0);
+                        fail("Rust default must not fall back to JavaScript");
+                    } catch (RuntimeException error) {
+                        assertEquals(BaroChartException.Code.UNAVAILABLE, typed(error).getCode());
+                    }
+                }
+            } finally {
+                BaroChartEngine.setDefaultBackend(previous);
+            }
+        });
+    }
+
     /** 호출이 정확히 typed UNAVAILABLE인지 확인한다. */
     private static void assertUnavailable(String label, Body body) {
         try {
             body.run();
-            fail(label + " must stay unavailable in the M1 Rust backend");
+            fail(label + " must stay unavailable in the Rust backend");
         } catch (RuntimeException error) {
             BaroChartException typed = typed(error);
             assertEquals(label, BaroChartException.Code.UNAVAILABLE, typed.getCode());
-            assertTrue(label, typed.getMessage().contains(label) || typed.getMessage().contains("nativeScenePacket"));
+            String expected = label.equals("nativeRegisterIndicatorSource")
+                ? "Indicator source registration requires the javaScript backend"
+                : label + " is not available in the Rust backend";
+            assertEquals(label, expected, typed.getMessage());
         } catch (Exception error) {
             throw new AssertionError(label, error);
         }
     }
 
-    @Test public void rustCreatesWithoutAssetAndRunsOnlyNativeInit() {
+    @Test public void rustCreatesWithoutAssetAndOwnsInitializedData() {
         requireRust();
         TestSupport.onMain(() -> {
             BaroChartEngine engine = engine();
@@ -54,7 +100,7 @@ public class RustRuntimeTest {
                 JSONObject metrics = engine.runtimeMetrics();
                 assertTrue(metrics.getLong("requestedLiveBytes") >= 1);
                 assertTrue(metrics.getLong("requestedPeakBytes") >= metrics.getLong("requestedLiveBytes"));
-                assertTrue(metrics.getString("scope").startsWith("Rust engine"));
+                assertEquals("Rust engine accounted requested bytes for owned payloads, call temporaries and FFI outputs; not allocator RSS; live handle counts include all engines of both backends and current isolated workers in this process",metrics.getString("scope"));
             } finally {
                 engine.close();
             }
@@ -66,14 +112,36 @@ public class RustRuntimeTest {
         TestSupport.onMain(() -> {
             BaroChartEngine engine = engine();
             try {
-                for (String name : new String[]{"nativeCommand", "nativeSceneJSON", "nativeAsyncBuffer", "nativeScenePacket"}) {
+                for (String name : new String[]{"nativeWorkspaceTargetDispose", "nativeWorkspaceSourceBuffer", "nativeWorkspaceSourceDispose",
+                    "nativeAsyncUI", "nativeRegisterIndicatorSource", "nativeAnalysisDemo", "nativeAnalysisReload",
+                    "nativeStudyVerification", "nativePublicationOrderSelfTest", "nativeSelfTest", "nativeExtendedSelfTest",
+                    "nativeHardeningSelfTest", "nativeComparisonDemo", "nativeComparisonReadout", "nativeComparisonAction",
+                    "nativeAxesSelfTest", "nativeParamsTargetDispose"}) {
                     assertUnavailable(name, () -> engine.invoke(name));
                 }
-                assertUnavailable("nativeScenePacket", () -> engine.scenePacket("scene", null, 320, 240, false));
-                assertUnavailable("nativeIndicatorBuffer", () -> engine.indicatorBytes("missing", "value", 0, 1));
-                java.lang.reflect.Field field=BaroChartEngine.class.getDeclaredField("handle");field.setAccessible(true);long handle=field.getLong(engine);
-                BaroChartColumns columns=BaroChartColumns.copyOf(new double[]{0},new double[]{1},new double[]{1},new double[]{1},new double[]{1},new double[]{1});
-                assertUnavailable("nativeAsyncTargetBuffer", () -> columns.copyInto(handle,0,0,1));
+            } finally {
+                engine.close();
+            }
+        });
+    }
+
+    @Test public void rustTypedBarsIndicatorsAndScenePacketUseNativeCore() {
+        requireRust();
+        TestSupport.onMain(() -> {
+            BaroChartEngine engine = engine();
+            try {
+                engine.setBars(TestSupport.bars(5, 0));
+                engine.addIndicator(Indicator.sma(3), "sma3");
+                byte[] raw = engine.indicatorBytes("sma3", "value", 0, 5);
+                assertEquals(5 * Double.BYTES, raw.length);
+                java.nio.DoubleBuffer values = ByteBuffer.wrap(raw).order(ByteOrder.nativeOrder()).asDoubleBuffer();
+                assertTrue(Double.isNaN(values.get(0)));
+                assertTrue(Double.isNaN(values.get(1)));
+                assertEquals(103.0, values.get(2), 0.0);
+                assertTrue(Double.isFinite(values.get(3)));
+                BaroChartEngine.ScenePacket packet = engine.scenePacket("scene", null, 320, 240, false);
+                assertTrue(packet.commandCount > 0);
+                assertTrue(packet.numbers.length > 0);
             } finally {
                 engine.close();
             }
@@ -133,6 +201,8 @@ public class RustRuntimeTest {
         assertEquals("Error: Chart disposed", BaroChartEngine.rustErrorMessage(3,"{private input"));
         assertEquals("Rust core busy", BaroChartEngine.rustErrorMessage(5,"null"));
         assertEquals("TypeError: Invalid Rust core transport", BaroChartEngine.rustErrorMessage(6,"not-json"));
+        assertEquals("InternalError: out of memory", BaroChartEngine.rustErrorMessage(7,null));
+        assertEquals("RangeError: Out of memory", BaroChartEngine.rustErrorMessage(8,null));
         assertEquals("Rust engine unavailable", BaroChartEngine.rustErrorMessage(2,null));
     }
 

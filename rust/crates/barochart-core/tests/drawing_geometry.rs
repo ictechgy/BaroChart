@@ -7,6 +7,7 @@ use barochart_core::data::{BarStore, ModelDataState, StoreOptions};
 use barochart_core::drawing_validation::validate_drawing;
 use barochart_core::model_state::{ModelState, VisibleRange};
 use barochart_js::json::{JsObject, JsValue, JsonMode, parse_json, stringify_json};
+use barochart_js::memory::{MemoryAccount, MemoryContext, OomStyle};
 use barochart_js::num::NumberDialect;
 use barochart_js::string::JsString;
 use drawing_geometry::{
@@ -401,6 +402,55 @@ fn cache_is_chart_owned_bounded_and_dead_identity_cannot_hit() {
     )
     .unwrap();
     assert!(!Arc::ptr_eq(first_result.as_ref().unwrap(), &result));
+}
+
+#[test]
+fn accounted_geometry_cache_hit_shares_one_payload_lease_and_drop_releases_all() {
+    let data = ModelDataState::new(StoreOptions::default(), Vec::new()).unwrap();
+    let store = data.store();
+    let model = ModelState::new(store, &JsValue::Undefined).unwrap();
+    let rows = drawing_rows();
+    let row = &rows[0];
+    let drawing = Arc::new(validate_drawing(&decode_wire(get(row, "input"))).unwrap());
+    let (view, layout) = layout(row);
+    let account = MemoryAccount::new(8 << 20, OomStyle::InternalErrorLowercase);
+    let mut cache =
+        DrawingGeometryCache::new_with_memory(2, MemoryContext::accounted(&account)).unwrap();
+    let empty_cache_bytes = account.snapshot().requested_live_bytes;
+    assert_eq!(empty_cache_bytes, 0);
+
+    let first = drawing_geometry(
+        &mut cache,
+        &drawing,
+        &model,
+        view,
+        store,
+        &layout,
+        NumberDialect::PLATFORM,
+    )
+    .unwrap();
+    assert!(first.requested_bytes() > 0);
+    let after_miss = account.snapshot().requested_live_bytes;
+    assert!(after_miss > empty_cache_bytes);
+    let second = drawing_geometry(
+        &mut cache,
+        &drawing,
+        &model,
+        view,
+        store,
+        &layout,
+        NumberDialect::PLATFORM,
+    )
+    .unwrap();
+    assert!(Arc::ptr_eq(&first, &second));
+    assert_eq!(account.snapshot().requested_live_bytes, after_miss);
+
+    drop(first);
+    drop(second);
+    assert_eq!(account.snapshot().requested_live_bytes, after_miss);
+    drop(drawing);
+    drop(cache);
+    assert_eq!(account.snapshot().requested_live_bytes, 0);
 }
 
 #[test]

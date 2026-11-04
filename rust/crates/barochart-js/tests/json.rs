@@ -6,11 +6,76 @@
 //! 계약이다(이식 지도 D8). Lossless는 M0 계획 Task 5의 BCJSON 문법에서 `F64` 토큰을 뺀 것이다.
 
 use barochart_js::json::{
-    JsObject, JsValue, JsonMode, parse_json, parse_json_utf16, parse_json_utf16_with,
-    parse_json_with, stringify_json, stringify_json_with,
+    JsObject, JsValue, JsonFailure, JsonMode, parse_json, parse_json_scoped, parse_json_utf16,
+    parse_json_utf16_with, parse_json_with, stringify_json, stringify_json_scoped,
+    stringify_json_with,
 };
+use barochart_js::memory::{MemoryAccount, MemoryContext, MemoryScope, OomStyle};
 use barochart_js::num::NumberDialect;
 use barochart_js::string::JsString;
+
+#[test]
+fn owned_payload_moves_back_to_scope_without_a_second_peak_and_utf8_is_fallible() {
+    let account = MemoryAccount::new(1_024, OomStyle::InternalErrorLowercase);
+    let context = MemoryContext::accounted(&account);
+    {
+        let group = context.reserve_group(600).unwrap();
+        let mut scope = context.scope();
+        scope.try_grow(400).unwrap();
+        let before = account.snapshot();
+        scope.absorb_persistent(group).unwrap();
+        assert_eq!(scope.requested_bytes(), 1_000);
+        assert_eq!(account.snapshot(), before);
+        let value = JsString::from_utf16(vec![b'a' as u16, 0xd800, 0xd83d, 0xde00]);
+        assert_eq!(
+            value.try_to_string_lossy_scoped(&mut scope).unwrap(),
+            "a�😀"
+        );
+        assert_eq!(scope.requested_bytes(), 1_008);
+    }
+    assert_eq!(account.snapshot().requested_live_bytes, 0);
+    let denied = MemoryAccount::new(1, OomStyle::InternalErrorLowercase);
+    let mut scope = MemoryScope::new(&denied);
+    assert!(
+        JsString::from_str("가")
+            .try_to_string_lossy_scoped(&mut scope)
+            .is_err()
+    );
+    assert_eq!(denied.snapshot().requested_live_bytes, 0);
+}
+
+#[test]
+fn scoped_entry_builder_keeps_js_key_order_duplicates_and_releases_oom() {
+    let account = MemoryAccount::new(0, OomStyle::InternalErrorLowercase);
+    {
+        let mut scope = MemoryScope::new(&account);
+        let entries = [
+            (JsString::from_str("b"), JsValue::Bool(true)),
+            (JsString::from_str("2"), JsValue::Number(2.0)),
+            (JsString::from_str("1"), JsValue::Number(1.0)),
+            (JsString::from_str("b"), JsValue::Undefined),
+        ];
+        let value = JsObject::try_from_entries_scoped(entries, &mut scope).unwrap();
+        assert_eq!(
+            stringify_json(&JsValue::Object(value), JsonMode::Lossless),
+            br#"{"1":1,"2":2,"b":undefined}"#
+        );
+        assert!(account.snapshot().requested_live_bytes > 0);
+    }
+    assert_eq!(account.snapshot().requested_live_bytes, 0);
+    let account = MemoryAccount::new(1, OomStyle::InternalErrorLowercase);
+    {
+        let mut scope = MemoryScope::new(&account);
+        assert!(
+            JsObject::try_from_entries_scoped(
+                [(JsString::from_str("a"), JsValue::Number(1.0))],
+                &mut scope
+            )
+            .is_err()
+        );
+    }
+    assert_eq!(account.snapshot().requested_live_bytes, 0);
+}
 
 /// 텍스트를 파싱한다. 실패하면 입력과 오류를 보여 주며 멈춘다.
 ///
@@ -1091,6 +1156,131 @@ fn large_objects_keep_js_order_and_last_value() {
         "delete 뒤 순서"
     );
     assert_eq!(members.len(), model.len());
+}
+
+/// Untrusted wide objects use amortized collection plus one numeric-key sort. This regression uses
+/// descending numeric keys (the worst order for sorted insertion) and 100k named keys, then checks
+/// ordinary own-property order and duplicate replacement without serializing another wide buffer.
+#[test]
+fn scoped_parser_handles_100k_numeric_and_named_keys_without_quadratic_insertion() {
+    const WIDTH: usize = 100_000;
+    let mut text = String::new();
+    text.try_reserve(WIDTH * 24).unwrap();
+    text.push('{');
+    for index in (0..WIDTH).rev() {
+        if index + 1 != WIDTH {
+            text.push(',');
+        }
+        text.push('"');
+        text.push_str(&index.to_string());
+        text.push_str("\":");
+        text.push_str(&index.to_string());
+    }
+    for index in 0..WIDTH {
+        text.push(',');
+        text.push_str("\"k");
+        text.push_str(&index.to_string());
+        text.push_str("\":");
+        text.push_str(&index.to_string());
+    }
+    text.push_str(",\"50000\":-1,\"k50000\":-2}");
+
+    let account = MemoryAccount::new(512 * 1024 * 1024, OomStyle::InternalErrorLowercase);
+    {
+        let mut scope = MemoryScope::new(&account);
+        let parsed = parse_json_scoped(
+            text.as_bytes(),
+            JsonMode::Standard,
+            NumberDialect::Ecma,
+            &mut scope,
+        )
+        .expect("wide object must parse under the counted scope");
+        let members = object(&parsed);
+        assert_eq!(members.len(), WIDTH * 2);
+        assert_eq!(members.get(&key("50000")).map(number), Some(-1.0));
+        assert_eq!(members.get(&key("k50000")).map(number), Some(-2.0));
+        let mut entries = members.iter();
+        assert_eq!(
+            entries.next().map(|(name, _)| name.to_string_lossy()),
+            Some("0".into())
+        );
+        assert_eq!(
+            entries
+                .nth(WIDTH - 2)
+                .map(|(name, _)| name.to_string_lossy()),
+            Some((WIDTH - 1).to_string())
+        );
+        assert_eq!(
+            entries.next().map(|(name, _)| name.to_string_lossy()),
+            Some("k0".into())
+        );
+        assert!(scope.requested_bytes() > text.len() as u64);
+    }
+    assert_eq!(account.snapshot().requested_live_bytes, 0);
+}
+
+/// Parser, iterative clone, and writer all fail through the scoped memory channel before their
+/// next wide grow, leave no account bytes live after the scope, and keep syntax distinct.
+#[test]
+fn scoped_json_paths_fail_deterministically_and_release_temporary_bytes() {
+    let large = format!("[\"{}\"]", "x".repeat(4_096));
+
+    let parse_account = MemoryAccount::new(512, OomStyle::InternalErrorLowercase);
+    {
+        let mut scope = MemoryScope::new(&parse_account);
+        assert!(matches!(
+            parse_json_scoped(
+                large.as_bytes(),
+                JsonMode::Standard,
+                NumberDialect::Ecma,
+                &mut scope
+            ),
+            Err(JsonFailure::Memory(_))
+        ));
+    }
+    assert_eq!(parse_account.snapshot().requested_live_bytes, 0);
+
+    let syntax_account = MemoryAccount::new(4_096, OomStyle::InternalErrorLowercase);
+    {
+        let mut scope = MemoryScope::new(&syntax_account);
+        assert!(matches!(
+            parse_json_scoped(b"[1,]", JsonMode::Standard, NumberDialect::Ecma, &mut scope),
+            Err(JsonFailure::Syntax(_))
+        ));
+    }
+    assert_eq!(syntax_account.snapshot().requested_live_bytes, 0);
+
+    let value = parse(&large, JsonMode::Standard);
+    let success_account = MemoryAccount::new(1024 * 1024, OomStyle::InternalErrorLowercase);
+    {
+        let mut scope = MemoryScope::new(&success_account);
+        let copy = value.try_clone_scoped(&mut scope).unwrap();
+        let encoded =
+            stringify_json_scoped(&copy, JsonMode::Standard, NumberDialect::Ecma, &mut scope)
+                .unwrap();
+        assert_eq!(
+            encoded,
+            stringify_json_with(&value, JsonMode::Standard, NumberDialect::Ecma)
+        );
+    }
+    assert_eq!(success_account.snapshot().requested_live_bytes, 0);
+
+    let clone_account = MemoryAccount::new(512, OomStyle::InternalErrorLowercase);
+    {
+        let mut scope = MemoryScope::new(&clone_account);
+        assert!(value.try_clone_scoped(&mut scope).is_err());
+    }
+    assert_eq!(clone_account.snapshot().requested_live_bytes, 0);
+
+    let write_account = MemoryAccount::new(512, OomStyle::InternalErrorLowercase);
+    {
+        let mut scope = MemoryScope::new(&write_account);
+        assert!(
+            stringify_json_scoped(&value, JsonMode::Standard, NumberDialect::Ecma, &mut scope)
+                .is_err()
+        );
+    }
+    assert_eq!(write_account.snapshot().requested_live_bytes, 0);
 }
 
 /// 깊이 100,000 중첩도 스택 넘침 없이 파싱·쓰기·복제·해제한다(Review Focus 2).

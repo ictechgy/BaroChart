@@ -7,7 +7,8 @@
 #![forbid(unsafe_code)]
 
 use barochart_js::error::JsError;
-use barochart_js::json::{JsObject, JsValue, JsonMode, stringify_json_with};
+use barochart_js::json::{JsObject, JsValue, JsonMode, stringify_json_scoped};
+use barochart_js::memory::{MemoryContext, MemoryGroup, MemoryScope, OomStyle};
 use barochart_js::num::{NumberDialect, js_max, js_min};
 use barochart_js::string::JsString;
 
@@ -16,7 +17,7 @@ use crate::axis_scale::{AxisScale, AxisScaleInput, AxisScaleKind};
 use crate::contracts::RESOURCE_LIMITS;
 use crate::data::{BarStore, DataIdentity};
 use crate::indicator_engine::{IndicatorEngine, IndicatorRead};
-use crate::labels::label_metrics;
+use crate::labels::label_metrics_scoped;
 use crate::model_state::{ModelState, Panel, Series, SeriesKind, VisibleRange};
 use crate::range_index::RangeQuery;
 use crate::series_cache::SeriesCaches;
@@ -37,7 +38,9 @@ fn object_ref(value: &JsValue) -> Option<&JsObject> {
 }
 
 fn field<'a>(value: &'a JsValue, name: &str) -> Option<&'a JsValue> {
-    object_ref(value)?.get(&JsString::from_str(name))
+    object_ref(value)?
+        .iter()
+        .find_map(|(key, value)| ascii_eq(key, name).then_some(value))
 }
 
 fn ascii_eq(value: &JsString, expected: &str) -> bool {
@@ -87,7 +90,6 @@ fn scale_kind(name: &JsString) -> Result<AxisScaleKind, JsError> {
     }
 }
 
-#[derive(Clone)]
 struct AxisConfig {
     record: JsValue,
     id: JsString,
@@ -105,61 +107,66 @@ struct AxisConfig {
 }
 
 impl AxisConfig {
-    fn from_panel(panel: &Panel, axis_width: f64) -> Result<Self, JsError> {
-        let mut record = panel.to_js_value();
-        let JsValue::Object(object) = &mut record else {
-            unreachable!("validated panel records are objects")
-        };
-        object.insert(JsString::from_str("axisId"), JsValue::Null);
-        object.insert(
-            JsString::from_str("side"),
-            JsValue::String(panel.axis_side.clone()),
-        );
-        object.insert(
-            JsString::from_str("visible"),
-            JsValue::Bool(panel.axis_visible),
-        );
-        object.insert(JsString::from_str("width"), JsValue::Number(axis_width));
+    fn from_panel(
+        panel: &Panel,
+        axis_width: f64,
+        scope: &mut MemoryScope,
+    ) -> Result<Self, JsError> {
+        let record = clone_record_with_overrides(
+            panel.raw_record(),
+            [
+                ("axisId", JsValue::Null),
+                (
+                    "side",
+                    JsValue::String(try_clone_string(&panel.axis_side, scope)?),
+                ),
+                ("visible", JsValue::Bool(panel.axis_visible)),
+                ("width", JsValue::Number(axis_width)),
+            ],
+            scope,
+        )?;
         Ok(Self {
             record,
-            id: panel.id.clone(),
-            panel_id: panel.id.clone(),
+            id: try_clone_string(&panel.id, scope)?,
+            panel_id: try_clone_string(&panel.id, scope)?,
             axis_id: None,
-            scale_name: panel.scale.clone(),
+            scale_name: try_clone_string(&panel.scale, scope)?,
             scale: scale_kind(&panel.scale)?,
             inverted: panel.inverted,
             padding: panel.padding,
-            range: option_range(&panel.to_js_value(), "range"),
-            base: option_number(&panel.to_js_value(), "base"),
-            side: panel.axis_side.clone(),
+            range: option_range(panel.raw_record(), "range"),
+            base: option_number(panel.raw_record(), "base"),
+            side: try_clone_string(&panel.axis_side, scope)?,
             visible: panel.axis_visible,
             width: axis_width,
         })
     }
 
-    fn from_axis(axis: &crate::model_state::Axis, axis_width: f64) -> Result<Self, JsError> {
-        let mut record = axis.to_js_value();
-        let JsValue::Object(object) = &mut record else {
-            unreachable!("validated axis records are objects")
-        };
-        object.insert(
-            JsString::from_str("axisId"),
-            JsValue::String(axis.id.clone()),
-        );
+    fn from_axis(
+        axis: &crate::model_state::Axis,
+        axis_width: f64,
+        scope: &mut MemoryScope,
+    ) -> Result<Self, JsError> {
         let width = axis.width.unwrap_or(axis_width);
-        object.insert(JsString::from_str("width"), JsValue::Number(width));
-        let scale_name = field(&record, "scale")
-            .and_then(|value| match value {
-                JsValue::String(value) => Some(value.clone()),
-                _ => None,
-            })
-            .unwrap_or_else(|| JsString::from_str("linear"));
-        let side = field(&record, "side")
-            .and_then(|value| match value {
-                JsValue::String(value) => Some(value.clone()),
-                _ => None,
-            })
-            .unwrap_or_else(|| JsString::from_str("right"));
+        let record = clone_record_with_overrides(
+            axis.raw_record(),
+            [
+                (
+                    "axisId",
+                    JsValue::String(try_clone_string(&axis.id, scope)?),
+                ),
+                ("width", JsValue::Number(width)),
+            ],
+            scope,
+        )?;
+        let scale_name_source = match field(&record, "scale") {
+            Some(JsValue::String(value)) => try_clone_string(value, scope)?,
+            _ => try_string("linear", scope)?,
+        };
+        let side_source = match field(&record, "side") {
+            Some(JsValue::String(value)) => try_clone_string(value, scope)?,
+            _ => try_string("right", scope)?,
+        };
         Ok(Self {
             range: option_range(&record, "range"),
             base: option_number(&record, "base"),
@@ -167,19 +174,19 @@ impl AxisConfig {
             padding: number_field(&record, "padding", 0.08),
             visible: axis.visible,
             record,
-            id: axis.id.clone(),
-            panel_id: axis.panel.clone(),
-            axis_id: Some(axis.id.clone()),
-            scale: scale_kind(&scale_name)?,
-            scale_name,
-            side,
+            id: try_clone_string(&axis.id, scope)?,
+            panel_id: try_clone_string(&axis.panel, scope)?,
+            axis_id: Some(try_clone_string(&axis.id, scope)?),
+            scale: scale_kind(&scale_name_source)?,
+            scale_name: scale_name_source,
+            side: side_source,
             width,
         })
     }
 }
 
 /// 소유 축 투영과 표시 스트립 기하다.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct LayoutAxis {
     /// 소스 축 식별자다. 기본 축이면 패널 식별자다.
     pub id: JsString,
@@ -236,22 +243,27 @@ pub struct LayoutAxis {
     inverted: bool,
 }
 
+struct AxisPlacement {
+    left: f64,
+    right: f64,
+    axis_left: f64,
+    axis_right: f64,
+    text_x: f64,
+}
+
 impl LayoutAxis {
     fn from_config(
         config: AxisConfig,
         axis: AxisScale,
-        left: f64,
-        right: f64,
-        axis_left: f64,
-        axis_right: f64,
-        text_x: f64,
-    ) -> Self {
-        let label = text_value(&config.record, "label");
+        placement: AxisPlacement,
+        scope: &mut MemoryScope,
+    ) -> Result<Self, JsError> {
+        let label = text_value_scoped(&config.record, "label", scope)?;
         let precision = option_number(&config.record, "precision").map(|value| value as u8);
-        let tick_format = text_value(&config.record, "tickFormat");
-        let prefix = text_value(&config.record, "prefix");
-        let suffix = text_value(&config.record, "suffix");
-        Self {
+        let tick_format = text_value_scoped(&config.record, "tickFormat", scope)?;
+        let prefix = text_value_scoped(&config.record, "prefix", scope)?;
+        let suffix = text_value_scoped(&config.record, "suffix", scope)?;
+        Ok(Self {
             id: config.id,
             panel_id: config.panel_id,
             axis_id: config.axis_id,
@@ -264,8 +276,8 @@ impl LayoutAxis {
             tick_format,
             prefix,
             suffix,
-            left,
-            right,
+            left: placement.left,
+            right: placement.right,
             top: axis.top,
             bottom: axis.bottom,
             min: axis.min,
@@ -273,13 +285,13 @@ impl LayoutAxis {
             base: axis.base,
             lo: axis.lo,
             hi: axis.hi,
-            axis_left,
-            axis_right,
-            text_x,
+            axis_left: placement.axis_left,
+            axis_right: placement.axis_right,
+            text_x: placement.text_x,
             inverted: config.inverted,
             config: config.record,
             scale: axis,
-        }
+        })
     }
 
     /// 캡처한 범위와 가격 스케일을 사용해 가격을 화면에 투영한다.
@@ -302,42 +314,41 @@ impl LayoutAxis {
         self.scale.inverse(value)
     }
 
-    fn to_js_value(&self) -> JsValue {
-        let mut value = self.config.clone();
-        let JsValue::Object(result) = &mut value else {
-            unreachable!("axis config records are objects")
-        };
-        result.insert(JsString::from_str("left"), JsValue::Number(self.left));
-        result.insert(JsString::from_str("right"), JsValue::Number(self.right));
-        result.insert(JsString::from_str("top"), JsValue::Number(self.top));
-        result.insert(JsString::from_str("bottom"), JsValue::Number(self.bottom));
-        result.insert(JsString::from_str("min"), JsValue::Number(self.min));
-        result.insert(JsString::from_str("max"), JsValue::Number(self.max));
-        result.insert(JsString::from_str("base"), JsValue::Number(self.base));
-        result.insert(JsString::from_str("lo"), JsValue::Number(self.lo));
-        result.insert(JsString::from_str("hi"), JsValue::Number(self.hi));
-        result.insert(
-            JsString::from_str("axisLeft"),
-            JsValue::Number(self.axis_left),
-        );
-        result.insert(
-            JsString::from_str("axisRight"),
-            JsValue::Number(self.axis_right),
-        );
-        result.insert(JsString::from_str("textX"), JsValue::Number(self.text_x));
-        value
+    fn to_js_value_scoped(&self, scope: &mut MemoryScope) -> Result<JsValue, JsError> {
+        clone_record_with_overrides(
+            &self.config,
+            [
+                ("left", JsValue::Number(self.left)),
+                ("right", JsValue::Number(self.right)),
+                ("top", JsValue::Number(self.top)),
+                ("bottom", JsValue::Number(self.bottom)),
+                ("min", JsValue::Number(self.min)),
+                ("max", JsValue::Number(self.max)),
+                ("base", JsValue::Number(self.base)),
+                ("lo", JsValue::Number(self.lo)),
+                ("hi", JsValue::Number(self.hi)),
+                ("axisLeft", JsValue::Number(self.axis_left)),
+                ("axisRight", JsValue::Number(self.axis_right)),
+                ("textX", JsValue::Number(self.text_x)),
+            ],
+            scope,
+        )
     }
 }
 
-fn text_value(record: &JsValue, name: &str) -> Option<JsString> {
+fn text_value_scoped(
+    record: &JsValue,
+    name: &str,
+    scope: &mut MemoryScope,
+) -> Result<Option<JsString>, JsError> {
     match field(record, name) {
-        Some(JsValue::String(value)) => Some(value.clone()),
-        _ => None,
+        Some(JsValue::String(value)) => try_clone_string(value, scope).map(Some),
+        _ => Ok(None),
     }
 }
 
 /// 소유 패널 투영이다. 첫 축이 패널 기본 축이다.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct LayoutPanel {
     /// 패널 식별자다.
     pub id: JsString,
@@ -354,16 +365,13 @@ pub struct LayoutPanel {
 }
 
 impl LayoutPanel {
-    fn to_js_value(&self) -> JsValue {
-        let mut result = self.axes[0].to_js_value();
-        let JsValue::Object(object) = &mut result else {
-            unreachable!("axis wire values are objects")
-        };
-        object.insert(
-            JsString::from_str("axes"),
-            JsValue::Array(self.axes.iter().map(LayoutAxis::to_js_value).collect()),
-        );
-        result
+    fn to_js_value_scoped(&self, scope: &mut MemoryScope) -> Result<JsValue, JsError> {
+        let mut axes = try_vec_capacity(self.axes.len(), scope)?;
+        for axis in &self.axes {
+            axes.push(axis.to_js_value_scoped(scope)?);
+        }
+        let base = self.axes[0].to_js_value_scoped(scope)?;
+        clone_record_with_overrides(base_ref(&base)?, [("axes", JsValue::Array(axes))], scope)
     }
 }
 
@@ -386,7 +394,7 @@ pub struct ScreenPrice {
 }
 
 /// 차트 프레임 하나에 대한 완전한 소유 기하 스냅샷이다.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Layout {
     /// 캡처한 기하와 데이터 출처 식별자를 나타내는 JSON 문자열 키다.
     pub geometry_key: JsString,
@@ -414,6 +422,7 @@ pub struct Layout {
     pub plot_right: f64,
     /// 화면에 그리는 순서의 패널 목록이다.
     pub panels: Vec<LayoutPanel>,
+    memory: MemoryGroup,
 }
 
 impl Layout {
@@ -513,20 +522,44 @@ impl Layout {
         &self.geometry_font
     }
 
+    /// 이 layout snapshot이 직접 보유한 requested bytes다.
+    pub fn requested_bytes(&self) -> u64 {
+        self.memory.requested_bytes()
+    }
+
     /// JS 반환 레코드와 같은 삽입 순서의 직렬화 가능한 레이아웃 필드다.
     pub fn to_js_value(&self) -> JsValue {
-        object_value([
-            ("geometryKey", JsValue::String(self.geometry_key.clone())),
-            ("geometryFont", self.geometry_font.clone()),
-            ("width", JsValue::Number(self.width)),
-            ("height", JsValue::Number(self.height)),
-            (
-                "panels",
-                JsValue::Array(self.panels.iter().map(LayoutPanel::to_js_value).collect()),
-            ),
-            ("from", JsValue::Number(self.from)),
-            ("to", JsValue::Number(self.to)),
-        ])
+        let mut scope = MemoryScope::unaccounted(OomStyle::RangeErrorCapitalized);
+        self.to_js_value_scoped(&mut scope)
+            .expect("unaccounted layout wire allocation failed")
+    }
+
+    /// 호출자가 serialization까지 유지하는 scope에 layout DOM을 fallible하게 만든다.
+    pub fn to_js_value_scoped(&self, scope: &mut MemoryScope) -> Result<JsValue, JsError> {
+        let mut panels = try_vec_capacity(self.panels.len(), scope)?;
+        for panel in &self.panels {
+            panels.push(panel.to_js_value_scoped(scope)?);
+        }
+        scoped_object(
+            [
+                (
+                    "geometryKey",
+                    JsValue::String(try_clone_string(&self.geometry_key, scope)?),
+                ),
+                (
+                    "geometryFont",
+                    self.geometry_font
+                        .try_clone_scoped(scope)
+                        .map_err(|failure| failure.into_js_error())?,
+                ),
+                ("width", JsValue::Number(self.width)),
+                ("height", JsValue::Number(self.height)),
+                ("panels", JsValue::Array(panels)),
+                ("from", JsValue::Number(self.from)),
+                ("to", JsValue::Number(self.to)),
+            ],
+            scope,
+        )
     }
 }
 
@@ -541,6 +574,115 @@ pub fn create_layout(
     width: f64,
     height: f64,
 ) -> Result<Layout, JsError> {
+    let memory = MemoryContext::unaccounted(OomStyle::RangeErrorCapitalized);
+    create_layout_with_memory(
+        model, store, indicators, host, caches, width, height, &memory,
+    )
+}
+
+/// 지정한 엔진 account에 retained layout payload를 연결해 만든다.
+#[allow(clippy::too_many_arguments)]
+pub fn create_layout_with_memory(
+    model: &mut ModelState,
+    store: &BarStore,
+    indicators: &mut IndicatorEngine,
+    host: &dyn Host,
+    caches: &mut SeriesCaches,
+    width: f64,
+    height: f64,
+    memory: &MemoryContext,
+) -> Result<Layout, JsError> {
+    let mut scope = memory.scope();
+    let mut temporary = memory.scope();
+    let mut layout = create_layout_internal(
+        model,
+        store,
+        indicators,
+        host,
+        caches,
+        width,
+        height,
+        memory,
+        &mut scope,
+        &mut temporary,
+    )?;
+    let requested = usize::try_from(scope.requested_bytes())
+        .map_err(|_| memory.allocation_failure().into_js_error())?;
+    layout.memory = scope
+        .split_persistent(requested)
+        .map_err(|failure| failure.into_js_error())?;
+    Ok(layout)
+}
+
+/// 호출자가 layout 수명 동안 유지하는 scope로 fallible layout을 만든다.
+#[allow(clippy::too_many_arguments)]
+pub fn create_layout_scoped(
+    model: &mut ModelState,
+    store: &BarStore,
+    indicators: &mut IndicatorEngine,
+    host: &dyn Host,
+    caches: &mut SeriesCaches,
+    width: f64,
+    height: f64,
+    memory: &MemoryContext,
+    scope: &mut MemoryScope,
+) -> Result<Layout, JsError> {
+    let mut temporary = MemoryScope::unaccounted(scope.allocation_failure().style());
+    create_layout_internal(
+        model,
+        store,
+        indicators,
+        host,
+        caches,
+        width,
+        height,
+        memory,
+        scope,
+        &mut temporary,
+    )
+}
+
+/// caller output scope와 같은 엔진의 temporary scope를 분리해 layout을 만든다.
+#[allow(clippy::too_many_arguments)]
+pub fn create_layout_scoped_with_memory(
+    model: &mut ModelState,
+    store: &BarStore,
+    indicators: &mut IndicatorEngine,
+    host: &dyn Host,
+    caches: &mut SeriesCaches,
+    width: f64,
+    height: f64,
+    memory: &MemoryContext,
+    scope: &mut MemoryScope,
+) -> Result<Layout, JsError> {
+    let mut temporary = memory.scope();
+    create_layout_internal(
+        model,
+        store,
+        indicators,
+        host,
+        caches,
+        width,
+        height,
+        memory,
+        scope,
+        &mut temporary,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn create_layout_internal(
+    model: &mut ModelState,
+    store: &BarStore,
+    indicators: &mut IndicatorEngine,
+    host: &dyn Host,
+    caches: &mut SeriesCaches,
+    width: f64,
+    height: f64,
+    memory: &MemoryContext,
+    scope: &mut MemoryScope,
+    temporary: &mut MemoryScope,
+) -> Result<Layout, JsError> {
     if !width.is_finite()
         || !height.is_finite()
         || width < 100.0
@@ -552,18 +694,22 @@ pub fn create_layout(
     }
 
     caches.retain_series(&model.series);
-    let configs: Vec<Vec<AxisConfig>> = model
-        .panels
-        .iter()
-        .map(|panel| {
-            let mut row = Vec::new();
-            row.push(AxisConfig::from_panel(panel, model.axis_width)?);
-            for axis in model.axes.iter().filter(|axis| axis.panel == panel.id) {
-                row.push(AxisConfig::from_axis(axis, model.axis_width)?);
-            }
-            Ok(row)
-        })
-        .collect::<Result<_, JsError>>()?;
+    let mut configs = try_vec_capacity(model.panels.len(), temporary)?;
+    for panel in &model.panels {
+        let axis_count = 1usize.saturating_add(
+            model
+                .axes
+                .iter()
+                .filter(|axis| axis.panel == panel.id)
+                .count(),
+        );
+        let mut row = try_vec_capacity(axis_count, temporary)?;
+        row.push(AxisConfig::from_panel(panel, model.axis_width, scope)?);
+        for axis in model.axes.iter().filter(|axis| axis.panel == panel.id) {
+            row.push(AxisConfig::from_axis(axis, model.axis_width, scope)?);
+        }
+        configs.push(row);
+    }
     let (left_strip, right_strip) = axis_strip_widths(model);
     let strip_factor = js_min(&[
         1.0,
@@ -576,53 +722,54 @@ pub fn create_layout(
     ]);
     let plot_left = 12.0 + left_strip * strip_factor;
     let plot_right = js_max(&[plot_left + 20.0, width - right_strip * strip_factor]);
-    let max_weight = js_max(
-        &model
-            .panels
-            .iter()
-            .map(|panel| panel.weight)
-            .collect::<Vec<_>>(),
-    );
+    let max_weight = model.panels.iter().fold(f64::NEG_INFINITY, |value, panel| {
+        js_max(&[value, panel.weight])
+    });
     let mut total_weight = 0.0;
     for panel in &model.panels {
         total_weight += panel.weight / max_weight;
     }
     let (from, to) = visible_indices(model.view, store.length());
-    let font = field(model.theme(), "font")
-        .cloned()
-        .unwrap_or(JsValue::Undefined);
-    let metrics = label_metrics(&font, NumberDialect::PLATFORM)?;
+    let font = match field(model.theme(), "font") {
+        Some(value) => value
+            .try_clone_scoped(scope)
+            .map_err(|failure| failure.into_js_error())?,
+        None => JsValue::Undefined,
+    };
+    let metrics = label_metrics_scoped(&font, NumberDialect::PLATFORM, temporary)?;
     let footer = js_min(&[
         height - 24.0,
         js_max(&[38.0, (metrics.height + 20.0).ceil()]),
     ]);
     let panel_space = height - footer;
     let mut top = 12.0;
-    let panel_definitions = model.panels.clone();
-    let mut panels = Vec::with_capacity(panel_definitions.len());
-    for (panel_index, panel) in panel_definitions.iter().enumerate() {
-        let row_height = panel_space * (panel.weight / max_weight / total_weight);
+    let mut panels = try_vec_capacity(model.panels.len(), scope)?;
+    for (panel_index, row_slot) in configs.iter_mut().enumerate().take(model.panels.len()) {
+        let panel_id = try_clone_string(&model.panels[panel_index].id, scope)?;
+        let panel_weight = model.panels[panel_index].weight;
+        let row_height = panel_space * (panel_weight / max_weight / total_weight);
         let gap = js_min(&[8.0, row_height / 2.0]);
         let bottom = top + row_height - gap;
-        let series_indices: Vec<usize> = model
-            .series
-            .iter()
-            .enumerate()
-            .filter(|(_, series)| series.panel == panel.id && series.visible)
-            .map(|(index, _)| index)
-            .collect();
+        let mut series_indices = try_vec_capacity(model.series.len(), temporary)?;
+        for (index, series) in model.series.iter().enumerate() {
+            if series.panel == panel_id && series.visible {
+                series_indices.push(index);
+            }
+        }
         let mut left_cursor = plot_left;
         let mut right_cursor = plot_right;
-        let mut axes = Vec::with_capacity(configs[panel_index].len());
-        for config in configs[panel_index].iter().cloned() {
-            let matching: Vec<usize> = series_indices
-                .iter()
-                .copied()
-                .filter(|index| model.series[*index].axis_id == config.axis_id)
-                .collect();
+        let row = std::mem::take(row_slot);
+        let mut axes = try_vec_capacity(row.len(), scope)?;
+        for config in row {
+            let mut matching = try_vec_capacity(series_indices.len(), temporary)?;
+            for index in series_indices.iter().copied() {
+                if model.series[index].axis_id == config.axis_id {
+                    matching.push(index);
+                }
+            }
             let scale = axis_range(
                 &config, model, &matching, store, indicators, host, caches, from, to, plot_left,
-                plot_right, top, bottom,
+                plot_right, top, bottom, temporary,
             )?;
             let width = if config.visible {
                 config.width * strip_factor
@@ -641,12 +788,21 @@ pub fn create_layout(
                 (axis_left, axis_right, axis_left + 8.0)
             };
             axes.push(LayoutAxis::from_config(
-                config, scale, plot_left, plot_right, axis_left, axis_right, text_x,
-            ));
+                config,
+                scale,
+                AxisPlacement {
+                    left: plot_left,
+                    right: plot_right,
+                    axis_left,
+                    axis_right,
+                    text_x,
+                },
+                scope,
+            )?);
         }
         let first = axes.first().expect("every model panel has a base axis");
         panels.push(LayoutPanel {
-            id: panel.id.clone(),
+            id: panel_id,
             left: first.left,
             right: first.right,
             top: first.top,
@@ -655,7 +811,7 @@ pub fn create_layout(
         });
         top = bottom + gap;
     }
-    let geometry_key = geometry_key(model, store, width, height, &panels)?;
+    let geometry_key = geometry_key(model, store, width, height, &panels, scope, temporary)?;
     Ok(Layout {
         geometry_key,
         geometry_font: font,
@@ -670,6 +826,7 @@ pub fn create_layout(
         plot_left,
         plot_right,
         panels,
+        memory: MemoryGroup::empty(memory.clone()),
     })
 }
 
@@ -765,16 +922,18 @@ fn query_series(
     indicators: &mut IndicatorEngine,
     host: &dyn Host,
     caches: &mut SeriesCaches,
+    scope: &mut MemoryScope,
 ) -> Result<RangeQuery, JsError> {
     let (from, to) = index_range(series, model_view, store.length());
     let identity: DataIdentity = store.data_identity();
     if let Some(indicator) = &series.indicator {
-        let read = indicators.get(store, host, &JsValue::String(indicator.clone()))?;
+        let indicator = JsValue::String(try_clone_string(indicator, scope)?);
+        let read = indicators.get(store, host, &indicator)?;
         let output = indicator_output_index(read, series.output.as_ref())?;
         let values = read
             .output_at(output)
             .ok_or_else(|| ordinary_error("Missing indicator output"))?;
-        let series_id = series.id.clone();
+        let series_id = try_clone_string(&series.id, scope)?;
         let revision_cache = &mut series.revision;
         let dirty_from = &mut series.dirty_from;
         let range_index_ready = &mut series.range_index_ready;
@@ -794,7 +953,7 @@ fn query_series(
             to,
         )
     } else if let Some(values) = series.values.as_deref() {
-        let series_id = series.id.clone();
+        let series_id = try_clone_string(&series.id, scope)?;
         let computed_from = series.dirty_from;
         let revision_cache = &mut series.revision;
         let dirty_from = &mut series.dirty_from;
@@ -824,7 +983,7 @@ fn query_series(
             "volume" => &columns.volume,
             _ => &columns.close,
         };
-        let series_id = series.id.clone();
+        let series_id = try_clone_string(&series.id, scope)?;
         let computed_from = series.dirty_from;
         let revision_cache = &mut series.revision;
         let dirty_from = &mut series.dirty_from;
@@ -862,6 +1021,7 @@ fn axis_range(
     right: f64,
     top: f64,
     bottom: f64,
+    scope: &mut MemoryScope,
 ) -> Result<AxisScale, JsError> {
     let mut min = f64::INFINITY;
     let mut max = f64::NEG_INFINITY;
@@ -869,8 +1029,8 @@ fn axis_range(
         let series = &mut model.series[index];
         let query = if aggregate_volume_series(series) {
             let target = js_max(&[1.0, ((right - left) / 3.0).floor()]) as usize;
-            let bars = store.aggregate(from as f64, to as f64, target)?;
-            let mut volumes = Vec::with_capacity(bars.len() + 1);
+            let bars = aggregate_scoped(store, from as f64, to as f64, target, scope)?;
+            let mut volumes = try_vec_capacity(bars.len().saturating_add(1), scope)?;
             volumes.push(0.0);
             volumes.extend(bars.into_iter().map(|bar| bar.volume));
             RangeQuery {
@@ -881,7 +1041,7 @@ fn axis_range(
         } else if matches!(series.kind, SeriesKind::Candles | SeriesKind::Ohlc) {
             store.index().query(from, to)?
         } else {
-            query_series(series, model.view, store, indicators, host, caches)?
+            query_series(series, model.view, store, indicators, host, caches, scope)?
         };
         min = js_min(&[min, query.min]);
         max = js_max(&[max, query.max]);
@@ -920,62 +1080,85 @@ fn geometry_key(
     width: f64,
     height: f64,
     panels: &[LayoutPanel],
+    scope: &mut MemoryScope,
+    temporary: &mut MemoryScope,
 ) -> Result<JsString, JsError> {
-    let mut values = vec![
+    let axis_count = panels.iter().map(|panel| panel.axes.len()).sum::<usize>();
+    let capacity = 6usize
+        .checked_add(axis_count)
+        .and_then(|value| value.checked_add(model.series.len()))
+        .ok_or_else(|| scope.allocation_failure().into_js_error())?;
+    let mut values = try_vec_capacity(capacity, temporary)?;
+    values.extend([
         JsValue::Number(width),
         JsValue::Number(height),
         JsValue::Number(model.view.from),
         JsValue::Number(model.view.to),
         JsValue::Number(store.serial()),
         JsValue::Number(store.time_version()),
-    ];
+    ]);
     for panel in panels {
         for axis in &panel.axes {
-            values.push(JsValue::Array(vec![
-                JsValue::String(panel.id.clone()),
-                axis.axis_id.clone().map_or(JsValue::Null, JsValue::String),
+            let mut row = try_vec_capacity(11, temporary)?;
+            row.extend([
+                JsValue::String(try_clone_string(&panel.id, temporary)?),
+                match axis.axis_id.as_ref() {
+                    Some(value) => JsValue::String(try_clone_string(value, temporary)?),
+                    None => JsValue::Null,
+                },
                 JsValue::Number(axis.left),
                 JsValue::Number(axis.right),
                 JsValue::Number(axis.top),
                 JsValue::Number(axis.bottom),
                 JsValue::Number(axis.min),
                 JsValue::Number(axis.max),
-                JsValue::String(axis.scale_name.clone()),
+                JsValue::String(try_clone_string(&axis.scale_name, temporary)?),
                 JsValue::Bool(axis.inverted),
                 JsValue::Number(axis.base),
-            ]));
+            ]);
+            values.push(JsValue::Array(row));
         }
     }
     for series in &model.series {
-        let raw = series.raw_record();
-        let axis_id = actual_axis_id(&raw, series);
+        let raw = series
+            .to_js_value_scoped(temporary)
+            .map_err(|failure| failure.into_js_error())?;
+        let axis_id = actual_axis_id_scoped(&raw, series, temporary)?;
         let visible = actual_visible(&raw, series.visible);
-        values.push(JsValue::Array(vec![
-            JsValue::String(series.id.clone()),
-            JsValue::String(series.panel.clone()),
+        let mut row = try_vec_capacity(4, temporary)?;
+        row.extend([
+            JsValue::String(try_clone_string(&series.id, temporary)?),
+            JsValue::String(try_clone_string(&series.panel, temporary)?),
             axis_id,
             visible,
-        ]));
+        ]);
+        values.push(JsValue::Array(row));
     }
-    let serialized = stringify_json_with(
+    let serialized = stringify_json_scoped(
         &JsValue::Array(values),
         JsonMode::Standard,
         NumberDialect::PLATFORM,
-    );
+        temporary,
+    )
+    .map_err(|failure| failure.into_js_error())?;
     let serialized = String::from_utf8(serialized)
         .map_err(|_| ordinary_error("Layout geometry key encoding failed"))?;
-    Ok(JsString::from_str(&serialized))
+    try_string(&serialized, scope)
 }
 
-fn actual_axis_id(record: &JsValue, series: &Series) -> JsValue {
+fn actual_axis_id_scoped(
+    record: &JsValue,
+    series: &Series,
+    scope: &mut MemoryScope,
+) -> Result<JsValue, JsError> {
     match (field(record, "axisId"), series.axis_id.as_ref()) {
         (Some(JsValue::String(value)), Some(current)) if value == current => {
-            JsValue::String(value.clone())
+            Ok(JsValue::String(try_clone_string(value, scope)?))
         }
-        (Some(JsValue::Null), None) => JsValue::Null,
-        (Some(JsValue::Undefined), None) | (None, None) => JsValue::Undefined,
-        (_, Some(current)) => JsValue::String(current.clone()),
-        (_, None) => JsValue::Null,
+        (Some(JsValue::Null), None) => Ok(JsValue::Null),
+        (Some(JsValue::Undefined), None) | (None, None) => Ok(JsValue::Undefined),
+        (_, Some(current)) => Ok(JsValue::String(try_clone_string(current, scope)?)),
+        (_, None) => Ok(JsValue::Null),
     }
 }
 
@@ -994,10 +1177,121 @@ fn actual_visible(record: &JsValue, visible: bool) -> JsValue {
     }
 }
 
-fn object_value(entries: impl IntoIterator<Item = (&'static str, JsValue)>) -> JsValue {
-    let mut object = JsObject::new();
-    for (name, value) in entries {
-        object.insert(JsString::from_str(name), value);
+fn base_ref(value: &JsValue) -> Result<&JsValue, JsError> {
+    if matches!(value, JsValue::Object(_)) {
+        Ok(value)
+    } else {
+        Err(ordinary_error("Layout axis wire object required"))
     }
-    JsValue::Object(object)
+}
+
+fn try_vec_capacity<T>(capacity: usize, scope: &mut MemoryScope) -> Result<Vec<T>, JsError> {
+    let bytes = capacity
+        .checked_mul(std::mem::size_of::<T>())
+        .ok_or_else(|| scope.allocation_failure().into_js_error())?;
+    scope
+        .try_grow(bytes)
+        .map_err(|failure| failure.into_js_error())?;
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(capacity)
+        .map_err(|_| scope.allocation_failure().into_js_error())?;
+    Ok(values)
+}
+
+fn try_clone_string(value: &JsString, scope: &mut MemoryScope) -> Result<JsString, JsError> {
+    value
+        .try_clone_scoped(scope)
+        .map_err(|failure| failure.into_js_error())
+}
+
+fn try_string(value: &str, scope: &mut MemoryScope) -> Result<JsString, JsError> {
+    JsString::try_from_str(value, scope).map_err(|failure| failure.into_js_error())
+}
+
+fn scoped_object<const N: usize>(
+    entries: [(&str, JsValue); N],
+    scope: &mut MemoryScope,
+) -> Result<JsValue, JsError> {
+    let mut owned = try_vec_capacity(N, scope)?;
+    for (name, value) in entries {
+        owned.push((try_string(name, scope)?, value));
+    }
+    JsObject::try_from_entries_scoped(owned, scope)
+        .map(JsValue::Object)
+        .map_err(|failure| failure.into_js_error())
+}
+
+fn clone_record_with_overrides<const N: usize>(
+    source: &JsValue,
+    overrides: [(&str, JsValue); N],
+    scope: &mut MemoryScope,
+) -> Result<JsValue, JsError> {
+    let JsValue::Object(source) = source else {
+        return Err(ordinary_error("Layout source record required"));
+    };
+    let capacity = source
+        .len()
+        .checked_add(N)
+        .ok_or_else(|| scope.allocation_failure().into_js_error())?;
+    let mut entries = try_vec_capacity(capacity, scope)?;
+    for (name, value) in source.iter() {
+        entries.push((
+            try_clone_string(name, scope)?,
+            value
+                .try_clone_scoped(scope)
+                .map_err(|failure| failure.into_js_error())?,
+        ));
+    }
+    for (name, value) in overrides {
+        entries.push((try_string(name, scope)?, value));
+    }
+    JsObject::try_from_entries_scoped(entries, scope)
+        .map(JsValue::Object)
+        .map_err(|failure| failure.into_js_error())
+}
+
+fn aggregate_scoped(
+    store: &BarStore,
+    start: f64,
+    end: f64,
+    max_buckets: usize,
+    scope: &mut MemoryScope,
+) -> Result<Vec<crate::data::AggregateBar>, JsError> {
+    if max_buckets == 0 || start.is_nan() || end.is_nan() {
+        return store.aggregate(start, end, max_buckets);
+    }
+    let length = store.length();
+    let clamp_floor = |value: f64| {
+        if value <= 0.0 {
+            0
+        } else if value >= length as f64 {
+            length
+        } else {
+            value.floor() as usize
+        }
+    };
+    let clamp_ceil = |value: f64| {
+        if value <= 0.0 {
+            0
+        } else if value >= length as f64 {
+            length
+        } else {
+            value.ceil() as usize
+        }
+    };
+    let from = clamp_floor(start);
+    let to = clamp_ceil(end);
+    let count = if to <= from {
+        0
+    } else {
+        std::cmp::min(to - from, max_buckets)
+    };
+    let bytes = count
+        .checked_mul(std::mem::size_of::<crate::data::AggregateBar>())
+        .ok_or_else(|| scope.allocation_failure().into_js_error())?;
+    scope
+        .try_grow(bytes)
+        .map_err(|failure| failure.into_js_error())?;
+    store.aggregate(start, end, max_buckets)
 }

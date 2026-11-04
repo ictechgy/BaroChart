@@ -1,6 +1,6 @@
 use barochart_core::contracts;
 
-use barochart_js::json::{JsValue, JsonMode, parse_json_utf16, stringify_json};
+use barochart_js::json::{JsObject, JsValue, JsonMode, parse_json_utf16, stringify_json};
 use barochart_js::num::NumberDialect;
 use barochart_js::string::JsString;
 use contracts::{
@@ -183,6 +183,29 @@ fn option_record_reports_first_canonical_offending_key_and_reserved_keys() {
             ("TypeError".into(), "Options: object required".into())
         );
     }
+}
+
+#[test]
+fn option_record_streams_wide_records_but_keeps_the_canonical_first_error() {
+    let mut object = JsObject::new();
+    for index in (0..4_096).rev() {
+        object.insert(
+            JsString::from_str(&format!("unknown-{index:04}")),
+            JsValue::Number(index as f64),
+        );
+    }
+    object.insert(JsString::from_str("allowed"), JsValue::Bool(true));
+    assert_eq!(
+        error(option_record(
+            &JsValue::Object(object),
+            &["allowed"],
+            "Wide options"
+        )),
+        (
+            "TypeError".into(),
+            "Wide options: unsupported field unknown-0000".into()
+        )
+    );
 }
 
 #[test]
