@@ -233,4 +233,27 @@ public class RustRuntimeTest {
             }
         });
     }
+
+    @Test public void dataAndIngestionCommandsUseRealRustOwnedPayloads() {
+        requireRust();
+        TestSupport.onMain(() -> {
+            BaroChartEngine engine = engine();
+            try {
+                engine.invoke("nativeInit", 0, new JSONObject());
+                JSONObject bar = new JSONObject().put("time",1000).put("open",1).put("high",2).put("low",0).put("close",1).put("volume",1);
+                engine.invoke("nativeCommand", "setData", new org.json.JSONArray().put(new org.json.JSONArray().put(bar)));
+                JSONObject configured=(JSONObject)engine.invoke("nativeDataIngestionCommand","configureDataIngestion",new org.json.JSONArray().put(new JSONObject().put("streamId","native").put("generation",1)));
+                assertEquals("native",configured.getJSONObject("result").getJSONObject("policy").getString("streamId"));
+                JSONObject next=new JSONObject().put("time",2000).put("open",2).put("high",3).put("low",1).put("close",2).put("volume",1);
+                JSONObject packet=new JSONObject().put("streamId","native").put("generation",1).put("firstSequence",0).put("events",new org.json.JSONArray().put(new JSONObject().put("kind","append").put("bar",next)));
+                JSONObject enqueued=(JSONObject)engine.invoke("nativeDataIngestionCommand","enqueueDataEvents",new org.json.JSONArray().put(packet));
+                assertEquals(1,enqueued.getJSONObject("result").getInt("pendingEvents"));
+                JSONObject drained=(JSONObject)engine.invoke("nativeDataIngestionCommand","drainDataEvents");
+                assertEquals(2,drained.getJSONObject("result").getInt("length"));
+                engine.invoke("nativeReleaseDataIngestion");
+                JSONObject closed=(JSONObject)engine.invoke("nativeDataIngestionCommand","dataIngestionStats");
+                assertEquals("CLOSED",closed.getJSONObject("error").getString("code"));
+            } finally {engine.close();}
+        });
+    }
 }
