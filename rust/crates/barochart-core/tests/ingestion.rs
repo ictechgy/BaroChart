@@ -69,6 +69,14 @@ fn owner() -> IngestionOwner {
     IngestionOwner::new(data, NumberDialect::Ecma)
 }
 
+#[test]
+fn explicit_undefined_drain_uses_the_js_default_parameter() {
+    let mut owner = owner();
+    owner.configure(&policy("defaults", &[])).unwrap();
+    let receipt = owner.drain(Some(&JsValue::Undefined), false).unwrap();
+    assert_eq!(receipt.receipt.events, 0);
+}
+
 fn error<T: std::fmt::Debug>(result: Result<T, ingestion::IngestionError>) -> (String, String) {
     let error = result.unwrap_err();
     (error.code().to_owned(), error.message().to_string_lossy())

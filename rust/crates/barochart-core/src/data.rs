@@ -423,6 +423,29 @@ pub struct BatchReceipt {
     pub unchanged: Option<bool>,
 }
 
+impl BatchReceipt {
+    /// source 영수증의 키 순서와 선택적 unchanged 키 존재를 보존한다.
+    pub fn to_js_value(&self) -> JsValue {
+        let mut record = JsObject::new();
+        for (key, value) in [
+            ("events", self.events as f64),
+            ("appended", self.appended as f64),
+            ("from", self.from as f64),
+            ("to", self.to as f64),
+            ("version", self.version),
+            ("length", self.length as f64),
+            ("capacity", self.capacity as f64),
+            ("bytes", self.bytes as f64),
+        ] {
+            record.insert(JsString::from_str(key), JsValue::Number(value));
+        }
+        if let Some(unchanged) = self.unchanged {
+            record.insert(JsString::from_str("unchanged"), JsValue::Bool(unchanged));
+        }
+        JsValue::Object(record)
+    }
+}
+
 /// 화면 집계 한 bucket이다.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AggregateBar {

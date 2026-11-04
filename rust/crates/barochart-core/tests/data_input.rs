@@ -386,3 +386,55 @@ fn committed_values_keep_the_existing_typed_store_contract() {
     let committed = set_data_input(&mut store, &reset, DataInputMode::ApiFacade).unwrap();
     assert!(matches!(committed.value, DataEventValue::None));
 }
+
+#[test]
+fn raw_timestamp_comparison_coerces_before_later_bar_validation() {
+    let initial = parse(r#"[{"time":1000,"open":1,"high":2,"low":0,"close":1,"volume":1}]"#);
+    let mut store = new_store(&initial);
+    let event = parse(r#"{"kind":"prepend","bars":[{"time":"2000"}]}"#);
+    let DataInputError::Js(error) =
+        apply_data_event_input(&mut store, &event, DataInputMode::LegacyStore).unwrap_err()
+    else {
+        panic!("ordinary error")
+    };
+    assert_eq!(
+        error.message,
+        JsString::from_str("Prepend must precede existing history without overlap")
+    );
+    let event = parse(r#"{"kind":"correction","bar":{"time":{"toString":0}}}"#);
+    let DataInputError::Js(error) =
+        apply_data_event_input(&mut store, &event, DataInputMode::LegacyStore).unwrap_err()
+    else {
+        panic!("ordinary error")
+    };
+    assert_eq!(error.name, "TypeError");
+    #[cfg(target_vendor = "apple")]
+    assert_eq!(error.message, JsString::from_str("No default value"));
+    #[cfg(target_os = "android")]
+    assert_eq!(error.message, JsString::from_str("toPrimitive"));
+    #[cfg(all(not(target_os = "android"), not(target_vendor = "apple")))]
+    assert_eq!(
+        error.message,
+        JsString::from_str("Cannot convert object to primitive value")
+    );
+    let mut empty = new_store(&JsValue::Array(Vec::new()));
+    let DataInputError::Js(error) =
+        apply_data_event_input(&mut empty, &event, DataInputMode::LegacyStore).unwrap_err()
+    else {
+        panic!("ordinary error")
+    };
+    assert_eq!(
+        error.message,
+        JsString::from_str("Correction requires an existing timestamp")
+    );
+    let event = parse(r#"{"kind":"append","bar":[]}"#);
+    let DataInputError::Js(error) =
+        apply_data_event_input(&mut store, &event, DataInputMode::LegacyStore).unwrap_err()
+    else {
+        panic!("ordinary error")
+    };
+    assert_eq!(
+        error.message,
+        JsString::from_str("Every OHLCV field must be finite")
+    );
+}

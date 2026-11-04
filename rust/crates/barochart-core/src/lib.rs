@@ -73,6 +73,11 @@ pub mod drawings;
 /// 드로잉 상태와 검증을 연결한다.
 pub mod position_drawing;
 
+/// 지표 params의 동기 교체를 staging한다.
+pub mod indicator_params_update;
+/// Study 문서의 원자 저장·추가 로드를 다룬다.
+pub mod study_setup;
+
 use barochart_js::error::JsError;
 use barochart_js::string::JsString;
 use data::{ModelDataState, StoreOptions};

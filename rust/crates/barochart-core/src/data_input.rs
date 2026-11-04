@@ -4,9 +4,11 @@
 
 use barochart_js::error::JsError;
 use barochart_js::json::{JsObject, JsValue};
+use barochart_js::num::NumberDialect;
 use barochart_js::string::JsString;
 
 use crate::batch_options::{BatchOptions, snapshot_batch_options};
+use crate::coercion::js_to_number_with;
 use crate::data::{
     Bar, BarStore, BatchEvent, ColumnInputs, Committed, DataEvent, DataEventValue, NumericColumn,
     validate_bar,
@@ -261,8 +263,12 @@ fn prepend_input(
     }
     if store.length() != 0 {
         let last = values.last().expect("nonempty prepend");
-        let raw_time = raw_property_time(last, "bars[bars.length - 1].time")?;
-        if raw_time.is_some_and(|time| time >= store.columns().time[0]) {
+        let raw_time = raw_time_value(last, "bars[bars.length - 1].time")?;
+        let time = js_to_number_with(
+            raw_time.unwrap_or(&JsValue::Undefined),
+            NumberDialect::PLATFORM,
+        )?;
+        if time >= store.columns().time[0] {
             return Err(
                 range_error("Prepend must precede existing history without overlap").into(),
             );
@@ -293,12 +299,18 @@ fn correction_input(
     store: &mut BarStore,
     value: &JsValue,
 ) -> Result<Committed<DataEventValue>, DataInputError> {
-    let raw_time = raw_property_time(value, "event.bar.time")?;
-    let Some(time) = raw_time else {
+    let raw_time = raw_time_value(value, "event.bar.time")?;
+    if store.length() == 0 {
         return Err(range_error("Correction requires an existing timestamp").into());
-    };
+    }
+    let time = js_to_number_with(
+        raw_time.unwrap_or(&JsValue::Undefined),
+        NumberDialect::PLATFORM,
+    )?;
     let index = store.lower_bound(time);
-    if index == store.length() || store.columns().time[index] != time {
+    if index == store.length()
+        || !matches!(raw_time, Some(JsValue::Number(raw)) if *raw == store.columns().time[index])
+    {
         return Err(range_error("Correction requires an existing timestamp").into());
     }
     let committed = store.apply_event(
@@ -312,6 +324,16 @@ fn raw_property_time(
     value: &JsValue,
     expression: &'static str,
 ) -> Result<Option<f64>, DataInputError> {
+    Ok(match raw_time_value(value, expression)? {
+        Some(JsValue::Number(value)) => Some(*value),
+        _ => None,
+    })
+}
+
+fn raw_time_value<'a>(
+    value: &'a JsValue,
+    expression: &'static str,
+) -> Result<Option<&'a JsValue>, DataInputError> {
     match value {
         JsValue::Null => Err(DataInputError::NullishPropertyAccess {
             base: NullishBase::Null,
@@ -323,10 +345,7 @@ fn raw_property_time(
             property: "time",
             expression,
         }),
-        JsValue::Object(object) => Ok(match object.get(&JsString::from_str("time")) {
-            Some(JsValue::Number(value)) => Some(*value),
-            _ => None,
-        }),
+        JsValue::Object(object) => Ok(object.get(&JsString::from_str("time"))),
         _ => Ok(None),
     }
 }
@@ -346,6 +365,9 @@ fn bars_input(
 }
 
 fn read_bar(value: &JsValue) -> Result<Bar, DataInputError> {
+    if matches!(value, JsValue::Array(_)) {
+        return Ok(bar_from_any(value));
+    }
     let JsValue::Object(object) = value else {
         return Err(type_error("OHLCV object required").into());
     };

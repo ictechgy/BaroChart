@@ -794,7 +794,8 @@ pub struct CancelReceipt {
 }
 
 impl CancelReceipt {
-    fn to_value(&self) -> JsValue {
+    /// 네이티브 봉투와 generic command가 공유하는 source 순서의 영수증이다.
+    pub fn to_value(&self) -> JsValue {
         object([
             ("events", value_number(self.events as f64)),
             (
@@ -823,7 +824,8 @@ pub struct DrainReceipt {
 }
 
 impl DrainReceipt {
-    fn to_value(&self) -> JsValue {
+    /// 네이티브 봉투와 generic command가 공유하는 source 순서의 영수증이다.
+    pub fn to_value(&self) -> JsValue {
         let receipt = &self.receipt;
         object([
             ("events", value_number(receipt.events as f64)),
@@ -1089,7 +1091,7 @@ impl IngestionOwner {
         }
         let maximum = self.session.as_ref().unwrap().policy.max_batch_events;
         let requested = match max_events {
-            None => maximum,
+            None | Some(JsValue::Undefined) => maximum,
             Some(value) => integer(value, 1.0, maximum as f64, "Drain count")? as usize,
         };
         let session = self.session.as_mut().unwrap();

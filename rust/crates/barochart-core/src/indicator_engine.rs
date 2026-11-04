@@ -17,7 +17,7 @@ use crate::indicator_dispatch::{self, IndicatorState};
 use crate::indicator_helpers::{canonical_checkpoint, exact_state_equal};
 use crate::indicator_params::validate_indicator_params;
 use crate::indicator_registry::IndicatorRegistry;
-use crate::indicator_types::{IndicatorDefinition, IndicatorProgram};
+use crate::indicator_types::{CreatedIndicator, IndicatorDefinition, IndicatorProgram};
 
 const DEFAULT_CHECKPOINT_SIZE: usize = 256;
 const DEFAULT_MAX_OUTPUT_BYTES: usize = 268_435_456;
@@ -291,6 +291,142 @@ impl<'a> IndicatorRead<'a> {
     }
 }
 
+/// Staging과 publish가 공유하는 indicator metadata 영수증이다.
+#[derive(Clone, Debug)]
+pub struct IndicatorPublishReceipt {
+    /// 대상 entry id다.
+    pub id: JsString,
+    /// canonical program 이름이다.
+    pub name: JsString,
+    /// factory 선언 순서로 정리한 raw params다.
+    pub params: JsValue,
+    /// 출력 이름 순서다.
+    pub outputs: Vec<JsString>,
+    /// 실제 own plot offset 필드 순서다.
+    pub plot_offsets: Vec<(JsString, f64)>,
+    /// false면 same-params no-op라 entry identity를 바꾸지 않는다.
+    pub changed: bool,
+}
+
+impl IndicatorPublishReceipt {
+    fn from_entry(entry: &IndicatorEntry, changed: bool) -> Self {
+        Self {
+            id: entry.id.clone(),
+            name: entry.name.clone(),
+            params: entry.params.clone(),
+            outputs: entry
+                .definition
+                .outputs
+                .iter()
+                .map(|output| JsString::from_str(output))
+                .collect(),
+            plot_offsets: entry
+                .definition
+                .plot_offsets
+                .iter()
+                .map(|offset| (JsString::from_str(offset.output), offset.value))
+                .collect(),
+            changed,
+        }
+    }
+}
+
+/// Study series staging이 새 definition만 빌리는 view다.
+#[derive(Clone, Copy)]
+pub struct IndicatorStageEntryView<'a> {
+    /// candidate id다.
+    pub id: &'a JsString,
+    /// 계산과 binding 검증을 끝낸 definition이다.
+    pub definition: &'a IndicatorDefinition,
+}
+
+struct EngineEntrySnapshot {
+    id: JsString,
+    identity: Arc<u8>,
+}
+
+enum StagedIndicatorOperation {
+    Add {
+        entry: IndicatorEntry,
+        receipt: IndicatorPublishReceipt,
+    },
+    Replace {
+        previous: Arc<u8>,
+        entry: IndicatorEntry,
+        receipt: IndicatorPublishReceipt,
+    },
+    Noop {
+        receipt: IndicatorPublishReceipt,
+    },
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum IndicatorStagePurpose {
+    Unknown,
+    Studies,
+    Params,
+}
+
+impl StagedIndicatorOperation {
+    fn id(&self) -> &JsString {
+        match self {
+            Self::Add { receipt, .. } | Self::Replace { receipt, .. } | Self::Noop { receipt } => {
+                &receipt.id
+            }
+        }
+    }
+
+    fn receipt(&self) -> &IndicatorPublishReceipt {
+        match self {
+            Self::Add { receipt, .. } | Self::Replace { receipt, .. } | Self::Noop { receipt } => {
+                receipt
+            }
+        }
+    }
+}
+
+/// 실제 engine entry를 건드리지 않고 계산 후보를 소유하는 transaction이다.
+pub struct IndicatorEngineStage {
+    engine_identity: Arc<u8>,
+    source: SourceFingerprint,
+    entries: Vec<EngineEntrySnapshot>,
+    registry_names: Vec<&'static str>,
+    projected_entries: usize,
+    projected_outputs: usize,
+    purpose: IndicatorStagePurpose,
+    operations: Vec<StagedIndicatorOperation>,
+}
+
+impl IndicatorEngineStage {
+    /// 빈 study 문서도 study surface stale 문구를 유지한다.
+    pub fn mark_studies(&mut self) {
+        self.purpose = IndicatorStagePurpose::Studies;
+    }
+
+    /// stage 호출 순서의 영수증을 빌린다.
+    pub fn receipts(&self) -> impl Iterator<Item = &IndicatorPublishReceipt> {
+        self.operations
+            .iter()
+            .map(StagedIndicatorOperation::receipt)
+    }
+
+    /// 새 계산 후보만 doc 순서로 순회한다. no-op은 definition이 바뀌지 않아 제외한다.
+    pub fn candidates(&self) -> impl Iterator<Item = IndicatorStageEntryView<'_>> {
+        self.operations
+            .iter()
+            .filter_map(|operation| match operation {
+                StagedIndicatorOperation::Add { entry, .. }
+                | StagedIndicatorOperation::Replace { entry, .. } => {
+                    Some(IndicatorStageEntryView {
+                        id: &entry.id,
+                        definition: &entry.definition,
+                    })
+                }
+                StagedIndicatorOperation::Noop { .. } => None,
+            })
+    }
+}
+
 /// 한 generator step의 결과다.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CalculationStep {
@@ -534,6 +670,229 @@ impl IndicatorEngine {
         })
     }
 
+    /// 현재 source/registry/entry identity를 고정한 빈 staging transaction을 만든다.
+    pub fn begin_stage(&self, store: &BarStore) -> IndicatorEngineStage {
+        IndicatorEngineStage {
+            engine_identity: Arc::clone(&self.identity),
+            source: SourceFingerprint::capture(store),
+            entries: self
+                .entries
+                .iter()
+                .map(|entry| EngineEntrySnapshot {
+                    id: entry.id.clone(),
+                    identity: Arc::clone(&entry.identity),
+                })
+                .collect(),
+            registry_names: self.registry_names(),
+            projected_entries: self.entries.len(),
+            projected_outputs: self
+                .entries
+                .iter()
+                .map(|entry| entry.definition.outputs.len())
+                .sum(),
+            purpose: IndicatorStagePurpose::Unknown,
+            operations: Vec::new(),
+        }
+    }
+
+    /// additive study entry를 live engine과 분리해 cold 계산한다.
+    pub fn stage_add(
+        &self,
+        stage: &mut IndicatorEngineStage,
+        store: &BarStore,
+        host: &dyn Host,
+        id: &JsValue,
+        name: &JsValue,
+        params: &JsValue,
+    ) -> Result<IndicatorPublishReceipt, JsError> {
+        self.ensure_stage_current(
+            stage,
+            store,
+            "Study setup stale: owner changed during staging",
+        )?;
+        stage.purpose = IndicatorStagePurpose::Studies;
+        let id = identifier(id, "Indicator id")?.clone();
+        validate_indicator_params(params)?;
+        if stage.projected_entries >= RESOURCE_LIMITS.max_indicators as usize {
+            return Err(range_error("Indicator limit"));
+        }
+        if stage.entries.iter().any(|entry| entry.id == id)
+            || stage
+                .operations
+                .iter()
+                .any(|operation| operation.id() == &id)
+        {
+            return Err(ordinary_error("Duplicate indicator id"));
+        }
+        let metadata = match name {
+            JsValue::String(name) => self.registry.lookup(name),
+            _ => None,
+        };
+        let Some(metadata) = metadata else {
+            return Err(value_message("Unknown indicator: ", name)?);
+        };
+        let created = indicator_dispatch::create(metadata.program, params, host)?;
+        self.ensure_stage_current(
+            stage,
+            store,
+            "Study setup stale: owner changed during staging",
+        )?;
+        let next_outputs = stage
+            .projected_outputs
+            .checked_add(created.definition.outputs.len())
+            .ok_or_else(|| range_error("Indicator output byte limit"))?;
+        self.check_staged_output_budget(next_outputs, store.capacity())?;
+        let mut entry = Self::entry_from_created(
+            id,
+            JsString::from_str(metadata.name),
+            created,
+            store.length(),
+        );
+        self.compute_staged_entry(
+            stage,
+            store,
+            host,
+            &mut entry,
+            "Study setup stale: owner changed during staging",
+        )?;
+        let receipt = IndicatorPublishReceipt::from_entry(&entry, true);
+        stage.operations.push(StagedIndicatorOperation::Add {
+            entry,
+            receipt: receipt.clone(),
+        });
+        stage.projected_entries += 1;
+        stage.projected_outputs = next_outputs;
+        Ok(receipt)
+    }
+
+    /// 같은 id의 params 후보를 cold 계산하고 schema/offset 호환성을 검사한다.
+    pub fn stage_replace(
+        &self,
+        stage: &mut IndicatorEngineStage,
+        store: &BarStore,
+        host: &dyn Host,
+        id: &JsValue,
+        params: &JsValue,
+    ) -> Result<IndicatorPublishReceipt, JsError> {
+        self.ensure_stage_current(
+            stage,
+            store,
+            "Indicator params stale: owner changed during snapshot",
+        )?;
+        stage.purpose = IndicatorStagePurpose::Params;
+        let Some(index) = self.entry_index(id) else {
+            return Err(ordinary_error("Missing indicator"));
+        };
+        validate_indicator_params(params)?;
+        let current = &self.entries[index];
+        if stage
+            .operations
+            .iter()
+            .any(|operation| operation.id() == &current.id)
+        {
+            return Err(ordinary_error(
+                "Indicator params stale: owner changed during snapshot",
+            ));
+        }
+        let requested = validate_indicator_params(params)?;
+        if current.definition.params.object_is_equal(&requested) {
+            let receipt = IndicatorPublishReceipt::from_entry(current, false);
+            stage.operations.push(StagedIndicatorOperation::Noop {
+                receipt: receipt.clone(),
+            });
+            return Ok(receipt);
+        }
+        let created = indicator_dispatch::create(current.definition.program, params, host)?;
+        self.ensure_stage_current(
+            stage,
+            store,
+            "Indicator params stale: owner changed during staging",
+        )?;
+        if !created.definition.params.object_is_equal(&requested) {
+            return Err(type_error("Indicator factory changed requested params"));
+        }
+        if current.definition.outputs != created.definition.outputs {
+            return Err(type_error(
+                "Indicator parameter update cannot change output schema",
+            ));
+        }
+        if current.definition.outputs.iter().any(|output| {
+            current.definition.effective_plot_offset(output).to_bits()
+                != created.definition.effective_plot_offset(output).to_bits()
+        }) {
+            return Err(type_error(
+                "Indicator parameter update cannot change plot offsets",
+            ));
+        }
+        self.check_staged_output_budget(stage.projected_outputs, store.capacity())?;
+        let mut entry = Self::entry_from_created(
+            current.id.clone(),
+            current.name.clone(),
+            created,
+            store.length(),
+        );
+        self.compute_staged_entry(
+            stage,
+            store,
+            host,
+            &mut entry,
+            "Indicator params stale: owner changed during staging",
+        )?;
+        let receipt = IndicatorPublishReceipt::from_entry(&entry, true);
+        stage.operations.push(StagedIndicatorOperation::Replace {
+            previous: Arc::clone(&current.identity),
+            entry,
+            receipt: receipt.clone(),
+        });
+        Ok(receipt)
+    }
+
+    /// 모든 guard를 다시 확인한 뒤 stage의 add/replace를 한 번에 게시한다.
+    pub fn publish_stage(
+        &mut self,
+        store: &BarStore,
+        stage: IndicatorEngineStage,
+    ) -> Result<Vec<IndicatorPublishReceipt>, JsError> {
+        let stale = match stage.purpose {
+            IndicatorStagePurpose::Studies => "Study setup stale: owner changed during staging",
+            IndicatorStagePurpose::Params
+                if stage.operations.iter().all(|operation| {
+                    matches!(operation, StagedIndicatorOperation::Noop { .. })
+                }) =>
+            {
+                "Indicator params stale: owner changed during metadata"
+            }
+            IndicatorStagePurpose::Params | IndicatorStagePurpose::Unknown => {
+                "Indicator params stale: owner changed during staging"
+            }
+        };
+        self.ensure_stage_current(&stage, store, stale)?;
+        let mut receipts = Vec::with_capacity(stage.operations.len());
+        for operation in stage.operations {
+            match operation {
+                StagedIndicatorOperation::Add { entry, receipt } => {
+                    self.entries.push(entry);
+                    receipts.push(receipt);
+                }
+                StagedIndicatorOperation::Replace {
+                    previous,
+                    entry,
+                    receipt,
+                } => {
+                    let index = self
+                        .entries
+                        .iter()
+                        .position(|current| Arc::ptr_eq(&current.identity, &previous))
+                        .expect("stage guard retained replacement entry");
+                    self.entries[index] = entry;
+                    receipts.push(receipt);
+                }
+                StagedIndicatorOperation::Noop { receipt } => receipts.push(receipt),
+            }
+        }
+        Ok(receipts)
+    }
+
     /// definition을 삽입한 뒤 eager get을 끝까지 실행한다. 실패하면 같은 entry만 제거한다.
     pub fn add<'a>(
         &'a mut self,
@@ -679,6 +1038,130 @@ impl IndicatorEngine {
     /// 모든 entry를 제거해 suspended task의 ownership 검사를 실패시킨다.
     pub fn dispose(&mut self) {
         self.entries.clear();
+    }
+
+    fn entry_from_created(
+        id: JsString,
+        name: JsString,
+        created: CreatedIndicator<IndicatorState>,
+        length: usize,
+    ) -> IndicatorEntry {
+        let definition = created.definition;
+        let params = definition.params.to_js_value();
+        let prototype = IndicatorPrototype::new(created.state, definition.program);
+        IndicatorEntry {
+            identity: Arc::new(0),
+            id,
+            name,
+            definition,
+            params,
+            prototype,
+            dirty: 0,
+            dirty_to: Some(length),
+            invalidated: true,
+            length: 0,
+            arrays: Vec::new(),
+            arrays_epoch: 0,
+            checkpoints: BTreeMap::new(),
+            checkpoints_epoch: 0,
+            revision: 0.0,
+            computed_from: None,
+            computed_until: None,
+            prepared_version: None,
+            generation: None,
+            running: None,
+        }
+    }
+
+    fn ensure_stage_current(
+        &self,
+        stage: &IndicatorEngineStage,
+        store: &BarStore,
+        message: &str,
+    ) -> Result<(), JsError> {
+        let entries_match = self.entries.len() == stage.entries.len()
+            && self
+                .entries
+                .iter()
+                .zip(&stage.entries)
+                .all(|(current, expected)| {
+                    current.id == expected.id && Arc::ptr_eq(&current.identity, &expected.identity)
+                });
+        if !Arc::ptr_eq(&self.identity, &stage.engine_identity)
+            || !stage.source.matches(store)
+            || self.registry_names() != stage.registry_names
+            || !entries_match
+        {
+            return Err(ordinary_error(message));
+        }
+        Ok(())
+    }
+
+    fn check_staged_output_budget(&self, outputs: usize, capacity: usize) -> Result<(), JsError> {
+        let bytes = outputs
+            .checked_mul(capacity)
+            .and_then(|value| value.checked_mul(8))
+            .unwrap_or(usize::MAX);
+        if bytes > self.options.max_output_bytes {
+            return Err(range_error("Indicator output byte limit"));
+        }
+        Ok(())
+    }
+
+    fn compute_staged_entry(
+        &self,
+        stage: &IndicatorEngineStage,
+        store: &BarStore,
+        host: &dyn Host,
+        entry: &mut IndicatorEntry,
+        stale_message: &str,
+    ) -> Result<(), JsError> {
+        let capacity = store.capacity();
+        entry.arrays = entry
+            .definition
+            .outputs
+            .iter()
+            .map(|_| vec![f64::NAN; capacity])
+            .collect();
+        entry.arrays_epoch = 1;
+        let length = store.length();
+        if length == 0 {
+            return Ok(());
+        }
+        let params = entry.params.clone();
+        let mut state = entry.prototype.fresh(&params, host)?;
+        self.ensure_stage_current(stage, store, stale_message)?;
+        let block = self.options.checkpoint_size;
+        for index in 0..length {
+            if index.is_multiple_of(block) {
+                entry.checkpoints.insert(index, state.snapshot());
+                self.ensure_stage_current(stage, store, stale_message)?;
+            }
+            let bar = store.at(index)?;
+            let values = state.step(host, &bar, index)?;
+            self.ensure_stage_current(stage, store, stale_message)?;
+            if values.len() != entry.arrays.len() {
+                return Err(type_error("Indicator output arity"));
+            }
+            for (output, value) in values.as_slice().iter().copied().enumerate() {
+                if value.is_infinite() {
+                    return Err(type_error("Output must be finite or NaN"));
+                }
+                entry.arrays[output][index] = value;
+            }
+        }
+        if length.is_multiple_of(block) {
+            entry.checkpoints.insert(length, state.snapshot());
+        }
+        self.ensure_stage_current(stage, store, stale_message)?;
+        entry.dirty = length;
+        entry.dirty_to = Some(0);
+        entry.invalidated = false;
+        entry.length = length;
+        entry.revision = 1.0;
+        entry.computed_from = Some(0);
+        entry.computed_until = Some(length);
+        Ok(())
     }
 
     fn find_id(&self, id: &JsString) -> Option<usize> {
