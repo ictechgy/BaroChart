@@ -1,4 +1,4 @@
-//! WTF-16 portable label metrics, fitting, command assembly, and panel titles.
+//! WTF-16 기반 레이블 치수, 잘라 맞추기, 명령 조립, 패널 제목이다.
 
 #![forbid(unsafe_code)]
 
@@ -9,21 +9,21 @@ use barochart_js::string::{JsString, is_js_whitespace};
 
 use crate::contracts::js_to_string_with;
 
-/// Conservative portable text dimensions, not a native glyph measurement.
+/// 보수적인 이식용 글자 치수다. 네이티브 글리프를 측정하지 않는다.
 #[derive(Clone, Copy, Debug)]
 pub struct LabelMetrics {
-    /// Parsed font size.
+    /// 글꼴에서 읽은 크기다.
     pub size: f64,
-    /// Portable ascent estimate.
+    /// 이식 가능한 ascent 추정치다.
     pub ascent: f64,
-    /// Portable descent estimate.
+    /// 이식 가능한 descent 추정치다.
     pub descent: f64,
-    /// Portable line-height estimate.
+    /// 이식 가능한 줄 높이 추정치다.
     pub height: f64,
 }
 
 impl LabelMetrics {
-    /// Metrics in the source field order.
+    /// 소스 필드 순서로 치수를 값 레코드로 만든다.
     pub fn to_value(self) -> JsValue {
         object([
             ("size", JsValue::Number(self.size)),
@@ -34,39 +34,39 @@ impl LabelMetrics {
     }
 }
 
-/// Fitted label text plus its original full text and portable width.
+/// 잘라 맞춘 레이블과 원문 전체, 이식 가능한 너비다.
 #[derive(Clone, Debug)]
 pub struct LabelFit {
-    /// Single-line text, possibly shortened with an ellipsis.
+    /// 한 줄 표시 문자열이다. 필요하면 말줄임표로 줄인다.
     pub text: JsString,
-    /// Full single-line text before truncation.
+    /// 잘라내기 전 한 줄 전체 문자열이다.
     pub full_text: JsString,
-    /// Width used by the layout bounds.
+    /// 레이아웃 경계에 쓰는 너비다.
     pub width: f64,
 }
 
-/// Text command arguments passed from the renderer/model boundary.
+/// 렌더러와 모델 경계에서 전달하는 텍스트 명령 인자다.
 pub struct LabelCommandInput<'a> {
-    /// Value coerced to the visible/full text strings.
+    /// 표시 문자열과 전체 문자열로 변환할 값이다.
     pub value: &'a JsValue,
-    /// Command X coordinate.
+    /// 명령의 X 좌표다.
     pub x: f64,
-    /// Command Y coordinate.
+    /// 명령의 Y 좌표다.
     pub y: f64,
-    /// Maximum visible text width.
+    /// 표시 가능한 최대 텍스트 너비다.
     pub max_width: f64,
-    /// Original renderer font value retained in the command.
+    /// 명령에 그대로 보존할 원래 렌더러 글꼴 값이다.
     pub font: &'a JsValue,
-    /// Command color value.
+    /// 명령의 색상 값이다.
     pub color: &'a JsValue,
-    /// Command clip value.
+    /// 명령의 클립 값이다.
     pub clip: &'a JsValue,
-    /// Optional final object spread.
+    /// 마지막에 펼칠 선택적 객체다.
     pub metadata: Option<&'a JsValue>,
 }
 
 impl LabelFit {
-    /// Fit metadata in the source field order.
+    /// 소스 필드 순서로 맞춤 결과를 값 레코드로 만든다.
     pub fn to_value(&self) -> JsValue {
         object([
             ("text", JsValue::String(self.text.clone())),
@@ -76,7 +76,7 @@ impl LabelFit {
     }
 }
 
-/// Label width model used by the renderer-independent layout.
+/// 렌더러와 독립적인 레이아웃에서 사용하는 레이블 너비 모델이다.
 pub fn label_metrics(font: &JsValue, dialect: NumberDialect) -> Result<LabelMetrics, JsError> {
     let font = js_to_string_with(font, dialect)?;
     let size = regex_font_size(&font, dialect)?;
@@ -88,7 +88,7 @@ pub fn label_metrics(font: &JsValue, dialect: NumberDialect) -> Result<LabelMetr
     })
 }
 
-/// Estimates width by source `for...of` code-point iteration over a WTF-16 string.
+/// WTF-16 문자열을 소스의 `for...of` 코드 포인트 순회 규칙으로 너비를 추정한다.
 pub fn label_width(value: &JsString, metrics: LabelMetrics) -> f64 {
     let units = value.as_units();
     let mut cursor = 0usize;
@@ -121,7 +121,7 @@ pub fn label_width(value: &JsString, metrics: LabelMetrics) -> f64 {
     total * metrics.size
 }
 
-/// Coerces and fits a label, replacing ECMAScript `\s` characters with spaces.
+/// 레이블을 변환하고 맞춘다. ECMAScript `\s` 문자는 공백으로 바꾼다.
 pub fn fit_label(
     value: &JsValue,
     max_width: f64,
@@ -164,7 +164,7 @@ pub fn fit_label(
     }))
 }
 
-/// Creates a text scene command; metadata spread last may override command fields.
+/// 텍스트 장면 명령을 만든다. 메타데이터는 마지막에 펼쳐져 명령 필드를 덮어쓸 수 있다.
 pub fn label_command(
     input: LabelCommandInput<'_>,
     dialect: NumberDialect,
@@ -197,7 +197,7 @@ pub fn label_command(
     Ok(JsValue::Object(command))
 }
 
-/// Builds a panel title, preserving source filtering, nullish fallback, Set order, and join behavior.
+/// 소스의 필터, nullish 대체, Set 순서, join 동작을 보존해 패널 제목을 만든다.
 pub fn panel_title(
     panel: &JsValue,
     series: &[JsValue],
@@ -267,10 +267,10 @@ fn font_regex_unit(unit: u16) -> bool {
     (b'0' as u16..=b'9' as u16).contains(&unit) || unit == b'.' as u16
 }
 
-/// Reuses the JS JSON number parser for the restricted `[0-9.]+` regex capture.
+/// 제한된 `[0-9.]+` 정규식 캡처를 읽을 때 JS JSON 숫자 파서를 재사용한다.
 ///
-/// The normalization only makes that capture valid JSON number grammar: leading zeroes are
-/// removed and leading/trailing decimal points receive a zero. Other captures map to JS NaN.
+/// 캡처를 유효한 JSON 숫자 문법으로만 정규화한다. 앞자리 0은 제거하고 앞이나 뒤의
+/// 소수점에는 0을 붙인다. 그 밖의 캡처는 JS NaN으로 처리한다.
 fn parse_number_capture(capture: &[u16], dialect: NumberDialect) -> f64 {
     let dots = capture
         .iter()

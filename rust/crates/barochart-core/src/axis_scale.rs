@@ -1,4 +1,4 @@
-//! Binary64 price-axis range, transform, projection, and inverse projection.
+//! 이진64 가격 축의 범위, 변환, 화면 투영, 역투영이다.
 
 #![forbid(unsafe_code)]
 
@@ -10,64 +10,64 @@ use barochart_js::string::JsString;
 const F64_MAX: f64 = f64::MAX;
 const F32_MAX: f64 = 3.4028234663852886e38;
 
-/// Axis transform kind.
+/// 축 값 변환 방식이다.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AxisScaleKind {
-    /// Raw linear prices.
+    /// 원시 가격을 그대로 쓰는 선형 축이다.
     Linear,
-    /// Natural logarithm.
+    /// 자연로그를 쓰는 로그 축이다.
     Log,
-    /// Percent change from a base.
+    /// 기준값 대비 백분율 변화 축이다.
     Percent,
 }
 
-/// Immutable inputs to the projection portion of JS `axisRange`.
+/// JS `axisRange`의 범위·투영 단계에 전달하는 불변 입력이다.
 ///
-/// The caller supplies bounds aggregated from the visible model series. `zero_baseline` is true
-/// when a histogram/area includes baseline zero; `source_min`/`source_max` already include that
-/// baseline, matching the point where JS captures its original domain.
+/// 호출자는 현재 표시 중인 모델 시리즈에서 집계한 범위를 전달한다. `source_min`과
+/// `source_max`에는 히스토그램·영역 계열의 기준선도 이미 반영한다. `zero_baseline`은
+/// 그 계열의 0 기준선이 원래 데이터 범위에 포함되었음을 나타낸다.
 #[derive(Clone, Copy, Debug)]
 pub struct AxisScaleInput {
-    /// Visible raw minimum after model aggregation and series baselines.
+    /// 모델 데이터와 시리즈 기준선을 집계한 뒤의 표시 최솟값이다.
     pub source_min: f64,
-    /// Visible raw maximum after model aggregation and series baselines.
+    /// 모델 데이터와 시리즈 기준선을 집계한 뒤의 표시 최댓값이다.
     pub source_max: f64,
-    /// Linear, logarithmic, or percentage projection.
+    /// 선형, 로그, 백분율 중 축 투영 방식이다.
     pub scale: AxisScaleKind,
-    /// Symmetric padding fraction.
+    /// 양쪽에 적용할 대칭 여백 비율이다.
     pub padding: f64,
-    /// Optional explicit raw range.
+    /// 선택적 명시 원시 범위다.
     pub range: Option<[f64; 2]>,
-    /// Optional explicit percentage base.
+    /// 선택적 백분율 기준값이다.
     pub base: Option<f64>,
-    /// First stored close, used as the percentage base when `base` is absent.
+    /// `base`가 없을 때 백분율 기준값으로 쓰는 첫 저장 종가다.
     pub first_close: Option<f64>,
-    /// Whether visible histogram/area data includes baseline zero.
+    /// 표시 데이터에 0 기준선이 포함되는 히스토그램·영역 계열이 있는지 나타낸다.
     pub zero_baseline: bool,
-    /// Whether low maps to the bottom instead of the top.
+    /// 참이면 최솟값을 화면 위쪽, 최댓값을 아래쪽에 배치한다.
     pub inverted: bool,
-    /// Top pixel coordinate.
+    /// 화면 위쪽 픽셀 좌표다.
     pub top: f64,
-    /// Bottom pixel coordinate.
+    /// 화면 아래쪽 픽셀 좌표다.
     pub bottom: f64,
 }
 
-/// Computed axis transform and the values needed for stable interpolation.
+/// 계산된 축 변환과 안정적인 보간에 필요한 값이다.
 #[derive(Clone, Copy, Debug)]
 pub struct AxisScale {
-    /// Final raw lower bound.
+    /// 최종 원시 최솟값이다.
     pub min: f64,
-    /// Final raw upper bound.
+    /// 최종 원시 최댓값이다.
     pub max: f64,
-    /// Effective percentage base (also exposed by JS for non-percent axes).
+    /// 실제 백분율 기준값이다. JS는 백분율이 아닌 축에서도 이 값을 노출한다.
     pub base: f64,
-    /// Top pixel coordinate.
+    /// 화면 위쪽 픽셀 좌표다.
     pub top: f64,
-    /// Bottom pixel coordinate.
+    /// 화면 아래쪽 픽셀 좌표다.
     pub bottom: f64,
-    /// Transformed lower bound.
+    /// 변환된 최솟값이다.
     pub lo: f64,
-    /// Transformed upper bound.
+    /// 변환된 최댓값이다.
     pub hi: f64,
     scale: AxisScaleKind,
     inverted: bool,
@@ -84,7 +84,7 @@ pub struct AxisScale {
 }
 
 impl AxisScale {
-    /// Applies JS axis range and projection math to a pure domain/configuration DTO.
+    /// 순수 범위·설정 DTO에 JS 축 범위와 투영 규칙을 적용한다.
     pub fn new(input: AxisScaleInput) -> Result<Self, JsError> {
         let source_min = input.source_min;
         let source_max = input.source_max;
@@ -161,8 +161,8 @@ impl AxisScale {
             return Err(range_error("Axis transform has no representable span"));
         }
 
-        // TwoDiff retains the low part of hi-lo for inverse interpolation across zero,
-        // without double-rounding subnormal weighted endpoint products.
+        // TwoDiff로 hi-lo의 낮은 부분을 보존해 0을 가로지르는 역보간에서
+        // 부분 정상수 끝점 곱의 이중 반올림을 피한다.
         let virtual_lo = if direct { hi - delta } else { 0.0 };
         let delta_error = if direct {
             (hi - (delta + virtual_lo)) + (virtual_lo - lo)
@@ -205,17 +205,17 @@ impl AxisScale {
         Ok(axis)
     }
 
-    /// Transforms a raw price using the configured JS math function.
+    /// 설정된 JS 수학 함수를 사용해 원시 가격을 변환한다.
     pub fn transform(&self, value: f64) -> f64 {
         transform_value(self.scale, value, self.base)
     }
 
-    /// Inverts a transformed value using the configured JS math function.
+    /// 설정된 JS 수학 함수를 사용해 변환된 값을 되돌린다.
     pub fn inverse(&self, value: f64) -> f64 {
         inverse_value(self.scale, value, self.base)
     }
 
-    /// Projects a raw price to screen Y, returning NaN outside finite F32 bounds.
+    /// 원시 가격을 화면 Y 좌표로 투영한다. 유한한 F32 범위를 벗어나면 NaN을 돌려준다.
     pub fn y(&self, value: f64) -> f64 {
         let mapped = self.transform(value);
         let difference = mapped - self.origin;
@@ -236,7 +236,7 @@ impl AxisScale {
         }
     }
 
-    /// Inverts a screen Y coordinate to a raw price with compensated interpolation.
+    /// 보정 보간으로 화면 Y 좌표를 원시 가격으로 역투영한다.
     pub fn price(&self, screen_y: f64) -> f64 {
         let fraction = (screen_y - self.top) / (self.bottom - self.top);
         let fraction = if self.inverted {

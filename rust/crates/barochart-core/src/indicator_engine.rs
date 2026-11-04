@@ -345,6 +345,12 @@ struct EngineEntrySnapshot {
     identity: Arc<u8>,
 }
 
+/// Compaction 전후 같은 entry order/identity를 보장하는 restart plan이다.
+pub struct IndicatorRestartPlan {
+    engine_identity: Arc<u8>,
+    entries: Vec<EngineEntrySnapshot>,
+}
+
 enum StagedIndicatorOperation {
     Add {
         entry: IndicatorEntry,
@@ -670,6 +676,62 @@ impl IndicatorEngine {
         })
     }
 
+    /// 현재 실제 entry identity/order를 compaction restart용으로 캡처한다.
+    pub fn prepare_restart(&self) -> IndicatorRestartPlan {
+        IndicatorRestartPlan {
+            engine_identity: Arc::clone(&self.identity),
+            entries: self
+                .entries
+                .iter()
+                .map(|entry| EngineEntrySnapshot {
+                    id: entry.id.clone(),
+                    identity: Arc::clone(&entry.identity),
+                })
+                .collect(),
+        }
+    }
+
+    /// restart plan이 아직 같은 engine/entry 집합을 가리키는지 본다.
+    pub fn validate_restart(&self, plan: &IndicatorRestartPlan) -> bool {
+        Arc::ptr_eq(&self.identity, &plan.engine_identity)
+            && self.entries.len() == plan.entries.len()
+            && self
+                .entries
+                .iter()
+                .zip(&plan.entries)
+                .all(|(entry, expected)| {
+                    entry.id == expected.id && Arc::ptr_eq(&entry.identity, &expected.identity)
+                })
+    }
+
+    /// 검증된 실제 entry들을 revision은 유지한 채 cold restart 상태로 바꾼다.
+    pub fn publish_restart(
+        &mut self,
+        plan: IndicatorRestartPlan,
+        length: usize,
+    ) -> Result<(), JsError> {
+        if !self.validate_restart(&plan) {
+            return Err(calculation_error(
+                "StaleSourceError",
+                "Compaction owner or source changed",
+            ));
+        }
+        for entry in &mut self.entries {
+            entry.checkpoints.clear();
+            entry.checkpoints_epoch = entry.checkpoints_epoch.wrapping_add(1);
+            entry.arrays.clear();
+            entry.arrays_epoch = entry.arrays_epoch.wrapping_add(1);
+            entry.dirty = 0;
+            entry.dirty_to = Some(length);
+            entry.invalidated = true;
+            entry.length = 0;
+            entry.computed_from = Some(0);
+            entry.computed_until = Some(0);
+            entry.prepared_version = None;
+        }
+        Ok(())
+    }
+
     /// 현재 source/registry/entry identity를 고정한 빈 staging transaction을 만든다.
     pub fn begin_stage(&self, store: &BarStore) -> IndicatorEngineStage {
         IndicatorEngineStage {
@@ -988,6 +1050,9 @@ impl IndicatorEngine {
 
     /// 커밋된 store change를 모든 entry에 lazy invalidation으로 반영한다.
     pub fn apply_change(&mut self, store: &BarStore, change: &DataChange) {
+        if change.kind == ChangeKind::Compact {
+            return;
+        }
         for entry in &mut self.entries {
             if entry.prepared_version == Some(store.version()) {
                 continue;

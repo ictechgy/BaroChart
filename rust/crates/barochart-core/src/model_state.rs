@@ -869,6 +869,9 @@ impl ModelState {
 
     /// Root store listener가 commit 뒤 전달하는 view/cache 효과를 적용한다.
     pub fn on_store_change(&mut self, store: &BarStore, change: &DataChange) {
+        if change.kind == ChangeKind::Compact {
+            return;
+        }
         if change.kind == ChangeKind::Prepend
             && change.added.is_some_and(|added| store.length() > added)
         {
@@ -894,6 +897,20 @@ impl ModelState {
         for series in &mut self.series {
             series.dirty_from = js_min(&[series.dirty_from, change.from as f64]);
         }
+    }
+
+    /// 검증이 끝난 compaction series cache restart를 실패 없이 게시한다.
+    pub fn publish_compaction_caches(&mut self) {
+        for series in &mut self.series {
+            series.range_index_ready = false;
+            series.revision = None;
+            series.dirty_from = 0.0;
+        }
+    }
+
+    /// Store publication과 같은 commit 구간에서 compaction view를 설치한다.
+    pub fn publish_compaction_view(&mut self, view: VisibleRange) {
+        self.view = view;
     }
 
     /// visible series의 가장 큰 양수/음수 offset에 대해 JS Math.max 규칙을 쓴다.

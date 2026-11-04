@@ -284,6 +284,8 @@ pub enum ChangeKind {
     Prepend,
     /// 원자적 batch다.
     Batch,
+    /// 같은 store owner에서 앞 history를 제거한 compaction이다.
+    Compact,
 }
 
 /// 커밋 뒤 원장·listener에 전달할 불변 변경 정보다.
@@ -297,7 +299,7 @@ pub struct DataChange {
     pub kind: ChangeKind,
     /// 커밋된 store version이다.
     pub version: f64,
-    /// append/prepend 행 수다.
+    /// append/prepend 행 수다. Compact에서는 wire `removed` 값으로 쓴다.
     pub added: Option<usize>,
     /// added 자기 키의 존재 여부다. 열 reset은 존재하면서 값이 undefined다.
     pub added_present: bool,
@@ -314,6 +316,7 @@ impl DataChange {
             ChangeKind::Update => "update",
             ChangeKind::Prepend => "prepend",
             ChangeKind::Batch => "batch",
+            ChangeKind::Compact => "compact",
         };
         let mut record = JsObject::new();
         record.insert(
@@ -325,7 +328,16 @@ impl DataChange {
             JsValue::String(JsString::from_str(kind)),
         );
         record.insert(JsString::from_str("version"), JsValue::Number(self.version));
-        if self.added_present {
+        if self.kind == ChangeKind::Compact {
+            record.insert(
+                JsString::from_str("removed"),
+                JsValue::Number(self.added.unwrap_or(0) as f64),
+            );
+            record.insert(
+                JsString::from_str("studyHistory"),
+                JsValue::String(JsString::from_str("restart")),
+            );
+        } else if self.added_present {
             record.insert(
                 JsString::from_str("added"),
                 self.added
@@ -508,6 +520,41 @@ impl DataIdentity {
     }
 }
 
+/// Store compaction의 source/새 열/tree를 publication 전까지 소유하는 후보이다.
+pub struct StoreCompactionCandidate {
+    source: DataIdentity,
+    source_version: f64,
+    source_time_version: f64,
+    source_length: usize,
+    source_capacity: usize,
+    columns: Columns,
+    index: RangeIndex,
+    receipt: StoreCompactionReceipt,
+}
+
+/// Store 자체 publication 결과다. Root compaction receipt가 이 값을 그대로 포함한다.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StoreCompactionReceipt {
+    /// 제거한 앞 행 수다.
+    pub removed: usize,
+    /// 남긴 행 수다.
+    pub length: usize,
+    /// 새 capacity다.
+    pub capacity: usize,
+    /// 새 logical store bytes다.
+    pub bytes: usize,
+    /// 이전 logical store bytes다.
+    pub previous_bytes: usize,
+    /// old/new source 동시 peak bytes다.
+    pub peak_source_bytes: usize,
+    /// 남은 첫 timestamp다.
+    pub first_retained_time: f64,
+    /// 게시할 store version이다.
+    pub version: f64,
+    /// 게시할 time version이다.
+    pub time_version: f64,
+}
+
 impl Clone for BarStore {
     fn clone(&self) -> Self {
         Self {
@@ -605,6 +652,111 @@ impl BarStore {
     /// volume/price range index를 빌린다.
     pub fn index(&self) -> &RangeIndex {
         &self.index
+    }
+
+    /// 앞 history를 제거할 새 열과 RangeIndex를 만들되 live store는 바꾸지 않는다.
+    pub fn prepare_compaction(
+        &self,
+        keep: usize,
+        max_peak_bytes: usize,
+    ) -> Result<StoreCompactionCandidate, JsError> {
+        if self.length == 0 {
+            return Err(range_error("Cannot compact an empty store"));
+        }
+        if keep == 0 || keep >= self.length {
+            return Err(range_error("Compaction keep range"));
+        }
+        let capacity = capacity_for(keep);
+        let peak = self
+            .capacity
+            .checked_add(capacity)
+            .and_then(|capacity| capacity.checked_mul(BYTES_PER_CAPACITY))
+            .unwrap_or(usize::MAX);
+        if peak > max_peak_bytes {
+            return Err(range_error("Compaction source peak byte budget"));
+        }
+        let removed = self.length - keep;
+        let mut columns = Columns::zeroed(capacity);
+        for target in 0..keep {
+            columns.write(target, self.columns.bar(removed + target));
+        }
+        let index = RangeIndex::new(
+            keep,
+            &columns.low,
+            &columns.high,
+            Some(&columns.volume),
+            capacity,
+            false,
+        )?;
+        let receipt = StoreCompactionReceipt {
+            removed,
+            length: keep,
+            capacity,
+            bytes: capacity * BYTES_PER_CAPACITY,
+            previous_bytes: self.capacity * BYTES_PER_CAPACITY,
+            peak_source_bytes: peak,
+            first_retained_time: columns.time[0],
+            version: self.version + 1.0,
+            time_version: self.time_version + 1.0,
+        };
+        Ok(StoreCompactionCandidate {
+            source: self.data_identity(),
+            source_version: self.version,
+            source_time_version: self.time_version,
+            source_length: self.length,
+            source_capacity: self.capacity,
+            columns,
+            index,
+            receipt,
+        })
+    }
+
+    /// compaction 후보가 여전히 같은 source에 적용 가능한지 본다.
+    pub fn validate_compaction(&self, candidate: &StoreCompactionCandidate) -> bool {
+        candidate.source.matches(&self.data_identity())
+            && candidate.source_version == self.version
+            && candidate.source_time_version == self.time_version
+            && candidate.source_length == self.length
+            && candidate.source_capacity == self.capacity
+    }
+
+    /// 검증된 후보의 새 열/tree와 version을 같은 store owner에 한 번 게시한다.
+    pub fn publish_compaction(
+        &mut self,
+        candidate: StoreCompactionCandidate,
+    ) -> Result<Committed<StoreCompactionReceipt>, JsError> {
+        if !self.validate_compaction(&candidate) {
+            return Err(JsError::new(
+                "StaleSourceError",
+                JsString::from_str("Compaction owner or source changed"),
+            ));
+        }
+        let StoreCompactionCandidate {
+            columns,
+            index,
+            receipt,
+            ..
+        } = candidate;
+        self.columns = columns;
+        self.columns_identity = Arc::new(());
+        self.index = index;
+        self.length = receipt.length;
+        self.capacity = receipt.capacity;
+        self.version = receipt.version;
+        self.time_version = receipt.time_version;
+        let change = DataChange {
+            from: 0,
+            to: receipt.length,
+            kind: ChangeKind::Compact,
+            version: receipt.version,
+            added: Some(receipt.removed),
+            added_present: false,
+            appended: None,
+        };
+        Ok(Committed {
+            value: receipt,
+            change: Some(change),
+        })
     }
 
     /// 모든 행을 소유 snapshot한 뒤 한 번 교체한다.
@@ -925,8 +1077,9 @@ impl BarStore {
         let count = std::cmp::min(end - start, max_buckets);
         let mut output = Vec::with_capacity(count);
         for bucket in 0..count {
-            let from = start + bucket * (end - start) / count;
-            let to = start + (bucket + 1) * (end - start) / count;
+            // 최대 2^22봉의 곱은 2^44까지 커지므로 wasm32 usize 곱을 피한다.
+            let from = start + (bucket as u64 * (end - start) as u64 / count as u64) as usize;
+            let to = start + ((bucket + 1) as u64 * (end - start) as u64 / count as u64) as usize;
             let query = self.index.query(from, to)?;
             output.push(AggregateBar {
                 start: from,
@@ -986,7 +1139,6 @@ impl BarStore {
                 "Data batch store byte budget limit {max_bytes}"
             )));
         }
-        let original = self.clone();
         let mut staged = self.clone();
         let mut from = length;
         let mut to = 0;
@@ -1029,7 +1181,7 @@ impl BarStore {
                 staged
                     .columns
                     .bar(*index)
-                    .same_value(&original.columns.bar(*index))
+                    .same_value(&self.columns.bar(*index))
             });
         if unchanged {
             return Ok(Committed {

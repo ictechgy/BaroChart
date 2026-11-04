@@ -855,6 +855,66 @@ pub struct ReleaseReceipt {
     pub cancelled: usize,
 }
 
+/// Compaction pending queue 정책이다.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PendingDataPolicy {
+    /// pending queue가 있으면 거부한다.
+    Reject,
+    /// 남은 timestamp를 참조하는 pending FIFO를 보존한다.
+    PreserveRetained,
+}
+
+/// Compaction의 fence BUSY와 source의 일반 오류 class를 구분한다.
+#[derive(Debug)]
+pub enum IngestionCompactionError {
+    /// async ingestion fence의 안정 BUSY 오류다.
+    Busy(IngestionError),
+    /// compaction source가 정한 일반 JS 오류 class다.
+    State(JsError),
+}
+
+impl IngestionCompactionError {
+    /// JS 오류 이름이다.
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Busy(_) => "IngestionError",
+            Self::State(error) => error.name,
+        }
+    }
+    /// IngestionError일 때만 안정 code가 있다.
+    pub fn code(&self) -> Option<&str> {
+        match self {
+            Self::Busy(error) => Some(error.code()),
+            Self::State(_) => None,
+        }
+    }
+    /// UTF-16 오류 문구다.
+    pub fn message(&self) -> &JsString {
+        match self {
+            Self::Busy(error) => error.message(),
+            Self::State(error) => &error.message,
+        }
+    }
+}
+
+/// Ingestion session/queue가 compaction 전 그대로인지 확인하는 plan이다.
+pub struct IngestionCompactionPlan {
+    session: bool,
+    source_serial: f64,
+    source_version: f64,
+    epoch: f64,
+    head: usize,
+    count: usize,
+    next_sequence: f64,
+    first_pending_sequence: f64,
+    paused: bool,
+    draining: bool,
+    leased: bool,
+    closed: bool,
+    events: Vec<IngestionEvent>,
+    document: Option<JsString>,
+}
+
 impl ReleaseReceipt {
     /// native release 반환값이다.
     pub fn to_value(self) -> JsValue {
@@ -895,6 +955,149 @@ impl IngestionOwner {
     /// ingestion 밖 publication을 위해 data를 배타적으로 빌린다.
     pub fn data_mut(&mut self) -> &mut ModelDataState {
         &mut self.data
+    }
+
+    /// Compaction 전에 fence/session/pending FIFO 의미를 검사하고 snapshot한다.
+    pub fn assert_compaction_idle_fence(&self) -> Result<(), IngestionError> {
+        self.idle_fence()
+    }
+
+    /// Compaction 전에 session/pending FIFO 의미를 검사하고 snapshot한다.
+    pub fn prepare_compaction(
+        &self,
+        removed: usize,
+        policy: PendingDataPolicy,
+    ) -> Result<IngestionCompactionPlan, IngestionCompactionError> {
+        let Some(session) = self.session.as_ref() else {
+            return Ok(IngestionCompactionPlan {
+                session: false,
+                source_serial: self.data.store().serial(),
+                source_version: self.data.store().version(),
+                epoch: 0.0,
+                head: 0,
+                count: 0,
+                next_sequence: 0.0,
+                first_pending_sequence: 0.0,
+                paused: false,
+                draining: false,
+                leased: false,
+                closed: false,
+                events: Vec::new(),
+                document: None,
+            });
+        };
+        if session.closed
+            || !session.paused
+            || session.count > 0 && policy != PendingDataPolicy::PreserveRetained
+            || session.draining
+            || session.leased
+        {
+            return Err(IngestionCompactionError::State(js_error(
+                "Error",
+                "Compaction requires paused empty idle ingestion unless preserving retained pending data",
+            )));
+        }
+        if policy == PendingDataPolicy::PreserveRetained
+            && session.source_version != self.data.store().version()
+        {
+            return Err(IngestionCompactionError::State(js_error(
+                "Error",
+                "Compaction pending source version changed",
+            )));
+        }
+        let events = session.prefix(session.count);
+        if policy == PendingDataPolicy::PreserveRetained {
+            let store = self.data.store();
+            let mut tail = store.columns().time[store.length() - 1];
+            let mut appended = Vec::new();
+            for event in &events {
+                crate::data::validate_bar(&event.bar, f64::NEG_INFINITY)
+                    .map_err(IngestionCompactionError::State)?;
+                match event.kind {
+                    IngestionKind::Append => {
+                        if event.bar.time <= tail {
+                            return Err(IngestionCompactionError::State(js_error(
+                                "Error",
+                                "Compaction pending append must follow virtual tail",
+                            )));
+                        }
+                        tail = event.bar.time;
+                        appended.push(event.bar.time);
+                    }
+                    IngestionKind::Update => {
+                        if event.bar.time != tail {
+                            return Err(IngestionCompactionError::State(js_error(
+                                "Error",
+                                "Compaction pending update must match virtual tail",
+                            )));
+                        }
+                    }
+                    IngestionKind::Correction => {
+                        let retained = store.columns().time[removed..store.length()]
+                            .binary_search_by(|value| value.total_cmp(&event.bar.time))
+                            .is_ok();
+                        if !retained && !appended.contains(&event.bar.time) {
+                            return Err(IngestionCompactionError::State(js_error(
+                                "Error",
+                                "Compaction pending correction requires retained timestamp",
+                            )));
+                        }
+                    }
+                }
+            }
+        }
+        Ok(IngestionCompactionPlan {
+            session: true,
+            source_serial: session.source_serial,
+            source_version: session.source_version,
+            epoch: session.epoch,
+            head: session.head,
+            count: session.count,
+            next_sequence: session.next_sequence,
+            first_pending_sequence: session.first_pending_sequence,
+            paused: session.paused,
+            draining: session.draining,
+            leased: session.leased,
+            closed: session.closed,
+            events,
+            document: Some(self.save().map_err(IngestionCompactionError::Busy)?),
+        })
+    }
+
+    /// Store commit 직전 ingestion snapshot이 그대로인지 확인한다.
+    pub fn validate_compaction(&self, plan: &IngestionCompactionPlan) -> bool {
+        match (plan.session, self.session.as_ref()) {
+            (false, None) => true,
+            (true, Some(session)) => {
+                session.source_serial == plan.source_serial
+                    && session.source_version == plan.source_version
+                    && session.epoch == plan.epoch
+                    && session.head == plan.head
+                    && session.count == plan.count
+                    && session.next_sequence == plan.next_sequence
+                    && session.first_pending_sequence == plan.first_pending_sequence
+                    && session.paused == plan.paused
+                    && session.draining == plan.draining
+                    && session.leased == plan.leased
+                    && session.closed == plan.closed
+                    && session.prefix(session.count) == plan.events
+                    && self.save().ok().as_ref() == plan.document.as_ref()
+            }
+            _ => false,
+        }
+    }
+
+    /// 검증된 session의 queue/counters를 그대로 두고 새 store 원장에 재결합한다.
+    pub fn publish_compaction_rebind(&mut self, plan: IngestionCompactionPlan) {
+        if !plan.session {
+            return;
+        }
+        let serial = self.data.store().serial();
+        let version = self.data.store().version();
+        let session = self.session.as_mut().expect("validated compaction session");
+        session.source_serial = serial;
+        session.source_version = version;
+        session.epoch = plan.epoch + 1.0;
     }
 
     fn configured(&self) -> Result<&IngestionSession, IngestionError> {

@@ -78,6 +78,27 @@ pub mod indicator_params_update;
 /// Study 문서의 원자 저장·추가 로드를 다룬다.
 pub mod study_setup;
 
+/// 실제 코어 모듈을 연결한다.
+pub mod layout;
+
+/// 실제 코어 모듈을 연결한다.
+pub mod series_cache;
+
+/// 실제 코어 모듈을 연결한다.
+pub mod data_explorer;
+
+/// 실제 코어 모듈을 연결한다.
+pub mod compaction;
+
+/// 실제 장면 처리 모듈을 연결한다.
+pub mod drawing_geometry;
+
+/// 실제 장면 처리 모듈을 연결한다.
+pub mod scene_parts;
+
+/// 실제 장면 처리 모듈을 연결한다.
+pub mod scene;
+
 use barochart_js::error::JsError;
 use barochart_js::string::JsString;
 use data::{ModelDataState, StoreOptions};
