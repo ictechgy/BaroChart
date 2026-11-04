@@ -78,6 +78,7 @@ public class RustRuntimeTest {
 
     @Test public void wideLogExplicitRangeInvertedMatchesAcrossPublicJNIBackends() {
         requireRust();
+        Assume.assumeTrue(BuildConfig.BAROCHART_WITH_QUICKJS);
         TestSupport.onMain(() -> {
             WideLogProbe javascript=wideLogProbe(EngineBackend.JAVASCRIPT),rust=wideLogProbe(EngineBackend.RUST);
             assertExactBits("wide log scene numeric bits",javascript.sceneBits,rust.sceneBits);

@@ -93,7 +93,7 @@ fn native_quickjs_outputs(rows: &[JsValue]) -> HashMap<String, String> {
         .output()
         .unwrap_or_else(|error| {
             panic!(
-                "NoNode: cannot run native QuickJS axis oracle with {:?}: {error}; set BAROCHART_NODE to Node v22.20.0",
+                "NoNode: cannot run native QuickJS axis oracle with {:?}: {error}; set BAROCHART_NODE to Node 22",
                 node
             )
         });

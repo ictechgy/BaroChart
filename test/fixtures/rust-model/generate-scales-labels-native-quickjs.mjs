@@ -9,7 +9,8 @@ import {fileURLToPath} from 'node:url';
 
 const [fixturePath] = process.argv.slice(2);
 assert(fixturePath, 'usage: generate-scales-labels-native-quickjs.mjs FIXTURE');
-assert.equal(process.version, 'v22.20.0', `native axis oracle requires Node v22.20.0 (got ${process.version})`);
+// Node only prepares the input; vendored QuickJS computes every oracle value.
+assert.equal(process.versions.node.split('.')[0], '22', `native axis oracle requires Node 22 (got ${process.version})`);
 
 const ROOT = resolve(fileURLToPath(new URL('.', import.meta.url)), '../../..');
 const QUICKJS_DIR = resolve(ROOT, 'native/android/quickjs');
