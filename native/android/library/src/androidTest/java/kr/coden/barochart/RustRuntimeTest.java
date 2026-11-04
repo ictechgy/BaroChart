@@ -5,9 +5,14 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
+import android.util.Log;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicReference;
 import org.json.JSONObject;
 import org.junit.Assume;
@@ -17,6 +22,69 @@ import org.junit.runner.RunWith;
 /** M1 Rust 스캐폴드 런타임: nativeInit만 성공하고 나머지는 JS fallback 없이 UNAVAILABLE이다. */
 @RunWith(AndroidJUnit4.class)
 public class RustRuntimeTest {
+    private static final String WIDE_LOG_TAG = "BaroChartWideLogParity";
+
+    private static long rawBits(double value) { return Double.doubleToRawLongBits(value); }
+
+    private static void collectNumericBits(Object value,String path,Map<String,Long> out) throws Exception {
+        if (value instanceof JSONObject) {
+            JSONObject object=(JSONObject)value;java.util.List<String> keys=new ArrayList<>();java.util.Iterator<String> iterator=object.keys();
+            while(iterator.hasNext())keys.add(iterator.next());java.util.Collections.sort(keys);
+            for(String key:keys)collectNumericBits(object.get(key),path+"."+key,out);
+        } else if (value instanceof org.json.JSONArray) {
+            org.json.JSONArray array=(org.json.JSONArray)value;
+            for(int i=0;i<array.length();i++)collectNumericBits(array.get(i),path+"["+i+"]",out);
+        } else if (value instanceof Number) out.put(path,rawBits(((Number)value).doubleValue()));
+    }
+
+    private static Map<String,Long> numericBits(JSONObject value) throws Exception {
+        Map<String,Long> out=new TreeMap<>();collectNumericBits(value,"$",out);return out;
+    }
+
+    private static String hex(long value) { return String.format(java.util.Locale.ROOT,"%016x",value); }
+
+    private static final class WideLogProbe {
+        final Map<String,Long> sceneBits;final List<Long> drawingBits;
+        WideLogProbe(Map<String,Long> sceneBits,List<Long> drawingBits){this.sceneBits=sceneBits;this.drawingBits=drawingBits;}
+    }
+
+    private WideLogProbe wideLogProbe(EngineBackend backend) throws Exception {
+        BaroChartEngine engine=BaroChartEngine.create(TestSupport.context(),EngineOptions.defaults(),backend);
+        try {
+            List<Bar> bars=new ArrayList<>();
+            bars.add(new Bar(1_700_000_000_000.0,.01,.01,.01,.01,1));
+            bars.add(new Bar(1_700_000_060_000.0,1e300,1e300,1e300,1e300,1));
+            engine.setBars(bars);
+            engine.command("setPanel","price",new JSONObject().put("scale","log").put("padding",0).put("range",new org.json.JSONArray().put(.01).put(1e300)).put("inverted",true));
+            Map<String,Long> scene=numericBits(engine.scene(800,500));
+            engine.setTool(DrawingTool.HORIZONTAL);
+            List<Long> drawings=new ArrayList<>();int pointer=1;
+            for(double y:new double[]{12,239,466}){
+                engine.invoke("nativePointer","down",pointer,200,y,24);engine.invoke("nativePointer","up",pointer,0,0);
+                JSONObject saved=new JSONObject(engine.saveDrawings());org.json.JSONArray items=saved.getJSONArray("drawings");
+                JSONObject point=items.getJSONObject(items.length()-1).getJSONArray("points").getJSONObject(0);
+                drawings.add(rawBits(point.getDouble("price")));pointer++;
+            }
+            Log.i(WIDE_LOG_TAG,"backend="+backend+" sceneBits="+scene.size()+" drawingBits="+hex(drawings.get(0))+","+hex(drawings.get(1))+","+hex(drawings.get(2)));
+            return new WideLogProbe(scene,drawings);
+        } finally { engine.close(); }
+    }
+
+    private static void assertExactBits(String label,Map<String,Long> expected,Map<String,Long> actual) {
+        if(expected.equals(actual))return;
+        for(String path:expected.keySet())if(!java.util.Objects.equals(expected.get(path),actual.get(path)))fail(label+" path="+path+" expected="+hex(expected.get(path))+" actual="+hex(actual.get(path)));
+        fail(label+" key set differs");
+    }
+
+    @Test public void wideLogExplicitRangeInvertedMatchesAcrossPublicJNIBackends() {
+        requireRust();
+        TestSupport.onMain(() -> {
+            WideLogProbe javascript=wideLogProbe(EngineBackend.JAVASCRIPT),rust=wideLogProbe(EngineBackend.RUST);
+            assertExactBits("wide log scene numeric bits",javascript.sceneBits,rust.sceneBits);
+            assertEquals("wide log drawing inverse bits",javascript.drawingBits,rust.drawingBits);
+        });
+    }
+
     /** 예외를 던질 수 있는 Rust 스캐폴드 호출. */
     private interface Body { void run() throws Exception; }
     /** Rust 내부 선택 훅으로 엔진을 만든다. */

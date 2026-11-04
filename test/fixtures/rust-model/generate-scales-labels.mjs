@@ -188,6 +188,15 @@ function axisVector(scenario) {
     samples: scenario.samples,
     screen_samples: screenSamples,
   };
+  // Linux native QuickJS가 같은 공개 ChartModel/createLayout 입력을 다시 실행할 수 있게
+  // V8 기대값과 분리된 원본 series/bar 구성도 함께 보존한다. Rust 결과에서 파생하지 않는다.
+  const oracleModel = wire({
+    values: scenario.values ?? null,
+    barValues: scenario.barValues ?? null,
+    seriesType: scenario.seriesType ?? 'line',
+    baseline: scenario.baseline ?? null,
+    storeFirstClose: scenario.storeFirstClose ?? null,
+  });
   try {
     const panel = {
       id: 'price',
@@ -227,6 +236,7 @@ function axisVector(scenario) {
       ...metadata,
       kind: 'axis',
       scenarioId: scenario.id,
+      oracleModel,
       input: rowText(input),
       expected: rowText(result),
       error: null,
@@ -236,6 +246,7 @@ function axisVector(scenario) {
       ...metadata,
       kind: 'axis',
       scenarioId: scenario.id,
+      oracleModel,
       input: rowText(input),
       expected: null,
       error: {name: error.name, message: error.message},

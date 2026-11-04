@@ -9,6 +9,13 @@ use barochart_js::json::{
 use barochart_js::num::NumberDialect;
 use barochart_js::string::JsString;
 
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+use std::collections::HashMap;
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+use std::path::PathBuf;
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+use std::process::Command;
+
 const FIXTURES: &str =
     include_str!("../../../../test/fixtures/rust-model/scales-labels-oracle.jsonl");
 
@@ -32,22 +39,103 @@ fn string(value: &JsValue) -> &JsString {
     value
 }
 
-fn expected_output(row: &JsValue) -> &JsString {
-    // Native Rust uses platform libm, which matches the local JavaScriptCore oracle for these
-    // log vectors. The wasm harness imports V8 Math.log/exp, so it uses the V8 `expected` value.
+fn expected_output_text(
+    row: &JsValue,
+    #[cfg(all(target_os = "linux", target_env = "gnu"))] native_quickjs: &HashMap<String, String>,
+) -> String {
+    // WASM은 V8 값을 주입하고, Apple native는 같은 기기의 JSC를 쓴다.
     #[cfg(target_arch = "wasm32")]
     {
-        string(field(row, "expected"))
+        string(field(row, "expected")).to_string_lossy()
     }
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
         if let JsValue::Object(object) = row
             && let Some(JsValue::String(value)) = object.get(&key("expectedJsc"))
         {
-            return value;
+            return value.to_string_lossy();
         }
-        string(field(row, "expected"))
+        string(field(row, "expected")).to_string_lossy()
     }
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    {
+        let input = parse_json_utf16(string(field(row, "input")).as_units(), JsonMode::Standard)
+            .unwrap_or_else(|error| panic!("native QuickJS input is invalid: {error}"));
+        if matches!(field(&input, "scale"), JsValue::String(value) if value == &key("log")) {
+            let scenario = string(field(row, "scenarioId")).to_string_lossy();
+            return native_quickjs
+                .get(&scenario)
+                .unwrap_or_else(|| panic!("native QuickJS oracle missed {scenario}"))
+                .clone();
+        }
+        string(field(row, "expected")).to_string_lossy()
+    }
+    #[cfg(all(
+        not(target_arch = "wasm32"),
+        not(any(target_os = "macos", target_os = "ios")),
+        not(all(target_os = "linux", target_env = "gnu"))
+    ))]
+    {
+        panic!("unsupported native axis oracle target; use Apple JSC or Linux GNU QuickJS")
+    }
+}
+
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn native_quickjs_outputs(rows: &[JsValue]) -> HashMap<String, String> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let helper = root.join("test/fixtures/rust-model/generate-scales-labels-native-quickjs.mjs");
+    let fixture = root.join("test/fixtures/rust-model/scales-labels-oracle.jsonl");
+    let node = std::env::var_os("BAROCHART_NODE").unwrap_or_else(|| "node".into());
+    let output = Command::new(&node)
+        .current_dir(&root)
+        .arg(&helper)
+        .arg(&fixture)
+        .output()
+        .unwrap_or_else(|error| {
+            panic!(
+                "NoNode: cannot run native QuickJS axis oracle with {:?}: {error}; set BAROCHART_NODE to Node v22.20.0",
+                node
+            )
+        });
+    assert!(
+        output.status.success(),
+        "native QuickJS axis oracle failed ({}): {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let mut result = HashMap::new();
+    for line in String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| !line.is_empty())
+    {
+        let row = parse_json(line.as_bytes(), JsonMode::Standard)
+            .unwrap_or_else(|error| panic!("native QuickJS oracle emitted invalid JSON: {error}"));
+        let scenario = string(field(&row, "scenarioId")).to_string_lossy();
+        let expected = string(field(&row, "expectedNativeQuickJs")).to_string_lossy();
+        assert!(
+            result.insert(scenario.clone(), expected).is_none(),
+            "native QuickJS oracle duplicated {scenario}"
+        );
+    }
+
+    let expected_scenarios: Vec<String> = rows
+        .iter()
+        .filter(|row| matches!(field(row, "error"), JsValue::Null))
+        .map(|row| string(field(row, "scenarioId")).to_string_lossy())
+        .collect();
+    assert_eq!(
+        result.len(),
+        expected_scenarios.len(),
+        "native QuickJS oracle result count"
+    );
+    for scenario in expected_scenarios {
+        assert!(
+            result.contains_key(&scenario),
+            "native QuickJS oracle missed {scenario}"
+        );
+    }
+    result
 }
 
 fn decode_number(value: &JsValue) -> Option<f64> {
@@ -233,6 +321,8 @@ fn output_value(axis: &AxisScale, samples: &[f64], screen_samples: &[f64]) -> Js
 #[test]
 fn public_layout_axis_vectors_match_binary64_outputs_and_errors() {
     let rows = rows();
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    let native_quickjs = native_quickjs_outputs(&rows);
     assert_eq!(rows.len(), 17);
     for row in rows {
         assert_eq!(
@@ -280,15 +370,17 @@ fn public_layout_axis_vectors_match_binary64_outputs_and_errors() {
             NumberDialect::Ecma,
         ))
         .unwrap();
+        #[cfg(all(target_os = "linux", target_env = "gnu"))]
+        let expected_text = expected_output_text(&row, &native_quickjs);
+        #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+        let expected_text = expected_output_text(&row);
         assert_eq!(
             actual_text,
-            expected_output(&row).to_string_lossy(),
+            expected_text,
             "{}: exact AxisScale wire output/order",
             string(field(&row, "scenarioId")).to_string_lossy()
         );
-        let expected = decode(
-            &parse_json_utf16(expected_output(&row).as_units(), JsonMode::Standard).unwrap(),
-        );
+        let expected = decode(&parse_json(expected_text.as_bytes(), JsonMode::Standard).unwrap());
         assert!(indicator_helpers::exact_state_equal(
             &output_value(&axis, &samples, &screen_samples),
             &expected

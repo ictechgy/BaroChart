@@ -24,4 +24,4 @@ xcrun devicectl device process launch --device PRIVATE_DEVICE_ID \
 
 Rust Source SHA: `67512c06b9c639de4e284a3d61bd345779b5d4c3da2818a8244899a1f81fc583`. 앱 SHA와원시samples요약·방법은 기계보고서에 있다. Release 링크맵 SDK 코드+자산은 3,839,591 B로 승인된5MiB예산 안에 있다.
 
-실기기500회생성·해제는 통과했고, 30분 streaming soak는 진행중이다. Android 실기기는 현재 사용할 수 없어 플랫폼별 기본값 전환 게이트는 남아 있다. JavaScript 기본값은 유지한다.
+실기기500회생성·해제와 30분 streaming soak도 통과했다. 두 10분 구간의 메모리 증가율은 0%·0.072%였고, 500회 생성·해제의 추정 증가율은 -2.56%였다. [soak 기계 보고서](2026-11-05-native-rust-ios-soak.json)에 실행파일·테스트 소스 SHA와 샘플을 보존했다. Android 실기기와 화면 낭독기 수동 검증은 남아 있으며 JavaScript 기본값은 유지한다.
