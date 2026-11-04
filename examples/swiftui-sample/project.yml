@@ -36,11 +36,30 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: kr.coden.barochart.sample.uitests
         GENERATE_INFOPLIST_FILE: YES
+  BaroChartDeviceTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - ../../Tests/BaroChartTests/SoakTests.swift
+    dependencies:
+      - target: BaroChartSample
+      - package: BaroChart
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: kr.coden.barochart.sample.devicetests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/BaroChartSample.app/BaroChartSample"
+        BUNDLE_LOADER: "$(TEST_HOST)"
 schemes:
   BaroChartSample:
     build:
       targets:
         BaroChartSample: all
         BaroChartSampleUITests: [test]
+        BaroChartDeviceTests: [test]
     test:
-      targets: [BaroChartSampleUITests]
+      targets:
+        - BaroChartSampleUITests
+        - BaroChartDeviceTests
+      environmentVariables:
+        BAROCHART_DEVICE_TEST_HOST: "1"

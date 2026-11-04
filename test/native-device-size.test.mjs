@@ -13,6 +13,7 @@ test('iOS SDK size includes linked Rust archive symbols alongside Swift symbols'
 # Sections:
 0x100000000 0x000000F0 __TEXT __text
 # Symbols:
+# Address Size File Name
 0x100000000 0x00000020 [  1] swiftEngine
 0x100000020 0x00000080 [  2] rustEngine
 0x1000000A0 0x00000030 [  3] app

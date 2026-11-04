@@ -224,7 +224,7 @@ public class RustRuntimeTest {
         Assume.assumeFalse(BuildConfig.BAROCHART_WITH_QUICKJS);
         TestSupport.onMain(() -> {
             try {
-                BaroChartEngine.create(TestSupport.context(),EngineOptions.defaults());
+                BaroChartEngine.create(TestSupport.context(),EngineOptions.defaults(), BaroChartEngine.RuntimeBackend.JAVASCRIPT);
                 fail("Rust-only artifact must reject JavaScript creation");
             } catch (RuntimeException error) {
                 BaroChartException typed=typed(error);

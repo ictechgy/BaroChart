@@ -4,7 +4,7 @@ export function sdkCodeBytesFromLinkMap(text){
  const sdkObject=path=>/(?:\/BaroChart\.build\/|\/BaroChart\.o$|(?:^|\/)libbarochart_ffi(?:-macos-universal)?\.a(?:\(|\[|$))/.test(path);
  for(const line of text.split('\n')){
   if(line.startsWith('#')){
-   section=line.startsWith('# Object files:')?'objects':line.startsWith('# Symbols:')?'symbols':'';
+   if(line.endsWith(':'))section=line.startsWith('# Object files:')?'objects':line.startsWith('# Symbols:')?'symbols':'';
    continue;
   }
   if(section==='objects'){
