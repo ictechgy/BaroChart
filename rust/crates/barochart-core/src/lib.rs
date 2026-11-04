@@ -60,6 +60,19 @@ pub mod labels;
 /// 검증된 코어 처리 모듈을 연결한다.
 pub mod model_state;
 
+/// 드로잉 상태와 검증을 연결한다.
+pub mod drawing_document;
+/// 드로잉 상태와 검증을 연결한다.
+pub mod drawing_edit;
+/// 드로잉 상태와 검증을 연결한다.
+pub mod drawing_types;
+/// 드로잉 상태와 검증을 연결한다.
+pub mod drawing_validation;
+/// 드로잉 상태와 검증을 연결한다.
+pub mod drawings;
+/// 드로잉 상태와 검증을 연결한다.
+pub mod position_drawing;
+
 use barochart_js::error::JsError;
 use barochart_js::string::JsString;
 use data::{ModelDataState, StoreOptions};

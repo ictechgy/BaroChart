@@ -174,7 +174,21 @@ function nextRandom(state){state.value=(Math.imul(state.value,1664525)+101390422
 function viewOperations(){
  const operations=[
   {op:'set',from:-100,to:100},{op:'zoom',factor:.5,anchor:'0.25'},{op:'pan',delta:null},
-  {op:'pan',delta:'1'},{op:'zoom',factor:2,anchor:true},{op:'fit'}
+  {op:'pan',delta:'1'},{op:'zoom',factor:2,anchor:true},{op:'fit'},
+  {op:'zoom',factor:.75,anchor:'\t\n 0.25 \ufeff'},
+  {op:'zoom',factor:.75,anchor:'0x10'},{op:'zoom',factor:.75,anchor:'0o10'},
+  {op:'zoom',factor:.75,anchor:'0b10'},{op:'zoom',factor:.75,anchor:'.5'},
+  {op:'zoom',factor:.75,anchor:'12.'},{op:'zoom',factor:.75,anchor:[]},
+  {op:'zoom',factor:.75,anchor:[.75]},{op:'zoom',factor:.75,anchor:null},
+  {op:'zoom',factor:.75,anchor:{}},{op:'zoom',factor:.75,anchor:{toString:0}},
+  {op:'zoom',factor:.75,anchor:'-0'},{op:'zoom',factor:.75,anchor:'+0'},
+  {op:'zoom',factor:.75,anchor:NaN},{op:'zoom',factor:.75,anchor:'NaN'},
+  {op:'zoom',factor:.75,anchor:'0x'+('f'.repeat(400))},
+  {op:'zoom',factor:.75,anchor:'9'.repeat(5000)},
+  {op:'pan',delta:1},{op:'pan',delta:-0},{op:'pan',delta:NaN},
+  {op:'pan',delta:null},{op:'pan',delta:true},{op:'pan',delta:'1'},
+  {op:'pan',delta:[]},{op:'pan',delta:[1]},{op:'pan',delta:{}},
+  {op:'pan',delta:{toString:0}},{op:'pan',delta:undefined}
  ];
  const random={value:0x6d2b79f5},anchors=[null,true,false,'0.25','bad',.75,[],[.5],{}],deltas=[null,true,false,'1',-20,-.5,.5,20,[],{}];
  for(let index=0;index<40;index++){
@@ -195,7 +209,17 @@ function runViewOperation(model,operation){
 function viewRow(){
  const bars=Array.from({length:64},(_,index)=>bar(index));const model=fresh({bars,model:{visibleBars:12}});model.addSeries({id:'future',type:'line',panel:'price',source:'close',offset:3});
  const result={initial:{view:{...model.view},follow:model.follow,forwardOffset:model.forwardOffset()},frames:[]};
- for(const operation of viewOperations()){const outcomeValue=outcome(()=>runViewOperation(model,operation));result.frames.push({operation,result:outcomeValue,view:{...model.view},follow:model.follow});}
+ for(const operation of viewOperations()){
+  const outcomeValue=outcome(()=>runViewOperation(model,operation));
+  const candidate=operation.op==='zoom'?operation.anchor:operation.op==='pan'?operation.delta:null;
+  const shadow=candidate&&typeof candidate==='object'&&Object.hasOwn(candidate,'toString');
+  const targetResults=shadow?{
+   apple:{error:{name:'TypeError',message:'No default value'}},
+   android:{error:{name:'TypeError',message:'toPrimitive'}},
+   other:outcomeValue
+  }:undefined;
+  result.frames.push({operation,result:outcomeValue,view:{...model.view},follow:model.follow,...(targetResults?{targetResults}:{})});
+ }
  model.dispose();return{kind:'view',id:'deterministic-view-state-machine',bars:encode(bars),expected:encode(result)};
 }
 

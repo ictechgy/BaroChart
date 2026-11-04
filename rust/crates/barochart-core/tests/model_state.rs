@@ -1,18 +1,17 @@
-use barochart_core::model_state;
-
 use barochart_core::data::{Bar, ModelDataState, StoreOptions};
 use barochart_core::indicator_params::validate_indicator_params;
 use barochart_core::indicator_types::{
     IndicatorDefinition, IndicatorProgram, IndicatorProvenance, PlotOffset,
 };
+use barochart_core::model_state::{
+    DrawingUsage, IndicatorProjection, InteractionGuard, ModelContext, ModelState, PlacementReceipt,
+};
 use barochart_js::error::JsError;
 use barochart_js::json::{JsObject, JsValue, JsonMode, parse_json, stringify_json};
 use barochart_js::string::JsString;
-use model_state::{
-    DrawingUsage, IndicatorProjection, InteractionGuard, ModelContext, ModelState, PlacementReceipt,
-};
 
 const FIXTURE: &str = include_str!("../../../../test/fixtures/rust-model/model-oracle.jsonl");
+const MODEL_SOURCE: &str = include_str!("../src/model_state.rs");
 const SMA_OUTPUTS: [&str; 1] = ["value"];
 const ICHIMOKU_OUTPUTS: [&str; 5] = ["tenkan", "kijun", "spanA", "spanB", "chikou"];
 
@@ -150,6 +149,43 @@ fn object_value<const N: usize>(entries: [(&str, JsValue); N]) -> JsValue {
         object.insert(JsString::from_str(key), value);
     }
     JsValue::Object(object)
+}
+
+fn object_entries(entries: Vec<(&str, JsValue)>) -> JsValue {
+    let mut object = JsObject::new();
+    for (key, value) in entries {
+        object.insert(JsString::from_str(key), value);
+    }
+    JsValue::Object(object)
+}
+
+fn coercion_target() -> &'static str {
+    #[cfg(target_os = "android")]
+    {
+        "android"
+    }
+    #[cfg(all(not(target_os = "android"), target_vendor = "apple"))]
+    {
+        "apple"
+    }
+    #[cfg(all(not(target_os = "android"), not(target_vendor = "apple")))]
+    {
+        "other"
+    }
+}
+
+#[test]
+fn model_reuses_common_coercion_without_a_local_number_grammar() {
+    assert!(MODEL_SOURCE.contains("use crate::coercion::{js_add_number_with, js_to_number_with};"));
+    assert!(MODEL_SOURCE.contains("js_to_number_with("));
+    assert!(MODEL_SOURCE.contains("js_add_number_with("));
+    for duplicate in [
+        "fn numeric_coercion(",
+        "fn parse_js_number(",
+        "fn additive_number(",
+    ] {
+        assert!(!MODEL_SOURCE.contains(duplicate), "duplicate {duplicate}");
+    }
 }
 
 fn view_value(model: &ModelState) -> JsValue {
@@ -695,20 +731,65 @@ fn actual_js_view_oracle_matches_f64_bits_coercion_errors_and_atomicity() {
         ("forwardOffset", JsValue::Number(model.forward_offset())),
     ]);
     let mut frames = Vec::new();
-    for expected_frame in array(get(&expected, "frames")) {
+    let mut target_frames = Vec::new();
+    for (index, expected_frame) in array(get(&expected, "frames")).iter().enumerate() {
         let operation = get(expected_frame, "operation").clone();
         let result = capture(run_view_operation(&mut model, store, &operation));
-        frames.push(object_value([
-            ("operation", operation),
+        let target_results = object(expected_frame).get(&JsString::from_str("targetResults"));
+        let mut actual_entries = vec![
+            ("operation", operation.clone()),
             ("result", result),
             ("view", view_value(&model)),
             ("follow", JsValue::Bool(model.follow)),
-        ]));
+        ];
+        let selected = match target_results {
+            Some(target_results) => {
+                for (target, message) in [
+                    ("apple", "No default value"),
+                    ("android", "toPrimitive"),
+                    ("other", "Cannot convert object to primitive value"),
+                ] {
+                    let error = get(get(target_results, target), "error");
+                    assert_eq!(text(get(error, "name")), "TypeError", "{target} name");
+                    assert_eq!(text(get(error, "message")), message, "{target} message");
+                }
+                assert_wire(
+                    get(expected_frame, "result"),
+                    &encode_wire(get(target_results, "other")),
+                    "Node target error metadata",
+                );
+                actual_entries.push(("targetResults", target_results.clone()));
+                get(target_results, coercion_target()).clone()
+            }
+            None => get(expected_frame, "result").clone(),
+        };
+        let actual_frame = object_entries(actual_entries);
+        let mut expected_entries = vec![
+            ("operation", operation),
+            ("result", selected),
+            ("view", get(expected_frame, "view").clone()),
+            ("follow", get(expected_frame, "follow").clone()),
+        ];
+        if let Some(target_results) = target_results {
+            expected_entries.push(("targetResults", target_results.clone()));
+        }
+        let target_frame = object_entries(expected_entries);
+        assert_wire(
+            &actual_frame,
+            &encode_wire(&target_frame),
+            &format!("view frame {index}"),
+        );
+        frames.push(actual_frame);
+        target_frames.push(target_frame);
     }
     let actual = object_value([("initial", initial), ("frames", JsValue::Array(frames))]);
+    let target_expected = object_value([
+        ("initial", get(&expected, "initial").clone()),
+        ("frames", JsValue::Array(target_frames)),
+    ]);
     assert_wire(
         &actual,
-        get(&row, "expected"),
+        &encode_wire(&target_expected),
         "deterministic view state machine",
     );
 }
@@ -819,6 +900,73 @@ fn actual_js_store_oracle_matches_follow_unfollow_prepend_and_reset_effects() {
         &actual,
         get(&row, "expected"),
         "store listener view effects",
+    );
+}
+
+#[test]
+fn public_normalized_series_matches_actual_js_goldens_without_model_mutation() {
+    let data = empty_data();
+    let store = data.store();
+    let options = parse(
+        r#"{"panels":[{"id":"price","weight":3},{"id":"lower"}],"axes":[{"id":"lower-axis","panel":"lower","side":"left"}]}"#,
+    );
+    let model = ModelState::new(store, &options).unwrap();
+    let definition = ichimoku_definition();
+    let indicator_id = JsString::from_str("ichi");
+    let projections = [IndicatorProjection {
+        id: &indicator_id,
+        definition: &definition,
+    }];
+    let context = ModelContext {
+        store,
+        indicators: &projections,
+        drawings: DrawingUsage::default(),
+        interaction: InteractionGuard::default(),
+    };
+    let before = model.snapshot();
+
+    let general = model
+        .normalized_series(
+            &parse(
+                r#"{"label":"L","offset":-0,"source":"close","panel":"price","type":"line","id":"line","visible":false}"#,
+            ),
+            &context,
+        )
+        .unwrap();
+    assert_wire(
+        &general.to_js_value(),
+        &encode_wire(&parse(
+            r##"{"id":"line","type":"line","panel":"price","source":"close","color":"#7898ff","width":1.5,"offset":-0,"visible":false,"label":"L"}"##,
+        )),
+        "actual JS general normalizedSeries",
+    );
+    assert_eq!(general.offset.to_bits(), (-0.0_f64).to_bits());
+    assert_eq!(general.dirty_from.to_bits(), 0.0_f64.to_bits());
+
+    let indicator = model
+        .normalized_series(
+            &parse(
+                r#"{"axisId":"lower-axis","output":"spanA","indicator":"ichi","panel":"lower","type":"line","id":"ichi-line"}"#,
+            ),
+            &context,
+        )
+        .unwrap();
+    assert_wire(
+        &indicator.to_js_value(),
+        &encode_wire(&parse(
+            r##"{"id":"ichi-line","type":"line","panel":"lower","indicator":"ichi","output":"spanA","color":"#7898ff","width":1.5,"offset":5,"axisId":"lower-axis"}"##,
+        )),
+        "actual JS indicator normalizedSeries",
+    );
+    assert_eq!(indicator.offset, 5.0);
+    assert_eq!(indicator.dirty_from, 0.0);
+
+    assert!(model.series.is_empty(), "normalization must not publish");
+    assert_eq!(model.series_values_revision(), None);
+    assert_wire(
+        &model.snapshot(),
+        &encode_wire(&before),
+        "normalizedSeries leaves model unchanged",
     );
 }
 

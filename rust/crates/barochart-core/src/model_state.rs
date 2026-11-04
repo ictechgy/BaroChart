@@ -9,6 +9,7 @@ use std::collections::HashSet;
 use barochart_js::num::{NumberDialect, js_max, js_min, same_value};
 use barochart_js::string::JsString;
 
+use crate::coercion::{js_add_number_with, js_to_number_with};
 use crate::contracts::{
     AXIS_KEYS, PANEL_KEYS, RESOURCE_LIMITS, SERIES_KEYS, THEME_KEYS, bounded_text, identifier,
     js_to_string_with, option_record, ordered_record,
@@ -766,6 +767,15 @@ impl ModelState {
         })
     }
 
+    /// Series options를 검증·정규화하되 model에는 게시하지 않는다.
+    pub fn normalized_series(
+        &self,
+        options: &JsValue,
+        context: &ModelContext<'_>,
+    ) -> Result<Series, JsError> {
+        normalize_series(options, None, self, context)
+    }
+
     /// Series를 검증·정규화해 painter 순서 끝에 추가한다.
     pub fn add_series(
         &mut self,
@@ -944,7 +954,10 @@ impl ModelState {
         if !factor.is_finite() || *factor <= 0.0 {
             return Err(range_error("Zoom factor"));
         }
-        let anchor = numeric_coercion(anchor.unwrap_or(&JsValue::Number(0.5)))?;
+        let anchor = js_to_number_with(
+            anchor.unwrap_or(&JsValue::Number(0.5)),
+            NumberDialect::PLATFORM,
+        )?;
         let anchor = js_max(&[0.0, js_min(&[1.0, anchor])]);
         let span = self.view.to - self.view.from;
         let at = self.view.from + span * anchor;
@@ -958,14 +971,9 @@ impl ModelState {
 
     /// JS `+` 의미에서 숫자로 남는 delta만 pan에 허용한다.
     pub fn pan(&mut self, store: &BarStore, delta: &JsValue) -> Result<(), JsError> {
-        let Some(delta) = additive_number(delta) else {
-            return Err(range_error("Visible range"));
-        };
-        self.set_visible_range(
-            store,
-            &JsValue::Number(self.view.from + delta),
-            &JsValue::Number(self.view.to + delta),
-        )
+        let from = js_add_number_with(self.view.from, delta, NumberDialect::PLATFORM)?;
+        let to = js_add_number_with(self.view.to, delta, NumberDialect::PLATFORM)?;
+        self.set_visible_range(store, &from, &to)
     }
 
     /// source key order의 모델 configuration snapshot이다.
@@ -1551,60 +1559,6 @@ fn same_js_value(left: &JsValue, right: &JsValue) -> bool {
                     })
         }
         _ => false,
-    }
-}
-
-fn numeric_coercion(value: &JsValue) -> Result<f64, JsError> {
-    match value {
-        JsValue::Number(value) => Ok(*value),
-        JsValue::Null => Ok(0.0),
-        JsValue::Bool(value) => Ok(if *value { 1.0 } else { 0.0 }),
-        JsValue::Undefined => Ok(f64::NAN),
-        JsValue::String(value) => Ok(parse_js_number(value)),
-        JsValue::Array(_) | JsValue::Object(_) => Ok(parse_js_number(&js_to_string_with(
-            value,
-            NumberDialect::PLATFORM,
-        )?)),
-    }
-}
-
-fn parse_js_number(value: &JsString) -> f64 {
-    let trimmed = JsString::trim(value).to_string_lossy();
-    if trimmed.is_empty() {
-        return 0.0;
-    }
-    match trimmed.as_str() {
-        "Infinity" | "+Infinity" => return f64::INFINITY,
-        "-Infinity" => return f64::NEG_INFINITY,
-        _ => {}
-    }
-    if let Some(hex) = trimmed
-        .strip_prefix("0x")
-        .or_else(|| trimmed.strip_prefix("0X"))
-    {
-        return u64::from_str_radix(hex, 16).map_or(f64::NAN, |value| value as f64);
-    }
-    if let Some(binary) = trimmed
-        .strip_prefix("0b")
-        .or_else(|| trimmed.strip_prefix("0B"))
-    {
-        return u64::from_str_radix(binary, 2).map_or(f64::NAN, |value| value as f64);
-    }
-    if let Some(octal) = trimmed
-        .strip_prefix("0o")
-        .or_else(|| trimmed.strip_prefix("0O"))
-    {
-        return u64::from_str_radix(octal, 8).map_or(f64::NAN, |value| value as f64);
-    }
-    trimmed.parse::<f64>().unwrap_or(f64::NAN)
-}
-
-fn additive_number(value: &JsValue) -> Option<f64> {
-    match value {
-        JsValue::Number(value) => Some(*value),
-        JsValue::Null => Some(0.0),
-        JsValue::Bool(value) => Some(if *value { 1.0 } else { 0.0 }),
-        _ => None,
     }
 }
 
