@@ -56,10 +56,14 @@ schemes:
       targets:
         BaroChartSample: all
         BaroChartSampleUITests: [test]
+    test:
+      targets: [BaroChartSampleUITests]
+  BaroChartDeviceSoak:
+    build:
+      targets:
+        BaroChartSample: all
         BaroChartDeviceTests: [test]
     test:
-      targets:
-        - BaroChartSampleUITests
-        - BaroChartDeviceTests
+      targets: [BaroChartDeviceTests]
       environmentVariables:
         BAROCHART_DEVICE_TEST_HOST: "1"

@@ -2,9 +2,9 @@
 """Focused standard-library tests for prepare-wasm-eh.py.
 
 The Node test runner invokes this file so the repository's normal ``node --test``
-entry point also covers the Python preparer.  These tests never use the network
-and never build Rust; the final test only reuses the repository's existing
-31-package cache.
+entry point also covers the Python preparer.  These tests never use the network,
+machine Cargo/Rustup state, or a Rust build; the CLI integration case uses a
+fully isolated temporary fixture.
 """
 
 from __future__ import annotations
@@ -24,7 +24,6 @@ from unittest import mock
 
 
 SCRIPT = Path(__file__).with_name("prepare-wasm-eh.py")
-ROOT = SCRIPT.parents[2]
 SPEC = importlib.util.spec_from_file_location("prepare_wasm_eh", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 PREPARER = importlib.util.module_from_spec(SPEC)
@@ -59,14 +58,13 @@ class FixtureRoot:
         )
         rustc_script = """#!/bin/sh
 if [ "$1" = "-vV" ]; then
-  cat <<'EOF'
-rustc 1.98.1 (48a229cea 2026-09-01)
-binary: rustc
-commit-hash: 48a229ceaefd4985c50990b14116b6d856af0985
-host: aarch64-apple-darwin
-release: 1.98.1
-LLVM version: 22.1.8
-EOF
+  printf '%s\\n' \\
+    'rustc 1.98.1 (48a229cea 2026-09-01)' \\
+    'binary: rustc' \\
+    'commit-hash: 48a229ceaefd4985c50990b14116b6d856af0985' \\
+    'host: aarch64-apple-darwin' \\
+    'release: 1.98.1' \\
+    'LLVM version: 22.1.8'
   exit 0
 fi
 exit 0
@@ -320,23 +318,56 @@ class PreparerTests(unittest.TestCase):
         with self.assertRaisesRegex(PREPARER.PrepareError, "unsupported non-crates.io registry source"):
             self._prepare()
 
-    def test_repository_cache_preparation_is_offline_and_complete(self) -> None:
+    def test_cli_preparation_is_hermetic_and_complete(self) -> None:
+        package = self.fixture.package("cli-fixture", "1.0.0")
+        self.fixture.lock([package])
+        _write_archive(self.fixture, package)
+        network_guard = Path(self.temporary.name) / "network-guard"
+        network_guard.mkdir()
+        (network_guard / "sitecustomize.py").write_text(
+            "import urllib.request\n"
+            "def _network_forbidden(*args, **kwargs):\n"
+            "    raise RuntimeError('network disabled in hermetic preparer test')\n"
+            "urllib.request.build_opener = _network_forbidden\n"
+            "urllib.request.urlopen = _network_forbidden\n",
+            encoding="utf-8",
+        )
+        isolated_home = Path(self.temporary.name) / "home"
+        isolated_rustup = Path(self.temporary.name) / "rustup"
+        isolated_cargo = Path(self.temporary.name) / "cargo-home"
+        isolated_proxy = Path(self.temporary.name) / "rustup-proxy"
+        for directory in (isolated_home, isolated_rustup, isolated_cargo, isolated_proxy):
+            directory.mkdir()
+        environment = {
+            "PATH": "",
+            "HOME": str(isolated_home),
+            "RUSTUP_HOME": str(isolated_rustup),
+            "CARGO_HOME": str(isolated_cargo),
+            "BAROCHART_RUSTUP_BIN": str(isolated_proxy),
+            "PYTHONPATH": str(network_guard),
+        }
         completed = subprocess.run(
-            [sys.executable, str(SCRIPT), "--offline", "--json"],
-            cwd=ROOT,
+            [sys.executable, str(SCRIPT), "--root", str(self.fixture.root), "--offline", "--json"],
+            cwd=self.fixture.root,
             check=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            env=environment,
         )
-        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.returncode, 0, completed.stderr or completed.stdout)
         result = json.loads(completed.stdout)
-        self.assertEqual(result["packages"], {"locked": 31, "cached": 31, "downloaded": 0, "missing": 0, "staged": 31})
-        environment = result["environment"]
-        self.assertEqual(environment["RUSTC_BOOTSTRAP"], "1")
-        self.assertEqual(environment["CARGO_INCREMENTAL"], "0")
-        self.assertIn("panic_unwind", (ROOT / "artifacts/rust-wasm/stdlib-cache/cargo-home/config.toml").read_text())
-        wrapper = Path(environment["RUSTC"]).read_text(encoding="utf-8")
+        self.assertEqual(
+            result["packages"],
+            {"locked": 1, "cached": 1, "downloaded": 0, "missing": 0, "staged": 1},
+        )
+        safe_environment = result["environment"]
+        self.assertEqual(safe_environment["RUSTC_BOOTSTRAP"], "1")
+        self.assertEqual(safe_environment["CARGO_INCREMENTAL"], "0")
+        self.assertEqual(safe_environment["CARGO_HOME"], str((self.fixture.cache / "cargo-home").resolve()))
+        config = self.fixture.cache / "cargo-home" / "config.toml"
+        self.assertIn("panic_unwind", config.read_text(encoding="utf-8"))
+        wrapper = Path(safe_environment["RUSTC"]).read_text(encoding="utf-8")
         self.assertIn("export DYLD_LIBRARY_PATH=", wrapper)
         self.assertIn("--sysroot", wrapper)
 
