@@ -96,7 +96,9 @@ jobs:
           echo "CARGO_HOME=${CARGO_HOME:-unset}"
           command -v rustup cargo || true
           rustup --version
-          rustup toolchain install --no-self-update --component rust-src
+          rustup toolchain install --no-self-update
+          rust_channel="$(python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]["channel"])')"
+          rustup component add --toolchain "${rust_channel}" rust-src
           rustup show active-toolchain
 
       - name: Check Rust formatting
