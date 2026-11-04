@@ -217,11 +217,12 @@ export async function createWasmHarness({targetDirectory = join(ROOT, 'artifacts
         bytesView().set(argsBytes, argsPointer);
         const status = instance.exports.bc_call(engine, namePointer, nameBytes.length, argsPointer, argsBytes.length, 1, output);
         const owned = descriptor(output);
-        const text = owned.pointer ? new TextDecoder('utf-8', {fatal: true}).decode(bytesView().subarray(owned.pointer, owned.pointer + owned.length)) : '';
         let value;
-        try {value = text ? parseLossless(text) : undefined} finally {if (owned.pointer) free(owned.pointer, owned.capacity)}
+        try {
+          const text = owned.pointer ? new TextDecoder('utf-8', {fatal: true}).decode(bytesView().subarray(owned.pointer, owned.pointer + owned.length)) : '';
+          value = text ? parseLossless(text) : undefined;
+        } finally {if (owned.pointer) free(owned.pointer, owned.capacity)}
         if (status === 0) return {status, value};
-        if (status === 1 || status === 2) return {status, error: value};
         return {status, error: value};
       } finally {
         free(namePointer, nameBytes.length);
@@ -229,9 +230,12 @@ export async function createWasmHarness({targetDirectory = join(ROOT, 'artifacts
         free(output, 12);
       }
     },
-    async compare(name, args) {
+    // A fresh nativeInit smoke oracle is sufficient only for initialization. Stateful callers
+    // provide a reused oracle or run the checked-in core-conformance scenarios.
+    async compare(name, args, {oracle: ownedOracle} = {}) {
+      assert.ok(ownedOracle || name === 'nativeInit', 'Stateful comparisons require a caller-owned oracle; use runScenario');
       const {createJavaScriptOracle} = await import('./core-conformance.mjs');
-      const oracle = await createJavaScriptOracle();
+      const oracle = ownedOracle ?? await createJavaScriptOracle();
       const expected = oracle.call(name, args);
       const javascript = expected.value;
       const rust = await harness.call(name, args);

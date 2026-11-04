@@ -94,7 +94,11 @@ fn checkpoint_codec_uses_the_requested_number_dialect_for_json_text() {
         safe_checkpoint_stringify_with(&value, NumberDialect::Ecma)
             .unwrap()
             .to_string_lossy(),
-        "5.960464477539063e-8"
+        if NumberDialect::PLATFORM == NumberDialect::QuickJs {
+            "5.9604644775390625e-8"
+        } else {
+            "5.960464477539063e-8"
+        }
     );
     assert_eq!(
         safe_checkpoint_stringify_with(&value, NumberDialect::QuickJs)

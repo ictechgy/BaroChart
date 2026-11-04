@@ -41,11 +41,11 @@ fn the_table_covers_every_defined_name_without_claiming_pending_handlers() {
 
 #[test]
 fn unavailable_names_have_the_documented_error() {
-    let error = call(&mut engine(), "nativeCommand", &[]).unwrap_err();
+    let error = call(&mut engine(), "nativeSceneJSON", &[]).unwrap_err();
     assert_eq!(error.name, "UnavailableError");
     assert_eq!(
         error.message,
-        JsString::from_str("nativeCommand is not available in the Rust backend")
+        JsString::from_str("nativeSceneJSON is not available in the Rust backend")
     );
     assert_eq!(error.code, None);
 }
@@ -110,6 +110,151 @@ fn echo_keeps_missing_and_negative_zero_values() {
         panic!("number expected")
     };
     assert_eq!(value.to_bits(), (-0.0_f64).to_bits());
+}
+
+fn value(text: &str) -> JsValue {
+    barochart_js::json::parse_json(text.as_bytes(), barochart_js::json::JsonMode::Lossless).unwrap()
+}
+
+#[test]
+fn legacy_data_calls_change_real_store_and_fail_atomically() {
+    let mut engine = engine();
+    call(
+        &mut engine,
+        "nativeInit",
+        &[JsValue::Number(0.0), value("{}")],
+    )
+    .unwrap();
+    let bars = value(
+        r#"[{"time":1000,"open":1,"high":2,"low":0,"close":1,"volume":1},{"time":2000,"open":2,"high":4,"low":1,"close":2,"volume":2}]"#,
+    );
+    assert!(matches!(
+        call(&mut engine, "nativeSetData", &[bars]),
+        Ok(JsValue::Undefined)
+    ));
+    let event = value(
+        r#"{"kind":"update","bar":{"time":2000,"open":2,"high":4,"low":1,"close":3,"volume":2}}"#,
+    );
+    assert!(matches!(
+        call(&mut engine, "nativeDataEvent", &[event]),
+        Ok(JsValue::Undefined)
+    ));
+    assert_eq!(
+        engine.data_state().unwrap().store().at(1).unwrap().close,
+        3.0
+    );
+    let before = engine.data_state().unwrap().store().clone();
+    let error = call(
+        &mut engine,
+        "nativeDataEvent",
+        &[value(r#"{"kind":"append","bar":{"time":1000}}"#)],
+    )
+    .unwrap_err();
+    assert_eq!(
+        error.message,
+        JsString::from_str("Every OHLCV field must be finite")
+    );
+    assert_eq!(engine.data_state().unwrap().store(), &before);
+}
+
+#[test]
+fn nullish_legacy_error_keeps_the_platform_expression() {
+    let mut engine = engine();
+    let missing = call(&mut engine, "nativeSetData", &[JsValue::Null]).unwrap_err();
+    assert_eq!(missing.name, "TypeError");
+    call(
+        &mut engine,
+        "nativeInit",
+        &[JsValue::Number(1.0), value("{}")],
+    )
+    .unwrap();
+    let error = call(
+        &mut engine,
+        "nativeDataEvent",
+        &[value(r#"{"kind":"update","bar":null}"#)],
+    )
+    .unwrap_err();
+    assert_eq!(error.name, "TypeError");
+    #[cfg(target_vendor = "apple")]
+    assert_eq!(
+        error.message,
+        JsString::from_str("null is not an object (evaluating 'event.bar.time')")
+    );
+    #[cfg(target_os = "android")]
+    assert_eq!(
+        error.message,
+        JsString::from_str("cannot read property 'time' of null")
+    );
+    #[cfg(all(not(target_os = "android"), not(target_vendor = "apple")))]
+    assert_eq!(
+        error.message,
+        JsString::from_str("Cannot read properties of null (reading 'time')")
+    );
+}
+
+#[test]
+fn command_data_and_native_ingestion_envelopes_share_the_owned_store() {
+    let mut engine = engine();
+    call(
+        &mut engine,
+        "nativeInit",
+        &[JsValue::Number(0.0), value("{}")],
+    )
+    .unwrap();
+    let result = call(
+        &mut engine,
+        "nativeCommand",
+        &[
+            value(r#""setData""#),
+            value(r#"[[{"time":1000,"open":1,"high":2,"low":0,"close":1,"volume":1}]]"#),
+        ],
+    )
+    .unwrap();
+    assert!(matches!(result, JsValue::Null));
+    let result = call(
+        &mut engine,
+        "nativeDataIngestionCommand",
+        &[
+            value(r#""configureDataIngestion""#),
+            value(r#"[{"streamId":"s","generation":1}]"#),
+        ],
+    )
+    .unwrap();
+    assert!(
+        matches!(result,JsValue::Object(ref o) if o.get(&JsString::from_str("result")).is_some())
+    );
+    let packet = value(
+        r#"[{"streamId":"s","generation":1,"firstSequence":0,"events":[{"kind":"append","bar":{"time":2000,"open":2,"high":3,"low":1,"close":2,"volume":1}}]}]"#,
+    );
+    call(
+        &mut engine,
+        "nativeDataIngestionCommand",
+        &[value(r#""enqueueDataEvents""#), packet],
+    )
+    .unwrap();
+    let result = call(
+        &mut engine,
+        "nativeDataIngestionCommand",
+        &[
+            value(r#""drainDataEvents""#),
+            JsValue::Array(vec![JsValue::Undefined]),
+        ],
+    )
+    .unwrap();
+    assert!(
+        matches!(result,JsValue::Object(ref o) if o.get(&JsString::from_str("result")).is_some())
+    );
+    assert_eq!(engine.data_state().unwrap().store().length(), 2);
+    call(&mut engine, "nativeReleaseDataIngestion", &[]).unwrap();
+    let result = call(
+        &mut engine,
+        "nativeDataIngestionCommand",
+        &[value(r#""dataIngestionStats""#)],
+    )
+    .unwrap();
+    assert!(
+        matches!(result,JsValue::Object(ref o) if o.get(&JsString::from_str("error")).is_some())
+    );
 }
 
 #[test]

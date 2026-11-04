@@ -3,14 +3,14 @@ import {createHash} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
-import {createJavaScriptOracle, readScenarios, runScenario} from '../scripts/rust/core-conformance.mjs';
+import {assertOracleRuntime, createJavaScriptOracle, readScenarios, runScenario} from '../scripts/rust/core-conformance.mjs';
 import {wasmTargetAvailable} from '../scripts/rust/wasm-harness.mjs';
 
 test('native manifest matches the actual bundle census, Rust table and command arities', async () => {
   const text = await readFile(new URL('../native/Resources/aster-core.js', import.meta.url), 'utf8');
   const manifest = JSON.parse(await readFile(new URL('./fixtures/rust-core-vectors/manifest.json', import.meta.url), 'utf8'));
   const context = vm.createContext({Intl});
-  vm.runInContext(text, context);
+  vm.runInContext(text, context, {timeout:5_000});
   const names = Object.keys(context).filter(name => name.startsWith('native') && typeof context[name] === 'function').sort();
   assert.equal(names.length, 100);
   assert.deepEqual(manifest.functions.map(row => row.name).sort(), names);
@@ -23,6 +23,14 @@ test('native manifest matches the actual bundle census, Rust table and command a
   const commands = arity.split(',').map(entry => {const [name, maxArguments] = entry.split(':');return {name, maxArguments: Number(maxArguments)}});
   assert.equal(commands.length, 65);
   assert.deepEqual(manifest.commands.map(({name, maxArguments}) => ({name, maxArguments})), commands);
+  const commandTable=await readFile(new URL('../rust/crates/barochart-bridge/src/command_table.rs',import.meta.url),'utf8');
+  const rustCommands=[...commandTable.matchAll(/\("([^"]+)",\s*(\d+)\)/g)].map(([,name,count])=>({name,maxArguments:Number(count)}));
+  assert.deepEqual(rustCommands,commands);
+});
+
+test('core oracle rejects a different Node major before creating either engine',()=>{
+  assert.throws(()=>assertOracleRuntime({node:'26.5.0'}),/pinned Node 22/);
+  assert.doesNotThrow(()=>assertOracleRuntime({node:'22.20.0'}));
 });
 
 test('oracle materializes arguments in its realm while preserving ordered special values', async () => {
@@ -48,4 +56,12 @@ test('stateful A0 scenarios compare actual bundle calls and Rust WASM outcomes',
     assert.equal(result.equal, true, JSON.stringify(result.results.filter(value => !value.equal)));
     assert.match(result.manifestSha256, /^[a-f0-9]{64}$/);
   }
+});
+
+test('native data/store and ingestion sequences match the actual bundle in one stateful lifetime', {
+  skip: process.env.REQUIRE_WASM === '1' ? false : !availability.available && availability.reason,
+}, async () => {
+  const scenarios=(await readScenarios()).filter(scenario=>['data-store','ingestion'].includes(scenario.suite));
+  assert.equal(scenarios.length,2);
+  for(const scenario of scenarios){const result=await runScenario(scenario);assert.equal(result.equal,true,JSON.stringify(result.results.filter(value=>!value.equal)));}
 });

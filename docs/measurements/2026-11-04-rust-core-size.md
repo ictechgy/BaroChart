@@ -1,40 +1,36 @@
-# Rust M1 scaffold size measurement — 2026-11-04
+# Rust 데이터·수집 단계 크기 측정 — 2026-11-04
 
-Source/profile identity and every artifact SHA are in [`rust-core-size.json`](rust-core-size.json). The measured frozen source commit is `d5b43f1da824fe83657577f06954d7daaca40669`, and the exact linked source-set hash is `e8b92a683714910821b4f52488f858dad22d633d08615ccca0197ad173fbd4ae`. All artifacts were rebuilt offline in isolated `artifacts/rust-size` directories; historic Task 7/8 outputs were not reused because they had no durable build-time source/profile hash.
+현재 코드의 linked 크기다. 소스 집합 SHA-256은 `35efddd84ea0b2e7301b8c6868dbc57aca707f00670cb9060375932ec74591bb`이며, 프로필·도구 버전·재현 명령·개별 SHA는 [기계 보고서](rust-core-size.json)에 있다. 전체 차트 이식과 실기기 성능 측정은 후속 단계다. 이전 M1b 수치는 해당 커밋의 보고서에 보존된다.
 
-## Android linked `.so` bytes
+## Android linked `.so`
 
-| ABI | Rust profile | JS-only | Rust-only | dual | linked Rust delta (`dual - JS`) | budget remaining |
-|---|---|---:|---:|---:|---:|---:|
-| arm64-v8a | `s`, unwind (shipping) | 1,055,616 | 1,429,688 | 2,468,536 | 1,412,920 | 677,192 |
-| arm64-v8a | `3`, unwind | 1,055,616 | 1,344,360 | 2,383,256 | 1,327,640 | 762,472 |
-| arm64-v8a | `s`, abort (comparison only) | 1,055,616 | 1,413,544 | 2,452,408 | 1,396,792 | 693,320 |
-| arm64-v8a | `3`, abort (comparison only) | 1,055,616 | 1,332,568 | 2,371,480 | 1,315,864 | 774,248 |
-| x86_64 | `s`, unwind (shipping) | 1,115,400 | 1,448,144 | 2,550,016 | 1,434,616 | 595,712 |
-| x86_64 | `3`, unwind | 1,115,400 | 1,382,336 | 2,484,304 | 1,368,904 | 661,424 |
-| x86_64 | `s`, abort (comparison only) | 1,115,400 | 1,432,304 | 2,534,192 | 1,418,792 | 611,536 |
-| x86_64 | `3`, abort (comparison only) | 1,115,400 | 1,371,968 | 2,473,936 | 1,358,536 | 671,792 |
+| ABI | Rust profile | JS-only | Rust-only | dual | dual − JS | budget remaining |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| arm64-v8a | `opt-s-panic-unwind` | 1,055,616 | 1,723,624 | 2,766,568 | 1,710,952 | 379,160 |
+| arm64-v8a | `opt-3-panic-unwind` | 1,055,616 | 1,579,896 | 2,618,760 | 1,563,144 | 526,968 |
+| arm64-v8a | `opt-s-panic-abort` | 1,055,616 | 1,678,552 | 2,721,496 | 1,665,880 | 424,232 |
+| arm64-v8a | `opt-3-panic-abort` | 1,055,616 | 1,540,104 | 2,578,968 | 1,523,352 | 566,760 |
+| x86_64 | `opt-s-panic-unwind` | 1,115,400 | 1,766,832 | 2,872,768 | 1,757,368 | 272,960 |
+| x86_64 | `opt-3-panic-unwind` | 1,115,400 | 1,660,000 | 2,761,872 | 1,646,472 | 383,856 |
+| x86_64 | `opt-s-panic-abort` | 1,115,400 | 1,720,256 | 2,826,192 | 1,710,792 | 319,536 |
+| x86_64 | `opt-3-panic-abort` | 1,115,400 | 1,621,056 | 2,722,944 | 1,607,544 | 422,784 |
 
-All sixteen Rust-linked Android artifacts and both JS baselines had 16 KiB PT_LOAD alignment. The shipping `s`/unwind scaffold is below the 3,145,728-byte ABI budget on both ABIs. `panic=abort` is not shippable because it defeats the required `catch_unwind` poison boundary; its rows are size comparisons only. On this scaffold, opt-level `3` happened to link smaller than `s`; this is an observed result, not a future-code rule.
+두 ABI의 shipping `s`/unwind dual은 3,145,728 bytes 예산 안에 있다. Rust-linked 16개와 JS baseline 2개의 PT_LOAD 16 KiB 정렬을 검사했다. `panic=abort` 프로필은 catch_unwind/poison 경계를 충족하지 않아 비교용이다.
 
 ## iOS link contribution
 
-An unsigned arm64 iOS 15 minimum executable was linked twice with identical `-Os -dead_strip` flags:
+동일한 `-Os -dead_strip`로 만든 unsigned arm64 최소 executable 두 개의 차이다. 실제 IPA·설치 크기·App Store thinning이나 시스템 프레임워크 크기는 측정하지 않는다.
 
 | Binary | File bytes | `__TEXT` bytes |
-|---|---:|---:|
-| empty baseline | 32,944 | 32,768 |
-| creates a Rust engine and calls `nativeInit` through the FFI | 542,608 | 393,216 |
-| delta | **509,664** | **360,448** |
+| --- | ---: | ---: |
+| baseline | 32,944 | 32,768 |
+| Rust referenced | 771,832 | 557,056 |
+| delta | 738,888 | 524,288 |
 
-The Rust static archive itself was 19,064,888 bytes, demonstrating why archive size is not app contribution. This is a link-only executable delta, not a signed IPA, install-size, App Store thinning, or system-framework measurement.
+정적 archive 자체는 20,820,896 bytes이며 executable 기여분과 다르다.
 
-## Full-port scenarios, not bounds
+## 후속 이식 시나리오
 
-The authoritative scope is a reader estimate of about 37,850 Rust physical lines: 27,850 stable-surface lines plus Tier A net-new ≈10,000. It is not a measured implementation size.
+2.5 MiB 설계 prior는 실제 측정값과 독립적인 시나리오이며, 전체 이식의 상한이나 확률 구간이 아니다. 이 시나리오의 dual 합은 arm64 3,677,056 bytes, x86_64 3,736,840 bytes로 예산을 넘는다. 실제 최종 값은 구현·링크 후 측정해야 한다.
 
-- Using the measured scaffold contribution as the actual current point and the design's 2.5 MiB Rust contribution as an independent scenario gives dual totals of 3,677,056 bytes (arm64, 531,328 over budget) and 3,736,840 bytes (x86_64, 591,112 over budget).
-- The 2.5 MiB scenario is neither an upper bound nor a probability interval; a complete implementation may be smaller or larger.
-- The old Task 9 bytes/LOC calculation is retained only as a labeled naive diagnostic. It divides the linked scaffold delta by the 4,572 physical `.rs` lines under `src/` in the four linked shipping crates (tests/tools excluded, all cfg branches included), then multiplies by 37,850. It produces implausible dual totals of 12,752,690 and 12,992,088 bytes because fixed std/allocator/FFI overhead dominates the scaffold. It must not be used as a growth law or artifact decision.
-
-The actual scaffold is within budget. The full-port artifact choice remains an owner decision after later milestones provide real linked code, not a conclusion from either scenario.
+물리 `.rs` 11,323줄을 분모로 한 bytes/LOC 예측은 진단용으로만 남겼다. std/allocator/FFI 고정 비용과 실제 dead-strip 때문에 성장 법칙이나 artifact 결정 근거로 사용하지 않는다.

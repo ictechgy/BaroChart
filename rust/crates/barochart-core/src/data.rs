@@ -423,6 +423,29 @@ pub struct BatchReceipt {
     pub unchanged: Option<bool>,
 }
 
+impl BatchReceipt {
+    /// source 영수증의 키 순서와 선택적 unchanged 키 존재를 보존한다.
+    pub fn to_js_value(&self) -> JsValue {
+        let mut record = JsObject::new();
+        for (key, value) in [
+            ("events", self.events as f64),
+            ("appended", self.appended as f64),
+            ("from", self.from as f64),
+            ("to", self.to as f64),
+            ("version", self.version),
+            ("length", self.length as f64),
+            ("capacity", self.capacity as f64),
+            ("bytes", self.bytes as f64),
+        ] {
+            record.insert(JsString::from_str(key), JsValue::Number(value));
+        }
+        if let Some(unchanged) = self.unchanged {
+            record.insert(JsString::from_str("unchanged"), JsValue::Bool(unchanged));
+        }
+        JsValue::Object(record)
+    }
+}
+
 /// 화면 집계 한 bucket이다.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AggregateBar {
@@ -902,8 +925,9 @@ impl BarStore {
         let count = std::cmp::min(end - start, max_buckets);
         let mut output = Vec::with_capacity(count);
         for bucket in 0..count {
-            let from = start + bucket * (end - start) / count;
-            let to = start + (bucket + 1) * (end - start) / count;
+            // 최대 2^22봉의 곱은 2^44까지 커지므로 wasm32 usize 곱을 피한다.
+            let from = start + (bucket as u64 * (end - start) as u64 / count as u64) as usize;
+            let to = start + ((bucket + 1) as u64 * (end - start) as u64 / count as u64) as usize;
             let query = self.index.query(from, to)?;
             output.push(AggregateBar {
                 start: from,
@@ -963,7 +987,6 @@ impl BarStore {
                 "Data batch store byte budget limit {max_bytes}"
             )));
         }
-        let original = self.clone();
         let mut staged = self.clone();
         let mut from = length;
         let mut to = 0;
@@ -1006,7 +1029,7 @@ impl BarStore {
                 staged
                     .columns
                     .bar(*index)
-                    .same_value(&original.columns.bar(*index))
+                    .same_value(&self.columns.bar(*index))
             });
         if unchanged {
             return Ok(Committed {

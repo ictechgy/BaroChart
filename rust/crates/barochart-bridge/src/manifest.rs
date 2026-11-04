@@ -1,8 +1,9 @@
 //! JS 번들의 초기 100개 함수 이름과 단계별 구현 상태다.
 
 use super::{
-    FunctionEntry, FunctionStatus, native_echo, native_init, params_abort, reject_source,
-    release_ingestion, release_true, workspace_abort,
+    FunctionEntry, FunctionStatus, native_command, native_data_event, native_echo,
+    native_ingestion_command, native_init, native_set_data, native_unchanged, params_abort,
+    reject_source, release_ingestion, release_true, workspace_abort,
 };
 
 /// 함수 조회와 supports가 함께 쓰는 단일 표다.
@@ -39,8 +40,8 @@ pub static FUNCTIONS: &[FunctionEntry] = &[
     },
     FunctionEntry {
         name: "nativeApplyUnchangedDataEvents",
-        status: FunctionStatus::Pending,
-        handler: None,
+        status: FunctionStatus::Implemented,
+        handler: Some(native_unchanged),
     },
     FunctionEntry {
         name: "nativeAsyncBegin",
@@ -149,8 +150,8 @@ pub static FUNCTIONS: &[FunctionEntry] = &[
     },
     FunctionEntry {
         name: "nativeCommand",
-        status: FunctionStatus::Pending,
-        handler: None,
+        status: FunctionStatus::Implemented,
+        handler: Some(native_command),
     },
     FunctionEntry {
         name: "nativeComparisonAction",
@@ -174,8 +175,8 @@ pub static FUNCTIONS: &[FunctionEntry] = &[
     },
     FunctionEntry {
         name: "nativeDataEvent",
-        status: FunctionStatus::Pending,
-        handler: None,
+        status: FunctionStatus::Implemented,
+        handler: Some(native_data_event),
     },
     FunctionEntry {
         name: "nativeDataExploration",
@@ -184,8 +185,8 @@ pub static FUNCTIONS: &[FunctionEntry] = &[
     },
     FunctionEntry {
         name: "nativeDataIngestionCommand",
-        status: FunctionStatus::Pending,
-        handler: None,
+        status: FunctionStatus::Implemented,
+        handler: Some(native_ingestion_command),
     },
     FunctionEntry {
         name: "nativeEcho",
@@ -419,8 +420,8 @@ pub static FUNCTIONS: &[FunctionEntry] = &[
     },
     FunctionEntry {
         name: "nativeSetData",
-        status: FunctionStatus::Pending,
-        handler: None,
+        status: FunctionStatus::Implemented,
+        handler: Some(native_set_data),
     },
     FunctionEntry {
         name: "nativeSetPanel",

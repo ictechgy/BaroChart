@@ -31,7 +31,12 @@ pub struct FunctionEntry {
     pub handler: Option<Handler>,
 }
 
+mod command_table;
+mod commands;
+mod data_handlers;
 mod manifest;
+use commands::{native_command, native_ingestion_command, native_unchanged};
+use data_handlers::{native_data_event, native_set_data};
 pub use manifest::FUNCTIONS;
 
 /// 번들에 정의된 이름인지 돌려준다. 실행 준비 여부는 별도 상태다.
@@ -74,7 +79,10 @@ fn release_true(_: &mut Engine, _: &[JsValue]) -> Result<JsValue, JsError> {
 }
 
 // 실제 source 세션이 들어오기 전의 빈 슬롯 정리도 host의 실패 복구 경로에 필요하다.
-fn release_ingestion(_: &mut Engine, _: &[JsValue]) -> Result<JsValue, JsError> {
+fn release_ingestion(engine: &mut Engine, _: &[JsValue]) -> Result<JsValue, JsError> {
+    if let Some(owner) = engine.ingestion_owner_mut() {
+        return Ok(owner.native_release_data_ingestion().to_value());
+    }
     let mut object = JsObject::new();
     for key in ["cancelled", "pendingEvents", "ownedBytes"] {
         object.insert(JsString::from_str(key), JsValue::Number(0.0));
