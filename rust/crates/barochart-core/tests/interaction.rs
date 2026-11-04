@@ -113,6 +113,56 @@ fn pan_cancel_restores_the_owned_view_and_pointer_map() {
     assert_eq!(controller.gesture_kind(), None);
 }
 
+#[test]
+fn drawing_projection_change_returns_the_cancel_invalidation() {
+    let data = ModelDataState::new(StoreOptions::default(), (0..20).map(bar).collect()).unwrap();
+    let mut model = ModelState::new(data.store(), &JsValue::Undefined).unwrap();
+    model
+        .add_series(
+            &parse(r#"{"id":"bars","type":"candles","panel":"price"}"#),
+            &ModelContext::plain(data.store()),
+        )
+        .unwrap();
+    let mut indicators = IndicatorEngine::new(IndicatorEngineOptions::default()).unwrap();
+    let mut drawings = DrawingStore::with_defaults(NumberDialect::PLATFORM);
+    let mut caches = SeriesCaches::new();
+    let mut geometry_cache = DrawingGeometryCache::new(32);
+    let mut controller = OwnedInteractionState::new();
+    let mut context = InteractionContext {
+        model: &mut model,
+        store: data.store(),
+        indicators: &mut indicators,
+        drawings: &mut drawings,
+        series_caches: &mut caches,
+        geometry_cache: &mut geometry_cache,
+        host: &NoZones,
+        width: 894.0,
+        height: 446.0,
+    };
+    controller
+        .set_tool(&mut context, &text("trendline"), false)
+        .unwrap();
+    let layout = context.layout().unwrap();
+    let panel = &layout.panels[0];
+    let x = (panel.left + panel.right) / 2.0;
+    let y = (panel.top + panel.bottom) / 2.0;
+    controller.down(&mut context, text("1"), x, y, 8.0).unwrap();
+    assert_eq!(controller.gesture_kind(), Some("create"));
+    assert!(context.drawings.transaction().is_some());
+    context.width += 100.0;
+    let effects = controller
+        .move_pointer(&mut context, &text("1"), x + 10.0, y)
+        .unwrap();
+    assert_eq!(controller.gesture_kind(), None);
+    assert_eq!(controller.pointer_count(), 0);
+    assert!(context.drawings.transaction().is_none());
+    assert!(context.drawings.items().is_empty());
+    assert_eq!(
+        effects.invalidations,
+        vec![InteractionInvalidation::Default]
+    );
+}
+
 fn wire_object(entries: impl IntoIterator<Item = (&'static str, JsValue)>) -> JsValue {
     let mut object = JsObject::new();
     for (name, value) in entries {

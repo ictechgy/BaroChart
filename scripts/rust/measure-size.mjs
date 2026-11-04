@@ -393,11 +393,11 @@ async function measure(options){
   commands:commands.map(command=>command.map(item=>portablePath(String(item),ROOT,tools.ndk))),
   android:{abis:ANDROID_ABIS.map(item=>item.abi),profiles:PROFILES.map(item=>item.id),artifacts:matrix},
   ios,forecast,naiveLocDiagnostic:naive,
-  ownerBudgetDecision:{date:'2026-11-04',previousBudgetBytes:PREVIOUS_SIZE_BUDGET,currentBudgetBytes:SIZE_BUDGET,decision:'Keep the dual artifact and raise the Android SDK size budget to 5 MiB.',noBinaryRebuild:true,defaultBackend:'JavaScript pending device gates'},
+  ownerBudgetDecision:{date:'2026-11-04',previousBudgetBytes:PREVIOUS_SIZE_BUDGET,currentBudgetBytes:SIZE_BUDGET,decision:'Keep the dual artifact and raise the Android SDK size budget to 5 MiB.',noBinaryRebuild:true,appliesTo:'The threshold-only approval required no binary change; measurement builds are recorded separately.',defaultBackend:'JavaScript pending device gates'},
   conclusions:{
    actualShippingPackageWithinBudget:Object.values(matrix).every(byProfile=>!byProfile[PROFILES[0].id].packaged.budget.exceeds),
    shippingPackageOverBudget:Object.values(matrix).some(byProfile=>byProfile[PROFILES[0].id].packaged.budget.exceeds),
-   artifactDecision:'Owner-approved decision: keep the dual artifact and use the 5 MiB Android SDK size budget. This threshold-only reassessment rebuilt no binaries; the default remains JavaScript pending device gates.',
+   artifactDecision:'Owner-approved policy: keep the dual artifact and use the 5 MiB Android SDK size budget. Current-source build provenance is recorded above; the default remains JavaScript pending device gates.',
   },
  };
  validateReport(report,{sourceSha256:source.sha256,androidPackagingSha256:source.androidPackagingSha256,coreAssetSha256:source.coreAssetSha256});await mkdir(dirname(reportPath),{recursive:true});await writeFile(reportPath,JSON.stringify(report,null,2)+'\n');

@@ -576,6 +576,147 @@ fn prepare_follow_publication(
     result.publication.expect("prepare publication")
 }
 
+fn ready_prepare_ui_transfer(
+    memory: Option<MemoryContext>,
+) -> (NativeRuntime, f64, JsValue, Vec<JsValue>, JsValue) {
+    let (mut source_chart, source_input, source_size) = configured_chart();
+    let mut source = NativeRuntime::new();
+    let mut source_serial = 2.0;
+    let begin = runtime_call(
+        &mut source,
+        &mut source_chart,
+        &source_input,
+        &source_size,
+        &mut source_serial,
+        "nativePrepareBegin",
+        &[text(
+            "{\"kind\":\"seeded\",\"count\":8,\"seed\":42,\"visibleBars\":6}",
+        )],
+    )
+    .value;
+    let begin = parse(&string(&begin));
+    let ticket = field(&begin, "ticket").clone();
+    let mut target = memory.map_or_else(NativeRuntime::new, NativeRuntime::new_with_memory);
+    let mut target_serial = 1.0;
+    empty_call(
+        &mut target,
+        &mut target_serial,
+        "nativePrepareCreate",
+        &[field(&begin, "metadataJSON").clone()],
+    );
+    empty_call(&mut target, &mut target_serial, "nativeAsyncStart", &[]);
+    loop {
+        let progress = empty_call(
+            &mut target,
+            &mut target_serial,
+            "nativeAsyncStep",
+            &[JsValue::Number(4_096.0)],
+        )
+        .value;
+        if matches!(
+            field(&parse(&string(&progress)), "complete"),
+            JsValue::Bool(true)
+        ) {
+            break;
+        }
+    }
+    let direct = runtime_call(
+        &mut source,
+        &mut source_chart,
+        &source_input,
+        &source_size,
+        &mut source_serial,
+        "nativeAsyncUI",
+        std::slice::from_ref(&ticket),
+    )
+    .value;
+    let header = runtime_call(
+        &mut source,
+        &mut source_chart,
+        &source_input,
+        &source_size,
+        &mut source_serial,
+        "nativeAsyncUIBegin",
+        std::slice::from_ref(&ticket),
+    )
+    .value;
+    let mut chunks = Vec::new();
+    loop {
+        let chunk = runtime_call(
+            &mut source,
+            &mut source_chart,
+            &source_input,
+            &source_size,
+            &mut source_serial,
+            "nativeAsyncUINext",
+            std::slice::from_ref(&ticket),
+        )
+        .value;
+        if matches!(
+            field(&parse(&string(&chunk)), "complete"),
+            JsValue::Bool(true)
+        ) {
+            break;
+        }
+        chunks.push(chunk);
+    }
+    (target, target_serial, header, chunks, direct)
+}
+
+fn header_with_drawing_field(header: &JsValue, name: &str, value: JsValue) -> JsValue {
+    let mut header = parse(&string(header));
+    let JsValue::Object(header_record) = &mut header else {
+        unreachable!()
+    };
+    let JsValue::Object(state) = header_record.get_mut(&key("state")).unwrap() else {
+        unreachable!()
+    };
+    let JsValue::Object(drawings) = state.get_mut(&key("drawings")).unwrap() else {
+        unreachable!()
+    };
+    drawings.insert(key(name), value);
+    text(&String::from_utf8(stringify_json(&header, JsonMode::Standard)).unwrap())
+}
+
+fn header_with_symbol_field(header: &JsValue, name: &str, value: JsValue) -> JsValue {
+    let mut header = parse(&string(header));
+    let JsValue::Object(header_record) = &mut header else {
+        unreachable!()
+    };
+    let JsValue::Object(state) = header_record.get_mut(&key("state")).unwrap() else {
+        unreachable!()
+    };
+    let JsValue::Object(symbol) = state.get_mut(&key("symbol")).unwrap() else {
+        unreachable!()
+    };
+    symbol.insert(key(name), value);
+    text(&String::from_utf8(stringify_json(&header, JsonMode::Standard)).unwrap())
+}
+
+fn direct_with_symbol_field(direct: &JsValue, name: &str, value: JsValue) -> JsValue {
+    let mut direct = parse(&string(direct));
+    let JsValue::Object(state) = &mut direct else {
+        unreachable!()
+    };
+    let JsValue::Object(symbol) = state.get_mut(&key("symbol")).unwrap() else {
+        unreachable!()
+    };
+    symbol.insert(key(name), value);
+    text(&String::from_utf8(stringify_json(&direct, JsonMode::Standard)).unwrap())
+}
+
+fn header_with_state_field(header: &JsValue, name: &str, value: JsValue) -> JsValue {
+    let mut header = parse(&string(header));
+    let JsValue::Object(header_record) = &mut header else {
+        unreachable!()
+    };
+    let JsValue::Object(state) = header_record.get_mut(&key("state")).unwrap() else {
+        unreachable!()
+    };
+    state.insert(key(name), value);
+    text(&String::from_utf8(stringify_json(&header, JsonMode::Standard)).unwrap())
+}
+
 #[test]
 fn streamed_ui_import_returns_the_exact_atomic_publication() {
     let expected = oracle("import");
@@ -774,7 +915,7 @@ fn streamed_ui_import_returns_the_exact_atomic_publication() {
     );
     let publication = result.publication.expect("publication");
     let chart = publication.chart;
-    let input = publication.input;
+    let input = publication.input.expect("finalized UI input");
     let inspect = object(&[
         (
             "view",
@@ -1040,4 +1181,845 @@ fn ui_wrapper_failure_order_matches_node22() {
         .err()
         .unwrap();
     assert_wire(&error_value(incomplete), field(&expected, "incomplete"));
+}
+
+#[test]
+fn ui_import_streams_before_ready_and_preserves_source_chunk_effects() {
+    let (mut source_chart, source_input, source_size) = configured_chart();
+    let mut source = NativeRuntime::new();
+    let mut source_serial = 2.0;
+    let begin = runtime_call(
+        &mut source,
+        &mut source_chart,
+        &source_input,
+        &source_size,
+        &mut source_serial,
+        "nativePrepareBegin",
+        &[text(
+            "{\"kind\":\"seeded\",\"count\":8,\"seed\":42,\"visibleBars\":6}",
+        )],
+    )
+    .value;
+    let begin = parse(&string(&begin));
+    let ticket = field(&begin, "ticket").clone();
+
+    let mut target = NativeRuntime::new();
+    let mut target_serial = 1.0;
+    empty_call(
+        &mut target,
+        &mut target_serial,
+        "nativePrepareCreate",
+        &[field(&begin, "metadataJSON").clone()],
+    );
+    let header = runtime_call(
+        &mut source,
+        &mut source_chart,
+        &source_input,
+        &source_size,
+        &mut source_serial,
+        "nativeAsyncUIBegin",
+        std::slice::from_ref(&ticket),
+    )
+    .value;
+    empty_call(
+        &mut target,
+        &mut target_serial,
+        "nativeAsyncUIImportBegin",
+        &[header],
+    );
+
+    let incomplete = target
+        .call(
+            &key("nativeAsyncUIImportEnd"),
+            &[],
+            RuntimeContext {
+                chart: None,
+                input: None,
+                size: None,
+                host: &NoZones,
+                next_store_serial: &mut target_serial,
+            },
+        )
+        .err()
+        .unwrap();
+    assert_eq!(
+        incomplete.message.to_string_lossy(),
+        "Async UI incomplete transfer"
+    );
+
+    let chunk = runtime_call(
+        &mut source,
+        &mut source_chart,
+        &source_input,
+        &source_size,
+        &mut source_serial,
+        "nativeAsyncUINext",
+        std::slice::from_ref(&ticket),
+    )
+    .value;
+    let original = parse(&string(&chunk));
+    assert!(matches!(field(&original, "complete"), JsValue::Bool(false)));
+
+    let mut bad_panel = original.clone();
+    let JsValue::Object(packet) = &mut bad_panel else {
+        unreachable!()
+    };
+    let JsValue::Array(records) = packet.get_mut(&key("records")).unwrap() else {
+        unreachable!()
+    };
+    let JsValue::Object(record) = &mut records[0] else {
+        unreachable!()
+    };
+    let JsValue::Object(drawing) = record.get_mut(&key("drawing")).unwrap() else {
+        unreachable!()
+    };
+    drawing.insert(key("panel"), text("missing"));
+    let bad_panel =
+        text(&String::from_utf8(stringify_json(&bad_panel, JsonMode::Standard)).unwrap());
+    let error = target
+        .call(
+            &key("nativeAsyncUIImportChunk"),
+            &[bad_panel],
+            RuntimeContext {
+                chart: None,
+                input: None,
+                size: None,
+                host: &NoZones,
+                next_store_serial: &mut target_serial,
+            },
+        )
+        .err()
+        .unwrap();
+    assert_eq!(error.message.to_string_lossy(), "Missing drawing panel");
+
+    let mut partial = original.clone();
+    let JsValue::Object(packet) = &mut partial else {
+        unreachable!()
+    };
+    let JsValue::Array(records) = packet.get_mut(&key("records")).unwrap() else {
+        unreachable!()
+    };
+    records.push(object(&[
+        ("slot", JsValue::Number(1.0)),
+        ("drawing", object(&[])),
+    ]));
+    let partial = text(&String::from_utf8(stringify_json(&partial, JsonMode::Standard)).unwrap());
+    target
+        .call(
+            &key("nativeAsyncUIImportChunk"),
+            &[partial],
+            RuntimeContext {
+                chart: None,
+                input: None,
+                size: None,
+                host: &NoZones,
+                next_store_serial: &mut target_serial,
+            },
+        )
+        .err()
+        .unwrap();
+
+    let original_retry =
+        text(&String::from_utf8(stringify_json(&original, JsonMode::Standard)).unwrap());
+    let error = target
+        .call(
+            &key("nativeAsyncUIImportChunk"),
+            &[original_retry],
+            RuntimeContext {
+                chart: None,
+                input: None,
+                size: None,
+                host: &NoZones,
+                next_store_serial: &mut target_serial,
+            },
+        )
+        .err()
+        .unwrap();
+    assert_eq!(error.message.to_string_lossy(), "Async UI record slot");
+
+    let mut corrected = original;
+    let JsValue::Object(packet) = &mut corrected else {
+        unreachable!()
+    };
+    packet.insert(key("records"), JsValue::Array(Vec::new()));
+    let corrected =
+        text(&String::from_utf8(stringify_json(&corrected, JsonMode::Standard)).unwrap());
+    empty_call(
+        &mut target,
+        &mut target_serial,
+        "nativeAsyncUIImportChunk",
+        &[corrected],
+    );
+    loop {
+        let chunk = runtime_call(
+            &mut source,
+            &mut source_chart,
+            &source_input,
+            &source_size,
+            &mut source_serial,
+            "nativeAsyncUINext",
+            std::slice::from_ref(&ticket),
+        )
+        .value;
+        if matches!(
+            field(&parse(&string(&chunk)), "complete"),
+            JsValue::Bool(true)
+        ) {
+            break;
+        }
+        empty_call(
+            &mut target,
+            &mut target_serial,
+            "nativeAsyncUIImportChunk",
+            &[chunk],
+        );
+    }
+
+    let not_ready = target
+        .call(
+            &key("nativeAsyncUIImportEnd"),
+            &[],
+            RuntimeContext {
+                chart: None,
+                input: None,
+                size: None,
+                host: &NoZones,
+                next_store_serial: &mut target_serial,
+            },
+        )
+        .err()
+        .unwrap();
+    assert_eq!(
+        not_ready.message.to_string_lossy(),
+        "Async result not ready"
+    );
+
+    empty_call(&mut target, &mut target_serial, "nativeAsyncStart", &[]);
+    loop {
+        let progress = empty_call(
+            &mut target,
+            &mut target_serial,
+            "nativeAsyncStep",
+            &[JsValue::Number(4_096.0)],
+        )
+        .value;
+        if matches!(
+            field(&parse(&string(&progress)), "complete"),
+            JsValue::Bool(true)
+        ) {
+            break;
+        }
+    }
+    empty_call(
+        &mut target,
+        &mut target_serial,
+        "nativeAsyncUIImportEnd",
+        &[],
+    );
+    let publication = empty_call(&mut target, &mut target_serial, "nativeAsyncFinish", &[])
+        .publication
+        .expect("retry End publishes the prepared UI");
+    assert_eq!(publication.chart.drawings().items().len(), 1);
+}
+
+#[test]
+fn ui_import_rejects_serial_at_begin_and_consumes_a_success_once() {
+    let (mut target, mut serial, header, chunks, _direct) = ready_prepare_ui_transfer(None);
+    let invalid =
+        header_with_drawing_field(&header, "serial", JsValue::Number(9_007_199_254_740_992.0));
+    let error = target
+        .call(
+            &key("nativeAsyncUIImportBegin"),
+            &[invalid],
+            RuntimeContext {
+                chart: None,
+                input: None,
+                size: None,
+                host: &NoZones,
+                next_store_serial: &mut serial,
+            },
+        )
+        .err()
+        .unwrap();
+    assert_eq!(error.name, "RangeError");
+    assert_eq!(error.message.to_string_lossy(), "Async drawing serial");
+
+    empty_call(
+        &mut target,
+        &mut serial,
+        "nativeAsyncUIImportBegin",
+        &[header],
+    );
+    for chunk in chunks {
+        empty_call(
+            &mut target,
+            &mut serial,
+            "nativeAsyncUIImportChunk",
+            &[chunk],
+        );
+    }
+    empty_call(&mut target, &mut serial, "nativeAsyncUIImportEnd", &[]);
+    let consumed = target
+        .call(
+            &key("nativeAsyncUIImportEnd"),
+            &[],
+            RuntimeContext {
+                chart: None,
+                input: None,
+                size: None,
+                host: &NoZones,
+                next_store_serial: &mut serial,
+            },
+        )
+        .err()
+        .unwrap();
+    assert_eq!(
+        consumed.message.to_string_lossy(),
+        "Async UI target missing"
+    );
+    let result = empty_call(&mut target, &mut serial, "nativeAsyncFinish", &[]);
+    assert!(result.publication.is_some());
+}
+
+#[test]
+fn ui_import_selection_error_is_identical_and_retryable() {
+    let (mut target, mut serial, header, chunks, direct) = ready_prepare_ui_transfer(None);
+    let header = header_with_drawing_field(&header, "selected", text("missing"));
+    empty_call(
+        &mut target,
+        &mut serial,
+        "nativeAsyncUIImportBegin",
+        &[header],
+    );
+    for chunk in chunks {
+        empty_call(
+            &mut target,
+            &mut serial,
+            "nativeAsyncUIImportChunk",
+            &[chunk],
+        );
+    }
+    let mut errors = Vec::new();
+    for _ in 0..2 {
+        let error = target
+            .call(
+                &key("nativeAsyncUIImportEnd"),
+                &[],
+                RuntimeContext {
+                    chart: None,
+                    input: None,
+                    size: None,
+                    host: &NoZones,
+                    next_store_serial: &mut serial,
+                },
+            )
+            .err()
+            .unwrap();
+        errors.push(error_value(error));
+    }
+    assert_wire(&errors[0], &errors[1]);
+    assert!(
+        matches!(field(&errors[0], "name"), JsValue::String(value) if value == &key("TypeError"))
+    );
+    assert!(
+        matches!(field(&errors[0], "message"), JsValue::String(value) if value == &key("Async selection"))
+    );
+    let result = empty_call(&mut target, &mut serial, "nativeAsyncFinish", &[direct]);
+    assert!(result.publication.is_some());
+}
+
+#[test]
+fn ui_import_finish_oom_retries_after_quota_is_freed() {
+    const LIMIT: u64 = 64 * 1024 * 1024;
+    let account = MemoryAccount::new(LIMIT, OomStyle::InternalErrorLowercase);
+    let memory = MemoryContext::accounted(&account);
+    let (mut target, mut serial, header, chunks, _direct) = ready_prepare_ui_transfer(Some(memory));
+    empty_call(
+        &mut target,
+        &mut serial,
+        "nativeAsyncUIImportBegin",
+        &[header],
+    );
+    for chunk in chunks {
+        empty_call(
+            &mut target,
+            &mut serial,
+            "nativeAsyncUIImportChunk",
+            &[chunk],
+        );
+    }
+    let remaining = LIMIT - account.snapshot().requested_live_bytes;
+    let filler = account.reserve(remaining).unwrap();
+    let error = target
+        .call(
+            &key("nativeAsyncUIImportEnd"),
+            &[],
+            RuntimeContext {
+                chart: None,
+                input: None,
+                size: None,
+                host: &NoZones,
+                next_store_serial: &mut serial,
+            },
+        )
+        .err()
+        .unwrap();
+    assert_eq!(error.code.as_deref(), Some("__BAROCHART_OOM_LIMIT__"));
+    drop(filler);
+
+    empty_call(&mut target, &mut serial, "nativeAsyncUIImportEnd", &[]);
+    let result = empty_call(&mut target, &mut serial, "nativeAsyncFinish", &[]);
+    let publication = result.publication.expect("OOM retry publication");
+    drop((publication, target));
+    assert_eq!(account.snapshot().requested_live_bytes, 0);
+}
+
+#[test]
+fn ui_finish_host_setup_oom_retries_after_quota_is_freed() {
+    const LIMIT: u64 = 64 * 1024 * 1024;
+    let account = MemoryAccount::new(LIMIT, OomStyle::InternalErrorLowercase);
+    let memory = MemoryContext::accounted(&account);
+    let (mut target, mut serial, header, chunks, _direct) = ready_prepare_ui_transfer(Some(memory));
+    empty_call(
+        &mut target,
+        &mut serial,
+        "nativeAsyncUIImportBegin",
+        &[header],
+    );
+    for chunk in chunks {
+        empty_call(
+            &mut target,
+            &mut serial,
+            "nativeAsyncUIImportChunk",
+            &[chunk],
+        );
+    }
+    empty_call(&mut target, &mut serial, "nativeAsyncUIImportEnd", &[]);
+
+    let remaining = LIMIT - account.snapshot().requested_live_bytes;
+    let filler = account.reserve(remaining).unwrap();
+    let error = target
+        .call(
+            &key("nativeAsyncFinish"),
+            &[],
+            RuntimeContext {
+                chart: None,
+                input: None,
+                size: None,
+                host: &NoZones,
+                next_store_serial: &mut serial,
+            },
+        )
+        .err()
+        .unwrap();
+    assert_eq!(error.code.as_deref(), Some("__BAROCHART_OOM_LIMIT__"));
+    drop(filler);
+
+    let result = empty_call(&mut target, &mut serial, "nativeAsyncFinish", &[]);
+    let publication = result
+        .publication
+        .expect("host setup OOM retry publication");
+    drop((publication, target));
+    assert_eq!(account.snapshot().requested_live_bytes, 0);
+}
+
+#[test]
+fn ui_import_attach_oom_keeps_the_taken_core_for_end_retry() {
+    const LIMIT: u64 = 64 * 1024 * 1024;
+    let account = MemoryAccount::new(LIMIT, OomStyle::InternalErrorLowercase);
+    let memory = MemoryContext::accounted(&account);
+    let (mut source_chart, source_input, source_size) = configured_chart();
+    let mut source = NativeRuntime::new();
+    let mut source_serial = 2.0;
+    let begin = runtime_call(
+        &mut source,
+        &mut source_chart,
+        &source_input,
+        &source_size,
+        &mut source_serial,
+        "nativePrepareBegin",
+        &[text(
+            "{\"kind\":\"seeded\",\"count\":8,\"seed\":42,\"visibleBars\":6}",
+        )],
+    )
+    .value;
+    let begin = parse(&string(&begin));
+    let ticket = field(&begin, "ticket").clone();
+    let mut target = NativeRuntime::new_with_memory(memory);
+    let mut serial = 1.0;
+    empty_call(
+        &mut target,
+        &mut serial,
+        "nativePrepareCreate",
+        &[field(&begin, "metadataJSON").clone()],
+    );
+    let header = runtime_call(
+        &mut source,
+        &mut source_chart,
+        &source_input,
+        &source_size,
+        &mut source_serial,
+        "nativeAsyncUIBegin",
+        std::slice::from_ref(&ticket),
+    )
+    .value;
+    empty_call(
+        &mut target,
+        &mut serial,
+        "nativeAsyncUIImportBegin",
+        &[header],
+    );
+    loop {
+        let chunk = runtime_call(
+            &mut source,
+            &mut source_chart,
+            &source_input,
+            &source_size,
+            &mut source_serial,
+            "nativeAsyncUINext",
+            std::slice::from_ref(&ticket),
+        )
+        .value;
+        if matches!(
+            field(&parse(&string(&chunk)), "complete"),
+            JsValue::Bool(true)
+        ) {
+            break;
+        }
+        empty_call(
+            &mut target,
+            &mut serial,
+            "nativeAsyncUIImportChunk",
+            &[chunk],
+        );
+    }
+    let not_ready = target
+        .call(
+            &key("nativeAsyncUIImportEnd"),
+            &[],
+            RuntimeContext {
+                chart: None,
+                input: None,
+                size: None,
+                host: &NoZones,
+                next_store_serial: &mut serial,
+            },
+        )
+        .err()
+        .unwrap();
+    assert_eq!(
+        not_ready.message.to_string_lossy(),
+        "Async result not ready"
+    );
+    empty_call(&mut target, &mut serial, "nativeAsyncStart", &[]);
+    loop {
+        let progress = empty_call(
+            &mut target,
+            &mut serial,
+            "nativeAsyncStep",
+            &[JsValue::Number(4_096.0)],
+        )
+        .value;
+        if matches!(
+            field(&parse(&string(&progress)), "complete"),
+            JsValue::Bool(true)
+        ) {
+            break;
+        }
+    }
+
+    let remaining = LIMIT - account.snapshot().requested_live_bytes;
+    let filler = account.reserve(remaining).unwrap();
+    let error = target
+        .call(
+            &key("nativeAsyncUIImportEnd"),
+            &[],
+            RuntimeContext {
+                chart: None,
+                input: None,
+                size: None,
+                host: &NoZones,
+                next_store_serial: &mut serial,
+            },
+        )
+        .err()
+        .unwrap();
+    assert_eq!(error.code.as_deref(), Some("__BAROCHART_OOM_LIMIT__"));
+    drop(filler);
+
+    empty_call(&mut target, &mut serial, "nativeAsyncUIImportEnd", &[]);
+    let result = empty_call(&mut target, &mut serial, "nativeAsyncFinish", &[]);
+    let publication = result.publication.expect("attach retry publication");
+    drop((publication, target));
+    assert_eq!(account.snapshot().requested_live_bytes, 0);
+}
+
+#[test]
+fn ui_import_defers_host_symbol_failure_from_end_to_finish_retry() {
+    let expected = oracle("host-phase");
+    let (mut target, mut serial, header, chunks, _direct) = ready_prepare_ui_transfer(None);
+    let header = header_with_symbol_field(&header, "timezone", text("America/New_York"));
+    empty_call(
+        &mut target,
+        &mut serial,
+        "nativeAsyncUIImportBegin",
+        &[header],
+    );
+    for chunk in chunks {
+        empty_call(
+            &mut target,
+            &mut serial,
+            "nativeAsyncUIImportChunk",
+            &[chunk],
+        );
+    }
+    let import_end = empty_call(&mut target, &mut serial, "nativeAsyncUIImportEnd", &[]).value;
+    assert_wire(&import_end, field(&expected, "importEnd"));
+    let mut errors = Vec::new();
+    for _ in 0..2 {
+        let error = target
+            .call(
+                &key("nativeAsyncFinish"),
+                &[],
+                RuntimeContext {
+                    chart: None,
+                    input: None,
+                    size: None,
+                    host: &NoZones,
+                    next_store_serial: &mut serial,
+                },
+            )
+            .err()
+            .unwrap();
+        errors.push(error_value(error));
+    }
+    assert_wire(&errors[0], &errors[1]);
+    assert_wire(&errors[0], field(&expected, "firstFinish"));
+    assert_wire(&errors[1], field(&expected, "secondFinish"));
+}
+
+#[test]
+fn ui_import_matches_finish_phase_for_tool_text_and_drawing_target() {
+    for (field_name, value, expected_name, expected_message) in [
+        (
+            "tool",
+            text("missing-tool"),
+            "Error",
+            "Unknown drawing tool",
+        ),
+        (
+            "text",
+            JsValue::Number(1.0),
+            "TypeError",
+            "Drawing text, at most 2000 characters",
+        ),
+    ] {
+        let (mut target, mut serial, header, chunks, _direct) = ready_prepare_ui_transfer(None);
+        let header = header_with_state_field(&header, field_name, value);
+        empty_call(
+            &mut target,
+            &mut serial,
+            "nativeAsyncUIImportBegin",
+            &[header],
+        );
+        for chunk in chunks {
+            empty_call(
+                &mut target,
+                &mut serial,
+                "nativeAsyncUIImportChunk",
+                &[chunk],
+            );
+        }
+        empty_call(&mut target, &mut serial, "nativeAsyncUIImportEnd", &[]);
+        let error = target
+            .call(
+                &key("nativeAsyncFinish"),
+                &[],
+                RuntimeContext {
+                    chart: None,
+                    input: None,
+                    size: None,
+                    host: &NoZones,
+                    next_store_serial: &mut serial,
+                },
+            )
+            .err()
+            .unwrap();
+        assert_eq!(error.name, expected_name);
+        assert_eq!(error.message.to_string_lossy(), expected_message);
+    }
+
+    let (mut target, mut serial, header, chunks, _direct) = ready_prepare_ui_transfer(None);
+    let header = header_with_state_field(
+        &header,
+        "drawingTarget",
+        object(&[("panel", text("missing"))]),
+    );
+    empty_call(
+        &mut target,
+        &mut serial,
+        "nativeAsyncUIImportBegin",
+        &[header],
+    );
+    for chunk in chunks {
+        empty_call(
+            &mut target,
+            &mut serial,
+            "nativeAsyncUIImportChunk",
+            &[chunk],
+        );
+    }
+    let error = target
+        .call(
+            &key("nativeAsyncUIImportEnd"),
+            &[],
+            RuntimeContext {
+                chart: None,
+                input: None,
+                size: None,
+                host: &NoZones,
+                next_store_serial: &mut serial,
+            },
+        )
+        .err()
+        .unwrap();
+    assert_eq!(error.message.to_string_lossy(), "Missing drawing panel");
+}
+
+#[test]
+fn direct_finish_host_failure_is_not_promoted_to_imported_ui_retry_state() {
+    let (mut target, mut serial, _header, _chunks, direct) = ready_prepare_ui_transfer(None);
+    let direct = direct_with_symbol_field(&direct, "timezone", text("America/New_York"));
+    let first = target
+        .call(
+            &key("nativeAsyncFinish"),
+            std::slice::from_ref(&direct),
+            RuntimeContext {
+                chart: None,
+                input: None,
+                size: None,
+                host: &NoZones,
+                next_store_serial: &mut serial,
+            },
+        )
+        .err()
+        .unwrap();
+    assert_eq!(
+        first.message.to_string_lossy(),
+        "Unsupported time zone: America/New_York"
+    );
+    let second = target
+        .call(
+            &key("nativeAsyncFinish"),
+            &[direct],
+            RuntimeContext {
+                chart: None,
+                input: None,
+                size: None,
+                host: &NoZones,
+                next_store_serial: &mut serial,
+            },
+        )
+        .err()
+        .unwrap();
+    assert_eq!(second.message.to_string_lossy(), "Async result not ready");
+}
+
+#[test]
+fn finish_host_failure_keeps_the_engine_global_chart_unpublished() {
+    let (mut source_chart, source_input, source_size) = configured_chart();
+    let mut source = NativeRuntime::new();
+    let mut source_serial = 2.0;
+    let begin = runtime_call(
+        &mut source,
+        &mut source_chart,
+        &source_input,
+        &source_size,
+        &mut source_serial,
+        "nativePrepareBegin",
+        &[text(
+            "{\"kind\":\"seeded\",\"count\":8,\"seed\":42,\"visibleBars\":6}",
+        )],
+    )
+    .value;
+    let begin = parse(&string(&begin));
+    let ticket = field(&begin, "ticket").clone();
+    let header = runtime_call(
+        &mut source,
+        &mut source_chart,
+        &source_input,
+        &source_size,
+        &mut source_serial,
+        "nativeAsyncUIBegin",
+        std::slice::from_ref(&ticket),
+    )
+    .value;
+    let header = header_with_symbol_field(&header, "timezone", text("America/New_York"));
+    let mut chunks = Vec::new();
+    loop {
+        let chunk = runtime_call(
+            &mut source,
+            &mut source_chart,
+            &source_input,
+            &source_size,
+            &mut source_serial,
+            "nativeAsyncUINext",
+            std::slice::from_ref(&ticket),
+        )
+        .value;
+        if matches!(
+            field(&parse(&string(&chunk)), "complete"),
+            JsValue::Bool(true)
+        ) {
+            break;
+        }
+        chunks.push(chunk);
+    }
+
+    let mut target = Engine::new(Box::new(NoZones));
+    target.install_chart(chart(4)).unwrap();
+    let old_identity = target.chart().unwrap().capture_identity();
+    target
+        .native_runtime_call(
+            &key("nativePrepareCreate"),
+            std::slice::from_ref(field(&begin, "metadataJSON")),
+        )
+        .unwrap();
+    target
+        .native_runtime_call(&key("nativeAsyncStart"), &[])
+        .unwrap();
+    loop {
+        let progress = target
+            .native_runtime_call(&key("nativeAsyncStep"), &[JsValue::Number(4_096.0)])
+            .unwrap();
+        if matches!(
+            field(&parse(&string(&progress)), "complete"),
+            JsValue::Bool(true)
+        ) {
+            break;
+        }
+    }
+    target
+        .native_runtime_call(&key("nativeAsyncUIImportBegin"), &[header])
+        .unwrap();
+    for chunk in chunks {
+        target
+            .native_runtime_call(&key("nativeAsyncUIImportChunk"), &[chunk])
+            .unwrap();
+    }
+    target
+        .native_runtime_call(&key("nativeAsyncUIImportEnd"), &[])
+        .unwrap();
+    for _ in 0..2 {
+        let error = target
+            .native_runtime_call(&key("nativeAsyncFinish"), &[])
+            .unwrap_err();
+        assert_eq!(
+            error.message.to_string_lossy(),
+            "Unsupported time zone: America/New_York"
+        );
+        let old = target.chart().expect("old global chart remains live");
+        assert!(old.validate_identity(&old_identity));
+        assert_eq!(old.data().store().length(), 4);
+    }
 }

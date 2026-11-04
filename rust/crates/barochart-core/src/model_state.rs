@@ -835,6 +835,14 @@ impl ModelState {
             seen.push(id);
             series.push(normalized);
         }
+        // Source는 입력 patch를 id Map에 모은 뒤 live painter 순서로 다시 조립한다.
+        // 검증은 위에서 입력 순서대로 끝내고, allocation 없는 정렬만 게시 후보에 적용한다.
+        series.sort_unstable_by_key(|next| {
+            self.series
+                .iter()
+                .position(|current| current.id == next.id)
+                .expect("validated async patch references a live series")
+        });
         let mut candidate = candidate;
         candidate.series = series;
         candidate.series_memory = series_memory;

@@ -129,7 +129,7 @@ jobs:
       - name: Run the real WASM harness without toolchain skips
         env:
           REQUIRE_WASM: '1'
-        run: node --test test/rust-wasm-harness.test.mjs
+        run: node --test test/rust-wasm-harness.test.mjs test/rust-core-conformance.test.mjs test/rust-aggregate-wasm.test.mjs test/rust-api-regressions.test.mjs
 
       - name: Compare the JS kernel with V8 and bundled QuickJS on a seeded corpus
         # 같은 시드 고정 코퍼스의 ECMA(r)·Android 방언(q)을 Node(V8)·동봉 QuickJS와 각각 비교한다.

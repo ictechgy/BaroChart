@@ -11,7 +11,7 @@ use barochart_js::string::JsString;
 
 use crate::Host;
 use crate::compaction::{self, CompactionContext, CompactionError};
-use crate::contracts::{SYMBOL_KEYS, option_record, portable_style_scoped};
+use crate::contracts::{SYMBOL_KEYS, js_to_string_scoped, option_record, portable_style_scoped};
 use crate::data::{BatchReceipt, DataEventValue};
 use crate::data_explorer::{
     self, DataAtRequest, DataQueryResult, DataQuerySeries, DataQueryStatus, ExplorerSymbol,
@@ -1025,7 +1025,7 @@ impl<'a> ChartApi<'a> {
             SetIndicatorPlacement => {
                 self.set_indicator_placement(argument(args, 0), argument(args, 1))
             }
-            RemoveIndicator => self.remove_indicator(argument(args, 0), admit_fixed_reply),
+            RemoveIndicator => self.remove_indicator(argument(args, 0), scope, admit_fixed_reply),
             IndicatorValues => self.indicator_values(argument(args, 0), args.get(1), scope),
             IndicatorValueAt => self.indicator_value_at(args, scope),
             RegisterIndicatorModule => self.register_indicator_module(args, scope),
@@ -1498,13 +1498,21 @@ impl<'a> ChartApi<'a> {
     fn remove_indicator(
         &mut self,
         id: &JsValue,
+        scope: &mut MemoryScope,
         admit_fixed_reply: &mut dyn FnMut() -> Result<(), JsError>,
     ) -> Result<JsValue, JsError> {
         if self.chart.indicators.entry(id).is_none() {
-            let suffix = string(id)
-                .map(JsString::to_string_lossy)
-                .unwrap_or_else(|| "undefined".to_owned());
-            return Err(ordinary_error(&format!("Missing indicator: {suffix}")));
+            let suffix = js_to_string_scoped(id, self.chart.dialect, scope)?;
+            let prefix = "Missing indicator: ";
+            let length = prefix
+                .encode_utf16()
+                .count()
+                .checked_add(suffix.len_utf16())
+                .ok_or_else(|| scope.allocation_failure().into_js_error())?;
+            let mut message = scoped_vec(length, scope)?;
+            message.extend(prefix.encode_utf16());
+            message.extend_from_slice(suffix.as_units());
+            return Err(JsError::new("Error", JsString::from_utf16(message)));
         }
         let memory = self.chart.ingestion.data().store().memory_context().clone();
         let mut temporary = memory.scope();
@@ -1822,6 +1830,12 @@ impl<'a> ChartApi<'a> {
             merged.insert(key("offset"), JsValue::Undefined);
         }
         merged.remove(&key("values"));
+        // JS setSeries는 patch.id를 읽고 style 검증은 하되, normalization/publication에는
+        // method argument의 원래 id를 강제로 다시 넣어 rename을 허용하지 않는다.
+        merged.insert(
+            key("id"),
+            JsValue::String(id.try_clone_scoped(scope).map_err(memory_error)?),
+        );
         let values = if !patch_has_values {
             SeriesValuesStage::KeepExisting
         } else if let Some(values) = attached_patch {

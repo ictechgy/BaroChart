@@ -657,7 +657,9 @@ impl SeriesCaches {
                 || policy_changed
                 || capacity_changed
                 || indicator && revision_cache.is_some_and(|old| revision > old + 1.0)
-                || computed_until.saturating_sub(start) > values.len() / 4;
+                // JS는 음수·fractional dirty offset도 Number 차이로 rebuild 여부를 정한다.
+                // 먼저 usize로 바꾸면 음수가 sentinel이 되어 stale tree를 갱신하지 못한다.
+                || computed_until as f64 - start_value > values.len() as f64 / 4.0;
             if rebuild {
                 let old_bytes = entry.index.as_ref().map_or(0, CachedIndex::bytes);
                 let context = memory.context().clone();

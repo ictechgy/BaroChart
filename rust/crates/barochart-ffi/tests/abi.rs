@@ -1940,6 +1940,94 @@ fn f64_transport_rejects_null_misalignment_and_overflow_without_writes() {
 }
 
 #[test]
+fn native_async_buffer_stale_routes_throw_without_writes_or_poisoning() {
+    let _guard = serial();
+
+    unsafe fn assert_stale(engine: *mut BcEngine, args: &[u8]) {
+        let mut destination = [91.0_f64, 92.0];
+        let mut error = BcBuf::default();
+        let status = unsafe {
+            bc_read_f64(
+                engine,
+                b"nativeAsyncBuffer".as_ptr(),
+                b"nativeAsyncBuffer".len(),
+                args.as_ptr(),
+                args.len(),
+                destination.as_mut_ptr(),
+                destination.len(),
+                &mut error,
+            )
+        };
+        assert_eq!(status, BcStatus::BC_THROW);
+        assert_eq!(destination, [91.0, 92.0]);
+        assert_eq!(
+            unsafe { bytes_and_free(error) },
+            br#"{"name":"Error","message":"Async stale: source replaced/released","code":null}"#
+        );
+        let (status, output) = unsafe { call(engine, b"nativeEcho", br#"["usable"]"#, 0) };
+        assert_eq!(status, BcStatus::BC_OK);
+        assert_eq!(output, br#""usable""#);
+    }
+
+    let mut fresh_host = Box::new(HostContext::new());
+    let fresh = unsafe { new_engine(&mut fresh_host) };
+    unsafe { assert_stale(fresh, b"[1,0,0,2]") };
+    unsafe { bc_engine_free(fresh) };
+
+    let mut released_host = Box::new(HostContext::new());
+    let released = unsafe { new_engine(&mut released_host) };
+    let (status, _) = unsafe { call(released, b"nativeInit", b"[8]", 0) };
+    assert_eq!(status, BcStatus::BC_OK);
+    let (status, begin) = unsafe {
+        call(
+            released,
+            b"nativePrepareBegin",
+            br#"["{\"kind\":\"seeded\",\"count\":4,\"seed\":7,\"visibleBars\":3}"]"#,
+            0,
+        )
+    };
+    assert_eq!(
+        status,
+        BcStatus::BC_OK,
+        "{}",
+        String::from_utf8_lossy(&begin)
+    );
+    assert!(String::from_utf8_lossy(&begin).contains("\\\"ticket\\\":1"));
+    let (status, output) = unsafe { call(released, b"nativeAsyncRelease", b"[1]", 0) };
+    assert_eq!(status, BcStatus::BC_OK);
+    assert_eq!(output, b"true");
+    unsafe { assert_stale(released, b"[1,0,0,2]") };
+    unsafe { bc_engine_free(released) };
+
+    let mut params_host = Box::new(HostContext::new());
+    let params = unsafe { new_engine(&mut params_host) };
+    let (status, _) = unsafe { call(params, b"nativeInit", b"[8]", 0) };
+    assert_eq!(status, BcStatus::BC_OK);
+    let (status, begin) = unsafe {
+        call(
+            params,
+            b"nativeParamsSourceBegin",
+            br#"["ema",{"period":3},1,805306368,1]"#,
+            0,
+        )
+    };
+    assert_eq!(
+        status,
+        BcStatus::BC_OK,
+        "{}",
+        String::from_utf8_lossy(&begin)
+    );
+    assert!(String::from_utf8_lossy(&begin).contains("\"ticket\":1"));
+    unsafe { assert_stale(params, b"[2,0,0,2]") };
+    let (status, active) = unsafe { call(params, b"nativeParamsSourceStatus", b"[1]", 0) };
+    assert_eq!(status, BcStatus::BC_OK);
+    assert!(String::from_utf8_lossy(&active).contains("\"status\":\"active\""));
+    let (status, _) = unsafe { call(params, b"nativeParamsSourceAbort", b"[1]", 0) };
+    assert_eq!(status, BcStatus::BC_OK);
+    unsafe { bc_engine_free(params) };
+}
+
+#[test]
 fn write_snapshot_returns_actual_previous_bits_and_outlives_engine() {
     let _guard = serial();
     let mut host = Box::new(HostContext::new());

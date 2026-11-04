@@ -146,31 +146,6 @@ fn parse_entry_json_scoped(
     }
 }
 
-fn pending_ui_incomplete_scoped(text: &JsString, scope: &mut MemoryScope) -> Result<bool, JsError> {
-    let parse_text = text
-        .try_clone_scoped(scope)
-        .map_err(|failure| failure.into_js_error())?;
-    let header = crate::checkpoint_codec::safe_checkpoint_parse_scoped(
-        &JsValue::String(parse_text),
-        NumberDialect::PLATFORM,
-        scope,
-    )?;
-    let counts = field(&header, "state")
-        .and_then(|state| field(state, "drawings"))
-        .and_then(|drawings| field(drawings, "frameCounts"));
-    let Some(JsValue::Array(counts)) = counts else {
-        return Err(type_error("Async UI frame counts"));
-    };
-    for count in counts {
-        if exact_usize(count).is_none() {
-            return Err(type_error("Async UI frame counts"));
-        }
-    }
-    Ok(counts
-        .iter()
-        .any(|count| number(count).unwrap_or(0.0) != 0.0))
-}
-
 /// One-call-only borrows supplied by Root Engine.
 pub struct RuntimeContext<'a> {
     pub chart: Option<&'a mut NativeChart>,
@@ -204,6 +179,10 @@ impl NativeRuntimeResult {
     }
 
     fn publication(value: JsValue, publication: PreparedPublication) -> Self {
+        debug_assert!(
+            publication.input.is_some(),
+            "runtime result cannot expose an unfinished UI publication"
+        );
         Self {
             value,
             publication: Some(publication),
@@ -550,11 +529,6 @@ enum PreparedTarget {
     Workspace(Box<NativeWorkspaceTarget>),
 }
 
-enum RuntimeUiImport {
-    Active(Box<NativeUiImport>),
-    Pending { incomplete: bool },
-}
-
 impl PreparedTarget {
     fn target(&mut self, slot: f64, offset: f64, count: f64) -> Result<&mut [f64], JsError> {
         match self {
@@ -598,7 +572,7 @@ pub struct NativeRuntime {
     params_source: Option<ParamsSourceRow>,
     prepared: Option<PreparedTarget>,
     params_target: Option<ParamsTargetRow>,
-    ui_import: Option<RuntimeUiImport>,
+    ui_import: Option<Box<NativeUiImport>>,
     ui_prepared: Option<PreparedPublication>,
     prepare_creating: bool,
     workspace_creating: bool,
@@ -872,7 +846,6 @@ impl NativeRuntime {
             }));
         }
         let ticket = self.next_ticket_unchecked();
-        let value = async_begin_value(ticket, &source, scope)?;
         self.async_source = Some(AsyncSourceRow {
             ticket,
             source,
@@ -880,6 +853,15 @@ impl NativeRuntime {
             owner,
             ui: None,
         });
+        let value = async_begin_value(
+            ticket,
+            &self
+                .async_source
+                .as_ref()
+                .expect("installed async source")
+                .source,
+            scope,
+        )?;
         Ok(JsValue::String(json_text_scoped(
             &value,
             NumberDialect::PLATFORM,
@@ -1671,25 +1653,10 @@ impl NativeRuntime {
             return Err(ordinary_error("Async UI target unavailable"));
         }
         let text = string_scoped(argument(args, 0), "Async UI header", scope)?;
-        NativeUiImport::validate_header_with_memory(&text, NumberDialect::PLATFORM, &self.memory)?;
-        let ready = self.prepared.as_mut().expect("target checked").take_core();
-        let (core, mode) = match ready {
-            Ok(ready) => ready,
-            Err(error) if error.message.to_string_lossy() == "Async result not ready" => {
-                self.ui_import = Some(RuntimeUiImport::Pending {
-                    incomplete: pending_ui_incomplete_scoped(&text, scope)?,
-                });
-                return Ok(JsValue::Bool(true));
-            }
-            Err(error) => return Err(error),
-        };
-        match NativeUiImport::new(&text, core, mode, NumberDialect::PLATFORM) {
-            Ok(import) => {
-                self.ui_import = Some(RuntimeUiImport::Active(Box::new(import)));
-                Ok(JsValue::Bool(true))
-            }
-            Err(error) => Err(error),
-        }
+        let import =
+            NativeUiImport::new_pending(&text, NumberDialect::PLATFORM, self.memory.clone())?;
+        self.ui_import = Some(Box::new(import));
+        Ok(JsValue::Bool(true))
     }
 
     fn ui_import_chunk(
@@ -1702,29 +1669,44 @@ impl NativeRuntime {
             .as_mut()
             .ok_or_else(|| ordinary_error("Async UI target missing"))?;
         let text = string_scoped(argument(args, 0), "Async UI chunk text", scope)?;
-        match import {
-            RuntimeUiImport::Active(import) => import.chunk(&text)?,
-            RuntimeUiImport::Pending { .. } => {
-                return Err(ordinary_error("Async result not ready"));
-            }
-        }
+        import.chunk(&text)?;
         Ok(JsValue::Bool(true))
     }
 
-    fn ui_import_end(&mut self, context: &mut RuntimeContext<'_>) -> Result<JsValue, JsError> {
-        let import = self
+    fn ui_import_end(&mut self, _context: &mut RuntimeContext<'_>) -> Result<JsValue, JsError> {
+        {
+            let import = self
+                .ui_import
+                .as_mut()
+                .ok_or_else(|| ordinary_error("Async UI target missing"))?;
+            import.validate_complete()?;
+        }
+        let (attached, core_installed) = self
+            .ui_import
+            .as_ref()
+            .map(|import| (import.attached(), import.core_installed()))
+            .expect("checked UI import");
+        if !attached && !core_installed {
+            let prepared = self
+                .prepared
+                .as_mut()
+                .ok_or_else(|| ordinary_error("Async target missing"))?;
+            let (core, mode) = prepared.take_core()?;
+            self.ui_import
+                .as_mut()
+                .expect("checked UI import")
+                .install_core(core, mode)?;
+        } else if !attached {
+            self.ui_import
+                .as_mut()
+                .expect("checked UI import")
+                .attach_core()?;
+        }
+        let publication = self
             .ui_import
             .as_mut()
-            .ok_or_else(|| ordinary_error("Async UI target missing"))?;
-        let publication = match import {
-            RuntimeUiImport::Active(import) => import.finish(context.host)?,
-            RuntimeUiImport::Pending { incomplete: true } => {
-                return Err(ordinary_error("Async UI incomplete transfer"));
-            }
-            RuntimeUiImport::Pending { incomplete: false } => {
-                return Err(ordinary_error("Async result not ready"));
-            }
-        };
+            .expect("checked UI import")
+            .finish()?;
         self.ui_prepared = Some(publication);
         self.ui_import = None;
         Ok(JsValue::Bool(true))
@@ -1736,16 +1718,33 @@ impl NativeRuntime {
         context: &mut RuntimeContext<'_>,
         scope: &mut MemoryScope,
     ) -> Result<NativeRuntimeResult, JsError> {
-        let publication = if let Some(publication) = self.ui_prepared.take() {
+        let imported = self.ui_prepared.is_some();
+        let mut publication = if let Some(publication) = self.ui_prepared.take() {
             publication
         } else {
             let Some(prepared) = self.prepared.as_mut() else {
                 return Err(ordinary_error("Async target missing"));
             };
-            let (core, mode) = prepared.take_core()?;
+            let ready = prepared.take_core();
+            let (core, mode) = match ready {
+                Ok(ready) => ready,
+                Err(error) if error.message.to_string_lossy() == "Async result not ready" => self
+                    .ui_import
+                    .as_mut()
+                    .and_then(|import| import.take_core_for_direct())
+                    .ok_or(error)?,
+                Err(error) => return Err(error),
+            };
             let text = string_scoped(argument(args, 0), "Async UI state", scope)?;
             finish_direct(core, &text, mode, context.host, NumberDialect::PLATFORM)?
         };
+        if let Err(error) = publication.finalize_host_state(context.host) {
+            if imported {
+                self.ui_prepared = Some(publication);
+            }
+            return Err(error);
+        }
+        self.ui_import = None;
         self.prepared = None;
         Ok(NativeRuntimeResult::publication(
             JsValue::Bool(true),
@@ -2308,7 +2307,7 @@ impl NativeRuntime {
         let offset_number = number(offset).unwrap_or(f64::NAN);
         let count_number = number(count).unwrap_or(f64::NAN);
         let RuntimeContext {
-            chart,
+            mut chart,
             input,
             size,
             host,
@@ -2319,28 +2318,47 @@ impl NativeRuntime {
             .as_ref()
             .is_some_and(|row| ticket_number == row.ticket as f64)
         {
-            let chart = chart.ok_or_else(|| type_error("Workspace own data slot: nativeModel"))?;
-            let preflight = {
-                let row = self.params_source.as_ref().expect("matched params source");
-                row.source.check_buffer_slice(
-                    chart.ingestion_owner(),
-                    chart.model(),
-                    chart.indicators(),
-                    chart.series_caches(),
-                    slot_number,
-                    offset_number,
-                    count_number,
-                    row.revision,
-                )
+            let preflight = match (chart.as_deref(), input, size) {
+                (None, _, _) => Err(type_error("Workspace own data slot: nativeModel")),
+                (_, None, _) => Err(type_error("Workspace own data slot: nativeInput")),
+                (_, _, None) => Err(type_error("Workspace own data slot: nativeSize")),
+                (Some(chart), Some(input), Some(size)) => {
+                    let row = self.params_source.as_ref().expect("matched params source");
+                    if !row.owner.matches_outer(chart, input, size)
+                        || row.lease.as_ref().is_some_and(|lease| {
+                            !chart.ingestion_owner().validate_async_lease(lease)
+                        })
+                    {
+                        Err(ordinary_error(
+                            "Workspace source stale: native owner replaced",
+                        ))
+                    } else if !row.owner.matches_source(chart, input) {
+                        Err(stale_error("Native params stale: source/owner changed"))
+                    } else {
+                        row.source.check_buffer_slice(
+                            chart.ingestion_owner(),
+                            chart.model(),
+                            chart.indicators(),
+                            chart.series_caches(),
+                            slot_number,
+                            offset_number,
+                            count_number,
+                            row.revision,
+                        )
+                    }
+                }
             };
             if let Err(error) = preflight {
                 let mut row = self.params_source.take().expect("matched params source");
-                if let Some(mut lease) = row.lease.take() {
+                if let Some(mut lease) = row.lease.take()
+                    && let Some(chart) = chart.as_deref_mut()
+                {
                     chart.ingestion_owner_mut().release_async_lease(&mut lease);
                 }
                 self.params_ledger.terminal(row.registration, "failed");
                 return Err(error);
             }
+            let chart = chart.expect("validated params chart");
             let row = self.params_source.as_mut().expect("matched params source");
             return row.source.buffer(
                 chart.ingestion_owner(),
@@ -2403,7 +2421,10 @@ impl NativeRuntime {
             let row = self.workspace_source.as_mut().expect("matched workspace");
             return workspace_read_slice(row, chart, input, host, slot, offset, count, revision);
         }
-        let row = self.async_source.as_ref().expect("checked async");
+        let row = self
+            .async_source
+            .as_ref()
+            .ok_or_else(|| ordinary_error("Async stale: source replaced/released"))?;
         if Some(row.ticket) != exact_u64(ticket) {
             return Err(ordinary_error("Async stale: source replaced/released"));
         }
@@ -2803,13 +2824,13 @@ fn restored_publication(
     })?;
     let input =
         OwnedInteractionState::new_with_memory(chart.data().store().memory_context().clone())?;
-    Ok(PreparedPublication {
+    Ok(PreparedPublication::ready(
         chart,
         input,
-        width: JsValue::Number(size.width),
-        height: JsValue::Number(size.height),
-        memory: MemoryGroup::empty(memory_context),
-    })
+        JsValue::Number(size.width),
+        JsValue::Number(size.height),
+        MemoryGroup::empty(memory_context),
+    ))
 }
 
 fn workspace_symbol_parts(

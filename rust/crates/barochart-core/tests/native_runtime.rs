@@ -298,6 +298,31 @@ fn call_empty(
     )
 }
 
+fn read_async_buffer(
+    runtime: &mut NativeRuntime,
+    chart: &mut NativeChart,
+    input: &OwnedInteractionState,
+    size: &NativeSizeState,
+    serial: &mut f64,
+    ticket: f64,
+) -> Result<Vec<f64>, barochart_js::error::JsError> {
+    runtime
+        .read_f64(
+            RuntimeContext {
+                chart: Some(chart),
+                input: Some(input),
+                size: Some(size),
+                host: &NoZones,
+                next_store_serial: serial,
+            },
+            &JsValue::Number(ticket),
+            &JsValue::Number(0.0),
+            &JsValue::Number(0.0),
+            &JsValue::Number(1.0),
+        )
+        .map(<[f64]>::to_vec)
+}
+
 fn error_value(error: barochart_js::error::JsError) -> JsValue {
     object(&[
         ("name", text(error.name)),
@@ -1411,7 +1436,14 @@ fn workspace_target_finish_returns_owned_atomic_publication() {
     let publication = result.publication.expect("workspace publication");
     assert_eq!(publication.chart.data().store().length(), 8);
     assert_eq!(publication.chart.model().series.len(), 3);
-    assert_eq!(publication.input.pointer_count(), 0);
+    assert_eq!(
+        publication
+            .input
+            .as_ref()
+            .expect("workspace publication input")
+            .pointer_count(),
+        0
+    );
     assert!(matches!(publication.width, JsValue::Number(1200.0)));
     assert!(matches!(publication.height, JsValue::Number(700.0)));
 }
@@ -1932,4 +1964,386 @@ fn malformed_arm_write_fails_before_registration_and_drops_the_row() {
     )
     .unwrap();
     assert_wire(&status, field(&expected, "status2"));
+}
+
+#[test]
+fn async_buffer_missing_rows_are_ordinary_stale_errors_and_leave_runtime_usable() {
+    let mut chart = chart(8);
+    let input = OwnedInteractionState::new();
+    let size = size(1200.0, 700.0);
+    let mut serial = 2.0;
+    let mut runtime = NativeRuntime::new();
+    let fresh =
+        read_async_buffer(&mut runtime, &mut chart, &input, &size, &mut serial, 1.0).unwrap_err();
+    assert_eq!(fresh.name, "Error");
+    assert_eq!(
+        fresh.message.to_string_lossy(),
+        "Async stale: source replaced/released"
+    );
+
+    let begin = call(
+        &mut runtime,
+        &mut chart,
+        &input,
+        &size,
+        &mut serial,
+        "nativePrepareBegin",
+        &[text(
+            "{\"kind\":\"seeded\",\"count\":4,\"seed\":7,\"visibleBars\":3}",
+        )],
+    )
+    .unwrap();
+    let ticket = number(field(&parse(&string(&begin)), "ticket"));
+    call(
+        &mut runtime,
+        &mut chart,
+        &input,
+        &size,
+        &mut serial,
+        "nativeAsyncRelease",
+        &[JsValue::Number(ticket)],
+    )
+    .unwrap();
+    let released = read_async_buffer(&mut runtime, &mut chart, &input, &size, &mut serial, ticket)
+        .unwrap_err();
+    assert_eq!(released.name, "Error");
+    assert_eq!(
+        released.message.to_string_lossy(),
+        "Async stale: source replaced/released"
+    );
+
+    let params = call(
+        &mut runtime,
+        &mut chart,
+        &input,
+        &size,
+        &mut serial,
+        "nativeParamsSourceBegin",
+        &[
+            text("ema"),
+            object(&[("period", JsValue::Number(3.0))]),
+            JsValue::Number(1.0),
+            JsValue::Number(805_306_368.0),
+            JsValue::Number(1.0),
+        ],
+    )
+    .unwrap();
+    let params_ticket = number(field(&params, "ticket"));
+    let mismatch = read_async_buffer(
+        &mut runtime,
+        &mut chart,
+        &input,
+        &size,
+        &mut serial,
+        params_ticket + 1.0,
+    )
+    .unwrap_err();
+    assert_eq!(mismatch.name, "Error");
+    assert_eq!(
+        mismatch.message.to_string_lossy(),
+        "Async stale: source replaced/released"
+    );
+    let active = call(
+        &mut runtime,
+        &mut chart,
+        &input,
+        &size,
+        &mut serial,
+        "nativeParamsSourceStatus",
+        &[JsValue::Number(1.0)],
+    )
+    .unwrap();
+    assert!(matches!(field(&active, "status"), JsValue::String(value) if value == &key("active")));
+    call(
+        &mut runtime,
+        &mut chart,
+        &input,
+        &size,
+        &mut serial,
+        "nativeParamsSourceAbort",
+        &[JsValue::Number(1.0)],
+    )
+    .unwrap();
+
+    assert!(
+        call(
+            &mut runtime,
+            &mut chart,
+            &input,
+            &size,
+            &mut serial,
+            "nativePrepareBegin",
+            &[text(
+                "{\"kind\":\"seeded\",\"count\":4,\"seed\":8,\"visibleBars\":3}",
+            )],
+        )
+        .is_ok()
+    );
+}
+
+#[test]
+fn params_buffer_rejects_equal_valued_owner_replacements_before_reading() {
+    let mut chart = chart(8);
+    let original_input = OwnedInteractionState::new();
+    let replacement_input = OwnedInteractionState::new();
+    let original_size = size(1200.0, 700.0);
+    let replacement_size = size(1200.0, 700.0);
+    let mut serial = 2.0;
+    let mut runtime = NativeRuntime::new();
+
+    for (registration, input, size) in [
+        (1_u64, &original_input, &replacement_size),
+        (2_u64, &replacement_input, &original_size),
+    ] {
+        let begin = call(
+            &mut runtime,
+            &mut chart,
+            &original_input,
+            &original_size,
+            &mut serial,
+            "nativeParamsSourceBegin",
+            &[
+                text("ema"),
+                object(&[("period", JsValue::Number(3.0))]),
+                JsValue::Number(registration as f64),
+                JsValue::Number(805_306_368.0),
+                JsValue::Number(registration as f64),
+            ],
+        )
+        .unwrap();
+        let ticket = field(&begin, "ticket").clone();
+        loop {
+            let progress = call(
+                &mut runtime,
+                &mut chart,
+                &original_input,
+                &original_size,
+                &mut serial,
+                "nativeParamsSourceStep",
+                &[
+                    ticket.clone(),
+                    JsValue::Number(64.0),
+                    JsValue::Number(registration as f64),
+                ],
+            )
+            .unwrap();
+            if matches!(field(&progress, "complete"), JsValue::Bool(true)) {
+                break;
+            }
+        }
+
+        let error = runtime
+            .read_f64(
+                RuntimeContext {
+                    chart: Some(&mut chart),
+                    input: Some(input),
+                    size: Some(size),
+                    host: &NoZones,
+                    next_store_serial: &mut serial,
+                },
+                &ticket,
+                &JsValue::Number(0.0),
+                &JsValue::Number(0.0),
+                &JsValue::Number(1.0),
+            )
+            .unwrap_err();
+        assert_eq!(error.name, "Error");
+        assert_eq!(
+            error.message.to_string_lossy(),
+            "Workspace source stale: native owner replaced"
+        );
+        let status = call(
+            &mut runtime,
+            &mut chart,
+            &original_input,
+            &original_size,
+            &mut serial,
+            "nativeParamsSourceStatus",
+            &[JsValue::Number(registration as f64)],
+        )
+        .unwrap();
+        assert!(
+            matches!(field(&status, "status"), JsValue::String(value) if value == &key("failed"))
+        );
+    }
+}
+
+#[test]
+fn async_begin_response_oom_keeps_the_published_row_releasable() {
+    struct Attempt {
+        reached_row: bool,
+        success: bool,
+        requested: u64,
+        oom: bool,
+    }
+
+    fn attempt(
+        runtime: &mut NativeRuntime,
+        chart: &mut NativeChart,
+        input: &OwnedInteractionState,
+        size: &NativeSizeState,
+        serial: &mut f64,
+        last_ticket: &mut u64,
+        limit: u64,
+    ) -> Attempt {
+        let account = MemoryAccount::new(limit, OomStyle::InternalErrorLowercase);
+        let mut scope = MemoryContext::accounted(&account).scope();
+        let result = runtime.call_scoped(
+            &key("nativePrepareBegin"),
+            &[text(
+                "{\"kind\":\"seeded\",\"count\":4,\"seed\":7,\"visibleBars\":3}",
+            )],
+            RuntimeContext {
+                chart: Some(chart),
+                input: Some(input),
+                size: Some(size),
+                host: &NoZones,
+                next_store_serial: serial,
+            },
+            &mut scope,
+        );
+        let requested = scope.requested_bytes();
+        let candidate = *last_ticket + 1;
+        let (reached_row, success, oom) = match result {
+            Ok(result) => {
+                let response = parse(&string(&result.value));
+                assert_eq!(number(field(&response, "ticket")), candidate as f64);
+                (true, true, false)
+            }
+            Err(error) => {
+                let reached = call(
+                    runtime,
+                    chart,
+                    input,
+                    size,
+                    serial,
+                    "nativeAsyncCheck",
+                    &[JsValue::Number(candidate as f64)],
+                )
+                .is_ok();
+                (
+                    reached,
+                    false,
+                    error.code.as_deref() == Some("__BAROCHART_OOM_LIMIT__"),
+                )
+            }
+        };
+        if reached_row {
+            *last_ticket = candidate;
+            call(
+                runtime,
+                chart,
+                input,
+                size,
+                serial,
+                "nativeAsyncRelease",
+                &[JsValue::Number(candidate as f64)],
+            )
+            .unwrap();
+        }
+        Attempt {
+            reached_row,
+            success,
+            requested,
+            oom,
+        }
+    }
+
+    let mut chart = chart(8);
+    let input = OwnedInteractionState::new();
+    let size = size(1200.0, 700.0);
+    let mut serial = 2.0;
+    let mut runtime = NativeRuntime::new();
+    let mut last_ticket = 0;
+
+    let probe = attempt(
+        &mut runtime,
+        &mut chart,
+        &input,
+        &size,
+        &mut serial,
+        &mut last_ticket,
+        0,
+    );
+    assert!(probe.success);
+    let success_limit = probe.requested;
+
+    let mut low = 1_u64;
+    let mut high = success_limit;
+    while low < high {
+        let middle = low + (high - low) / 2;
+        let result = attempt(
+            &mut runtime,
+            &mut chart,
+            &input,
+            &size,
+            &mut serial,
+            &mut last_ticket,
+            middle,
+        );
+        if result.reached_row {
+            high = middle;
+        } else {
+            assert!(result.oom);
+            low = middle + 1;
+        }
+    }
+    let construction = attempt(
+        &mut runtime,
+        &mut chart,
+        &input,
+        &size,
+        &mut serial,
+        &mut last_ticket,
+        low,
+    );
+    assert!(construction.reached_row && !construction.success && construction.oom);
+    let construction_prefix = construction.requested;
+
+    let mut low = low + 1;
+    let mut high = success_limit;
+    while low < high {
+        let middle = low + (high - low) / 2;
+        let result = attempt(
+            &mut runtime,
+            &mut chart,
+            &input,
+            &size,
+            &mut serial,
+            &mut last_ticket,
+            middle,
+        );
+        if result.success || result.requested > construction_prefix {
+            high = middle;
+        } else {
+            assert!(result.reached_row && result.oom);
+            low = middle + 1;
+        }
+    }
+    let serialization = attempt(
+        &mut runtime,
+        &mut chart,
+        &input,
+        &size,
+        &mut serial,
+        &mut last_ticket,
+        low,
+    );
+    assert!(serialization.reached_row && !serialization.success && serialization.oom);
+    assert!(serialization.requested > construction_prefix);
+
+    assert!(
+        call(
+            &mut runtime,
+            &mut chart,
+            &input,
+            &size,
+            &mut serial,
+            "nativePrepareBegin",
+            &[text(
+                "{\"kind\":\"seeded\",\"count\":4,\"seed\":9,\"visibleBars\":3}",
+            )],
+        )
+        .is_ok()
+    );
 }

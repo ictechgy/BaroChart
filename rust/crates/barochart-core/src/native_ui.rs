@@ -15,11 +15,11 @@ use crate::Host;
 use crate::chart_api::ChartApi;
 use crate::checkpoint_codec::{safe_checkpoint_parse_scoped, safe_checkpoint_stringify_scoped};
 use crate::contracts::{
-    AXIS_KEYS, PANEL_KEYS, RESOURCE_LIMITS, SERIES_KEYS, THEME_KEYS, bounded_text, option_record,
+    AXIS_KEYS, PANEL_KEYS, RESOURCE_LIMITS, SERIES_KEYS, THEME_KEYS, identifier, option_record,
     portable_style_scoped,
 };
 use crate::drawing_types::Drawing;
-use crate::drawing_validation::{DRAWING_TYPES, canonical_drawing_scoped};
+use crate::drawing_validation::canonical_drawing_scoped;
 use crate::drawings::{DrawingFrame, DrawingSnapshot, DrawingSnapshotList, DrawingStore};
 use crate::indicator_modules::pressure_descriptor_value;
 use crate::indicator_types::IndicatorProvenance;
@@ -159,6 +159,49 @@ fn drawing_serial(value: &JsValue) -> Result<u64, JsError> {
             Ok(*value as u64)
         }
         _ => Err(range_error("Async drawing serial")),
+    }
+}
+
+fn js_truthy(value: &JsValue) -> bool {
+    match value {
+        JsValue::Undefined | JsValue::Null | JsValue::Bool(false) => false,
+        JsValue::Number(value) => *value != 0.0 && !value.is_nan(),
+        JsValue::String(value) => !value.as_units().is_empty(),
+        JsValue::Bool(true) | JsValue::Array(_) | JsValue::Object(_) => true,
+    }
+}
+
+fn validate_symbol_shape(value: &JsValue) -> Result<(), JsError> {
+    let JsValue::Object(symbol) = value else {
+        return Err(type_error("Invalid symbol metadata"));
+    };
+    let required_text = |name: &str| matches!(symbol.get(&key(name)), Some(JsValue::String(value)) if !value.as_units().is_empty());
+    let decimals = matches!(
+        symbol.get(&key("priceDecimals")),
+        Some(JsValue::Number(value))
+            if value.is_finite() && value.fract() == 0.0 && (0.0..=18.0).contains(value)
+    );
+    let tick = matches!(
+        symbol.get(&key("tickSize")),
+        Some(JsValue::Number(value)) if value.is_finite() && *value > 0.0
+    );
+    let adjustment = matches!(
+        symbol.get(&key("adjustment")),
+        Some(JsValue::String(value))
+            if ["raw", "split", "total-return"]
+                .iter()
+                .any(|candidate| value == &key(candidate))
+    );
+    if ["id", "exchange", "timezone", "currency", "volumeUnit"]
+        .iter()
+        .all(|name| required_text(name))
+        && decimals
+        && tick
+        && adjustment
+    {
+        Ok(())
+    } else {
+        Err(type_error("Invalid symbol metadata"))
     }
 }
 
@@ -1018,10 +1061,94 @@ fn same_drawing_frames(left: &[Vec<Arc<Drawing>>], right: &[Vec<Arc<Drawing>>]) 
 /// UI finish 뒤 Root가 같은 call에서 게시하는 완성 후보다.
 pub struct PreparedPublication {
     pub chart: NativeChart,
-    pub input: OwnedInteractionState,
+    pub input: Option<OwnedInteractionState>,
     pub width: JsValue,
     pub height: JsValue,
     pub memory: MemoryGroup,
+    pending_host: Option<PendingUiHostState>,
+}
+
+struct PendingUiHostState {
+    tool: JsValue,
+    text: JsValue,
+    drawing_target: Option<JsValue>,
+    crosshair: Option<(f64, f64)>,
+    symbol: JsValue,
+    _memory: MemoryGroup,
+}
+
+impl PreparedPublication {
+    pub(crate) fn ready(
+        chart: NativeChart,
+        input: OwnedInteractionState,
+        width: JsValue,
+        height: JsValue,
+        memory: MemoryGroup,
+    ) -> Self {
+        Self {
+            chart,
+            input: Some(input),
+            width,
+            height,
+            memory,
+            pending_host: None,
+        }
+    }
+
+    fn pending(
+        chart: NativeChart,
+        host_state: PendingUiHostState,
+        width: JsValue,
+        height: JsValue,
+        memory: MemoryGroup,
+    ) -> Self {
+        Self {
+            chart,
+            input: None,
+            width,
+            height,
+            memory,
+            pending_host: Some(host_state),
+        }
+    }
+
+    /// Source `nativeAsyncFinish` 순서로 fresh controller와 host symbol을 staging한다.
+    pub(crate) fn finalize_host_state(&mut self, host: &dyn Host) -> Result<(), JsError> {
+        let Some(pending) = self.pending_host.as_ref() else {
+            debug_assert!(self.input.is_some(), "ready publication input");
+            return Ok(());
+        };
+        let memory = self.chart.data().store().memory_context().clone();
+        let mut input = OwnedInteractionState::from_native_ui_with_memory(
+            key("select"),
+            JsValue::String(JsString::default()),
+            None,
+            pending.crosshair,
+            memory,
+        )?;
+        let width = match &self.width {
+            JsValue::Number(value) => *value,
+            _ => f64::NAN,
+        };
+        let height = match &self.height {
+            JsValue::Number(value) => *value,
+            _ => f64::NAN,
+        };
+        let mut api = ChartApi::with_controller(&mut self.chart, &mut input, host, width, height);
+        api.dispatch(&key("setTool"), std::slice::from_ref(&pending.tool))?;
+        api.dispatch(&key("setText"), std::slice::from_ref(&pending.text))?;
+        let null_target = JsValue::Null;
+        api.dispatch(
+            &key("setDrawingTarget"),
+            std::slice::from_ref(pending.drawing_target.as_ref().unwrap_or(&null_target)),
+        )?;
+        if js_truthy(&pending.symbol) {
+            api.dispatch(&key("setSymbol"), std::slice::from_ref(&pending.symbol))?;
+        }
+        self.input = Some(input);
+        self.pending_host = None;
+        Ok(())
+    }
 }
 
 /// Data target event가 UI view를 최종 보정하는 데 필요한 최소 정보다.
@@ -1065,7 +1192,7 @@ struct ParsedUi {
     stage: NativeUiModelStage,
     follow: bool,
     drawing_target: Option<JsValue>,
-    tool: JsString,
+    tool: JsValue,
     text: JsValue,
     crosshair: Option<(f64, f64)>,
     symbol: JsValue,
@@ -1137,7 +1264,7 @@ fn parsed_ui_heap_bytes(parsed: &ParsedUi) -> usize {
                 .as_ref()
                 .map_or(0, js_value_heap_bytes),
         )
-        .saturating_add(js_string_heap_bytes(&parsed.tool))
+        .saturating_add(js_value_heap_bytes(&parsed.tool))
         .saturating_add(js_value_heap_bytes(&parsed.text))
         .saturating_add(js_value_heap_bytes(&parsed.symbol))
         .saturating_add(js_value_heap_bytes(&parsed.size.0))
@@ -1342,27 +1469,15 @@ fn parse_ui(
                 .map_err(|failure| failure.into_js_error())
         })
         .transpose()?;
-    let tool = string_scoped(
-        required(value, "tool", "Unknown drawing tool")?,
-        "Unknown drawing tool",
-        scope,
-    )?;
-    if tool != key("select")
-        && !DRAWING_TYPES
-            .iter()
-            .any(|candidate| tool.as_units().iter().copied().eq(candidate.encode_utf16()))
-    {
-        return Err(ordinary_error("Unknown drawing tool"));
-    }
-    let text_value = required(value, "text", "Drawing text, at most 2000 characters")?;
-    let text_value = bounded_text(
-        text_value,
-        2000,
-        "Drawing text, at most 2000 characters",
-        true,
-    )?
-    .try_clone_scoped(scope)
-    .map_err(|failure| failure.into_js_error())?;
+    let undefined = JsValue::Undefined;
+    let tool = field(value, "tool")
+        .unwrap_or(&undefined)
+        .try_clone_scoped(scope)
+        .map_err(|failure| failure.into_js_error())?;
+    let text_value = field(value, "text")
+        .unwrap_or(&undefined)
+        .try_clone_scoped(scope)
+        .map_err(|failure| failure.into_js_error())?;
     let symbol = field(value, "symbol")
         .map(|value| {
             value
@@ -1371,6 +1486,9 @@ fn parse_ui(
         })
         .transpose()?
         .unwrap_or(JsValue::Null);
+    if js_truthy(&symbol) {
+        validate_symbol_shape(&symbol)?;
+    }
     let ingestion = match field(value, "dataIngestion") {
         None | Some(JsValue::Undefined) => None,
         Some(value) => Some(string_scoped(value, "Ingestion document string", scope)?),
@@ -1384,7 +1502,7 @@ fn parse_ui(
         follow,
         drawing_target,
         tool,
-        text: JsValue::String(text_value),
+        text: text_value,
         crosshair,
         symbol,
         size: (width, height),
@@ -1584,10 +1702,10 @@ fn build_publication(
     parsed: ParsedUi,
     drawings: DrawingStore,
     mode: NativeUiFinishMode,
-    host: &dyn Host,
     dialect: NumberDialect,
 ) -> Result<PreparedPublication, JsError> {
     let memory_context = core.owner.data().store().memory_context().clone();
+    let host_state = prepare_pending_host_state(&parsed, &memory_context)?;
     if let Some(document) = parsed.ingestion.as_ref() {
         let mut load_scope = memory_context.scope();
         let document = document
@@ -1611,7 +1729,7 @@ fn build_publication(
         prepared_view,
         parsed.follow,
     );
-    let mut chart = NativeChart::from_parts(NativeChartParts {
+    let chart = NativeChart::from_parts(NativeChartParts {
         ingestion: core.owner,
         model: core.model,
         indicators: core.indicators,
@@ -1623,25 +1741,14 @@ fn build_publication(
         symbol_memory: MemoryGroup::empty(memory_context.clone()),
         dialect,
     })?;
-    if !matches!(parsed.symbol, JsValue::Null | JsValue::Undefined) {
-        ChartApi::new(&mut chart, host)
-            .dispatch(&key("setSymbol"), std::slice::from_ref(&parsed.symbol))?;
-    }
     let publication_memory = MemoryGroup::empty(memory_context.clone());
-    let input = OwnedInteractionState::from_native_ui_with_memory(
-        parsed.tool,
-        parsed.text,
-        parsed.drawing_target,
-        parsed.crosshair,
-        memory_context,
-    )?;
-    Ok(PreparedPublication {
+    Ok(PreparedPublication::pending(
         chart,
-        input,
-        width: parsed.size.0,
-        height: parsed.size.1,
-        memory: publication_memory,
-    })
+        host_state,
+        parsed.size.0,
+        parsed.size.1,
+        publication_memory,
+    ))
 }
 
 fn apply_view_effect(
@@ -1712,7 +1819,7 @@ pub fn finish_direct(
     core: NativePreparedCore,
     text: &JsString,
     mode: NativeUiFinishMode,
-    host: &dyn Host,
+    _host: &dyn Host,
     dialect: NumberDialect,
 ) -> Result<PreparedPublication, JsError> {
     let memory = core.owner.data().store().memory_context().clone();
@@ -1724,7 +1831,7 @@ pub fn finish_direct(
     let value = safe_checkpoint_parse_scoped(&JsValue::String(parse_text), dialect, &mut scope)?;
     let parsed = parse_ui(&core, &value, &mode, dialect, &mut scope)?;
     let drawings = drawing_store_from_direct(&parsed, dialect, &memory, &mut scope)?;
-    let publication = build_publication(core, parsed, drawings, mode, host, dialect)?;
+    let publication = build_publication(core, parsed, drawings, mode, dialect)?;
     drop((value, scope));
     Ok(publication)
 }
@@ -1733,11 +1840,13 @@ pub fn finish_direct(
 pub struct NativeUiImport {
     core: Option<NativePreparedCore>,
     parsed: Option<ParsedUi>,
-    mode: NativeUiFinishMode,
+    pending_state: Option<JsValue>,
+    _pending_state_memory: MemoryGroup,
+    mode: Option<NativeUiFinishMode>,
     store: DrawingStore,
     counts: Vec<usize>,
     frames: Vec<Vec<Arc<Drawing>>>,
-    frame_memory: Vec<Option<MemoryGroup>>,
+    _frame_memory: Vec<MemoryGroup>,
     records: Vec<Arc<Drawing>>,
     used: HashSet<usize>,
     frame: usize,
@@ -1747,10 +1856,43 @@ pub struct NativeUiImport {
     new_text: usize,
     dialect: NumberDialect,
     memory: MemoryGroup,
+    publication: Option<PendingUiPublication>,
+}
+
+struct PendingUiPublication {
+    parts: Option<NativeChartParts>,
+    chart: Option<NativeChart>,
+    host_state: Option<PendingUiHostState>,
+    width: JsValue,
+    height: JsValue,
+}
+
+impl PendingUiPublication {
+    fn resume(&mut self) -> Result<PreparedPublication, JsError> {
+        if self.chart.is_none() {
+            let parts = self.parts.take().expect("pending publication parts");
+            match NativeChart::try_from_parts_recoverable(parts) {
+                Ok(chart) => self.chart = Some(chart),
+                Err((error, parts)) => {
+                    self.parts = Some(parts);
+                    return Err(error);
+                }
+            }
+        }
+        let chart = self.chart.take().expect("validated publication chart");
+        let memory = chart.data().store().memory_context().clone();
+        Ok(PreparedPublication::pending(
+            chart,
+            self.host_state.take().expect("pending host UI state"),
+            std::mem::replace(&mut self.width, JsValue::Undefined),
+            std::mem::replace(&mut self.height, JsValue::Undefined),
+            MemoryGroup::empty(memory),
+        ))
+    }
 }
 
 impl NativeUiImport {
-    /// Target core readiness보다 먼저 protocol/header shape를 검사한다.
+    /// Target core readiness보다 먼저 protocol/header 전체를 검사한다.
     pub fn validate_header(text: &JsString, dialect: NumberDialect) -> Result<(), JsError> {
         Self::validate_header_with_memory(
             text,
@@ -1778,17 +1920,64 @@ impl NativeUiImport {
         {
             return Err(type_error("Async UI protocol"));
         }
+        let state = required(&header, "state", "Async UI protocol")?;
+        let drawings = required(state, "drawings", "Async drawing header")?;
+        option_record(
+            drawings,
+            &[
+                "limits",
+                "frameCounts",
+                "undoCount",
+                "redoCount",
+                "selected",
+                "serial",
+            ],
+            "Async drawing header",
+        )?;
+        let store = DrawingStore::from_options_with_memory(
+            required(drawings, "limits", "Async drawing limits")?,
+            dialect,
+            memory.clone(),
+        )?;
+        let undo_count = exact_usize(
+            required(drawings, "undoCount", "Async undo count")?,
+            store.config().history_limit,
+            "Async undo count",
+        )?;
+        let redo_count = exact_usize(
+            required(drawings, "redoCount", "Async redo count")?,
+            store.config().history_limit,
+            "Async redo count",
+        )?;
+        drawing_serial(required(drawings, "serial", "Async drawing serial")?)?;
+        let count_values = array(
+            required(drawings, "frameCounts", "Async UI frame counts")?,
+            "Async UI frame counts",
+        )?;
+        if count_values.len() != 1 + undo_count + redo_count {
+            return Err(type_error("Async UI frame counts"));
+        }
+        let mut references = 0usize;
+        for value in count_values {
+            references = references.saturating_add(exact_usize(
+                value,
+                store.config().max_drawings,
+                "Async UI frame size",
+            )?);
+        }
+        if references > store.config().max_drawings + store.config().history_bytes.saturating_div(8)
+        {
+            return Err(range_error("Async UI history reference budget"));
+        }
         Ok(())
     }
 
-    pub fn new(
+    /// Ready core가 없어도 header와 chunk 상태를 explicit runtime account에 보존한다.
+    pub fn new_pending(
         text: &JsString,
-        core: NativePreparedCore,
-        mode: NativeUiFinishMode,
         dialect: NumberDialect,
+        context: MemoryContext,
     ) -> Result<Self, JsError> {
-        let context = core.owner.data().store().memory_context().clone();
-        Self::validate_header_with_memory(text, dialect, &context)?;
         let mut scope = context.scope();
         let parse_text = text
             .try_clone_scoped(&mut scope)
@@ -1798,11 +1987,11 @@ impl NativeUiImport {
         option_record(&header, &["schema", "protocol", "state"], "Async UI header")?;
         if !matches!(field(&header, "schema"), Some(JsValue::String(value)) if value == &key("aster.async.ui"))
             || !matches!(field(&header, "protocol"), Some(JsValue::Number(1.0)))
+            || !matches!(field(&header, "state"), Some(JsValue::Object(_)))
         {
             return Err(type_error("Async UI protocol"));
         }
         let state = required(&header, "state", "Async UI protocol")?;
-        let parsed = parse_ui(&core, state, &mode, dialect, &mut scope)?;
         let drawings = required(state, "drawings", "Async drawing header")?;
         option_record(
             drawings,
@@ -1831,6 +2020,7 @@ impl NativeUiImport {
             store.config().history_limit,
             "Async redo count",
         )?;
+        drawing_serial(required(drawings, "serial", "Async drawing serial")?)?;
         let count_values = array(
             required(drawings, "frameCounts", "Async UI frame counts")?,
             "Async UI frame counts",
@@ -1870,7 +2060,7 @@ impl NativeUiImport {
                 .try_vec_capacity(*count)
                 .map_err(|failure| failure.into_js_error())?;
             frames.push(frame);
-            frame_memory.push(Some(group));
+            frame_memory.push(group);
         }
         let (records, records_memory) = context
             .try_vec_capacity(references)
@@ -1890,24 +2080,23 @@ impl NativeUiImport {
             .absorb(used_memory)
             .map_err(|failure| failure.into_js_error())?;
         let mut retained_scope = context.scope();
-        let parsed = retain_parsed_ui(parsed, &mut retained_scope)?;
-        let mode = retain_finish_mode(&mode, &mut retained_scope)?;
-        let parse_bytes = parsed_ui_heap_bytes(&parsed);
-        memory
-            .absorb(
-                retained_scope
-                    .split_persistent(parse_bytes)
-                    .map_err(|failure| failure.into_js_error())?,
-            )
+        let pending_state = state
+            .try_clone_scoped(&mut retained_scope)
+            .map_err(|failure| failure.into_js_error())?;
+        let state_bytes = js_value_heap_bytes(&pending_state);
+        let pending_state_memory = retained_scope
+            .split_persistent(state_bytes)
             .map_err(|failure| failure.into_js_error())?;
         drop((header, scope));
         Ok(Self {
-            core: Some(core),
-            parsed: Some(parsed),
-            mode,
+            core: None,
+            parsed: None,
+            pending_state: Some(pending_state),
+            _pending_state_memory: pending_state_memory,
+            mode: None,
             store,
             frames,
-            frame_memory,
+            _frame_memory: frame_memory,
             counts,
             records,
             used,
@@ -1918,7 +2107,96 @@ impl NativeUiImport {
             new_text: 0,
             dialect,
             memory,
+            publication: None,
         })
+    }
+
+    pub fn new(
+        text: &JsString,
+        core: NativePreparedCore,
+        mode: NativeUiFinishMode,
+        dialect: NumberDialect,
+    ) -> Result<Self, JsError> {
+        let context = core.owner.data().store().memory_context().clone();
+        let mut import = Self::new_pending(text, dialect, context)?;
+        import.install_core(core, mode)?;
+        Ok(import)
+    }
+
+    /// Ready target core를 한 번만 인수하고 core-dependent UI stage를 준비한다.
+    pub fn install_core(
+        &mut self,
+        core: NativePreparedCore,
+        mode: NativeUiFinishMode,
+    ) -> Result<(), JsError> {
+        if self.core.is_some() || self.mode.is_some() {
+            return Err(ordinary_error("Async UI target unavailable"));
+        }
+        self.core = Some(core);
+        self.mode = Some(mode);
+        self.attach_core()
+    }
+
+    /// Attach OOM/validation 실패 뒤에도 core/state를 보존해 같은 End가 재시도할 수 있다.
+    pub fn attach_core(&mut self) -> Result<(), JsError> {
+        if self.parsed.is_some() {
+            return Ok(());
+        }
+        let core = self
+            .core
+            .as_ref()
+            .ok_or_else(|| ordinary_error("Async result not ready"))?;
+        let mode = self
+            .mode
+            .as_ref()
+            .ok_or_else(|| ordinary_error("Async result not ready"))?;
+        let state = self
+            .pending_state
+            .as_ref()
+            .ok_or_else(|| ordinary_error("Async result not ready"))?;
+        let context = self.memory.context().clone();
+        let mut scope = context.scope();
+        let parsed = parse_ui(core, state, mode, self.dialect, &mut scope)?;
+        for drawing in &self.records {
+            parsed
+                .stage
+                .validate_drawing_binding(&drawing_value_scoped(drawing, &mut scope)?)?;
+        }
+        let parsed = retain_parsed_ui(parsed, &mut scope)?;
+        let parse_bytes = parsed_ui_heap_bytes(&parsed);
+        let parsed_memory = scope
+            .split_persistent(parse_bytes)
+            .map_err(|failure| failure.into_js_error())?;
+        self.memory
+            .absorb(parsed_memory)
+            .map_err(|failure| failure.into_js_error())?;
+        self.parsed = Some(parsed);
+        self.pending_state = None;
+        self._pending_state_memory = MemoryGroup::empty(context);
+        Ok(())
+    }
+
+    /// Core-dependent stage가 준비됐는지 반환한다.
+    pub fn attached(&self) -> bool {
+        self.parsed.is_some() || self.publication.is_some()
+    }
+
+    /// Ready target core를 이미 UI import가 소유하는지 반환한다.
+    pub fn core_installed(&self) -> bool {
+        self.core.is_some()
+    }
+
+    /// 실패한 UI End 뒤 direct finish가 원래 ready core를 회수한다.
+    pub fn take_core_for_direct(&mut self) -> Option<(NativePreparedCore, NativeUiFinishMode)> {
+        if self.publication.is_some() {
+            return None;
+        }
+        let core = self.core.take()?;
+        let Some(mode) = self.mode.take() else {
+            self.core = Some(core);
+            return None;
+        };
+        Some((core, mode))
     }
 
     fn skip_empty(&mut self) -> Result<(), JsError> {
@@ -1991,8 +2269,6 @@ impl NativeUiImport {
             return Err(type_error("Async UI chunk order/offset"));
         }
         let mut points = 0usize;
-        let mut text_units = 0usize;
-        let mut candidate_records = scoped_vec(records.len(), &mut scope)?;
         for row in records {
             option_record(row, &["slot", "drawing"], "Async UI record")?;
             let slot = exact_usize(
@@ -2000,7 +2276,7 @@ impl NativeUiImport {
                 usize::MAX,
                 "Async UI record slot",
             )?;
-            if slot != self.records.len() + candidate_records.len() {
+            if slot != self.records.len() {
                 return Err(type_error("Async UI record slot"));
             }
             let value = required(row, "drawing", "Async UI record")?;
@@ -2011,60 +2287,62 @@ impl NativeUiImport {
                 &mut scope,
             )?);
             let drawing_value = drawing_value_scoped(&drawing, &mut scope)?;
-            self.parsed
-                .as_ref()
-                .expect("active import")
-                .stage
-                .validate_drawing_binding(&drawing_value)?;
-            points += drawing.points.len();
-            text_units +=
+            if let Some(parsed) = self.parsed.as_ref() {
+                parsed.stage.validate_drawing_binding(&drawing_value)?;
+            } else {
+                validate_pending_drawing_binding(
+                    self.pending_state.as_ref().expect("pending import state"),
+                    &drawing_value,
+                )?;
+            }
+            points = points.saturating_add(drawing.points.len());
+            self.new_points = self.new_points.saturating_add(drawing.points.len());
+            let text_units =
                 safe_checkpoint_stringify_scoped(&drawing_value, self.dialect, &mut scope)?
                     .len_utf16();
+            self.new_text = self.new_text.saturating_add(text_units);
             if points > UI_CHUNK_POINTS
-                || self.new_points.saturating_add(points)
-                    > self.store.config().max_points
-                        + self.store.config().history_bytes.saturating_div(32)
-                || self.new_text.saturating_add(text_units)
-                    > self.store.config().max_points * 96
-                        + self.store.config().max_drawings * 3072
-                        + self.store.config().history_bytes.saturating_div(2)
+                || self.new_points
+                    > self
+                        .store
+                        .config()
+                        .max_points
+                        .saturating_add(self.store.config().history_bytes.saturating_div(32))
+                || self.new_text
+                    > self
+                        .store
+                        .config()
+                        .max_points
+                        .saturating_mul(96)
+                        .saturating_add(self.store.config().max_drawings.saturating_mul(3072))
+                        .saturating_add(self.store.config().history_bytes.saturating_div(2))
             {
                 return Err(range_error("Async UI unique record budget"));
             }
-            candidate_records.push(drawing);
+            self.records.push(drawing);
         }
         let mut candidate_refs = scoped_vec(refs.len(), &mut scope)?;
         for reference in refs {
             let slot = exact_usize(
                 reference,
-                (self.records.len() + candidate_records.len()).saturating_sub(1),
+                self.records.len().saturating_sub(1),
                 "Async UI reference slot",
             )?;
-            if self.records.get(slot).is_none()
-                && candidate_records
-                    .get(slot.saturating_sub(self.records.len()))
-                    .is_none()
-            {
+            let Some(drawing) = self.records.get(slot) else {
                 return Err(type_error("Async UI reference slot"));
-            }
-            candidate_refs.push(slot);
-        }
-        self.new_points += points;
-        self.new_text += text_units;
-        self.records.extend(candidate_records);
-        for slot in candidate_refs {
-            let drawing = self
-                .records
-                .get(slot)
-                .expect("validated UI reference remains present");
+            };
             self.used.insert(slot);
-            self.frames[self.frame].push(Arc::clone(drawing));
+            candidate_refs.push(Arc::clone(drawing));
+        }
+        for drawing in candidate_refs {
+            self.frames[self.frame].push(drawing);
             self.offset += 1;
         }
         Ok(())
     }
 
-    pub fn finish(&mut self, host: &dyn Host) -> Result<PreparedPublication, JsError> {
+    /// Source finish와 같은 순서로 transfer completeness를 검사한다.
+    pub fn validate_complete(&mut self) -> Result<(), JsError> {
         if self.finished {
             return Err(ordinary_error("Async UI import finished"));
         }
@@ -2075,7 +2353,16 @@ impl NativeUiImport {
         if self.used.len() != self.records.len() {
             return Err(type_error("Async UI unused record"));
         }
-        let parsed = self.parsed.take().expect("active import");
+        Ok(())
+    }
+
+    pub fn finish(&mut self) -> Result<PreparedPublication, JsError> {
+        if self.publication.is_some() {
+            return self.complete_publication();
+        }
+        self.validate_complete()?;
+        self.attach_core()?;
+        let parsed = self.parsed.as_ref().expect("attached import");
         let drawings = required(&parsed.state, "drawings", "Async drawing header")?;
         let undo_count = exact_usize(
             required(drawings, "undoCount", "Async undo count")?,
@@ -2094,21 +2381,19 @@ impl NativeUiImport {
             _ => return Err(type_error("Async selection")),
         };
         let serial = drawing_serial(required(drawings, "serial", "Async drawing serial")?)?;
-        let frames = std::mem::take(&mut self.frames);
-        let frame_memory = std::mem::take(&mut self.frame_memory);
+        let limits = required(drawings, "limits", "Async drawing limits")?;
+        let mut store =
+            DrawingStore::from_options_with_memory(limits, self.dialect, context.clone())?;
         let (mut undo, undo_memory) = context
             .try_vec_capacity(undo_count)
             .map_err(|failure| failure.into_js_error())?;
-        let redo_count = frames.len().saturating_sub(1 + undo_count);
+        let redo_count = self.frames.len().saturating_sub(1 + undo_count);
         let (mut redo, redo_memory) = context
             .try_vec_capacity(redo_count)
             .map_err(|failure| failure.into_js_error())?;
         let mut items = None;
-        for (index, (frame, memory)) in frames.into_iter().zip(frame_memory).enumerate() {
-            let snapshot = DrawingFrame::try_from_vec(
-                frame,
-                memory.expect("active UI frame retains its memory group"),
-            )?;
+        for (index, frame) in self.frames.iter().enumerate() {
+            let snapshot = DrawingFrame::try_clone_slice(frame, &context)?;
             if index == 0 {
                 items = Some(snapshot);
             } else if index <= undo_count {
@@ -2120,26 +2405,192 @@ impl NativeUiImport {
         let items = items.expect("UI import always has a current drawing frame");
         let undo = DrawingSnapshotList::try_from_vec(undo, undo_memory)?;
         let redo = DrawingSnapshotList::try_from_vec(redo, redo_memory)?;
-        self.store
-            .install_native_ui_history(items, undo, redo, selected, serial)?;
-        let core = self.core.take().expect("active import");
-        let mode = std::mem::replace(&mut self.mode, NativeUiFinishMode::Prepare);
-        let store = std::mem::replace(
-            &mut self.store,
-            DrawingStore::with_defaults_and_memory(self.dialect, context.clone())?,
+        store.install_native_ui_history(items, undo, redo, selected, serial)?;
+        let host_state = prepare_pending_host_state(parsed, &context)?;
+        if let Some(document) = parsed.ingestion.as_ref() {
+            let mut load_scope = context.scope();
+            let document = document
+                .try_clone_scoped(&mut load_scope)
+                .map_err(|failure| failure.into_js_error())?;
+            let stats = self
+                .core
+                .as_mut()
+                .expect("attached import core")
+                .owner
+                .load(&JsValue::String(document))
+                .map_err(ingestion_error)?;
+            if matches!(field(&stats, "pendingEvents"), Some(JsValue::Number(value)) if *value != 0.0)
+            {
+                self.core
+                    .as_mut()
+                    .expect("attached import core")
+                    .owner
+                    .dispose();
+                return Err(ordinary_error("Async ingestion payload must be empty"));
+            }
+        }
+        let mut core = self.core.take().expect("active import");
+        let parsed = self.parsed.take().expect("attached import");
+        let mode = self.mode.take().expect("active import mode");
+        let ParsedUi {
+            state: _,
+            stage,
+            follow,
+            drawing_target: _,
+            tool: _,
+            text: _,
+            crosshair: _,
+            symbol: _,
+            size: (width, height),
+            ingestion: _,
+        } = parsed;
+        let prepared_view = core.model.view;
+        core.model.publish_native_ui(stage);
+        apply_view_effect(
+            &mut core.model,
+            core.owner.data().store(),
+            &mode,
+            prepared_view,
+            follow,
         );
-        let publication = build_publication(core, parsed, store, mode, host, self.dialect)?;
+        self.publication = Some(PendingUiPublication {
+            parts: Some(NativeChartParts {
+                ingestion: core.owner,
+                model: core.model,
+                indicators: core.indicators,
+                drawings: store,
+                series_caches: core.caches,
+                symbol: None,
+                symbol_record: None,
+                symbol_formatters: false,
+                symbol_memory: MemoryGroup::empty(context.clone()),
+                dialect: self.dialect,
+            }),
+            chart: None,
+            host_state: Some(host_state),
+            width,
+            height,
+        });
+        drop(finish_scope);
+        self.complete_publication()
+    }
+
+    fn complete_publication(&mut self) -> Result<PreparedPublication, JsError> {
+        let publication = self
+            .publication
+            .as_mut()
+            .expect("pending UI publication")
+            .resume()?;
+        self.publication = None;
+        let context = self.memory.context().clone();
         self.counts = Vec::new();
         self.frames = Vec::new();
-        self.frame_memory = Vec::new();
+        self._frame_memory = Vec::new();
         self.records = Vec::new();
         self.used = HashSet::new();
+        self.pending_state = None;
+        self._pending_state_memory = MemoryGroup::empty(context.clone());
         let empty = MemoryGroup::empty(context);
         self.memory = empty;
-        drop(finish_scope);
         self.finished = true;
         Ok(publication)
     }
+}
+
+fn prepare_pending_host_state(
+    parsed: &ParsedUi,
+    context: &MemoryContext,
+) -> Result<PendingUiHostState, JsError> {
+    let mut scope = context.scope();
+    let tool = parsed
+        .tool
+        .try_clone_scoped(&mut scope)
+        .map_err(|failure| failure.into_js_error())?;
+    let text = parsed
+        .text
+        .try_clone_scoped(&mut scope)
+        .map_err(|failure| failure.into_js_error())?;
+    let drawing_target = parsed
+        .drawing_target
+        .as_ref()
+        .map(|value| {
+            value
+                .try_clone_scoped(&mut scope)
+                .map_err(|failure| failure.into_js_error())
+        })
+        .transpose()?;
+    let symbol = parsed
+        .symbol
+        .try_clone_scoped(&mut scope)
+        .map_err(|failure| failure.into_js_error())?;
+    let bytes = js_value_heap_bytes(&tool)
+        .checked_add(js_value_heap_bytes(&text))
+        .and_then(|bytes| bytes.checked_add(drawing_target.as_ref().map_or(0, js_value_heap_bytes)))
+        .and_then(|bytes| bytes.checked_add(js_value_heap_bytes(&symbol)))
+        .ok_or_else(|| scope.allocation_failure().into_js_error())?;
+    let memory = scope
+        .split_persistent(bytes)
+        .map_err(|failure| failure.into_js_error())?;
+    Ok(PendingUiHostState {
+        tool,
+        text,
+        drawing_target,
+        crosshair: parsed.crosshair,
+        symbol,
+        _memory: memory,
+    })
+}
+
+fn validate_pending_drawing_binding(state: &JsValue, drawing: &JsValue) -> Result<(), JsError> {
+    let JsValue::Object(drawing) = drawing else {
+        return Err(type_error("Drawing binding object required"));
+    };
+    let undefined = JsValue::Undefined;
+    let panel_value = drawing.get(&key("panel")).unwrap_or(&undefined);
+    if !matches!(panel_value, JsValue::Undefined) {
+        identifier(panel_value, "Drawing panel")?;
+    }
+    for (name, label) in [
+        ("axisId", "Drawing axisId"),
+        ("seriesId", "Drawing seriesId"),
+    ] {
+        let value = drawing.get(&key(name)).unwrap_or(&undefined);
+        if !matches!(value, JsValue::Undefined | JsValue::Null) {
+            identifier(value, label)?;
+        }
+    }
+    let default_panel = key("price");
+    let panel = match panel_value {
+        JsValue::String(value) => value,
+        JsValue::Undefined => &default_panel,
+        _ => unreachable!("identifier rejected a defined non-string panel"),
+    };
+    let panels = array(
+        required(state, "panels", "Async UI collections")?,
+        "Async UI collections",
+    )?;
+    if !panels
+        .iter()
+        .any(|candidate| matches!(field(candidate, "id"), Some(JsValue::String(id)) if id == panel))
+    {
+        return Err(ordinary_error("Missing drawing panel"));
+    }
+    let axis = match drawing.get(&key("axisId")).unwrap_or(&undefined) {
+        JsValue::String(value) => Some(value),
+        JsValue::Undefined | JsValue::Null => None,
+        _ => unreachable!("identifier rejected axisId"),
+    };
+    if let Some(axis) = axis {
+        let axes = array(required(state, "axes", "Async UI axes")?, "Async UI axes")?;
+        let valid = axes.iter().any(|candidate| {
+            matches!(field(candidate, "id"), Some(JsValue::String(id)) if id == axis)
+                && matches!((field(candidate, "panel"), panel_value), (Some(JsValue::String(axis_panel)), JsValue::String(drawing_panel)) if axis_panel == drawing_panel)
+        });
+        if !valid {
+            return Err(ordinary_error("Missing drawing axis binding"));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

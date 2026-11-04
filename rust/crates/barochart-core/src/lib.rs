@@ -982,7 +982,11 @@ impl Engine {
             publication
                 .chart
                 .absorb_retained_memory(publication.memory)?;
-            self.publish_chart_with_input(publication.chart, publication.input);
+            let input = publication
+                .input
+                .take()
+                .expect("runtime publication finalizes controller state");
+            self.publish_chart_with_input(publication.chart, input);
             self.size = Some(size);
         }
         Ok(result.value)

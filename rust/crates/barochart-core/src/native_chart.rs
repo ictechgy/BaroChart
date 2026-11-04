@@ -14,7 +14,9 @@ use barochart_js::num::NumberDialect;
 use barochart_js::string::JsString;
 
 use crate::Host;
-use crate::contracts::{RESOURCE_LIMITS, portable_color, portable_font};
+use crate::contracts::{
+    RESOURCE_LIMITS, SERIES_KEYS, option_record, portable_color, portable_font,
+};
 use crate::data::{BarStore, Committed, DataChange, ModelDataState};
 use crate::drawing_geometry::DrawingGeometryCache;
 use crate::drawings::DrawingStore;
@@ -175,6 +177,7 @@ pub(crate) fn api_series_options_scoped(
     memory: &MemoryContext,
     scope: &mut MemoryScope,
 ) -> Result<ApiSeriesOptions, JsError> {
+    option_record(options, SERIES_KEYS, "Series")?;
     let count = match options {
         JsValue::Object(record) => record.len(),
         JsValue::Array(values) => values.len(),
@@ -527,28 +530,52 @@ impl NativeChart {
 
     /// 검증된 owner/모델/출력/cache/drawing을 O(1) publication 후보로 채택한다.
     pub fn from_parts(parts: NativeChartParts) -> Result<Self, JsError> {
+        Self::try_from_parts_recoverable(parts).map_err(|(error, _parts)| error)
+    }
+
+    /// Publication 조립 실패 시 이동한 실제 parts를 caller에게 그대로 돌려준다.
+    #[allow(clippy::result_large_err)] // OOM 복구 경로에서 parts를 boxing하며 다시 할당하지 않는다.
+    pub(crate) fn try_from_parts_recoverable(
+        parts: NativeChartParts,
+    ) -> Result<Self, (JsError, NativeChartParts)> {
         let memory = parts.ingestion.data().store().memory_context().clone();
         if !memory.shares_account(parts.symbol_memory.context()) {
-            return Err(type_error("Native symbol memory context"));
+            return Err((type_error("Native symbol memory context"), parts));
         }
+        let drawing_cache = match DrawingGeometryCache::new_with_memory(
+            RESOURCE_LIMITS.max_drawings as usize,
+            memory.clone(),
+        ) {
+            Ok(cache) => cache,
+            Err(error) => return Err((error, parts)),
+        };
         let retained_memory = MemoryGroup::empty(memory.clone());
+        let NativeChartParts {
+            ingestion,
+            model,
+            indicators,
+            drawings,
+            series_caches,
+            symbol,
+            symbol_record,
+            symbol_formatters,
+            symbol_memory,
+            dialect,
+        } = parts;
         Ok(Self {
             identity: Arc::new(()),
-            ingestion: parts.ingestion,
-            model: parts.model,
-            indicators: parts.indicators,
-            drawings: parts.drawings,
-            series_caches: parts.series_caches,
-            drawing_cache: DrawingGeometryCache::new_with_memory(
-                RESOURCE_LIMITS.max_drawings as usize,
-                memory,
-            )?,
-            symbol: parts.symbol,
-            symbol_record: parts.symbol_record,
-            symbol_formatters: parts.symbol_formatters,
-            symbol_memory: parts.symbol_memory,
+            ingestion,
+            model,
+            indicators,
+            drawings,
+            series_caches,
+            drawing_cache,
+            symbol,
+            symbol_record,
+            symbol_formatters,
+            symbol_memory,
             formatter_identity: Arc::new(()),
-            dialect: parts.dialect,
+            dialect,
             retained_memory,
         })
     }

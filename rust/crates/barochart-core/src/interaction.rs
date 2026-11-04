@@ -2030,7 +2030,11 @@ impl OwnedInteractionState {
                 )?;
             }
             Gesture::Create { .. } | Gesture::Edit { .. } => {
-                self.move_drawing(context, &gesture, x, y, &mut gesture_scope)?;
+                if let Some(effects) =
+                    self.move_drawing(context, &gesture, x, y, &mut gesture_scope)?
+                {
+                    return Ok(effects);
+                }
             }
         }
         if let Some(viewport) = self.gesture.as_mut().and_then(gesture_viewport_mut) {

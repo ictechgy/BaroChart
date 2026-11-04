@@ -63,3 +63,58 @@ fn cache_rebuild_and_remove_charge_only_owned_tree_and_failure_is_atomic() {
     assert_eq!(caches.accounted_bytes(), 0);
     assert_eq!(account.snapshot().requested_live_bytes, 0);
 }
+
+#[test]
+fn negative_dirty_offsets_rebuild_stale_extrema_like_javascript() {
+    for next_dirty in [-1.0, -0.5, f64::NEG_INFINITY] {
+        let data = ModelDataState::new(StoreOptions::default(), Vec::new()).unwrap();
+        let store = data.store();
+        let identity = store.data_identity();
+        let mut values = vec![1.0; store.capacity()];
+        values[7] = 100.0;
+        let id = JsString::from_str("external");
+        let mut caches = SeriesCaches::new();
+        let mut revision = None;
+        let mut dirty = f64::INFINITY;
+        let mut ready = false;
+        caches
+            .query_series(
+                &id,
+                false,
+                &mut revision,
+                &mut dirty,
+                &mut ready,
+                store,
+                &identity,
+                &values,
+                0.0,
+                0.0,
+                values.len(),
+                0,
+                values.len(),
+            )
+            .unwrap();
+        values[7] = 2.0;
+        dirty = next_dirty;
+        let range = caches
+            .query_series(
+                &id,
+                false,
+                &mut revision,
+                &mut dirty,
+                &mut ready,
+                store,
+                &identity,
+                &values,
+                1.0,
+                0.0,
+                values.len(),
+                0,
+                values.len(),
+            )
+            .unwrap();
+        assert_eq!(range.max, 2.0, "negative dirty offset {next_dirty}");
+        assert_eq!(dirty, f64::INFINITY);
+        assert_eq!(revision, Some(1.0));
+    }
+}
