@@ -206,13 +206,19 @@ physical-device performance and soak/manual acceptance remain rollout gates.
 
 ## Rollout status
 
-The native Rust core is opt-in during validation. Fresh native SDK artifacts
-and reviews are being finalized. The current dual-backend package fits the
-owner-approved 5 MiB per-ABI budget; see the [measurement and artifact decision](measurements/2026-11-04-rust-core-size.md). Android
-physical-device validation and real-device performance, soak and manual
-acceptance are not complete. iOS live-device validation is also pending local
-signing configuration. Keep JavaScript as the Android default until the rollout
-gates are approved.
+The native Rust core is opt-in. Fresh native SDK artifacts and review fixes
+passed the local verification suites. The dual-backend package fits the
+owner-approved 5 MiB per-ABI budget; see the
+[measurement and artifact decision](measurements/2026-11-04-rust-core-size.md).
+
+[Physical iPhone XR measurements](measurements/2026-11-05-native-rust-ios-ab.md)
+passed the startup and pan budgets in Release. The same device passed 500
+create/dispose cycles and a
+[30-minute streaming soak](measurements/2026-11-05-native-rust-ios-soak.json).
+JavaScript was faster in this workload; Rust used less process memory. Android
+physical-device performance and soak, plus manual VoiceOver/TalkBack acceptance,
+remain unverified. Keep JavaScript as the default until the platform rollout
+gates are completed.
 
 ## Related guides
 

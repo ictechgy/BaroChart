@@ -67,9 +67,11 @@ from that source. The final Node suite passed 5,967 tests without skips; dual
 shared Android suites passed 65 tests per backend. JS-only/Rust-only availability,
 R8 and 16 KiB checks passed, with configuration-specific skips recorded.
 [Physical iPhone XR A/B](2026-11-05-native-rust-ios-ab.md) passed both performance
-budgets in Release. Device soak and manual acceptance are tracked separately.
+budgets in Release. The same device passed 500 create/dispose cycles and the
+full [30-minute streaming soak](2026-11-05-native-rust-ios-soak.json), with
+10-minute memory growth windows of 0% and 0.072% after warm-up.
 
 The owner retained the dual artifact and approved a 5 MiB per-ABI SDK budget;
 startup 500 ms and pan 16.7 ms thresholds are unchanged. See the
-[size report](2026-11-04-rust-core-size.md). Real-device performance, soak and
-manual accessibility acceptance remain separate platform gates.
+[size report](2026-11-04-rust-core-size.md). Android physical-device performance
+and soak, plus manual VoiceOver/TalkBack acceptance, remain rollout gates.
