@@ -43,6 +43,23 @@ pub mod session_studies;
 /// 정적 pressure 지표를 다룬다.
 pub mod trusted_studies;
 
+/// 검증된 코어 처리 모듈을 연결한다.
+pub mod axis_scale;
+/// 검증된 코어 처리 모듈을 연결한다.
+pub mod coercion;
+/// 검증된 코어 처리 모듈을 연결한다.
+pub mod data_input;
+/// 검증된 코어 처리 모듈을 연결한다.
+pub mod indicator_engine;
+/// 검증된 코어 처리 모듈을 연결한다.
+pub mod indicator_query;
+/// 검증된 코어 처리 모듈을 연결한다.
+pub mod ingestion;
+/// 검증된 코어 처리 모듈을 연결한다.
+pub mod labels;
+/// 검증된 코어 처리 모듈을 연결한다.
+pub mod model_state;
+
 use barochart_js::error::JsError;
 use barochart_js::string::JsString;
 use data::{ModelDataState, StoreOptions};

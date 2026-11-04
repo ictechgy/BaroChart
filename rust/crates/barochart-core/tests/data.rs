@@ -180,6 +180,35 @@ fn change_wire_preserves_absent_and_own_undefined_added_fields() {
 }
 
 #[test]
+fn retained_source_identity_survives_moves_and_detects_clones_and_replaced_columns() {
+    let mut state = ModelDataState::new(StoreOptions::default(), Vec::new()).unwrap();
+    let empty = state.store().data_identity();
+    let cloned = state.store().clone();
+    assert!(!empty.matches(&cloned.data_identity()));
+    assert!(!empty.same_store(&cloned.data_identity()));
+    let cloned_identity = cloned.data_identity();
+    let moved = Box::new(cloned);
+    assert!(cloned_identity.matches(&moved.data_identity()));
+    state.store_mut().append(bar(T, 1.0, 1.0)).unwrap();
+    assert!(empty.matches(&state.store().data_identity()));
+    state.store_mut().set_data(Vec::new()).unwrap();
+    let replacement = state.store().data_identity();
+    assert!(empty.same_store(&replacement));
+    assert!(!empty.same_columns(&replacement));
+
+    let bars = (0..16)
+        .map(|i| bar(T + i as f64 * 60_000.0, 1.0, 1.0))
+        .collect();
+    let mut full = ModelDataState::new(StoreOptions::default(), bars).unwrap();
+    let original = full.store().data_identity();
+    full.store_mut()
+        .append(bar(T + 16.0 * 60_000.0, 1.0, 1.0))
+        .unwrap();
+    assert!(original.same_store(&full.store().data_identity()));
+    assert!(!original.same_columns(&full.store().data_identity()));
+}
+
+#[test]
 fn set_data_is_atomic_and_empty_reset_still_publishes_one_change() {
     let mut state = ModelDataState::new(StoreOptions::default(), vec![bar(T, 1.0, 2.0)]).unwrap();
     let before = state.store().clone();

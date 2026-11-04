@@ -3,6 +3,7 @@
 use barochart_js::error::JsError;
 use barochart_js::json::{JsObject, JsValue};
 use barochart_js::string::JsString;
+use std::sync::Arc;
 
 use crate::batch_options::BatchOptions;
 use crate::contracts::RESOURCE_LIMITS;
@@ -446,8 +447,10 @@ pub struct AggregateBar {
 }
 
 /// 한 모델이 소유하는 OHLCV 저장소다. listener는 이 타입 밖에서 [`DataChange`]를 받아 호출한다.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct BarStore {
+    owner_identity: Arc<()>,
+    columns_identity: Arc<()>,
     serial: f64,
     length: usize,
     capacity: usize,
@@ -458,6 +461,47 @@ pub struct BarStore {
     time_version: f64,
     columns: Columns,
     index: RangeIndex,
+}
+
+/// 계산 task가 보유해 allocator 주소 재사용과 무관하게 source를 식별하는 토큰이다.
+#[derive(Clone, Debug)]
+pub struct DataIdentity {
+    owner: Arc<()>,
+    columns: Arc<()>,
+}
+
+impl DataIdentity {
+    /// 동일한 store 객체인가 확인한다. 스레드 간 순차 이동은 identity를 바꾸지 않는다.
+    pub fn same_store(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.owner, &other.owner)
+    }
+    /// 동일한 열 소유 묶음인가 확인한다. 값의 제자리 수정은 identity를 바꾸지 않는다.
+    pub fn same_columns(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.columns, &other.columns)
+    }
+    /// store와 열 identity가 모두 같은지 확인한다.
+    pub fn matches(&self, other: &Self) -> bool {
+        self.same_store(other) && self.same_columns(other)
+    }
+}
+
+impl Clone for BarStore {
+    fn clone(&self) -> Self {
+        Self {
+            owner_identity: Arc::new(()),
+            columns_identity: Arc::new(()),
+            serial: self.serial,
+            length: self.length,
+            capacity: self.capacity,
+            max_bars: self.max_bars,
+            timeframe_ms: self.timeframe_ms,
+            time_origin: self.time_origin,
+            version: self.version,
+            time_version: self.time_version,
+            columns: self.columns.clone(),
+            index: self.index.clone(),
+        }
+    }
 }
 
 impl BarStore {
@@ -479,6 +523,8 @@ impl BarStore {
         let columns = Columns::zeroed(INITIAL_CAPACITY);
         let index = RangeIndex::new(0, &[], &[], Some(&[]), INITIAL_CAPACITY, false)?;
         let mut store = Self {
+            owner_identity: Arc::new(()),
+            columns_identity: Arc::new(()),
             serial,
             length: 0,
             capacity: INITIAL_CAPACITY,
@@ -497,6 +543,13 @@ impl BarStore {
     /// 모델 소유자가 부여한 geometry serial이다.
     pub fn serial(&self) -> f64 {
         self.serial
+    }
+    /// 현재 source의 보유 identity를 돌려준다.
+    pub fn data_identity(&self) -> DataIdentity {
+        DataIdentity {
+            owner: Arc::clone(&self.owner_identity),
+            columns: Arc::clone(&self.columns_identity),
+        }
     }
     /// 논리 행 수다.
     pub fn length(&self) -> usize {
@@ -641,7 +694,7 @@ impl BarStore {
             staged.length += 1;
             staged.version += 1.0;
             staged.time_version += 1.0;
-            *self = staged;
+            self.adopt_staged(staged);
         } else {
             self.index.update(index, bar.low, bar.high, bar.volume)?;
             self.columns.write(index, bar);
@@ -1000,7 +1053,7 @@ impl BarStore {
             self.version = staged.version;
             self.time_version = staged.time_version;
         } else {
-            *self = staged;
+            self.adopt_staged(staged);
         }
         Ok(Committed {
             value: receipt,
@@ -1097,8 +1150,10 @@ impl BarStore {
             capacity,
             false,
         )?;
+        let columns_identity = Arc::new(());
         self.capacity = capacity;
         self.columns = columns;
+        self.columns_identity = columns_identity;
         self.index = index;
         Ok(())
     }
@@ -1112,7 +1167,9 @@ impl BarStore {
         kind: ChangeKind,
         added: Option<usize>,
     ) -> Result<Committed<()>, JsError> {
+        let columns_identity = Arc::new(());
         self.columns = columns;
+        self.columns_identity = columns_identity;
         self.index = index;
         self.length = length;
         self.capacity = capacity;
@@ -1142,6 +1199,12 @@ impl BarStore {
             added,
             appended,
         }
+    }
+
+    // 동일 store의 원자 transaction은 owner를 유지하고 새 열 identity만 게시한다.
+    fn adopt_staged(&mut self, mut staged: Self) {
+        staged.owner_identity = Arc::clone(&self.owner_identity);
+        *self = staged;
     }
 }
 
