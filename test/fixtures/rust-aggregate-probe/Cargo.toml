@@ -1,0 +1,12 @@
+[package]
+name="aggregate-parity-probe"
+version="0.0.0"
+edition="2024"
+[lib]
+crate-type=["cdylib"]
+[dependencies]
+barochart-core={path="../../../rust/crates/barochart-core"}
+[workspace]
+[profile.release]
+opt-level="s"
+panic="abort"

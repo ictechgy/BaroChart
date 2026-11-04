@@ -31,6 +31,25 @@ final class RustRuntimeTests: XCTestCase {
         XCTAssertEqual(try engine.call("nativeInit", [7]).toInt32(), 7)
     }
 
+    func testDataCommandsAndIngestionUseRealRustOwnedPayloads() throws {
+        let engine = try BaroChartEngine(options: nil, runtimeBackend: .rust)
+        defer {try? engine.close()}
+        _ = try engine.call("nativeInit", [0, [String: Any]()])
+        let bar: [String: Any] = ["time": 1000, "open": 1, "high": 2, "low": 0, "close": 1, "volume": 1]
+        XCTAssertTrue(try engine.call("nativeCommand", ["setData", [[bar]]]).isNull)
+        let configured = try engine.call("nativeDataIngestionCommand", ["configureDataIngestion", [["streamId": "native", "generation": 1]]])
+        XCTAssertEqual(configured.forProperty("result")?.forProperty("policy")?.forProperty("streamId")?.toString(), "native")
+        let next: [String: Any] = ["time": 2000, "open": 2, "high": 3, "low": 1, "close": 2, "volume": 1]
+        let packet: [String: Any] = ["streamId": "native", "generation": 1, "firstSequence": 0, "events": [["kind": "append", "bar": next]]]
+        let enqueued = try engine.call("nativeDataIngestionCommand", ["enqueueDataEvents", [packet]])
+        XCTAssertEqual(enqueued.forProperty("result")?.forProperty("pendingEvents")?.toInt32(), 1)
+        let drained = try engine.call("nativeDataIngestionCommand", ["drainDataEvents"])
+        XCTAssertEqual(drained.forProperty("result")?.forProperty("length")?.toInt32(), 2)
+        _ = try engine.call("nativeReleaseDataIngestion")
+        let closed = try engine.call("nativeDataIngestionCommand", ["dataIngestionStats"])
+        XCTAssertEqual(closed.forProperty("error")?.forProperty("code")?.toString(), "CLOSED")
+    }
+
     func testDecodedUTF16StringKeepsTheCoreStringContract() throws {
         let realm = try XCTUnwrap(RustValueRealm.current())
         let value = try realm.materialize(.wtf16([0x61, 0xd800]))
@@ -135,11 +154,20 @@ final class RustRuntimeTests: XCTestCase {
         let typed = try XCTUnwrap(failure {try engine.fit()})
         XCTAssertEqual(typed.code, .unavailable)
         XCTAssertTrue(typed.message.contains("nativeCommand"), typed.message)
-        for name in ["nativeCommand", "nativeAsyncBegin", "nativeSelfTest"] {
+        for name in ["nativeSceneJSON", "nativeAsyncBegin", "nativeSelfTest"] {
             let lowLevel = try XCTUnwrap(failure {try engine.call(name)})
             XCTAssertEqual(lowLevel.code, .unavailable)
             XCTAssertTrue(lowLevel.message.contains(name), lowLevel.message)
         }
+    }
+
+    func testUnknownFunctionKeepsTheJavaScriptHostMissingOutcome() throws {
+        let runtime = try XCTUnwrap(BaroChartRuntimeFactory.makeRustEngineRuntime())
+        guard case .missing = runtime.perform("__not_a_native_function", []) else {
+            return XCTFail("Undefined names must retain the missing outcome")
+        }
+        XCTAssertTrue(runtime.supports("nativeSelfTest"))
+        XCTAssertFalse(runtime.supports("__not_a_native_function"))
     }
 
     func testIsolatedRuntimeUsesRequestedRustBackend() throws {

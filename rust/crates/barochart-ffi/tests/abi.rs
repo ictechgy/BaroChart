@@ -435,7 +435,7 @@ fn call_validates_transport_flags_and_preserves_number_mode() {
     assert_eq!(status, BcStatus::BC_UNAVAILABLE);
     assert_eq!(
         out,
-        br#"{"name":"UnavailableError","message":"missing is not available in the Rust backend yet","code":null}"#
+        br#"{"name":"UnavailableError","message":"missing is not available in the Rust backend","code":null}"#
     );
 
     for flags in [2, 3, u32::MAX] {

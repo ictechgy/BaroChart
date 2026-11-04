@@ -1,14 +1,14 @@
 {
   "schema": "barochart.rust-core-size",
   "version": 1,
-  "generatedAt": "2026-11-03T16:18:34.613Z",
+  "generatedAt": "2026-11-04T02:48:09.904Z",
   "budgetBytes": 3145728,
   "qualification": "Actual M1 scaffold link measurements plus non-probabilistic scenarios. No chart runtime speed or full-port precision is claimed.",
   "source": {
-    "sha256": "e8b92a683714910821b4f52488f858dad22d633d08615ccca0197ad173fbd4ae",
-    "rustSha256": "393bd8697e11a7c5eefbb25427646b0a7e07903740522055d927dee4bb64484a",
-    "androidLinkSha256": "6819981924c586bec8c3ddf0e26a3fa653d928258dabcdc0141d54783a959df6",
-    "currentScaffoldRustPhysicalLines": 4572,
+    "sha256": "35efddd84ea0b2e7301b8c6868dbc57aca707f00670cb9060375932ec74591bb",
+    "rustSha256": "1c97c68cc4fdaca8b570fb304371633ba139a4005db5d5f82922b814c36622d5",
+    "androidLinkSha256": "fbc156999bfc883f9470b06207c061e2c2aee6818d1d227f198182fa4fe90c44",
+    "currentScaffoldRustPhysicalLines": 11323,
     "scope": {
       "stableRustLinesEstimate": 27850,
       "tierANetNewRustLinesEstimate": 10000,
@@ -19,7 +19,7 @@
       "design": "docs/superpowers/specs/2026-11-02-rust-core-design.md §5.5",
       "tierA": "docs/superpowers/specs/2026-11-02-rust-core-porting-map-tier-a.md §7.1"
     },
-    "commit": "d5b43f1da824fe83657577f06954d7daaca40669"
+    "commit": "108921328596d5a81c6ffb7a611dbce6b08cae31"
   },
   "tools": {
     "node": "v22.20.0",
@@ -41,7 +41,7 @@
   },
   "commandPlaceholders": {
     "$REPO": "repository root",
-    "$OUT": "$REPO/artifacts/rust-size",
+    "$OUT": "$REPO/artifacts/m2a/size",
     "$NODE": "configured Node 22 executable",
     "$NDK": "configured Android NDK root",
     "$NDK_HOST": "darwin-x86_64",
@@ -883,14 +883,14 @@
       "strip",
       "-S",
       "-x",
-      "$REPO/artifacts/rust-size/artifacts/ios/baseline"
+      "$REPO/artifacts/m2a/size/artifacts/ios/baseline"
     ],
     [
       "$XCRUN",
       "strip",
       "-S",
       "-x",
-      "$REPO/artifacts/rust-size/artifacts/ios/rust-referenced"
+      "$REPO/artifacts/m2a/size/artifacts/ios/rust-referenced"
     ],
     [
       "$XCRUN",
@@ -929,11 +929,11 @@
           },
           "jsOnly": {
             "bytes": 1055616,
-            "sha256": "39f27ca7f245493e264a1821f4c42e012ddc6be165ae395d7e116936a95f0a7e",
-            "path": "$REPO/artifacts/rust-size/artifacts/android/arm64-v8a/js-only/libbarochart.so",
+            "sha256": "6037a5d7ed9c61f409c9169be56fa2e8666a0f05056e681f66abbadd3804ab64",
+            "path": "$REPO/artifacts/m2a/size/artifacts/android/arm64-v8a/js-only/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "e8b92a683714910821b4f52488f858dad22d633d08615ccca0197ad173fbd4ae",
+              "sourceSha256": "35efddd84ea0b2e7301b8c6868dbc57aca707f00670cb9060375932ec74591bb",
               "profileIndependent": true
             },
             "loadAlignments": [
@@ -944,12 +944,12 @@
             "sharedAcrossRustProfiles": true
           },
           "dual": {
-            "bytes": 2468536,
-            "sha256": "74aa82bf96ff9e91998d8c01a09dcc969d7a28c97539994460fd145778fb98fe",
-            "path": "$REPO/artifacts/rust-size/artifacts/android/arm64-v8a/opt-s-panic-unwind/dual/libbarochart.so",
+            "bytes": 2766568,
+            "sha256": "3177749421bf6c42d7b18573af1b39cd82a0b00b20689241cd5a9ec8b1bd4a5c",
+            "path": "$REPO/artifacts/m2a/size/artifacts/android/arm64-v8a/opt-s-panic-unwind/dual/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "e8b92a683714910821b4f52488f858dad22d633d08615ccca0197ad173fbd4ae",
+              "sourceSha256": "35efddd84ea0b2e7301b8c6868dbc57aca707f00670cb9060375932ec74591bb",
               "profile": "opt-s-panic-unwind"
             },
             "loadAlignments": [
@@ -959,12 +959,12 @@
             ]
           },
           "rustOnly": {
-            "bytes": 1429688,
-            "sha256": "b079a5824e0666f6173ec3b2da3d014806a4650677073cb9c0b98dd7f928f682",
-            "path": "$REPO/artifacts/rust-size/artifacts/android/arm64-v8a/opt-s-panic-unwind/rust-only/libbarochart.so",
+            "bytes": 1723624,
+            "sha256": "b06d9c4fcb77ff8f697f57e581c778d6527a952e654924109296e3de54542ed6",
+            "path": "$REPO/artifacts/m2a/size/artifacts/android/arm64-v8a/opt-s-panic-unwind/rust-only/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "e8b92a683714910821b4f52488f858dad22d633d08615ccca0197ad173fbd4ae",
+              "sourceSha256": "35efddd84ea0b2e7301b8c6868dbc57aca707f00670cb9060375932ec74591bb",
               "profile": "opt-s-panic-unwind"
             },
             "loadAlignments": [
@@ -974,15 +974,15 @@
             ]
           },
           "rustStaticlib": {
-            "bytes": 25042626,
-            "sha256": "9a1693a357fe9912c700bab1b96d8abb591da923e86c04e8b1de44f08f55fe14",
+            "bytes": 26969650,
+            "sha256": "d0a05181b0c434e539271d3ebc5ae521d87d076b0a3777b7499e3ebc3f9c9ad9",
             "path": "$OUT/rust-target/android/opt-s-panic-unwind/aarch64-linux-android/release/libbarochart_ffi.a"
           },
-          "linkedRustDeltaBytes": 1412920,
+          "linkedRustDeltaBytes": 1710952,
           "budget": {
             "bytes": 3145728,
             "dualExceeds": false,
-            "remaining": 677192
+            "remaining": 379160
           }
         },
         "opt-3-panic-unwind": {
@@ -996,11 +996,11 @@
           },
           "jsOnly": {
             "bytes": 1055616,
-            "sha256": "39f27ca7f245493e264a1821f4c42e012ddc6be165ae395d7e116936a95f0a7e",
-            "path": "$REPO/artifacts/rust-size/artifacts/android/arm64-v8a/js-only/libbarochart.so",
+            "sha256": "6037a5d7ed9c61f409c9169be56fa2e8666a0f05056e681f66abbadd3804ab64",
+            "path": "$REPO/artifacts/m2a/size/artifacts/android/arm64-v8a/js-only/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "e8b92a683714910821b4f52488f858dad22d633d08615ccca0197ad173fbd4ae",
+              "sourceSha256": "35efddd84ea0b2e7301b8c6868dbc57aca707f00670cb9060375932ec74591bb",
               "profileIndependent": true
             },
             "loadAlignments": [
@@ -1011,12 +1011,12 @@
             "sharedAcrossRustProfiles": true
           },
           "dual": {
-            "bytes": 2383256,
-            "sha256": "ac38cdb0105a5f5572acd15544cad7ce60158223a65730ff98e51dfc4b4f15b3",
-            "path": "$REPO/artifacts/rust-size/artifacts/android/arm64-v8a/opt-3-panic-unwind/dual/libbarochart.so",
+            "bytes": 2618760,
+            "sha256": "0ce6bf724d0d032da25a9731b00886132d508d961613ea7851eeb91dae7251db",
+            "path": "$REPO/artifacts/m2a/size/artifacts/android/arm64-v8a/opt-3-panic-unwind/dual/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "e8b92a683714910821b4f52488f858dad22d633d08615ccca0197ad173fbd4ae",
+              "sourceSha256": "35efddd84ea0b2e7301b8c6868dbc57aca707f00670cb9060375932ec74591bb",
               "profile": "opt-3-panic-unwind"
             },
             "loadAlignments": [
@@ -1026,12 +1026,12 @@
             ]
           },
           "rustOnly": {
-            "bytes": 1344360,
-            "sha256": "8068c3db2eb353787259338fef013630341668cf70163466e1b05a2c14933d5c",
-            "path": "$REPO/artifacts/rust-size/artifacts/android/arm64-v8a/opt-3-panic-unwind/rust-only/libbarochart.so",
+            "bytes": 1579896,
+            "sha256": "57515a5ec01db692080e4cae18b32fb9bb86e2f8f88bdd71072bdbd51210cdc8",
+            "path": "$REPO/artifacts/m2a/size/artifacts/android/arm64-v8a/opt-3-panic-unwind/rust-only/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "e8b92a683714910821b4f52488f858dad22d633d08615ccca0197ad173fbd4ae",
+              "sourceSha256": "35efddd84ea0b2e7301b8c6868dbc57aca707f00670cb9060375932ec74591bb",
               "profile": "opt-3-panic-unwind"
             },
             "loadAlignments": [
@@ -1041,15 +1041,15 @@
             ]
           },
           "rustStaticlib": {
-            "bytes": 24625390,
-            "sha256": "5113e89b01193fd24447777ae150f50fadcae7480eba8c0df7e97b0ecac71c7e",
+            "bytes": 26127970,
+            "sha256": "a9c6b8e8d95ef0efd982eb7d0f2e92dce54c08bacdf813476ec71e8102ca5e59",
             "path": "$OUT/rust-target/android/opt-3-panic-unwind/aarch64-linux-android/release/libbarochart_ffi.a"
           },
-          "linkedRustDeltaBytes": 1327640,
+          "linkedRustDeltaBytes": 1563144,
           "budget": {
             "bytes": 3145728,
             "dualExceeds": false,
-            "remaining": 762472
+            "remaining": 526968
           }
         },
         "opt-s-panic-abort": {
@@ -1063,11 +1063,11 @@
           },
           "jsOnly": {
             "bytes": 1055616,
-            "sha256": "39f27ca7f245493e264a1821f4c42e012ddc6be165ae395d7e116936a95f0a7e",
-            "path": "$REPO/artifacts/rust-size/artifacts/android/arm64-v8a/js-only/libbarochart.so",
+            "sha256": "6037a5d7ed9c61f409c9169be56fa2e8666a0f05056e681f66abbadd3804ab64",
+            "path": "$REPO/artifacts/m2a/size/artifacts/android/arm64-v8a/js-only/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "e8b92a683714910821b4f52488f858dad22d633d08615ccca0197ad173fbd4ae",
+              "sourceSha256": "35efddd84ea0b2e7301b8c6868dbc57aca707f00670cb9060375932ec74591bb",
               "profileIndependent": true
             },
             "loadAlignments": [
@@ -1078,12 +1078,12 @@
             "sharedAcrossRustProfiles": true
           },
           "dual": {
-            "bytes": 2452408,
-            "sha256": "9a153a46ba257c06d907dae14ea24cf5cf920da0fbd885d8076508c643976184",
-            "path": "$REPO/artifacts/rust-size/artifacts/android/arm64-v8a/opt-s-panic-abort/dual/libbarochart.so",
+            "bytes": 2721496,
+            "sha256": "0a07eb831066bb28698b7d1f1db49162d5cb46b113d87c76d3d822b2e279dc74",
+            "path": "$REPO/artifacts/m2a/size/artifacts/android/arm64-v8a/opt-s-panic-abort/dual/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "e8b92a683714910821b4f52488f858dad22d633d08615ccca0197ad173fbd4ae",
+              "sourceSha256": "35efddd84ea0b2e7301b8c6868dbc57aca707f00670cb9060375932ec74591bb",
               "profile": "opt-s-panic-abort"
             },
             "loadAlignments": [
@@ -1093,12 +1093,12 @@
             ]
           },
           "rustOnly": {
-            "bytes": 1413544,
-            "sha256": "0c80d3222907fa76534aa8dbeb9895727c53a9c45fa29d830fb4f1da7aebbc3b",
-            "path": "$REPO/artifacts/rust-size/artifacts/android/arm64-v8a/opt-s-panic-abort/rust-only/libbarochart.so",
+            "bytes": 1678552,
+            "sha256": "c8af75ff471024f806bf50f685f1b136c4e3b02ea263e9151a72a2bfec3e9534",
+            "path": "$REPO/artifacts/m2a/size/artifacts/android/arm64-v8a/opt-s-panic-abort/rust-only/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "e8b92a683714910821b4f52488f858dad22d633d08615ccca0197ad173fbd4ae",
+              "sourceSha256": "35efddd84ea0b2e7301b8c6868dbc57aca707f00670cb9060375932ec74591bb",
               "profile": "opt-s-panic-abort"
             },
             "loadAlignments": [
@@ -1108,15 +1108,15 @@
             ]
           },
           "rustStaticlib": {
-            "bytes": 24938100,
-            "sha256": "3c9be9b3bdb758ef793544d30bfaf7eee81c9f8bfd4cfe96fea342f5bdd919a7",
+            "bytes": 26687472,
+            "sha256": "07b19b77fab9525015b4f0054708d2e59dc98cb9e83220889f72c12caff95ad5",
             "path": "$OUT/rust-target/android/opt-s-panic-abort/aarch64-linux-android/release/libbarochart_ffi.a"
           },
-          "linkedRustDeltaBytes": 1396792,
+          "linkedRustDeltaBytes": 1665880,
           "budget": {
             "bytes": 3145728,
             "dualExceeds": false,
-            "remaining": 693320
+            "remaining": 424232
           }
         },
         "opt-3-panic-abort": {
@@ -1130,11 +1130,11 @@
           },
           "jsOnly": {
             "bytes": 1055616,
-            "sha256": "39f27ca7f245493e264a1821f4c42e012ddc6be165ae395d7e116936a95f0a7e",
-            "path": "$REPO/artifacts/rust-size/artifacts/android/arm64-v8a/js-only/libbarochart.so",
+            "sha256": "6037a5d7ed9c61f409c9169be56fa2e8666a0f05056e681f66abbadd3804ab64",
+            "path": "$REPO/artifacts/m2a/size/artifacts/android/arm64-v8a/js-only/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "e8b92a683714910821b4f52488f858dad22d633d08615ccca0197ad173fbd4ae",
+              "sourceSha256": "35efddd84ea0b2e7301b8c6868dbc57aca707f00670cb9060375932ec74591bb",
               "profileIndependent": true
             },
             "loadAlignments": [
@@ -1145,12 +1145,12 @@
             "sharedAcrossRustProfiles": true
           },
           "dual": {
-            "bytes": 2371480,
-            "sha256": "2ce633410c6b4b20a1aca9b5d377499bd85381a839733935bce3d1cb1676b7d2",
-            "path": "$REPO/artifacts/rust-size/artifacts/android/arm64-v8a/opt-3-panic-abort/dual/libbarochart.so",
+            "bytes": 2578968,
+            "sha256": "ccd7123594857e53cc3839a0e9e7b3d0c20a102434b1f6f0afe0274b3dbaf565",
+            "path": "$REPO/artifacts/m2a/size/artifacts/android/arm64-v8a/opt-3-panic-abort/dual/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "e8b92a683714910821b4f52488f858dad22d633d08615ccca0197ad173fbd4ae",
+              "sourceSha256": "35efddd84ea0b2e7301b8c6868dbc57aca707f00670cb9060375932ec74591bb",
               "profile": "opt-3-panic-abort"
             },
             "loadAlignments": [
@@ -1160,12 +1160,12 @@
             ]
           },
           "rustOnly": {
-            "bytes": 1332568,
-            "sha256": "57892722566ec3f69116a94b28e30ac1825d90ebb6b4d7e594950211e52902bb",
-            "path": "$REPO/artifacts/rust-size/artifacts/android/arm64-v8a/opt-3-panic-abort/rust-only/libbarochart.so",
+            "bytes": 1540104,
+            "sha256": "aeac93c8013035a53d196d310260f2f4b08362f65e69572938d4d64213acc0e1",
+            "path": "$REPO/artifacts/m2a/size/artifacts/android/arm64-v8a/opt-3-panic-abort/rust-only/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "e8b92a683714910821b4f52488f858dad22d633d08615ccca0197ad173fbd4ae",
+              "sourceSha256": "35efddd84ea0b2e7301b8c6868dbc57aca707f00670cb9060375932ec74591bb",
               "profile": "opt-3-panic-abort"
             },
             "loadAlignments": [
@@ -1175,15 +1175,15 @@
             ]
           },
           "rustStaticlib": {
-            "bytes": 24544940,
-            "sha256": "abe8e34130db7897bf15f0c3b81923c26a8b7f9b91d923ecbefc637ff56eb5dd",
+            "bytes": 25894602,
+            "sha256": "b065d46399b213589b52f2cb3905a845ba2526da36fd8c16ab485fe6326c1c05",
             "path": "$OUT/rust-target/android/opt-3-panic-abort/aarch64-linux-android/release/libbarochart_ffi.a"
           },
-          "linkedRustDeltaBytes": 1315864,
+          "linkedRustDeltaBytes": 1523352,
           "budget": {
             "bytes": 3145728,
             "dualExceeds": false,
-            "remaining": 774248
+            "remaining": 566760
           }
         }
       },
@@ -1199,11 +1199,11 @@
           },
           "jsOnly": {
             "bytes": 1115400,
-            "sha256": "018f0c13614a0a855ac96f67b03ef1c854a0886743c4857106124913bf1b06fe",
-            "path": "$REPO/artifacts/rust-size/artifacts/android/x86_64/js-only/libbarochart.so",
+            "sha256": "7938333d0ec6f34ef1d53419b2f76176dd07d007e2c86f9936b5c895201e8e91",
+            "path": "$REPO/artifacts/m2a/size/artifacts/android/x86_64/js-only/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "e8b92a683714910821b4f52488f858dad22d633d08615ccca0197ad173fbd4ae",
+              "sourceSha256": "35efddd84ea0b2e7301b8c6868dbc57aca707f00670cb9060375932ec74591bb",
               "profileIndependent": true
             },
             "loadAlignments": [
@@ -1214,12 +1214,12 @@
             "sharedAcrossRustProfiles": true
           },
           "dual": {
-            "bytes": 2550016,
-            "sha256": "64aabc4aeb094e89c1ea90d5914617c69b4c6f8fd74a923cb42e6dc768aa9550",
-            "path": "$REPO/artifacts/rust-size/artifacts/android/x86_64/opt-s-panic-unwind/dual/libbarochart.so",
+            "bytes": 2872768,
+            "sha256": "10005e13230f908d8c1570fd836e3dcd8a4a98d0cdce08f6af4942b6e9fc27e2",
+            "path": "$REPO/artifacts/m2a/size/artifacts/android/x86_64/opt-s-panic-unwind/dual/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "e8b92a683714910821b4f52488f858dad22d633d08615ccca0197ad173fbd4ae",
+              "sourceSha256": "35efddd84ea0b2e7301b8c6868dbc57aca707f00670cb9060375932ec74591bb",
               "profile": "opt-s-panic-unwind"
             },
             "loadAlignments": [
@@ -1229,12 +1229,12 @@
             ]
           },
           "rustOnly": {
-            "bytes": 1448144,
-            "sha256": "d873db5ba18ecb77a53d765e0e2ef5fd4752e78cfd7a8603d8634aa6831cf7cd",
-            "path": "$REPO/artifacts/rust-size/artifacts/android/x86_64/opt-s-panic-unwind/rust-only/libbarochart.so",
+            "bytes": 1766832,
+            "sha256": "91c7188fd15ea415f6bf0a8811e1eaab1b55dd93bbe4509716c1d94f0a663f05",
+            "path": "$REPO/artifacts/m2a/size/artifacts/android/x86_64/opt-s-panic-unwind/rust-only/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "e8b92a683714910821b4f52488f858dad22d633d08615ccca0197ad173fbd4ae",
+              "sourceSha256": "35efddd84ea0b2e7301b8c6868dbc57aca707f00670cb9060375932ec74591bb",
               "profile": "opt-s-panic-unwind"
             },
             "loadAlignments": [
@@ -1244,15 +1244,15 @@
             ]
           },
           "rustStaticlib": {
-            "bytes": 24642868,
-            "sha256": "be52d2a121a13bd070294637145e64900b007609d13cc8188728f5b30363e584",
+            "bytes": 26576684,
+            "sha256": "951702a1f766fef35e0a9e3c3b57f2959b41ee6b68ed7c913104239bb269a185",
             "path": "$OUT/rust-target/android/opt-s-panic-unwind/x86_64-linux-android/release/libbarochart_ffi.a"
           },
-          "linkedRustDeltaBytes": 1434616,
+          "linkedRustDeltaBytes": 1757368,
           "budget": {
             "bytes": 3145728,
             "dualExceeds": false,
-            "remaining": 595712
+            "remaining": 272960
           }
         },
         "opt-3-panic-unwind": {
@@ -1266,11 +1266,11 @@
           },
           "jsOnly": {
             "bytes": 1115400,
-            "sha256": "018f0c13614a0a855ac96f67b03ef1c854a0886743c4857106124913bf1b06fe",
-            "path": "$REPO/artifacts/rust-size/artifacts/android/x86_64/js-only/libbarochart.so",
+            "sha256": "7938333d0ec6f34ef1d53419b2f76176dd07d007e2c86f9936b5c895201e8e91",
+            "path": "$REPO/artifacts/m2a/size/artifacts/android/x86_64/js-only/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "e8b92a683714910821b4f52488f858dad22d633d08615ccca0197ad173fbd4ae",
+              "sourceSha256": "35efddd84ea0b2e7301b8c6868dbc57aca707f00670cb9060375932ec74591bb",
               "profileIndependent": true
             },
             "loadAlignments": [
@@ -1281,12 +1281,12 @@
             "sharedAcrossRustProfiles": true
           },
           "dual": {
-            "bytes": 2484304,
-            "sha256": "04b2071a1ab8d3d0eb23cb46ce2a49d682043ba93f3e4ed930d9262c45506c3a",
-            "path": "$REPO/artifacts/rust-size/artifacts/android/x86_64/opt-3-panic-unwind/dual/libbarochart.so",
+            "bytes": 2761872,
+            "sha256": "da91f259f4d8181f39fd0c46a98cd4c744614a560235cad71e94b8c3b20bfc5b",
+            "path": "$REPO/artifacts/m2a/size/artifacts/android/x86_64/opt-3-panic-unwind/dual/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "e8b92a683714910821b4f52488f858dad22d633d08615ccca0197ad173fbd4ae",
+              "sourceSha256": "35efddd84ea0b2e7301b8c6868dbc57aca707f00670cb9060375932ec74591bb",
               "profile": "opt-3-panic-unwind"
             },
             "loadAlignments": [
@@ -1296,12 +1296,12 @@
             ]
           },
           "rustOnly": {
-            "bytes": 1382336,
-            "sha256": "9bb53e2f89a3f5af8bd99b72199ced53133bb57fcfe31da139ea9ce5812d6d34",
-            "path": "$REPO/artifacts/rust-size/artifacts/android/x86_64/opt-3-panic-unwind/rust-only/libbarochart.so",
+            "bytes": 1660000,
+            "sha256": "b9452e11199aedf2ab9693c63968fe7b9859859b81ffd57605ac58452871a678",
+            "path": "$REPO/artifacts/m2a/size/artifacts/android/x86_64/opt-3-panic-unwind/rust-only/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "e8b92a683714910821b4f52488f858dad22d633d08615ccca0197ad173fbd4ae",
+              "sourceSha256": "35efddd84ea0b2e7301b8c6868dbc57aca707f00670cb9060375932ec74591bb",
               "profile": "opt-3-panic-unwind"
             },
             "loadAlignments": [
@@ -1311,15 +1311,15 @@
             ]
           },
           "rustStaticlib": {
-            "bytes": 24253530,
-            "sha256": "66a7d09e8a5deaa9e830ce2c7fd2cfb7270e16b9e76f9f3e38c8a76a7cb99e04",
+            "bytes": 25782766,
+            "sha256": "a9ccd78ccb613698f2f6cc5f46ccc24626249436c63ba29b147d9b37a413ba1a",
             "path": "$OUT/rust-target/android/opt-3-panic-unwind/x86_64-linux-android/release/libbarochart_ffi.a"
           },
-          "linkedRustDeltaBytes": 1368904,
+          "linkedRustDeltaBytes": 1646472,
           "budget": {
             "bytes": 3145728,
             "dualExceeds": false,
-            "remaining": 661424
+            "remaining": 383856
           }
         },
         "opt-s-panic-abort": {
@@ -1333,11 +1333,11 @@
           },
           "jsOnly": {
             "bytes": 1115400,
-            "sha256": "018f0c13614a0a855ac96f67b03ef1c854a0886743c4857106124913bf1b06fe",
-            "path": "$REPO/artifacts/rust-size/artifacts/android/x86_64/js-only/libbarochart.so",
+            "sha256": "7938333d0ec6f34ef1d53419b2f76176dd07d007e2c86f9936b5c895201e8e91",
+            "path": "$REPO/artifacts/m2a/size/artifacts/android/x86_64/js-only/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "e8b92a683714910821b4f52488f858dad22d633d08615ccca0197ad173fbd4ae",
+              "sourceSha256": "35efddd84ea0b2e7301b8c6868dbc57aca707f00670cb9060375932ec74591bb",
               "profileIndependent": true
             },
             "loadAlignments": [
@@ -1348,12 +1348,12 @@
             "sharedAcrossRustProfiles": true
           },
           "dual": {
-            "bytes": 2534192,
-            "sha256": "ec3cd8c5b05aa9b3e85cddc46d21fdab2f8ec7c4d7c6923283e3dd9067929e9d",
-            "path": "$REPO/artifacts/rust-size/artifacts/android/x86_64/opt-s-panic-abort/dual/libbarochart.so",
+            "bytes": 2826192,
+            "sha256": "a7f73d446560c3f12c72b4b8fd872e7e6a16e33b07e4110c0c799c15ca3133db",
+            "path": "$REPO/artifacts/m2a/size/artifacts/android/x86_64/opt-s-panic-abort/dual/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "e8b92a683714910821b4f52488f858dad22d633d08615ccca0197ad173fbd4ae",
+              "sourceSha256": "35efddd84ea0b2e7301b8c6868dbc57aca707f00670cb9060375932ec74591bb",
               "profile": "opt-s-panic-abort"
             },
             "loadAlignments": [
@@ -1363,12 +1363,12 @@
             ]
           },
           "rustOnly": {
-            "bytes": 1432304,
-            "sha256": "c1afd152fecf1aef01c020c07b29c3107598c6ddbf59914f125fca4760b3b009",
-            "path": "$REPO/artifacts/rust-size/artifacts/android/x86_64/opt-s-panic-abort/rust-only/libbarochart.so",
+            "bytes": 1720256,
+            "sha256": "5b5890e109a398f7f34311d25cce0e302a1340dc954c5b78d2ce85d0eadd8f50",
+            "path": "$REPO/artifacts/m2a/size/artifacts/android/x86_64/opt-s-panic-abort/rust-only/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "e8b92a683714910821b4f52488f858dad22d633d08615ccca0197ad173fbd4ae",
+              "sourceSha256": "35efddd84ea0b2e7301b8c6868dbc57aca707f00670cb9060375932ec74591bb",
               "profile": "opt-s-panic-abort"
             },
             "loadAlignments": [
@@ -1378,15 +1378,15 @@
             ]
           },
           "rustStaticlib": {
-            "bytes": 24540950,
-            "sha256": "bb843b033ec58cbd853a2716491efde1bf866d83051dab8ce975fdc6d714098b",
+            "bytes": 26301094,
+            "sha256": "11392a3bff5133b87bbd6e1ab2a9b5dccee61421af7a0b874219164156b1c003",
             "path": "$OUT/rust-target/android/opt-s-panic-abort/x86_64-linux-android/release/libbarochart_ffi.a"
           },
-          "linkedRustDeltaBytes": 1418792,
+          "linkedRustDeltaBytes": 1710792,
           "budget": {
             "bytes": 3145728,
             "dualExceeds": false,
-            "remaining": 611536
+            "remaining": 319536
           }
         },
         "opt-3-panic-abort": {
@@ -1400,11 +1400,11 @@
           },
           "jsOnly": {
             "bytes": 1115400,
-            "sha256": "018f0c13614a0a855ac96f67b03ef1c854a0886743c4857106124913bf1b06fe",
-            "path": "$REPO/artifacts/rust-size/artifacts/android/x86_64/js-only/libbarochart.so",
+            "sha256": "7938333d0ec6f34ef1d53419b2f76176dd07d007e2c86f9936b5c895201e8e91",
+            "path": "$REPO/artifacts/m2a/size/artifacts/android/x86_64/js-only/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "e8b92a683714910821b4f52488f858dad22d633d08615ccca0197ad173fbd4ae",
+              "sourceSha256": "35efddd84ea0b2e7301b8c6868dbc57aca707f00670cb9060375932ec74591bb",
               "profileIndependent": true
             },
             "loadAlignments": [
@@ -1415,12 +1415,12 @@
             "sharedAcrossRustProfiles": true
           },
           "dual": {
-            "bytes": 2473936,
-            "sha256": "8a066b4e8e77613d7cb413d2515ff0efa77181260888d5c65dbeb06abc03c638",
-            "path": "$REPO/artifacts/rust-size/artifacts/android/x86_64/opt-3-panic-abort/dual/libbarochart.so",
+            "bytes": 2722944,
+            "sha256": "bc007db5aafe7b8fb4f7e06c5a5048910b7e52a3bff7ddba7e06cb83dcca2805",
+            "path": "$REPO/artifacts/m2a/size/artifacts/android/x86_64/opt-3-panic-abort/dual/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "e8b92a683714910821b4f52488f858dad22d633d08615ccca0197ad173fbd4ae",
+              "sourceSha256": "35efddd84ea0b2e7301b8c6868dbc57aca707f00670cb9060375932ec74591bb",
               "profile": "opt-3-panic-abort"
             },
             "loadAlignments": [
@@ -1430,12 +1430,12 @@
             ]
           },
           "rustOnly": {
-            "bytes": 1371968,
-            "sha256": "7d0bb6a9535bb8ffa82bb04f7756ee15748025d622a2fc61cea431e89649072d",
-            "path": "$REPO/artifacts/rust-size/artifacts/android/x86_64/opt-3-panic-abort/rust-only/libbarochart.so",
+            "bytes": 1621056,
+            "sha256": "aba3331507ebfec80ebb7d95b55c735af51dec39f3eb1a22951e511f8a8787c8",
+            "path": "$REPO/artifacts/m2a/size/artifacts/android/x86_64/opt-3-panic-abort/rust-only/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "e8b92a683714910821b4f52488f858dad22d633d08615ccca0197ad173fbd4ae",
+              "sourceSha256": "35efddd84ea0b2e7301b8c6868dbc57aca707f00670cb9060375932ec74591bb",
               "profile": "opt-3-panic-abort"
             },
             "loadAlignments": [
@@ -1445,15 +1445,15 @@
             ]
           },
           "rustStaticlib": {
-            "bytes": 24174556,
-            "sha256": "689438fb8867507d4852dda4c0f2aeb076b96092bcc4222312f62023cc17764c",
+            "bytes": 25551764,
+            "sha256": "99a921778a8d228c0c7174c19f4ab8962ee54fdc56b2e6a987a3364d3627530e",
             "path": "$OUT/rust-target/android/opt-3-panic-abort/x86_64-linux-android/release/libbarochart_ffi.a"
           },
-          "linkedRustDeltaBytes": 1358536,
+          "linkedRustDeltaBytes": 1607544,
           "budget": {
             "bytes": 3145728,
             "dualExceeds": false,
-            "remaining": 671792
+            "remaining": 422784
           }
         }
       }
@@ -1464,29 +1464,29 @@
     "target": "arm64-apple-ios15.0",
     "profile": "opt-s-panic-unwind",
     "archive": {
-      "bytes": 19064888,
-      "sha256": "f5495479217fedfa512e700d875b6d2d862aac9e63e4ee06d240eb40ad296f1d",
-      "path": "$REPO/artifacts/rust-size/rust-target/ios/opt-s-panic-unwind/aarch64-apple-ios/release/libbarochart_ffi.a"
+      "bytes": 20820896,
+      "sha256": "24d1718c6c5bdab9c3bdf055bdab1e32fc5b6664a3e10306cdd7730a642470bb",
+      "path": "$REPO/artifacts/m2a/size/rust-target/ios/opt-s-panic-unwind/aarch64-apple-ios/release/libbarochart_ffi.a"
     },
     "baseline": {
       "bytes": 32944,
       "sha256": "37b4c2bd303281d0d9a2bf95610a7aedb6c15659c6d1b2a4684ef8003fdbc6f2",
       "fileBytes": 32944,
       "textSegmentBytes": 32768,
-      "path": "$REPO/artifacts/rust-size/artifacts/ios/baseline"
+      "path": "$REPO/artifacts/m2a/size/artifacts/ios/baseline"
     },
     "rustReferenced": {
-      "bytes": 542608,
-      "sha256": "de9c0aa7bc53fefdbfd9840ca5cc28e1d354e0253cfce3bcd6496e201ab1b7c1",
-      "fileBytes": 542608,
-      "textSegmentBytes": 393216,
-      "path": "$REPO/artifacts/rust-size/artifacts/ios/rust-referenced"
+      "bytes": 771832,
+      "sha256": "9c2301c43c5b29e381ac7cf05282bd47f3ab8873f201bff9fea16779eadd58a8",
+      "fileBytes": 771832,
+      "textSegmentBytes": 557056,
+      "path": "$REPO/artifacts/m2a/size/artifacts/ios/rust-referenced"
     },
     "delta": {
-      "fileBytes": 509664,
-      "textSegmentBytes": 360448
+      "fileBytes": 738888,
+      "textSegmentBytes": 524288
     },
-    "sourceSha256": "e8b92a683714910821b4f52488f858dad22d633d08615ccca0197ad173fbd4ae"
+    "sourceSha256": "35efddd84ea0b2e7301b8c6868dbc57aca707f00670cb9060375932ec74591bb"
   },
   "forecast": {
     "arm64-v8a": {
@@ -1497,11 +1497,11 @@
         "The 37,850-line reader estimate describes scope and carries no byte-growth law."
       ],
       "rustContributionBytes": {
-        "measuredScaffold": 1412920,
+        "measuredScaffold": 1710952,
         "designPriorScenario": 2621440
       },
       "dualBytes": {
-        "measuredScaffold": 2468536,
+        "measuredScaffold": 2766568,
         "designPriorScenario": 3677056
       },
       "budget": {
@@ -1518,11 +1518,11 @@
         "The 37,850-line reader estimate describes scope and carries no byte-growth law."
       ],
       "rustContributionBytes": {
-        "measuredScaffold": 1434616,
+        "measuredScaffold": 1757368,
         "designPriorScenario": 2621440
       },
       "dualBytes": {
-        "measuredScaffold": 2550016,
+        "measuredScaffold": 2872768,
         "designPriorScenario": 3736840
       },
       "budget": {
@@ -1536,10 +1536,10 @@
     "arm64-v8a": {
       "formula": "linked Rust scaffold delta / physical .rs lines under src/ in the four linked shipping crates (tests and tools excluded; all cfg branches included) × authoritative estimated total Rust lines",
       "numerator": {
-        "linkedRustDeltaBytes": 1412920
+        "linkedRustDeltaBytes": 1710952
       },
       "denominator": {
-        "shippingCrateSrcPhysicalLinesAllCfgBranches": 4572,
+        "shippingCrateSrcPhysicalLinesAllCfgBranches": 11323,
         "crates": [
           "barochart-js",
           "barochart-core",
@@ -1548,9 +1548,9 @@
         ]
       },
       "scopeLinesEstimate": 37850,
-      "bytesPerCompiledScaffoldLine": 309.0376202974628,
-      "projectedRustBytes": 11697074,
-      "projectedDualBytes": 12752690,
+      "bytesPerCompiledScaffoldLine": 151.10412434867084,
+      "projectedRustBytes": 5719291,
+      "projectedDualBytes": 6774907,
       "exceedsBudget": true,
       "warning": "Naive diagnostic only: fixed std/allocator/FFI overhead dominates the scaffold, while future chart logic and tables do not scale linearly. Do not use as a growth law.",
       "useForDecision": false
@@ -1558,10 +1558,10 @@
     "x86_64": {
       "formula": "linked Rust scaffold delta / physical .rs lines under src/ in the four linked shipping crates (tests and tools excluded; all cfg branches included) × authoritative estimated total Rust lines",
       "numerator": {
-        "linkedRustDeltaBytes": 1434616
+        "linkedRustDeltaBytes": 1757368
       },
       "denominator": {
-        "shippingCrateSrcPhysicalLinesAllCfgBranches": 4572,
+        "shippingCrateSrcPhysicalLinesAllCfgBranches": 11323,
         "crates": [
           "barochart-js",
           "barochart-core",
@@ -1570,9 +1570,9 @@
         ]
       },
       "scopeLinesEstimate": 37850,
-      "bytesPerCompiledScaffoldLine": 313.7830271216098,
-      "projectedRustBytes": 11876688,
-      "projectedDualBytes": 12992088,
+      "bytesPerCompiledScaffoldLine": 155.20339132738673,
+      "projectedRustBytes": 5874448,
+      "projectedDualBytes": 6989848,
       "exceedsBudget": true,
       "warning": "Naive diagnostic only: fixed std/allocator/FFI overhead dominates the scaffold, while future chart logic and tables do not scale linearly. Do not use as a growth law.",
       "useForDecision": false

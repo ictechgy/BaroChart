@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {existsSync} from 'node:fs';
 import {readFile} from 'node:fs/promises';
-import vm from 'node:vm';
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {parseLossless, stringifyLossless} from '../trace/bcjson.mjs';
@@ -218,11 +217,12 @@ export async function createWasmHarness({targetDirectory = join(ROOT, 'artifacts
         bytesView().set(argsBytes, argsPointer);
         const status = instance.exports.bc_call(engine, namePointer, nameBytes.length, argsPointer, argsBytes.length, 1, output);
         const owned = descriptor(output);
-        const text = owned.pointer ? new TextDecoder('utf-8', {fatal: true}).decode(bytesView().subarray(owned.pointer, owned.pointer + owned.length)) : '';
         let value;
-        try {value = text ? parseLossless(text) : undefined} finally {if (owned.pointer) free(owned.pointer, owned.capacity)}
+        try {
+          const text = owned.pointer ? new TextDecoder('utf-8', {fatal: true}).decode(bytesView().subarray(owned.pointer, owned.pointer + owned.length)) : '';
+          value = text ? parseLossless(text) : undefined;
+        } finally {if (owned.pointer) free(owned.pointer, owned.capacity)}
         if (status === 0) return {status, value};
-        if (status === 1 || status === 2) return {status, error: value};
         return {status, error: value};
       } finally {
         free(namePointer, nameBytes.length);
@@ -230,15 +230,16 @@ export async function createWasmHarness({targetDirectory = join(ROOT, 'artifacts
         free(output, 12);
       }
     },
-    async compare(name, args) {
-      const source = await readFile(join(ROOT, 'native/Resources/aster-core.js'), 'utf8');
-      const context = vm.createContext({Intl});
-      vm.runInContext(source, context, {timeout: 5_000});
-      const callable = context[name];
-      assert.equal(typeof callable, 'function', `VM function missing: ${name}`);
-      const javascript = Reflect.apply(callable, context, args);
+    // A fresh nativeInit smoke oracle is sufficient only for initialization. Stateful callers
+    // provide a reused oracle or run the checked-in core-conformance scenarios.
+    async compare(name, args, {oracle: ownedOracle} = {}) {
+      assert.ok(ownedOracle || name === 'nativeInit', 'Stateful comparisons require a caller-owned oracle; use runScenario');
+      const {createJavaScriptOracle} = await import('./core-conformance.mjs');
+      const oracle = ownedOracle ?? await createJavaScriptOracle();
+      const expected = oracle.call(name, args);
+      const javascript = expected.value;
       const rust = await harness.call(name, args);
-      return {javascript, rust, equal: rust.status === 0 && stringifyLossless(rust.value) === stringifyLossless(javascript)};
+      return {javascript, rust, equal: rust.status === expected.status && stringifyLossless(rust.status === 0 ? rust.value : rust.error) === stringifyLossless(expected.status === 0 ? javascript : expected.error)};
     },
     dispose() {
       if (disposePromise) return disposePromise;

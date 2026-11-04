@@ -34,7 +34,7 @@ test('WASM harness compares nativeInit with the Node VM and reports staged unava
   assert.equal(unavailable.status, 2);
   assert.deepEqual(unavailable.error, {
     name: 'UnavailableError',
-    message: 'nativeSelfTest is not available in the Rust backend yet',
+    message: 'nativeSelfTest is not available in the Rust backend',
     code: null,
   });
   assert.equal((await harness.call('__bcMathForTest', ['log', 2])).status, 2, 'release build must not expose debug probes');
@@ -105,4 +105,21 @@ test('debug WASM probes execute V8 math and Intl time-zone imports through the A
   await harness.dispose();
   assert.equal(harness.hostReleaseCount, 1);
   assert.equal(harness.unexpectedReleaseCount, 0);
+});
+
+test('WASM owned result is freed even when fatal UTF-8 transport decoding fails', {skip}, async t => {
+  const harness=await createWasmHarness({profile:'debug',targetDirectory:'artifacts/rust-wasm/transport-debug-target'});
+  t.after(()=>harness.dispose());
+  const before=(await harness.call('__bcAllocationStatsForTest',[])).value;
+  const Original=globalThis.TextDecoder;
+  globalThis.TextDecoder=class extends Original {
+    decode(input,options){
+      if(input instanceof Uint8Array&&new Original().decode(input).includes('transport-fault-case')) input[0]=0xff;
+      return super.decode(input,options);
+    }
+  };
+  try {await assert.rejects(harness.call('nativeEcho',['transport-fault-case']),TypeError)}
+  finally {globalThis.TextDecoder=Original}
+  const after=(await harness.call('__bcAllocationStatsForTest',[])).value;
+  assert.deepEqual(after,before,'decoding failure must release the result allocation');
 });
