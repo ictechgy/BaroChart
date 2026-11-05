@@ -1,0 +1,11 @@
+{
+  "name": "barochart-web-wasm-consumer-tools",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "rollup": "4.64.5",
+    "typescript": "5.9.3",
+    "vite": "7.3.7"
+  }
+}

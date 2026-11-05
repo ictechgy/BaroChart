@@ -188,10 +188,17 @@ fn source_fixture() -> (IngestionOwner, ModelState, IndicatorEngine, SeriesCache
 fn accounted_source_fixture(
     memory: MemoryContext,
 ) -> (IngestionOwner, ModelState, IndicatorEngine, SeriesCaches) {
+    accounted_source_fixture_with_count(memory, 8)
+}
+
+fn accounted_source_fixture_with_count(
+    memory: MemoryContext,
+    count: usize,
+) -> (IngestionOwner, ModelState, IndicatorEngine, SeriesCaches) {
     let mut data =
         ModelDataState::new_with_memory(StoreOptions::default(), Vec::new(), memory.clone())
             .unwrap();
-    let columns = seeded_columns(8, 42).unwrap();
+    let columns = seeded_columns(count, 42).unwrap();
     data.store_mut()
         .set_columns(
             &ColumnInputs {
@@ -202,7 +209,7 @@ fn accounted_source_fixture(
                 close: NumericColumn::F64(&columns.close),
                 volume: NumericColumn::F64(&columns.volume),
             },
-            Some(8),
+            Some(count),
         )
         .unwrap();
     let owner = IngestionOwner::new(data, NumberDialect::Ecma);
@@ -248,6 +255,82 @@ fn accounted_source_fixture(
         .add_series(&JsValue::Object(series), &context)
         .unwrap();
     (owner, model, engine, SeriesCaches::new_with_memory(memory))
+}
+
+#[test]
+fn params_capture_metadata_oom_is_accounted_and_does_not_orphan_the_source_lease() {
+    let probe_account = MemoryAccount::new(0, OomStyle::RangeErrorCapitalized);
+    let probe_context = MemoryContext::accounted(&probe_account);
+    let (mut probe_owner, probe_model, probe_engine, probe_caches) =
+        accounted_source_fixture_with_count(probe_context, 4_096);
+    let probe_baseline = probe_account.snapshot().requested_live_bytes;
+    let mut probe_lease = probe_owner.acquire_async_lease().unwrap();
+    let mut params = JsObject::new();
+    params.insert(JsString::from_str("period"), JsValue::Number(5.0));
+    let probe_source = NativeParamsSource::capture(
+        &probe_owner,
+        &probe_lease,
+        &probe_model,
+        &probe_engine,
+        &probe_caches,
+        &JsValue::String(JsString::from_str("ema")),
+        &JsValue::Object(params.clone()),
+        7.0,
+        1.0,
+        805_306_368.0,
+        NumberDialect::Ecma,
+        &NoZones,
+    )
+    .unwrap();
+    let probe_peak = probe_account.snapshot().requested_peak_bytes;
+    drop(probe_source);
+    assert!(probe_owner.release_async_lease(&mut probe_lease));
+    drop((probe_owner, probe_model, probe_engine, probe_caches));
+    assert_eq!(probe_account.snapshot().requested_live_bytes, 0);
+    let capture_bytes = probe_peak.saturating_sub(probe_baseline);
+    assert!(capture_bytes > 1_024);
+
+    let limit = probe_baseline + capture_bytes / 2;
+    let limited_account = MemoryAccount::new(limit, OomStyle::RangeErrorCapitalized);
+    let limited_context = MemoryContext::accounted(&limited_account);
+    let (mut owner, model, engine, caches) =
+        accounted_source_fixture_with_count(limited_context, 4_096);
+    assert!(limited_account.snapshot().requested_live_bytes <= limit);
+    let mut lease = owner.acquire_async_lease().unwrap();
+    let error = match NativeParamsSource::capture(
+        &owner,
+        &lease,
+        &model,
+        &engine,
+        &caches,
+        &JsValue::String(JsString::from_str("ema")),
+        &JsValue::Object(params),
+        7.0,
+        1.0,
+        805_306_368.0,
+        NumberDialect::Ecma,
+        &NoZones,
+    ) {
+        Ok(_) => panic!("limited params capture unexpectedly succeeded"),
+        Err(error) => error,
+    };
+    assert!(
+        error
+            .message
+            .to_string_lossy()
+            .to_ascii_lowercase()
+            .contains("memory")
+    );
+    assert!(owner.validate_async_lease(&lease));
+    assert!(owner.release_async_lease(&mut lease));
+    let mut second = owner.acquire_async_lease().unwrap();
+    assert!(owner.validate_async_lease(&second));
+    assert!(owner.release_async_lease(&mut second));
+    assert!(
+        engine
+            .entry(&JsValue::String(JsString::from_str("ema")))
+            .is_some()
+    );
 }
 
 fn params_state(model: &ModelState, engine: &IndicatorEngine) -> JsValue {

@@ -42,6 +42,14 @@ mod input_handlers;
 mod manifest;
 mod native_jobs_handlers;
 pub mod reply_policy;
+#[cfg(target_arch = "wasm32")]
+mod web_handlers;
+#[cfg(any(target_arch = "wasm32", test))]
+mod web_layout_handlers;
+#[cfg(target_arch = "wasm32")]
+mod web_migration_handlers;
+#[cfg(target_arch = "wasm32")]
+mod web_params_handlers;
 pub use bulk_handlers::{call_bulk, call_bulk_with_reply_admission};
 use commands::{native_command, native_ingestion_command, native_unchanged};
 use data_handlers::{native_data_event, native_set_data};
@@ -82,6 +90,10 @@ pub fn call_scoped_with_reply_admission(
     scope: &mut MemoryScope,
     admit_reply: &mut dyn FnMut(FixedReply) -> Result<(), JsError>,
 ) -> Result<JsValue, JsError> {
+    #[cfg(target_arch = "wasm32")]
+    if name.starts_with("web.") {
+        return web_handlers::call(engine, name, args, scope, admit_reply);
+    }
     let implemented = FUNCTIONS
         .binary_search_by_key(&name, |entry| entry.name)
         .ok()
@@ -234,6 +246,18 @@ pub fn read_f64_scoped<'a>(
     args: &[JsValue],
     scope: &mut MemoryScope,
 ) -> Result<&'a [f64], JsError> {
+    #[cfg(target_arch = "wasm32")]
+    if name == "web.dataColumn" {
+        return engine
+            .chart()
+            .ok_or_else(|| {
+                JsError::new(
+                    "Error",
+                    JsString::from_str("Native model is not initialized"),
+                )
+            })
+            .and_then(|chart| barochart_core::web::data_column(chart, args));
+    }
     if name == "nativeAsyncBuffer" {
         return engine.native_async_buffer(args);
     }

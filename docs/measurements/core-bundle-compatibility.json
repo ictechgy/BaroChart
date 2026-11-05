@@ -1,0 +1,35 @@
+{
+  "schema": "barochart.core-bundle-compatibility",
+  "version": 1,
+  "baseline": {
+    "ref": "e530a5f",
+    "bundleSha256": "007ac99f8553b5912ef0c32ec392b5d30d196daf97bb17181c183004258ef512"
+  },
+  "current": {
+    "bundleSha256": "16eb77f70d75cb1c8663f5def04dad7ee10183421bcdd49015d40a6b27a96072"
+  },
+  "fixture": {
+    "oracleCommit": "87598ca492e6a7273b60b629c0cf9f2456268853",
+    "scenarioCount": 5,
+    "totalCallCount": 120,
+    "parityCallCount": 103,
+    "rustPolicyCallCount": 17,
+    "behaviorSha256": "08285b8bdb757a416ac407224f0447a8346c76ef391a13b684952847f6c8ed23",
+    "expectedPayloadSha256": "03748e6fa89537977ed8a134816ebac09f719f26c070a870529cf0625e63ade5"
+  },
+  "validation": {
+    "oldEqualsCurrent": true,
+    "oldEqualsFrozenExpected": true,
+    "currentEqualsFrozenExpected": true,
+    "mismatchCount": 0,
+    "mismatches": []
+  },
+  "runtime": {
+    "node": "v22.20.0",
+    "v8": "12.4.254.21-node.33",
+    "icu": "77.1",
+    "tz": "2025b"
+  },
+  "scope": "Fresh VM per stateful scenario. Parity calls compare baseline JS, current JS, and stored expected bytes. Explicit rust-policy calls are counted but not compared to JavaScript because their expected values intentionally describe Rust-only rejection policy.",
+  "note": "Only bundle provenance may be updated after this audit passes. Stored expected outcomes, arguments, comparison policies, and oracleCommit remain frozen."
+}

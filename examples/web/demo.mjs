@@ -13,7 +13,27 @@ import {applyLayoutFrame} from './apply-layout-frame.mjs';
 import {safeCheckpointStringify} from '../../src/core/checkpoint-validation.mjs';
 import {modelRequest} from '../../src/web/worker-state.mjs';
 import {collectIndicatorGroups,indicatorGroup,copyPanelProjection,copyAxisProjection,uniqueLayoutId,captureLayoutDomains,pinSyntheticRange,clearSyntheticRange,rebindSyntheticRangePins,pruneSyntheticRangePins} from './indicator-layout.mjs';
-const $=id=>document.getElementById(id);let chart,model,timer,extras=[],serial=0,job=0,controller,loadedMarket,loadedCount,streamIntent=false,light=false,preparing=false;
+export async function mountJavaScriptDemo({root=globalThis.document,initialModel=null,initialState=null,publish=true,signal}={}){
+ if(!root||typeof root.querySelector!=='function'||typeof root.querySelectorAll!=='function')throw new TypeError('Demo root must support querySelector');
+ const ownerDocument=root.nodeType===9?root:root.ownerDocument??globalThis.document;
+ if(!ownerDocument)throw new TypeError('Demo root owner document required');
+ const view=ownerDocument.defaultView??globalThis.window??globalThis;
+ const $=id=>root.querySelector('#'+id),queryAll=selector=>root.querySelectorAll(selector);
+ const matchesMedia=query=>view.matchMedia?.(query)??globalThis.matchMedia?.(query)??{matches:false};
+ const schedule=view.setInterval?.bind(view)??globalThis.setInterval;
+ const cancelSchedule=view.clearInterval?.bind(view)??globalThis.clearInterval;
+ const scheduleTimeout=view.setTimeout?.bind(view)??globalThis.setTimeout;
+ const cancelTimeout=view.clearTimeout?.bind(view)??globalThis.clearTimeout;
+ const timeouts=new Set(),later=(fn,delay)=>{const id=scheduleTimeout(()=>{timeouts.delete(id);fn();},delay);timeouts.add(id);return id};
+ const cancelLater=id=>{if(timeouts.delete(id))cancelTimeout(id);};
+ if(signal!==undefined&&(!signal||typeof signal.addEventListener!=='function'||typeof signal.removeEventListener!=='function'||typeof signal.aborted!=='boolean'))throw new TypeError('AbortSignal required');
+ if(signal?.aborted)throw new DOMException('Demo mount cancelled','AbortError');
+ let autoPublish=!!publish,published=false,disposed=false;
+ let chart,model,timer,extras=[],serial=0,job=0,controller,loadedMarket,loadedCount,streamIntent=false,light=false,preparing=false;
+ let initialResolve,initialReject,initialSettled=false;
+ const initialReady=new Promise((resolve,reject)=>{initialResolve=resolve;initialReject=reject;});void initialReady.catch(()=>{});
+ const settleInitial=error=>{if(initialSettled)return;initialSettled=true;error?initialReject(error):initialResolve();};
+ const onExternalAbort=()=>controller?.abort();signal?.addEventListener('abort',onExternalAbort,{once:true});
 const generatedPanelIds=new Set(),generatedAxisIds=new Set(),syntheticPanelRanges=new Map(),syntheticAxisRanges=new Map();let layoutAxisExplicit=false,layoutDraft=null,layoutMutationOwner=null;
 const journals=new Map();
 let pageActive=true,pageClosed=false,resumeInitial=false;
@@ -25,7 +45,7 @@ function replaceOptions(select,choices,selected=''){
  if(!select)return '';
  const signature=choices.map(choice=>choice.value+'\u0000'+choice.label).join('\u0001');
  if(select.dataset.layoutOptions!==signature){
-  const options=choices.map(choice=>{const option=document.createElement('option');option.value=choice.value;option.textContent=choice.label;return option;});
+  const options=choices.map(choice=>{const option=ownerDocument.createElement('option');option.value=choice.value;option.textContent=choice.label;return option;});
   select.replaceChildren(...options);select.dataset.layoutOptions=signature;
  }
  const accepted=choices.some(choice=>choice.value===selected)?selected:(choices[0]?.value??'');
@@ -86,24 +106,24 @@ const editorStatus=message=>setText('indicator-editor-status',message);
 const indicatorEditor=createIndicatorEditor({root:$('indicator-editor'),getChart:()=>chart,isBusy:()=>preparing||!pageActive||pageClosed,onApplyParams:applyIndicatorParams,onApplyStyle:applyIndicatorStyle,onRemove:removeSelectedIndicator,onStatus:editorStatus});
 const presetStatus=message=>setText('chart-layout-status',message);
 const analysisStatus=message=>setText('analysis-status',message);
-const layoutMemory=createLayoutMemory({getStorage:()=>window.localStorage,getPreset:currentLayoutPreset,onStatus:presetStatus});
+const layoutMemory=createLayoutMemory({getStorage:()=>view.localStorage??globalThis.localStorage,getPreset:currentLayoutPreset,onStatus:presetStatus});
 const rememberedLayout=layoutMemory.read();let startupPreset=rememberedLayout.preset;
 $('remember-chart-layout').checked=rememberedLayout.enabled;
 if(startupPreset){$('market').value=startupPreset.market;$('count').value=String(startupPreset.count);light=startupPreset.light;}
-function stopStream(){clearInterval(timer);timer=null;$('stream').setAttribute('aria-pressed','false');$('stream').textContent='▶ 합성 스트림';}
+function stopStream(){if(timer!==null){cancelSchedule(timer);timer=null;}$('stream').setAttribute('aria-pressed','false');$('stream').textContent='▶ 합성 스트림';}
 function sync(){if(!model||!chart||chart.disposed)return;$('explore').setAttribute('aria-pressed',String(chart.dataExploration?.active??false));const d=model.drawings.items.find(d=>d.id===model.drawings.selected);$('undo').disabled=!model.drawings.undoStack.length&&!chart.controller.gesture;$('redo').disabled=!model.drawings.redoStack.length;$('delete').disabled=!d||d.locked;$('lock').disabled=!d;$('lock').textContent=d?.locked?'잠금 해제':'잠금';
  setText('selection',d?'선택: '+d.type+' · '+(d.locked?'잠김':'편집 가능'):'선택된 도형 없음');chart.canvas.style.cursor=chart.controller.tool==='select'?(chart.controller.gesture?.kind==='pan'?'grabbing':'grab'):chart.controller.tool==='text'?'text':'crosshair';
  const b=model.store.length?model.store.at(model.store.length-1):null;setText('last-time',b?model.timeFormatter(b.time):'데이터 없음');for(const k of ['open','high','low','close'])setText('last-'+k,b?formatPrice(b[k],model.symbol):'—');setText('last-volume',b?(Object.is(b.volume,-0)?'-0':String(b.volume)):'—');
  if(typeof syncIndicatorLayoutControls==='function')syncIndicatorLayoutControls();
  indicatorEditor.sync();
 }
-function busy(value){preparing=value;if(value)drawingFileImport.cancel();$('cancel-compute').hidden=!value;$('workspace').setAttribute('aria-busy',String(value));for(const id of ['add-indicator','clear-indicators','series','scale','renderer','stream','load','layout-indicator','layout-panel','layout-axis','apply-indicator-placement','separate-indicator-panel','reorder-panel','panel-up','panel-down','layout-undo','layout-redo','save-chart-layout','load-chart-layout','save-analysis','load-analysis','drawing-manager-controls'])$(id).disabled=value||!model||!chart||chart.disposed;const ready=!!model&&!model.disposed&&!!chart&&!chart.disposed;for(const id of ['fit','recent','save','explore','explore-read'])$(id).disabled=!ready;for(const node of document.querySelectorAll('[data-tool]'))node.disabled=!ready;if(!value&&typeof syncIndicatorLayoutControls==='function')syncIndicatorLayoutControls();indicatorEditor.sync();syncIndicatorAddControl();}
+function busy(value){preparing=value;if(value)drawingFileImport.cancel();$('cancel-compute').hidden=!value;$('workspace').setAttribute('aria-busy',String(value));for(const id of ['add-indicator','clear-indicators','series','scale','renderer','stream','load','layout-indicator','layout-panel','layout-axis','apply-indicator-placement','separate-indicator-panel','reorder-panel','panel-up','panel-down','layout-undo','layout-redo','save-chart-layout','load-chart-layout','save-analysis','load-analysis','drawing-manager-controls'])$(id).disabled=value||!model||!chart||chart.disposed;const ready=!!model&&!model.disposed&&!!chart&&!chart.disposed;for(const id of ['fit','recent','save','explore','explore-read'])$(id).disabled=!ready;for(const node of (typeof queryAll==='function'?queryAll('[data-tool]'):[]))node.disabled=!ready;if(!value&&typeof syncIndicatorLayoutControls==='function')syncIndicatorLayoutControls();indicatorEditor.sync();syncIndicatorAddControl();}
 function syncIndicatorAddControl(){indicatorPicker.sync();$('add-indicator').disabled=!indicatorPicker.selectedName||!model||model.disposed||!chart||chart.disposed||preparing||!pageActive||pageClosed;}
 function progress(p){status(p.phase==='data'?'원본 데이터 준비 '+Math.round(p.done/p.total*100)+'%…':p.phase==='indicators'?'지표 계산 '+p.done+'/'+p.total+'…':'화면 인덱스를 준비합니다…');}
 function defaults(market){const symbol=DEMO_SYMBOLS[market];return {panels:[{id:'price',label:'PRICE',weight:3.5},{id:'volume',label:'VOLUME',weight:.8,precision:0},{id:'rsi',label:'RSI',weight:1,range:[0,100],precision:0}],series:[{id:'price',label:'가격',type:$('series').value,panel:'price',color:'#58cadb'},{id:'volume',label:'거래량',type:'histogram',source:'volume',panel:'volume',color:'#2b6e78'},{id:'ema',label:'EMA',type:'line',panel:'price',indicator:'ema',color:'#f0b755'},{id:'upper',label:'볼린저 상단',type:'line',panel:'price',indicator:'bb',output:'upper',color:'#63779e',width:1},{id:'lower',label:'볼린저 하단',type:'line',panel:'price',indicator:'bb',output:'lower',color:'#63779e',width:1},{id:'rsi',label:'RSI',type:'line',panel:'rsi',indicator:'rsi',color:'#aa91f7'}],indicators:[{id:'ema',name:'ema',params:{}},{id:'bb',name:'bollinger',params:{}},{id:'rsi',name:'rsi',params:{}}],precision:symbol.priceDecimals,axisWidth:market==='crypto'?125:85,theme:light?LIGHT_THEME:DARK_THEME};}
 function palette(){
  // Preferences and chrome exist before the first asynchronous model does.
- document.documentElement.dataset.chartTheme=light?'light':'dark';$('theme').setAttribute('aria-pressed',String(light));
+ if(autoPublish)ownerDocument.documentElement.dataset.chartTheme=light?'light':'dark';$('theme').setAttribute('aria-pressed',String(light));
  if(!model)return;
  chart.api.setTheme(light?LIGHT_THEME:DARK_THEME);
  const colors={price:['#58cadb','#285bb9'],ema:['#f0b755','#946200'],rsi:['#aa91f7','#7150ba'],upper:['#63779e','#4a6084'],lower:['#63779e','#4a6084']};
@@ -116,16 +136,16 @@ function palette(){
   if(Object.keys(patch).length)chart.api.setSeries(s.id,patch);
  }
 }
-function layoutPanels(){if(!model)return;const total=model.panels.reduce((a,p)=>a+p.weight,0),min=Math.min(...model.panels.map(p=>p.weight)),height=Math.max(515,Math.ceil(72*total/min+38));$('chart-row').style.height=(height+(matchMedia('(max-width:600px)').matches?64:0))+'px';chart?.resize();}
+ function layoutPanels(){if(!model)return;const total=model.panels.reduce((a,p)=>a+p.weight,0),min=Math.min(...model.panels.map(p=>p.weight)),height=Math.max(515,Math.ceil(72*total/min+38));$('chart-row').style.height=(height+(matchesMedia('(max-width:600px)').matches?64:0))+'px';chart?.resize();}
 function drawingPanelHost(target){
- const host=document.createElement('div');attachDrawingPanel(host,target,{label:'도형 관리'});return host;
+ const host=ownerDocument.createElement('div');attachDrawingPanel(host,target,{label:'도형 관리'});return host;
 }
 function install(next,market,count,newExtras=extras,{adoption=null,beforeCommit=null,restoreAnalysis=false}={}){
  drawingFileImport.cancel();const same=market===loadedMarket,oldMarket=loadedMarket,oldModel=model,oldChart=chart;
  const symbol=DEMO_SYMBOLS[market];if(!restoreAnalysis){const precision=next.precision;new ChartAPI(next).setSymbol(symbol);next.precision=precision;}
  if(!restoreAnalysis){if(oldModel)journals.set(loadedMarket,oldModel.drawings);if(journals.has(market))next.drawings=journals.get(market);}
  if(!restoreAnalysis&&same&&oldModel){const span=oldModel.view.to-oldModel.view.from;next.setVisibleRange(oldModel.follow?next.store.length-span-.5:oldModel.view.from,oldModel.follow?next.store.length-.5:oldModel.view.to);next.follow=oldModel.follow;}
- const host=document.createElement('div');host.style='width:100%;height:100%';let created,drawingHost;
+ const host=ownerDocument.createElement('div');host.style='width:100%;height:100%';let created,drawingHost;
  try{
   createLayout(next,Math.max(100,oldChart?.canvas?.clientWidth||800),Math.max(80,oldChart?.canvas?.clientHeight||500));
   created=createChart(host,next,{renderer:$('renderer').value,dataExplorer:dataExplorer(),onError:error=>status(friendly(error)),onFallback:reason=>status('GPU를 사용할 수 없어 Canvas로 전환했습니다. '+reason.slice(0,80))});
@@ -145,11 +165,11 @@ function install(next,market,count,newExtras=extras,{adoption=null,beforeCommit=
  // observer sees the new accepted chart, never a half-disposed old owner.
  model=next;chart=created;resetLayoutHistory(next);extras=newExtras;loadedMarket=market;loadedCount=count;streamCalendar=demoCalendar(market);rebindSyntheticRangePinsToModel(model);
  if(restoreAnalysis){if(oldModel&&oldMarket!==market)journals.set(oldMarket,oldModel.drawings);journals.set(market,next.drawings);}
- $('chart').replaceChildren(host);window.aster={model,chart};liveReadout.bind(chart);
+ $('chart').replaceChildren(host);if(autoPublish){view.aster={model,chart};published=true;}liveReadout.bind(chart);
  host.addEventListener('aster:exploration',()=>{$('explore').setAttribute('aria-pressed',String(chart.dataExploration.active));});host.addEventListener('aster:render',sync);host.addEventListener('aster:state',sync);
- if(adoption){document.documentElement.dataset.chartTheme=light?'light':'dark';$('theme').setAttribute('aria-pressed',String(light));}else palette();
+ if(adoption){if(autoPublish)ownerDocument.documentElement.dataset.chartTheme=light?'light':'dark';$('theme').setAttribute('aria-pressed',String(light));}else palette();
  $('series').value=model.series.find(series=>series.id==='price')?.type??'candles';$('scale').value=model.panels.find(panel=>panel.id==='price')?.scale??'linear';
- chart.setTool(document.querySelector('[data-tool][aria-pressed="true"]').dataset.tool);chart.api.setCrosshairSnap({mode:$('crosshair-snap').value});chart.api.setDrawingMagnet({mode:$('magnet').value});chart.controller.text=$('annotation').value;chart.canvas.setAttribute('aria-describedby','keyboard-help exploration-help selection data-summary');
+ chart.setTool(root.querySelector('[data-tool][aria-pressed="true"]').dataset.tool);chart.api.setCrosshairSnap({mode:$('crosshair-snap').value});chart.api.setDrawingMagnet({mode:$('magnet').value});chart.controller.text=$('annotation').value;chart.canvas.setAttribute('aria-describedby','keyboard-help exploration-help selection data-summary');
  oldChart?.destroy({disposeModel:true});$('drawing-controls').replaceChildren(drawingHost);setText('symbol',symbol.id);setText('meta',symbol.currency+' · '+symbol.timezone+' · '+symbol.volumeUnit);layoutPanels();chart.invalidate();sync();
 }
 async function load({ignoreSaved=false}={}){
@@ -163,18 +183,19 @@ async function load({ignoreSaved=false}={}){
   install(next,market,count,same?extras:[],{adoption,beforeCommit:()=>{if(token!==job||!pageActive||pageClosed)throw new DOMException('Cancelled','AbortError');}});if(token!==job)return;startupPreset=null;
   if(hadModel)recordLayoutChange();layoutMemory.flush();if(restore)presetStatus('이 브라우저에 저장된 지표와 패널 배치를 복원했습니다.');
   status('계산 완료 · 원본/지표는 worker에서 준비합니다. 키보드 안내와 데이터 요약을 확인하세요.');
+  settleInitial();
  }catch(error){
   if(token===job){layoutDraft=null;layoutAxisExplicit=false;
    if(restore&&error.name!=='AbortError'&&!model){startupPreset=null;presetStatus('저장된 배치를 적용하지 못해 기본 배치로 시작합니다. 저장 파일은 유지했습니다.');return load({ignoreSaved:true});}
-   status(friendly(error));if(loadedMarket){$('market').value=loadedMarket;$('count').value=String(loadedCount);}
+   status(friendly(error));if(loadedMarket){$('market').value=loadedMarket;$('count').value=String(loadedCount);}if(!model)settleInitial(error);
   }
- }finally{if(token===job){busy(false);if(streamIntent&&!document.hidden)startStream();}}
+ }finally{if(token===job){busy(false);if(streamIntent&&!ownerDocument.hidden)startStream();}}
 }
 function nextExtraIndicatorId(){let id;do{id='extra-'+(++serial);}while(model.indicators.entries.has(id)||model.panels.some(panel=>panel.id===id)||model.series.some(series=>series.id.startsWith(id+'-')));return id;}
 async function addIndicator(){if(!model||!chart||chart.disposed||preparing||!pageActive||pageClosed||!indicatorPicker.selectedName)return;cleanupSyntheticRangePins();const token=++job;controller?.abort();controller=new AbortController();stopStream();busy(true);const version=model.store.version,options=stripUncommittedLayoutResources(modelRequest(model)),name=indicatorPicker.selectedName,id=nextExtraIndicatorId(),overlay=['sma','vwma','ema','wma','bollinger','donchian','vwap','dema','tema','hma','keltner','supertrend','ichimoku','pivots','parabolicSAR'].includes(name),panel=overlay?'price':id;
  try{const def=builtinIndicators.get(name)({});options.indicators.push({id,name,params:{}});if(!overlay)options.panels.push({id,label:name.toUpperCase(),weight:1});const outputs=def.outputs.filter(x=>x!=='direction'),label=indicatorPicker.selected?.koreanName??name;for(const output of outputs)options.series.push({id:id+'-'+output,label:label+(outputs.length>1?' · '+output:''),type:output==='histogram'?'histogram':'line',panel,indicator:id,output,color:'#aa91f7'});
  const next=await prepareChartModel({columns:Object.fromEntries(Object.entries(model.store.columns).map(([k,a])=>[k,a.subarray(0,model.store.length)])),length:model.store.length,options},{signal:controller.signal,onProgress:p=>{if(token===job&&pageActive&&!pageClosed)progress(p);}});if(token!==job||version!==model.store.version){next.dispose();throw new Error('Data changed; prepared result discarded');}if(!overlay)generatedPanelIds.add(panel);install(next,loadedMarket,loadedCount,[...extras,{id,panel}]);if(token!==job)return;indicatorEditor.select(id);recordLayoutChange();status('지표를 추가했습니다.');}
- catch(error){if(token===job){layoutDraft=null;layoutAxisExplicit=false;status(friendly(error));}}finally{if(token===job){busy(false);if(streamIntent&&!document.hidden)startStream();}}
+ catch(error){if(token===job){layoutDraft=null;layoutAxisExplicit=false;status(friendly(error));}}finally{if(token===job){busy(false);if(streamIntent&&!ownerDocument.hidden)startStream();}}
 }
 function selectedLayoutGroup(){return model&&indicatorGroup(model,$('layout-indicator')?.value)||collectIndicatorGroups(model)[0]||null;}
 function layoutMutationReady({allowLayoutOwner=false}={}){if(layoutMutationOwner&&!allowLayoutOwner){layoutStatus('진행 중인 배치 변경이 끝난 뒤 다시 시도하세요.');return false;}if(!model||model.disposed||!chart||chart.disposed||preparing||!pageActive||pageClosed)return false;if(chart.controller?.gesture||chart.controller?.pointers?.size||model.drawings?.transaction){layoutStatus('진행 중인 입력이 끝난 뒤 지표 배치를 변경하세요.');return false;}return true;}
@@ -274,14 +295,14 @@ function separateIndicatorPanel(){
 }
 function reorderPanel(direction){
  if(!layoutMutationReady())return;
- const owner=captureLayoutOwner(),selected=$('reorder-panel')?.value,order=model.panels.map(panel=>panel.id),index=order.indexOf(selected),target=index+direction,focused=document.activeElement;
+ const owner=captureLayoutOwner(),selected=$('reorder-panel')?.value,order=model.panels.map(panel=>panel.id),index=order.indexOf(selected),target=index+direction,focused=ownerDocument.activeElement;
  if(index<0||target<0||target>=order.length)return;
  [order[index],order[target]]=[order[target],order[index]];let historyToken;
  try{
   historyToken=layoutHistory.begin('패널 순서');beginLayoutMutation(owner);const changed=owner.chart.api.setPanelOrder(order);assertLayoutOwner(owner);
   if(changed===false){endLayoutMutation(owner);layoutHistory.commit(historyToken);historyToken=null;return;}
   layoutPanels();assertLayoutOwner(owner);owner.chart.invalidate();assertLayoutOwner(owner);endLayoutMutation(owner);layoutHistory.commit(historyToken);historyToken=null;sync();
-  const active=document.activeElement;if((focused===$('panel-up')||focused===$('panel-down'))&&focused.disabled&&(active===focused||active===document.body||active==null))$('reorder-panel').focus({preventScroll:true});
+  const active=ownerDocument.activeElement;if((focused===$('panel-up')||focused===$('panel-down'))&&focused.disabled&&(active===focused||active===ownerDocument.body||active==null))$('reorder-panel').focus({preventScroll:true});
   recordLayoutChange();layoutStatus('패널 순서를 적용했습니다.');status('패널 순서를 적용했습니다.');
  }catch(error){endLayoutMutation(owner);cancelLayoutRecord(historyToken,owner);sync();layoutStatus(friendly(error));status(friendly(error));}
 }
@@ -298,7 +319,7 @@ async function applyIndicatorParams(id,params){
   const result=await setIndicatorParamsAsync(owner.chart.api,id,params,{signal:controller.signal,onProgress:p=>{if(token===job&&pageActive&&!pageClosed)editorStatus('지표 설정 계산 중 · '+(p.total?Math.round(p.done/p.total*100):0)+'%');}});
   if(token===job&&model===owner.model&&chart===owner.chart){recordLayoutChange();editorStatus(result.observerError?'설정은 적용됐지만 화면 갱신 중 오류가 발생했습니다.':'지표 설정을 적용했습니다.');}
   return result;
- }finally{if(token===job){busy(false);if(streamIntent&&!document.hidden)startStream();}}
+ }finally{if(token===job){busy(false);if(streamIntent&&!ownerDocument.hidden)startStream();}}
 }
 function applyIndicatorStyle(id,patch){requireEditorReady();const owner=captureLayoutOwner();owner.chart.api.setSeries(id,patch);assertLayoutOwner(owner);sync();recordLayoutChange();editorStatus('출력 스타일을 적용했습니다.');}
 function removeSelectedIndicator(id){
@@ -324,11 +345,11 @@ function restoreHistoryFrame(frame){
  finally{endLayoutMutation(owner);}
 }
 function navigateLayoutHistory(direction){
- if(!layoutMutationReady())return;const owner=captureLayoutOwner(),focused=document.activeElement;
+ if(!layoutMutationReady())return;const owner=captureLayoutOwner(),focused=ownerDocument.activeElement;
  try{
   const changed=layoutHistory[direction]();assertLayoutOwner(owner);if(!changed){syncIndicatorLayoutControls();layoutStatus('사용할 수 있는 배치 기록이 없습니다.');return;}
   layoutDraft=null;layoutAxisExplicit=false;layoutPanels();assertLayoutOwner(owner);owner.chart.invalidate();assertLayoutOwner(owner);sync();recordLayoutChange();
-  const active=document.activeElement;if((focused===$('layout-undo')||focused===$('layout-redo'))&&focused.disabled&&(active===focused||active===document.body||active==null)){
+  const active=ownerDocument.activeElement;if((focused===$('layout-undo')||focused===$('layout-redo'))&&focused.disabled&&(active===focused||active===ownerDocument.body||active==null)){
    const opposite=$(direction==='undo'?'layout-redo':'layout-undo');(opposite.disabled?$('reorder-panel'):opposite).focus({preventScroll:true});
   }
   layoutStatus(direction==='undo'?'이전 지표 배치로 되돌렸습니다.':'지표 배치를 다시 실행했습니다.');
@@ -341,7 +362,7 @@ function currentLayoutPreset(){
 function recordLayoutChange(){if(pageActive&&!pageClosed)layoutMemory.changed();}
 function downloadLayout(){
  if(!layoutMutationReady())return;
- try{const text=stringifyDemoLayout(currentLayoutPreset()),url=URL.createObjectURL(new Blob([text],{type:'application/json'})),link=document.createElement('a');link.href=url;link.download='barochart-layout.json';try{link.click();}finally{setTimeout(()=>URL.revokeObjectURL(url),1000);}presetStatus('지표와 패널 배치를 파일로 저장했습니다.');}
+ try{const text=stringifyDemoLayout(currentLayoutPreset()),url=URL.createObjectURL(new Blob([text],{type:'application/json'})),link=ownerDocument.createElement('a');link.href=url;link.download='barochart-layout.json';try{link.click();}finally{later(()=>URL.revokeObjectURL(url),1000);}presetStatus('지표와 패널 배치를 파일로 저장했습니다.');}
  catch(error){presetStatus(friendly(error));}
 }
 function importConfiguration(source){
@@ -392,13 +413,13 @@ async function importLayoutFile(file){
  }catch(error){
   const published=candidate&&model===candidate;if(candidate&&!published)candidate.dispose();
   if(token===undefined||token===job)presetStatus(published?'배치는 적용됐지만 화면 정리 중 오류가 발생했습니다. 현재 차트를 확인하세요.':friendly(error));
- }finally{if(token!==undefined&&token===job){busy(false);if(streamIntent&&!document.hidden)startStream();}}
+ }finally{if(token!==undefined&&token===job){busy(false);if(streamIntent&&!ownerDocument.hidden)startStream();}}
 }
 function downloadAnalysis(){
  if(!layoutMutationReady())return;
  try{
-  const text=saveDemoAnalysis(chart.api,{market:loadedMarket,count:loadedCount,light}),url=URL.createObjectURL(new Blob([text],{type:'application/json'})),link=document.createElement('a');
-  link.href=url;link.download='barochart-analysis.json';try{link.click();}finally{setTimeout(()=>URL.revokeObjectURL(url),1000);}
+  const text=saveDemoAnalysis(chart.api,{market:loadedMarket,count:loadedCount,light}),url=URL.createObjectURL(new Blob([text],{type:'application/json'})),link=ownerDocument.createElement('a');
+  link.href=url;link.download='barochart-analysis.json';try{link.click();}finally{later(()=>URL.revokeObjectURL(url),1000);}
   analysisStatus('시세·지표·도형·표시 범위를 분석 파일에 저장했습니다.');
  }catch(error){analysisStatus(friendly(error));}
 }
@@ -422,20 +443,20 @@ async function importAnalysisFile(file){
  }catch(error){
   const published=candidate&&model===candidate;if(candidate&&!published)candidate.dispose();
   if(token===undefined||token===job)analysisStatus(published?'분석은 복원됐지만 화면 정리 중 오류가 발생했습니다. 현재 차트를 확인하세요.':friendly(error));
- }finally{if(token!==undefined&&token===job){busy(false);if(streamIntent&&!document.hidden)startStream();}}
+ }finally{if(token!==undefined&&token===job){busy(false);if(streamIntent&&!ownerDocument.hidden)startStream();}}
 }
-$('market').onchange=load;$('count').onchange=load;$('cancel-compute').onclick=()=>controller?.abort();$('fit').onclick=()=>chart?.api.fit();$('recent').onclick=()=>chart?.api.setVisibleRange(model.store.length-200.5,model.store.length-.5);
+$('market').onchange=()=>{if(!model)startupPreset=null;return load();};$('count').onchange=()=>{if(!model)startupPreset=null;return load();};$('cancel-compute').onclick=()=>controller?.abort();$('fit').onclick=()=>chart?.api.fit();$('recent').onclick=()=>chart?.api.setVisibleRange(model.store.length-200.5,model.store.length-.5);
 $('series').onchange=()=>{if(!model||!chart||chart.disposed||preparing)return;const s=model.series.find(s=>s.id==='price'),old=s.type;try{chart.api.setSeries('price',{type:$('series').value});palette();chart.drawNow();recordLayoutChange();}catch(error){chart.api.setSeries('price',{type:old});$('series').value=old;status(friendly(error));}chart.invalidate();};
 $('scale').onchange=()=>{if(!model||!chart||chart.disposed||preparing)return;const old=model.panels.find(p=>p.id==='price').scale;try{chart.api.setPanel('price',{scale:$('scale').value});chart.drawNow();resetLayoutHistory(model);recordLayoutChange();}catch(error){chart.api.setPanel('price',{scale:old});$('scale').value=old;status(friendly(error));}chart.invalidate();};
 $('explore').onclick=()=>{if(!chart)return;try{chart.setDataExploration(!chart.dataExploration.active);$('explore').setAttribute('aria-pressed',String(chart.dataExploration.active));chart.canvas.focus({preventScroll:true});}catch(error){status(friendly(error));}};
 $('explore-read').onclick=()=>{if(!chart)return;try{chart.readExploration();}catch(error){status(friendly(error));}};
-  $('renderer').onchange=()=>{if(!model||!chart||chart.disposed||preparing)return;drawingFileImport.cancel();layoutDraft=null;layoutAxisExplicit=false;const tool=chart.controller.tool;chart.destroy();chart=createChart(chart.container,model,{renderer:$('renderer').value,dataExplorer:dataExplorer(),onError:error=>status(friendly(error))});chart.setTool(tool);chart.api.setCrosshairSnap({mode:$('crosshair-snap').value});chart.api.setDrawingMagnet({mode:$('magnet').value});chart.controller.text=$('annotation').value;chart.canvas.setAttribute('aria-describedby','keyboard-help exploration-help selection data-summary');window.aster={model,chart};liveReadout.bind(chart);$('drawing-controls').replaceChildren(drawingPanelHost(chart));chart.invalidate();sync();};
-$('theme').onclick=()=>{light=!light;palette();chart?.invalidate();recordLayoutChange();};
-for(const b of document.querySelectorAll('[data-tool]')){b.setAttribute('aria-pressed',String(b.dataset.tool==='select'));b.onclick=()=>{if(!chart)return;chart.setTool(b.dataset.tool);for(const x of document.querySelectorAll('[data-tool]'))x.setAttribute('aria-pressed',String(x===b));status('도구: '+b.title+' · '+(['channel','fibextension'].includes(b.dataset.tool)?'드래그 후 세 번째 핸들을 편집하세요.':'Esc로 취소할 수 있습니다.'));chart.canvas.focus({preventScroll:true});};}
+  $('renderer').onchange=()=>{if(!model||!chart||chart.disposed||preparing)return;drawingFileImport.cancel();layoutDraft=null;layoutAxisExplicit=false;const tool=chart.controller.tool;chart.destroy();chart=createChart(chart.container,model,{renderer:$('renderer').value,dataExplorer:dataExplorer(),onError:error=>status(friendly(error))});chart.setTool(tool);chart.api.setCrosshairSnap({mode:$('crosshair-snap').value});chart.api.setDrawingMagnet({mode:$('magnet').value});chart.controller.text=$('annotation').value;chart.canvas.setAttribute('aria-describedby','keyboard-help exploration-help selection data-summary');if(autoPublish){view.aster={model,chart};published=true;}liveReadout.bind(chart);$('drawing-controls').replaceChildren(drawingPanelHost(chart));chart.invalidate();sync();};
+$('theme').onclick=()=>{if(!model)startupPreset=null;light=!light;palette();chart?.invalidate();recordLayoutChange();};
+for(const b of queryAll('[data-tool]')){b.setAttribute('aria-pressed',String(b.dataset.tool==='select'));b.onclick=()=>{if(!chart)return;chart.setTool(b.dataset.tool);for(const x of queryAll('[data-tool]'))x.setAttribute('aria-pressed',String(x===b));status('도구: '+b.title+' · '+(['channel','fibextension'].includes(b.dataset.tool)?'드래그 후 세 번째 핸들을 편집하세요.':'Esc로 취소할 수 있습니다.'));chart.canvas.focus({preventScroll:true});};}
 $('crosshair-snap').onchange=()=>{if(chart)chart.api.setCrosshairSnap({mode:$('crosshair-snap').value});status('십자선: '+$('crosshair-snap').selectedOptions[0].textContent+' · 포인터만 적용하며 도형 자석과 별개입니다.');};
 $('magnet').onchange=()=>{if(chart)chart.api.setDrawingMagnet({mode:$('magnet').value});status('자석: '+$('magnet').selectedOptions[0].textContent+' · 보이는 OHLC 봉의 새 앵커·개별 핸들에 적용합니다.');};
 $('annotation').oninput=()=>{if(chart)chart.api.setText($('annotation').value);};$('undo').onclick=()=>chart?.api.undo();$('redo').onclick=()=>chart?.api.redo();$('delete').onclick=()=>chart?.api.deleteDrawing();$('lock').onclick=()=>{if(!model||!chart||chart.disposed)return;const d=model.drawings.items.find(d=>d.id===model.drawings.selected);if(d)chart.api.editDrawing(d.id,{locked:!d.locked});};
-$('save').onclick=()=>{if(!model||!chart||chart.disposed)return;try{const url=URL.createObjectURL(new Blob([chart.api.saveDrawings()],{type:'application/json'})),link=document.createElement('a');link.href=url;link.download='aster-drawings.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status('도형을 저장했습니다.');}catch(error){status(friendly(error));}};
+ $('save').onclick=()=>{if(!model||!chart||chart.disposed)return;try{const url=URL.createObjectURL(new Blob([chart.api.saveDrawings()],{type:'application/json'})),link=ownerDocument.createElement('a');link.href=url;link.download='aster-drawings.json';link.click();later(()=>URL.revokeObjectURL(url),1000);status('도형을 저장했습니다.');}catch(error){status(friendly(error));}};
 $('load').onclick=()=>{if(!model||!chart||chart.disposed||preparing)return;drawingFileImport.cancel();$('file').click();};$('file').onchange=async e=>{const file=e.target.files[0];e.target.value='';await drawingFileImport.read(file);};
 $('add-indicator').onclick=addIndicator;$('clear-indicators').onclick=clearExtraIndicators;
 $('layout-indicator').onchange=()=>{layoutAxisExplicit=false;const group=selectedLayoutGroup();if(group&&$('layout-panel'))$('layout-panel').value=group.panelId??model.panels[0]?.id??'';if(group)setLayoutDraft(group,$('layout-panel').value,group.mixedAxisOrigins?'independent':group.axisId===null?'primary':group.axisId===undefined?'independent':'axis:'+group.axisId,false);refreshLayoutAxisChoices(layoutDraft?.axis??'');syncIndicatorLayoutControls();};
@@ -450,26 +471,98 @@ $('save-analysis').onclick=downloadAnalysis;$('load-analysis').onclick=()=>{if(l
 $('analysis-file').onchange=e=>{const file=e.target.files[0];e.target.value='';void importAnalysisFile(file);};
 $('remember-chart-layout').onchange=()=>{const enabled=$('remember-chart-layout').checked,saved=layoutMemory.setEnabled(enabled);$('remember-chart-layout').checked=layoutMemory.enabled;if(saved){if(enabled){recordLayoutChange();layoutMemory.flush();}else presetStatus('배치를 자동으로 기억하지 않습니다.');}};
 $('forget-chart-layout').onclick=()=>{const cleared=layoutMemory.clear();$('remember-chart-layout').checked=layoutMemory.enabled;if(cleared){startupPreset=null;presetStatus('저장된 배치를 지웠습니다. 다음 방문은 기본 배치로 시작합니다.');}};
-function startStream(){if(timer||!model||model.disposed||!chart||chart.disposed||!pageActive||pageClosed||preparing||document.hidden)return;let ticks=0;timer=setInterval(()=>{try{const b=model.store.at(model.store.length-1),delta=Math.sin(++ticks*1.7)*.05*(model.symbol.id.endsWith('COIN')?1e-10:model.symbol.currency==='KRW'?700:1),close=Math.max(model.symbol.tickSize,b.close+delta);if(ticks%20)model.store.upsert({...b,close,high:Math.max(b.high,close),low:Math.min(b.low,close),volume:b.volume+20});else{let time=b.time+60000;const calendar=demoCalendarForStream();while(!calendar.at(time))time+=60000;model.store.append({time,open:close,high:close,low:close,close,volume:0});}}catch(error){streamIntent=false;stopStream();status(friendly(error));}},100);$('stream').setAttribute('aria-pressed','true');$('stream').textContent='Ⅱ 스트림 정지';}
+function startStream(){const unpublished=typeof autoPublish!=='undefined'&&(!autoPublish||!published);if(timer||unpublished||!model||model.disposed||!chart||chart.disposed||!pageActive||pageClosed||preparing||ownerDocument.hidden)return;let ticks=0;timer=schedule(()=>{try{const b=model.store.at(model.store.length-1),delta=Math.sin(++ticks*1.7)*.05*(model.symbol.id.endsWith('COIN')?1e-10:model.symbol.currency==='KRW'?700:1),close=Math.max(model.symbol.tickSize,b.close+delta);if(ticks%20)model.store.upsert({...b,close,high:Math.max(b.high,close),low:Math.min(b.low,close),volume:b.volume+20});else{let time=b.time+60000;const calendar=demoCalendarForStream();while(!calendar.at(time))time+=60000;model.store.append({time,open:close,high:close,low:close,close,volume:0});}}catch(error){streamIntent=false;stopStream();status(friendly(error));}},100);$('stream').setAttribute('aria-pressed','true');$('stream').textContent='Ⅱ 스트림 정지';}
 let streamCalendar;function demoCalendarForStream(){return streamCalendar;}
 $('stream').onclick=()=>{if(!model||!chart||chart.disposed||preparing)return;streamIntent=!streamIntent;if(streamIntent)startStream();else stopStream();};
-const statsTimer=setInterval(()=>{if(!chart?.lastScene)return;const s=chart.lastScene.stats,sorted=[...chart.timings].sort((a,b)=>a-b);setText('stats',chart.rendererKind+' · 저장 '+s.storedBars.toLocaleString()+' · 표시 원본 '+s.visibleSourceBars.toLocaleString()+' · 버킷 '+s.renderedCandleBuckets+' · 제출 p95 '+(sorted[Math.floor(sorted.length*.95)]??0).toFixed(2)+'ms');},500);
-window.addEventListener('resize',layoutPanels);
-window.addEventListener('pagehide',e=>{drawingFileImport.cancel();layoutMemory.flush();
+const statsTimer=schedule(()=>{if(!chart?.lastScene)return;const s=chart.lastScene.stats,sorted=[...chart.timings].sort((a,b)=>a-b);setText('stats',chart.rendererKind+' · 저장 '+s.storedBars.toLocaleString()+' · 표시 원본 '+s.visibleSourceBars.toLocaleString()+' · 버킷 '+s.renderedCandleBuckets+' · 제출 p95 '+(sorted[Math.floor(sorted.length*.95)]??0).toFixed(2)+'ms');},500);
+const onResize=()=>layoutPanels();
+const onPageHide=e=>{drawingFileImport.cancel();layoutMemory.flush();
  if(pageClosed)return;
  // Preserve a suspended first-load intent across repeated pagehide events,
  // but never reinterpret an already-aborted user Cancel as a resume request.
  if(pageActive)resumeInitial=!!e.persisted&&!model&&preparing&&!controller?.signal.aborted;
- pageActive=false;if(!e.persisted){pageClosed=true;resumeInitial=false;}
- const pending=preparing;++job;controller?.abort();busy(false);stopStream();
+ const pending=preparing;pageActive=false;++job;controller?.abort();busy(false);stopStream();
  if(pending&&loadedMarket){$('market').value=loadedMarket;$('count').value=String(loadedCount);status('페이지 이동으로 계산을 취소했습니다. 이전 차트는 유지됩니다.');}
- if(!e.persisted){clearInterval(statsTimer);layoutMemory.dispose();indicatorEditor.dispose();indicatorPicker.destroy();liveReadout.destroy();chart?.destroy({disposeModel:true});}
-});
-window.addEventListener('pageshow',e=>{
+ if(!e.persisted){resumeInitial=false;dispose();}
+};
+view.addEventListener?.('resize',onResize);
+view.addEventListener?.('pagehide',onPageHide);
+const onPageShow=e=>{
  if(!e.persisted||pageClosed||pageActive)return;
  pageActive=true;const retry=resumeInitial;resumeInitial=false;
  if(retry&&!model){status('중단된 첫 차트 계산을 다시 시작합니다.');void load();return;}
  chart?.resize();if(!pageActive||pageClosed)return;chart?.invalidate();if(streamIntent)startStream();
-});
-document.addEventListener('visibilitychange',()=>{if(document.hidden)stopStream();else if(pageActive&&!pageClosed&&streamIntent&&!preparing)startStream();});
-await load();
+};
+view.addEventListener?.('pageshow',onPageShow);
+const onVisibility=()=>{if(ownerDocument.hidden)stopStream();else if(pageActive&&!pageClosed&&streamIntent&&!preparing)startStream();};
+ownerDocument.addEventListener?.('visibilitychange',onVisibility);
+
+function pause(){
+ if(disposed||pageClosed)return;
+ resumeInitial=!!(!model&&preparing&&!controller?.signal.aborted);
+ pageActive=false;++job;controller?.abort();drawingFileImport.cancel();busy(false);stopStream();
+}
+function resume(){
+ if(disposed||pageClosed)return;
+ pageActive=true;
+ if(resumeInitial&&!model){resumeInitial=false;void load();return;}
+ chart?.resize();chart?.invalidate();if(streamIntent)startStream();
+}
+function publishCurrent(){
+ if(disposed||!model||!chart||chart.disposed)return false;
+ signal?.removeEventListener('abort',onExternalAbort);
+ autoPublish=true;published=true;ownerDocument.documentElement.dataset.chartTheme=light?'light':'dark';$('theme').setAttribute('aria-pressed',String(light));view.aster={model,chart};if(streamIntent&&!ownerDocument.hidden)startStream();return {model,chart};
+}
+function applyInitialInput(input){
+ if(!input||typeof input!=='object'||!chart)return;
+ if(input.tool!==undefined)chart.setTool(input.tool);
+ if(input.text!==undefined)chart.api.setText(input.text);
+ if(input.drawingTarget!==undefined)chart.api.setDrawingTarget(input.drawingTarget);
+ if(input.crosshairSnap!==undefined)chart.api.setCrosshairSnap(input.crosshairSnap);
+ if(input.drawingMagnet!==undefined)chart.api.setDrawingMagnet(input.drawingMagnet);
+ if(input.tool!==undefined)for(const button of queryAll('[data-tool]'))button.setAttribute('aria-pressed',String(button.dataset.tool===input.tool));
+ if(input.text!==undefined&&$('annotation'))$('annotation').value=input.text;
+ if(input.crosshairSnap?.mode!==undefined&&$('crosshair-snap'))$('crosshair-snap').value=input.crosshairSnap.mode;
+ if(input.drawingMagnet?.mode!==undefined&&$('magnet'))$('magnet').value=input.drawingMagnet.mode;
+}
+function dispose(){
+ if(disposed)return;
+ signal?.removeEventListener('abort',onExternalAbort);
+ settleInitial(new DOMException('Demo mount disposed','AbortError'));
+ disposed=true;pageClosed=true;pageActive=false;resumeInitial=false;++job;controller?.abort();drawingFileImport.cancel();stopStream();busy(false);
+ view.removeEventListener?.('resize',onResize);view.removeEventListener?.('pagehide',onPageHide);view.removeEventListener?.('pageshow',onPageShow);ownerDocument.removeEventListener?.('visibilitychange',onVisibility);
+ cancelSchedule(statsTimer);for(const id of [...timeouts])cancelLater(id);
+ layoutMemory.dispose();indicatorEditor.dispose();indicatorPicker.destroy();liveReadout.destroy();
+ for(const node of queryAll('[id],[data-tool]'))for(const property of ['onclick','onchange','oninput','onkeydown'])node[property]=null;
+ if(view.aster?.chart===chart||view.aster?.model===model)delete view.aster;
+ const oldChart=chart,oldModel=model;
+ if(oldChart&&!oldChart.disposed)oldChart.destroy({disposeModel:true});else if(oldModel&&!oldModel.disposed)oldModel.dispose();
+}
+
+const state=initialState&&typeof initialState==='object'?initialState:{};
+if(state.preferencesChanged===true)startupPreset=null;
+if(state.light!==undefined)light=!!state.light;
+if(state.market&&$("market"))$("market").value=state.market;
+if(Number.isSafeInteger(state.count)&&$("count"))$("count").value=String(state.count);
+if(state.streamIntent===true)streamIntent=true;
+if(initialModel){
+ const market=state.market??Object.entries(DEMO_SYMBOLS).find(([,symbol])=>symbol.id===initialModel.symbol?.id)?.[0]??'us';
+ const count=Number.isSafeInteger(state.count)?state.count:initialModel.store?.length??0;
+ const generatedPanels=state.generatedPanels??state.generatedPanelIds??[],generatedAxes=state.generatedAxes??state.generatedAxisIds??[];
+ const panelPins=state.panelPins??state.syntheticPanelRanges,axisPins=state.axisPins??state.syntheticAxisRanges;
+ const ids=value=>[...(value??[])].map(entry=>typeof entry==='string'?entry:entry?.id).filter(Boolean);
+ const hasAdoption=state.generatedPanels!==undefined||state.generatedPanelIds!==undefined||state.generatedAxes!==undefined||state.generatedAxisIds!==undefined||panelPins!==undefined||axisPins!==undefined;
+ const maps=value=>value instanceof Map?new Map(value):value&&typeof value==='object'&&!Array.isArray(value)?new Map(Object.entries(value)):new Map(value??[]);
+ const adoption=hasAdoption?{light,panelPins:maps(panelPins),axisPins:maps(axisPins),generatedPanels:ids(generatedPanels),generatedAxes:ids(generatedAxes)}:null;
+ install(initialModel,market,count,state.extras??[],{adoption});startupPreset=null;
+ applyInitialInput(state.input);
+ if(state.layoutHistory){layoutHistory.importState(state.layoutHistory,model);syncIndicatorLayoutControls();}
+ settleInitial();
+ if(streamIntent&&!ownerDocument.hidden)startStream();
+}else void load();
+
+try{await initialReady;}catch(error){dispose();throw error;}
+
+const pinState=pins=>[...pins].map(([id,entry])=>[id,{range:Array.isArray(entry?.range)?[...entry.range]:undefined}]);
+return Object.freeze({backend:'javascript',get model(){return model;},get chart(){return chart;},get state(){return {market:loadedMarket,count:loadedCount,light,streamIntent,layoutBusy:preparing||!!layoutMutationOwner,generatedPanels:[...generatedPanelIds],generatedAxes:[...generatedAxisIds],panelPins:pinState(syntheticPanelRanges),axisPins:pinState(syntheticAxisRanges),layoutHistory:layoutHistory.exportState()};},pause,resume,dispose,publish:publishCurrent,load,addIndicator,importLayoutFile,importAnalysisFile});
+}

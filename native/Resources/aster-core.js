@@ -2546,6 +2546,77 @@ function validateCheckpointState(name, params, state, index) {
   return state;
 }
 
+
+const MAX_BYTES=33554432,MAX_HISTORY=4194304;
+const states=new WeakMap();
+const mapGet=Map.prototype.get,mapSet=Map.prototype.set,mapDelete=Map.prototype.delete,mapClear=Map.prototype.clear,mapHas=Map.prototype.has,mapKeys=Map.prototype.keys,mapValues=Map.prototype.values;
+const setAdd=Set.prototype.add,setDelete=Set.prototype.delete,setClear=Set.prototype.clear,setHas=Set.prototype.has;
+const typedProto=Object.getPrototypeOf(Uint8Array.prototype),typedBuffer=Object.getOwnPropertyDescriptor(typedProto,'buffer').get,arrayBufferBytes=Object.getOwnPropertyDescriptor(ArrayBuffer.prototype,'byteLength').get,sharedBufferBytes=typeof SharedArrayBuffer==='function'?Object.getOwnPropertyDescriptor(SharedArrayBuffer.prototype,'byteLength').get:null;
+
+function frame(packet){
+ if(!packet||!(packet.indices instanceof Uint32Array)||!(packet.offsets instanceof Uint32Array)||!(packet.bytes instanceof Uint8Array)||packet.indices.length>MAX_HISTORY+1||packet.offsets.length!==packet.indices.length+1||packet.offsets[0]!==0||packet.offsets.at(-1)!==packet.bytes.length||packet.bytes.length>MAX_BYTES)throw new TypeError('Checkpoint stream shape');
+ for(let i=0;i<packet.indices.length;i++)if(packet.indices[i]>MAX_HISTORY||i&&packet.indices[i]<=packet.indices[i-1]||packet.offsets[i]>=packet.offsets[i+1])throw new TypeError('Checkpoint boundaries');
+}
+function context(packet,length,block){
+ if(!Number.isSafeInteger(length)||length<0||length>MAX_HISTORY||!Number.isSafeInteger(block)||block<1||block>MAX_HISTORY)throw new RangeError('Checkpoint history context');
+ const count=length===0?0:Math.floor(length/block)+1;
+ if(packet.indices.length!==count)throw new TypeError('Checkpoint history count');
+ for(let i=0;i<count;i++)if(packet.indices[i]!==i*block)throw new TypeError('Checkpoint history boundary');
+}
+function state(value){const result=states.get(value);if(!result)throw new TypeError('Lazy checkpoint owner');return result;}
+function bufferBytes(buffer){if(buffer instanceof ArrayBuffer)return arrayBufferBytes.call(buffer);if(sharedBufferBytes&&buffer instanceof SharedArrayBuffer)return sharedBufferBytes.call(buffer);throw new TypeError('Checkpoint backing buffer');}
+function retainedBytes(packet){const seen=new Set();let total=0;for(const array of [packet.indices,packet.offsets,packet.bytes]){const buffer=typedBuffer.call(array);if(!seen.has(buffer)){seen.add(buffer);total+=bufferBytes(buffer);}}return total;}
+function ordinal(source,index){const a=source.packet.indices;let from=0,to=a.length;while(from<to){const mid=(from+to)>>>1;if(a[mid]<index)from=mid+1;else to=mid;}return a[from]===index?from:-1;}
+
+/** Internal native-workspace accounting view for an authentic lazy store. */
+function lazyCheckpointSource(value){
+ const source=states.get(value);if(!source)return null;
+ const {packet,overrides,deleted}=source,buffers=[typedBuffer.call(packet.indices),typedBuffer.call(packet.offsets),typedBuffer.call(packet.bytes)];
+ return {
+  count:packet.indices.length-deleted.size+overrides.size,
+  baseCount:packet.indices.length,
+  overrideCount:overrides.size,
+  deletedCount:deleted.size,
+  retainedBytes:retainedBytes(packet),
+  revision:source.revision,
+  refs:[packet.indices,packet.offsets,packet.bytes,...buffers,...buffers.map(bufferBytes)],
+  values:()=>mapValues.call(overrides),
+ };
+}
+
+/** Encoded checkpoint storage used by worker-hydrated models. */
+class LazyCheckpoints {
+ constructor(packet){
+  frame(packet);
+  const owned=Object.freeze({indices:packet.indices,offsets:packet.offsets,bytes:packet.bytes});
+  states.set(this,{packet:owned,overrides:new Map(),deleted:new Set(),decoder:new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}),revision:0});
+  Object.defineProperty(this,'cache',{value:new Map(),enumerable:true});
+ }
+ ordinal(index){return ordinal(state(this),index);}
+ has(index){const source=state(this);return mapHas.call(source.overrides,index)||!setHas.call(source.deleted,index)&&ordinal(source,index)>=0;}
+ decodeRecord(i,name,params){const source=state(this),{bytes,offsets,indices}=source.packet,value=safeCheckpointParse(source.decoder.decode(bytes.subarray(offsets[i],offsets[i+1])));if(name!==undefined)validateCheckpointState(name,params??{},value,indices[i]);return value;}
+ validate(length,block=256,name,params){const source=state(this);frame(source.packet);context(source.packet,length,block);for(let i=0;i<source.packet.indices.length;i++)this.decodeRecord(i,name,params);return this;}
+ async validateAsync(length,block=256,name,params,options={}){
+  const source=state(this);frame(source.packet);context(source.packet,length,block);
+  const {signal,maxRecordsPerSlice=32,maxSliceMs=4,yieldTask=()=>new Promise(resolve=>setTimeout(resolve,0)),onProgress,checkOwner}=options;
+  if(!Number.isSafeInteger(maxRecordsPerSlice)||maxRecordsPerSlice<1||maxRecordsPerSlice>4096||!Number.isFinite(maxSliceMs)||maxSliceMs<=0||typeof yieldTask!=='function'||checkOwner!==undefined&&typeof checkOwner!=='function')throw new RangeError('Checkpoint validation slice');
+  const now=()=>globalThis.performance?.now?.()??Date.now(),total=source.packet.indices.length;let since=now(),slice=0;
+  const aborted=()=>{if(signal?.aborted){const error=new Error('Checkpoint validation aborted');error.name='AbortError';throw error;}checkOwner?.();};
+  aborted();for(let i=0;i<total;i++){
+   aborted();this.decodeRecord(i,name,params);aborted();slice++;
+   if(slice>=maxRecordsPerSlice||now()-since>=maxSliceMs){try{onProgress?.({completed:i+1,total});}catch{}aborted();if(i+1<total){await yieldTask();aborted();}slice=0;since=now();}
+  }
+  aborted();try{onProgress?.({completed:total,total});}catch{}aborted();return this;
+ }
+ get(index){const source=state(this);if(mapHas.call(source.overrides,index))return mapGet.call(source.overrides,index);if(setHas.call(source.deleted,index))return undefined;if(mapHas.call(this.cache,index))return mapGet.call(this.cache,index);const i=ordinal(source,index);if(i<0)return undefined;const value=this.decodeRecord(i);if(this.cache.size>=32)mapClear.call(this.cache);mapSet.call(this.cache,index,value);return value;}
+ set(index,value){const source=state(this);mapSet.call(source.overrides,index,value);if(ordinal(source,index)>=0)setAdd.call(source.deleted,index);mapDelete.call(this.cache,index);source.revision++;return this;}
+ delete(index){const source=state(this),existed=this.has(index);mapDelete.call(source.overrides,index);if(ordinal(source,index)>=0)setAdd.call(source.deleted,index);mapDelete.call(this.cache,index);source.revision++;return existed;}
+ clear(){const source=state(this);source.packet=Object.freeze({indices:new Uint32Array(),offsets:new Uint32Array(1),bytes:new Uint8Array()});mapClear.call(source.overrides);setClear.call(source.deleted);mapClear.call(this.cache);source.revision++;}
+ *keys(){const source=state(this);for(const index of source.packet.indices)if(mapHas.call(source.overrides,index)||!setHas.call(source.deleted,index))yield index;for(const index of mapKeys.call(source.overrides))if(ordinal(source,index)<0)yield index;}
+ *[Symbol.iterator](){for(const index of this.keys())yield [index,this.get(index)];}
+ get size(){const source=state(this);return source.packet.indices.length-source.deleted.size+source.overrides.size;}
+}
+
 // Native-only bounded checkpoint records. No TextEncoder, timers or DOM APIs.
 const NATIVE_CHECKPOINT_RECORD_BYTES=262144,NATIVE_CHECKPOINT_TOTAL_BYTES=33554432;
 const nativeCheckpointMaxIndex=4194304;
@@ -3776,13 +3847,15 @@ const sourceTyped=Object.getPrototypeOf(Float64Array.prototype),sourceLength=Obj
 function sourceInteger(n,max,label){if(!Number.isSafeInteger(n)||n<0||n>max)throw new RangeError('Workspace source '+label);return n;}
 function sourceStale(){const e=new Error('Workspace source stale: owner/data/configuration changed');e.name='StaleSourceError';throw e;}
 const sourceSlot=(o,k)=>workspaceSlot(o,k);
-function sourceMapCount(map){return map instanceof NativeCheckpointMap?sourceEncodedSize.call(map):sourceMapSize.call(map);}
+function sourceMapCount(map){const lazy=lazyCheckpointSource(map);return lazy?lazy.count:map instanceof NativeCheckpointMap?sourceEncodedSize.call(map):sourceMapSize.call(map);}
+function sourceCheckpointRefs(map){const lazy=lazyCheckpointSource(map);return lazy?[lazy.revision,...lazy.refs]:[];}
+function sourceCheckpointValues(map){const lazy=lazyCheckpointSource(map);return lazy?lazy.values():Map.prototype.values.call(map);}
 function sourceRefs(api,input,size){
  const m=sourceSlot(api,'model'),s=sourceSlot(m,'store'),d=sourceSlot(m,'drawings'),engine=sourceSlot(m,'indicators'),entries=sourceSlot(engine,'entries'),columns=sourceSlot(s,'columns'),out=[api,sourceSlot(api,'controller'),m,input,size,s,columns,sourceSlot(s,'version'),sourceSlot(s,'timeVersion'),sourceSlot(s,'length'),sourceSlot(s,'capacity'),s.maxBars,s.timeframeMs,s.timeOrigin,m.disposed,engine,entries,sourceMapSize.call(entries),m.dataIngestion,m.theme,m.symbol,m.priceFormatter,m.timeFormatter,m.precision,m.axisWidth,m.view,m.view.from,m.view.to,m.follow,m.crosshair,d,d.items,d.selected,d.serial,d.transaction,d.undoStack,d.redoStack,d.undoStack.length,d.redoStack.length,size.width,size.height];
  for(const list of [m.panels,m.axes,m.series,d.undoStack,d.redoStack]){out.push(list,list.length);for(const item of list)out.push(item);}
  for(const k of FIELDS){const a=sourceSlot(columns,k);out.push(a,sourceLength.call(a),sourceBuffer.call(a));}
  const tree=s.index;out.push(tree,tree?.min,tree?.max,tree?.sum);
- for(const [id,e] of Map.prototype.entries.call(entries)){const cp=sourceSlot(e,'checkpoints');out.push(id,e,e.def,e.name,e.params,e.revision,e.length,e.dirty,e.dirtyTo,e.invalidated,cp,sourceMapCount(cp),Map.prototype.get.call(engine.registry,e.name),e.arrays,e.arrays.length);for(const a of e.arrays)out.push(a);}
+ for(const [id,e] of Map.prototype.entries.call(entries)){const cp=sourceSlot(e,'checkpoints');out.push(id,e,e.def,e.name,e.params,e.revision,e.length,e.dirty,e.dirtyTo,e.invalidated,cp,sourceMapCount(cp),...sourceCheckpointRefs(cp),Map.prototype.get.call(engine.registry,e.name),e.arrays,e.arrays.length);for(const a of e.arrays)out.push(a);}
  for(const item of m.series){const index=item.rangeIndex,tree=index instanceof BlockRangeIndex?index.tree:index;out.push(item.values,item.revision,item.dirtyFrom,index,index?.values,tree,tree?.min,tree?.max,tree?.sum);}
  const session=m.dataIngestion;if(session){const policy=sourceSlot(session,'policy'),counters=sourceSlot(session,'counters');out.push(session,policy,counters,session.paused,session.closed,session.count,session.head,session.capacity,session.nextSequence,session.firstPendingSequence,session.lastError,session.columns,session.kinds);for(const k of Object.keys(policy))out.push(k,sourceSlot(policy,k));for(const k of Object.keys(counters))out.push(k,sourceSlot(counters,k));for(const k of FIELDS)out.push(sourceSlot(session.columns,k));}
  if(input)out.push(sourceSlot(input,'model'),input.tool,input.text,input.drawingTarget,input.gesture,input.pointers,input.pointers?.size);
@@ -3798,7 +3871,7 @@ class NativeWorkspaceCapture {
    this.ingestionText=this.session?DataIngestion.prototype.save.call(this.session):null;this.binding=workspaceBinding(binding);this.document=readWorkspaceDocument(text);nativeWorkspacePreflight(api,text,this.binding);this.check(revision);
    const store=model.store,seenBuffers=new Set(),put=a=>{if(!['Float64Array','Uint8Array'].includes(sourceTag.call(a)))throw new TypeError('Workspace source numeric buffer');const buffer=sourceBuffer.call(a),bytes=sourceBufferBytes.call(buffer);if(!seenBuffers.has(buffer)){seenBuffers.add(buffer);this.charge(bytes,'sourceBytes');}};
    this.buffers=FIELDS.map(k=>sourceSlot(store.columns,k));for(const a of this.buffers){if(sourceTag.call(a)!=='Float64Array'||sourceLength.call(a)<store.length)throw new TypeError('Workspace source column length');put(a);}const tree=t=>{if(!t)return;for(const k of ['min','max','sum'])if(t[k])put(t[k]);};tree(store.index);if(this.session){for(const k of FIELDS)put(sourceSlot(this.session.columns,k));put(this.session.kinds);}
-   for(const [,e] of Map.prototype.entries.call(model.indicators.entries)){for(const a of e.arrays)put(a);const map=sourceSlot(e,'checkpoints');if(map instanceof NativeCheckpointMap)this.charge(sourceEncodedBytes.call(map)+sourceEncodedSize.call(map)*128,'checkpointBytes');else{const count=sourceMapSize.call(map);sourceInteger(count,4194305,'checkpoint count');this.charge(count*128,'checkpointBytes');this.records.push(map);}}
+   for(const [,e] of Map.prototype.entries.call(model.indicators.entries)){for(const a of e.arrays)put(a);const map=sourceSlot(e,'checkpoints'),lazy=lazyCheckpointSource(map);if(map instanceof NativeCheckpointMap)this.charge(sourceEncodedBytes.call(map)+sourceEncodedSize.call(map)*128,'checkpointBytes');else if(lazy){sourceInteger(lazy.count,4194305,'checkpoint count');this.charge(lazy.retainedBytes+(lazy.baseCount+lazy.overrideCount+lazy.deletedCount)*128,'checkpointBytes');if(lazy.overrideCount)this.records.push(map);}else{const count=sourceMapSize.call(map);sourceInteger(count,4194305,'checkpoint count');this.charge(count*128,'checkpointBytes');this.records.push(map);}}
    for(const item of model.series){if(item.values)put(item.values);const index=item.rangeIndex;if(index?.values)put(index.values);tree(index instanceof BlockRangeIndex?index.tree:index);}
    const d=model.drawings;this.frames=[d.items,...d.undoStack,...d.redoStack];sourceInteger(this.frames.length,20001,'drawing frame count');for(const frame of this.frames){if(!Array.isArray(frame)||frame.length>10000)throw new TypeError('Workspace source drawing frame');if(!this.seenFrames.has(frame)){this.seenFrames.add(frame);this.charge(frame.length*8,'drawingBytes');}}
    this.check(revision);
@@ -3808,7 +3881,7 @@ class NativeWorkspaceCapture {
  active(){if(this.closed)throw new Error('Workspace source capture closed');}
  check(revision){this.active();if(revision!==this.hostRevision||!sourceSame(this.refs,sourceRefs(this.api,this.input,this.size))||this.session!==this.model.dataIngestion||this.session&&(this.session.epoch!==this.leaseEpoch||this.session.closed||!this.session.leased))sourceStale();return true;}
  step(maxRecords=8,revision){this.active();try{sourceInteger(maxRecords,64,'admission work');if(!maxRecords)throw new RangeError('Workspace source admission work');this.check(revision);if(this.phase!=='admission')return {phase:this.phase,complete:true};let work=0;
-  while(this.recordAt<this.records.length&&work<maxRecords){if(!this.recordIterator)this.recordIterator=Map.prototype.values.call(this.records[this.recordAt]);const row=this.recordIterator.next();if(row.done){this.recordAt++;this.recordIterator=null;continue;}const cost=nativeCheckpointFootprint(row.value);this.charge(cost.logicalBytes,'checkpointBytes');this.recordCount++;work++;this.check(revision);}
+  while(this.recordAt<this.records.length&&work<maxRecords){if(!this.recordIterator)this.recordIterator=sourceCheckpointValues(this.records[this.recordAt]);const row=this.recordIterator.next();if(row.done){this.recordAt++;this.recordIterator=null;continue;}const cost=nativeCheckpointFootprint(row.value);this.charge(cost.logicalBytes,'checkpointBytes');this.recordCount++;work++;this.check(revision);}
   while(this.recordAt===this.records.length&&this.frameAt<this.frames.length&&work<maxRecords){const frame=this.frames[this.frameAt];if(this.drawingAt===frame.length){this.frameAt++;this.drawingAt=0;continue;}const drawing=frame[this.drawingAt++];work++;if(!drawing||typeof drawing!=='object')throw new TypeError('Workspace source drawing');if(!this.seenDrawings.has(drawing)){this.seenDrawings.add(drawing);this.charge(nativeCheckpointFootprint(drawing).logicalBytes,'drawingBytes');this.drawingCount++;}this.check(revision);}
   if(this.recordAt<this.records.length||this.frameAt<this.frames.length)return {phase:'admission',done:this.recordCount+this.drawingCount,complete:false};
   const s=this.model.store;this.metadataJSON=safeCheckpointStringify({schema:'aster.native-workspace-target',version:1,...(this.ingestionText===null?{}:{dataIngestion:this.ingestionText}),document:safeCheckpointStringify(this.document),datasetBinding:this.binding,source:{length:s.length,maxBars:s.maxBars,timeframeMs:s.timeframeMs,timeOrigin:s.timeOrigin,version:s.version,timeVersion:s.timeVersion},size:{width:this.size.width,height:this.size.height},retainedBytes:this.sourceBytes+this.checkpointBytes+this.drawingBytes,maxBytes:this.maxBytes});this.plan=nativeWorkspaceTargetPlan(this.metadataJSON);this.check(revision);this.phase='copy';return {phase:'copy',done:this.recordCount+this.drawingCount,complete:true};

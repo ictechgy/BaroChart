@@ -148,7 +148,11 @@ export async function createWasmHarness({targetDirectory, profile = 'release', p
   }};
   instance = await WebAssembly.instantiate(module, wasmImports);
 
-  const requiredExports = ['memory', 'bc_alloc', 'bc_call', 'bc_engine_free', 'bc_engine_new', 'bc_free'];
+  const requiredExports = [
+    'memory', 'bc_alloc', 'bc_call', 'bc_engine_free', 'bc_engine_new', 'bc_free',
+    'bc_web_abi_version', 'bc_web_capabilities', 'bc_web_memory_stats',
+    'bc_web_packet', 'bc_web_read_f64', 'bc_web_write_f64',
+  ];
   assert.deepEqual(WebAssembly.Module.exports(module).map(({name}) => name).sort(), requiredExports.sort(), 'WASM export surface changed');
   const imports = WebAssembly.Module.imports(module).map(({module: source, name}) => `${source}.${name}`).sort();
   assert.deepEqual(imports, ['env.host_release', 'env.js_exp', 'env.js_hypot', 'env.js_log', 'env.zone_offset_seconds', 'env.zone_resolve']);
@@ -228,6 +232,94 @@ export async function createWasmHarness({targetDirectory, profile = 'release', p
     get importCalls() {return {...importCalls}},
     allocate,
     free,
+    webAbiVersion() {
+      return instance.exports.bc_web_abi_version();
+    },
+    webBytes(pointer) {
+      const owned = descriptor(pointer);
+      const bytes = owned.pointer
+        ? new Uint8Array(bytesView().slice(owned.pointer, owned.pointer + owned.length))
+        : new Uint8Array();
+      if (owned.pointer) free(owned.pointer, owned.capacity);
+      return bytes;
+    },
+    webCall(name, args = [], flags = 1) {
+      const nameBytes = new TextEncoder().encode(name);
+      const argsBytes = new TextEncoder().encode(stringifyLossless(args));
+      const namePointer = allocate(nameBytes.length), argsPointer = allocate(argsBytes.length), output = allocate(12);
+      try {
+        bytesView().set(nameBytes, namePointer);
+        bytesView().set(argsBytes, argsPointer);
+        const status = instance.exports.bc_web_read_f64(
+          engine, namePointer, nameBytes.length, argsPointer, argsBytes.length, flags, output,
+        );
+        const owned = descriptor(output);
+        let value;
+        try {
+          const raw = owned.pointer ? bytesView().slice(owned.pointer, owned.pointer + owned.length) : new Uint8Array();
+          value = status === 0 ? raw : raw.length ? parseLossless(new TextDecoder('utf-8', {fatal: true}).decode(raw)) : undefined;
+        } finally {if (owned.pointer) free(owned.pointer, owned.capacity)}
+        return {status, value};
+      } finally {
+        free(namePointer, nameBytes.length); free(argsPointer, argsBytes.length); free(output, 12);
+      }
+    },
+    webCapabilities() {
+      const output = allocate(12);
+      try {
+        const status = instance.exports.bc_web_capabilities(engine, output);
+        const owned = descriptor(output);
+        try {
+          const raw = owned.pointer ? new TextDecoder('utf-8', {fatal: true}).decode(bytesView().subarray(owned.pointer, owned.pointer + owned.length)) : '';
+          return {status, value: raw ? JSON.parse(raw) : undefined};
+        } finally {if (owned.pointer) free(owned.pointer, owned.capacity)}
+      } finally {free(output, 12)}
+    },
+    webWriteF64(name, args, values, flags = 1) {
+      const nameBytes = new TextEncoder().encode(name);
+      const argsBytes = new TextEncoder().encode(stringifyLossless(args));
+      const sourceBytes = values.length * 8;
+      const namePointer = allocate(nameBytes.length), argsPointer = allocate(argsBytes.length), sourcePointer = sourceBytes ? allocate(sourceBytes) : 0, didWrite = allocate(4), error = allocate(12);
+      try {
+        bytesView().set(nameBytes, namePointer); bytesView().set(argsBytes, argsPointer);
+        if (sourcePointer) {
+          const view = new DataView(instance.exports.memory.buffer);
+          values.forEach((value, index) => view.setFloat64(sourcePointer + index * 8, value, true));
+        }
+        const status = instance.exports.bc_web_write_f64(engine, namePointer, nameBytes.length, argsPointer, argsBytes.length, flags, sourcePointer, values.length, didWrite, error);
+        const wrote = new DataView(instance.exports.memory.buffer).getUint32(didWrite, true);
+        const owned = descriptor(error);
+        const message = owned.pointer ? parseLossless(new TextDecoder('utf-8', {fatal: true}).decode(bytesView().subarray(owned.pointer, owned.pointer + owned.length))) : undefined;
+        if (owned.pointer) free(owned.pointer, owned.capacity);
+        return {status, didWrite: wrote, error: message};
+      } finally {
+        free(namePointer, nameBytes.length); free(argsPointer, argsBytes.length); if (sourcePointer) free(sourcePointer, sourceBytes); free(didWrite, 4); free(error, 12);
+      }
+    },
+    webWriteF64Bits(name, args, bits, flags = 1) {
+      const nameBytes = new TextEncoder().encode(name), argsBytes = new TextEncoder().encode(stringifyLossless(args));
+      const sourceBytes = bits.length * 8, namePointer = allocate(nameBytes.length), argsPointer = allocate(argsBytes.length), sourcePointer = sourceBytes ? allocate(sourceBytes) : 0, didWrite = allocate(4), error = allocate(12);
+      try {
+        bytesView().set(nameBytes, namePointer); bytesView().set(argsBytes, argsPointer);
+        if (sourcePointer) {const view = new DataView(instance.exports.memory.buffer);bits.forEach((value,index)=>view.setBigUint64(sourcePointer + index * 8, BigInt(value), true));}
+        const status = instance.exports.bc_web_write_f64(engine,namePointer,nameBytes.length,argsPointer,argsBytes.length,flags,sourcePointer,bits.length,didWrite,error);
+        const wrote = new DataView(instance.exports.memory.buffer).getUint32(didWrite,true), owned = descriptor(error);
+        const message = owned.pointer ? parseLossless(new TextDecoder('utf-8',{fatal:true}).decode(bytesView().subarray(owned.pointer,owned.pointer+owned.length))) : undefined;
+        if (owned.pointer) free(owned.pointer,owned.capacity);
+        return {status,didWrite:wrote,error:message};
+      } finally {free(namePointer,nameBytes.length);free(argsPointer,argsBytes.length);if(sourcePointer)free(sourcePointer,sourceBytes);free(didWrite,4);free(error,12);}
+    },
+    webPacket(args = []) {
+      const argsBytes = new TextEncoder().encode(stringifyLossless(args)), argsPointer = allocate(argsBytes.length), metadata = allocate(12), numbers = allocate(12);
+      try {
+        bytesView().set(argsBytes,argsPointer);
+        const status = instance.exports.bc_web_packet(engine,argsPointer,argsBytes.length,metadata,numbers), read = pointer => {const owned=descriptor(pointer);const bytes=owned.pointer?bytesView().slice(owned.pointer,owned.pointer+owned.length):new Uint8Array();if(owned.pointer)free(owned.pointer,owned.capacity);return bytes;};
+        return {status,metadata:read(metadata),numbers:read(numbers)};
+      } finally {free(argsPointer,argsBytes.length);free(metadata,12);free(numbers,12);}
+    },
+    webMemoryStats() {
+      const output=allocate(12);try{const status=instance.exports.bc_web_memory_stats(engine,output),owned=descriptor(output);const value=owned.pointer?JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytesView().subarray(owned.pointer,owned.pointer+owned.length))):undefined;if(owned.pointer)free(owned.pointer,owned.capacity);return{status,value};}finally{free(output,12);}
+    },
     async call(name, args) {
       if (disposed || !engine) throw new Error('WASM harness is disposed');
       const nameBytes = new TextEncoder().encode(name);

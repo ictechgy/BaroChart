@@ -2,6 +2,9 @@
 
 #![forbid(unsafe_code)]
 
+#[cfg(target_arch = "wasm32")]
+mod web_migration;
+
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use barochart_js::error::JsError;
@@ -473,6 +476,16 @@ impl RuntimeOwnerToken {
         chart.validate_formatter_identity(&self.formatter)
             && input.validate_source_owner(&self.input)
     }
+
+    #[cfg(target_arch = "wasm32")]
+    fn matches_web_params_outer(&self, chart: &NativeChart, input: &OwnedInteractionState) -> bool {
+        self.chart.matches(chart) && input.validate_source_controller(&self.input)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn matches_web_params_source(&self, chart: &NativeChart) -> bool {
+        chart.validate_formatter_identity(&self.formatter)
+    }
 }
 
 enum AsyncSourceKind {
@@ -513,6 +526,74 @@ struct ParamsSourceRow {
     lease: Option<AsyncIngestionLease>,
     owner: RuntimeOwnerToken,
     arm: Option<ParamsWriteArm>,
+    #[cfg(target_arch = "wasm32")]
+    web: bool,
+}
+
+fn params_owner_matches_outer(
+    owner: &RuntimeOwnerToken,
+    chart: &NativeChart,
+    input: &OwnedInteractionState,
+    size: &NativeSizeState,
+    web: bool,
+) -> bool {
+    #[cfg(target_arch = "wasm32")]
+    if web {
+        return owner.matches_web_params_outer(chart, input);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = web;
+    owner.matches_outer(chart, input, size)
+}
+
+fn params_owner_matches_source(
+    owner: &RuntimeOwnerToken,
+    chart: &NativeChart,
+    input: &OwnedInteractionState,
+    web: bool,
+) -> bool {
+    #[cfg(target_arch = "wasm32")]
+    if web {
+        return owner.matches_web_params_source(chart);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = web;
+    owner.matches_source(chart, input)
+}
+
+impl ParamsSourceRow {
+    fn matches_outer(
+        &self,
+        chart: &NativeChart,
+        input: &OwnedInteractionState,
+        size: &NativeSizeState,
+    ) -> bool {
+        params_owner_matches_outer(
+            &self.owner,
+            chart,
+            input,
+            size,
+            cfg!(target_arch = "wasm32") && self.web_mode(),
+        )
+    }
+
+    fn matches_source(&self, chart: &NativeChart, input: &OwnedInteractionState) -> bool {
+        params_owner_matches_source(
+            &self.owner,
+            chart,
+            input,
+            cfg!(target_arch = "wasm32") && self.web_mode(),
+        )
+    }
+
+    fn web_mode(&self) -> bool {
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.web
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        false
+    }
 }
 
 struct ParamsTargetRow {
@@ -578,6 +659,10 @@ pub struct NativeRuntime {
     workspace_creating: bool,
     params_creating: bool,
     params_ledger: NativeParamsStatusLedger,
+    #[cfg(target_arch = "wasm32")]
+    web_migration_source: Option<web_migration::WebMigrationSourceState>,
+    #[cfg(target_arch = "wasm32")]
+    web_migration_target: Option<web_migration::WebMigrationTargetState>,
 }
 
 impl Default for NativeRuntime {
@@ -609,6 +694,10 @@ impl NativeRuntime {
             workspace_creating: false,
             params_creating: false,
             params_ledger,
+            #[cfg(target_arch = "wasm32")]
+            web_migration_source: None,
+            #[cfg(target_arch = "wasm32")]
+            web_migration_target: None,
         }
     }
 
@@ -638,6 +727,14 @@ impl NativeRuntime {
         self.async_source.is_some()
             || self.workspace_source.is_some()
             || self.params_source.is_some()
+            || {
+                #[cfg(target_arch = "wasm32")]
+                {
+                    self.web_migration_source.is_some()
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                false
+            }
     }
 
     fn target_busy(&self, include_ui: bool) -> bool {
@@ -647,6 +744,14 @@ impl NativeRuntime {
             || self.params_target.is_some()
             || self.params_creating
             || include_ui && (self.ui_import.is_some() || self.ui_prepared.is_some())
+            || {
+                #[cfg(target_arch = "wasm32")]
+                {
+                    self.web_migration_target.is_some()
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                false
+            }
     }
 
     fn next_ticket_checked(&mut self, message: &str) -> Result<u64, JsError> {
@@ -706,6 +811,10 @@ impl NativeRuntime {
             .map_err(|failure| failure.into_js_error())?;
         let name = name.to_string_lossy();
         let value = match name.as_str() {
+            #[cfg(target_arch = "wasm32")]
+            name if name.starts_with("web.migration") => {
+                return self.web_migration_call(name, args, &mut context, scope);
+            }
             "nativeAsyncBegin" => self.async_begin(args, &mut context, false, scope)?,
             "nativePrepareBegin" => self.async_begin(args, &mut context, true, scope)?,
             "nativeDataAsyncBegin" => self.data_async_begin(args, &mut context, scope)?,
@@ -760,21 +869,47 @@ impl NativeRuntime {
             "nativeAsyncUIImportChunk" => self.ui_import_chunk(args, scope)?,
             "nativeAsyncUIImportEnd" => self.ui_import_end(&mut context)?,
             "nativeAsyncFinish" => return self.async_finish(args, &mut context, scope),
-            "nativeParamsSourceBegin" => self.params_source_begin(args, &mut context)?,
+            "nativeParamsSourceBegin" => self.params_source_begin(args, &mut context, false)?,
+            #[cfg(target_arch = "wasm32")]
+            "web.paramsSourceBegin" => self.params_source_begin(args, &mut context, true)?,
             "nativeParamsSourceStep" => self.params_source_step(args, &mut context, scope)?,
+            #[cfg(target_arch = "wasm32")]
+            "web.paramsSourceStep" => self.params_source_step(args, &mut context, scope)?,
             "nativeParamsSourceCheck" => self.params_source_check(args, &mut context)?,
+            #[cfg(target_arch = "wasm32")]
+            "web.paramsSourceCheck" => self.params_source_check(args, &mut context)?,
             "nativeParamsSourceReceive" => self.params_source_receive(args, &mut context, scope)?,
+            #[cfg(target_arch = "wasm32")]
+            "web.paramsSourceReceive" => self.params_source_receive(args, &mut context, scope)?,
             "nativeParamsSourceArmWrite" => self.params_source_arm(args, &mut context)?,
+            #[cfg(target_arch = "wasm32")]
+            "web.paramsSourceArmWrite" => self.params_source_arm(args, &mut context)?,
             "nativeParamsSourceCheckpoint" => {
                 self.params_source_checkpoint(args, &mut context, scope)?
             }
+            #[cfg(target_arch = "wasm32")]
+            "web.paramsSourceCheckpoint" => {
+                self.params_source_checkpoint(args, &mut context, scope)?
+            }
             "nativeParamsSourceValidate" => self.params_source_validate(args, &mut context)?,
+            #[cfg(target_arch = "wasm32")]
+            "web.paramsSourceValidate" => self.params_source_validate(args, &mut context)?,
             "nativeParamsSourcePrepare" => self.params_source_prepare(args, &mut context)?,
+            #[cfg(target_arch = "wasm32")]
+            "web.paramsSourcePrepare" => self.params_source_prepare(args, &mut context)?,
             "nativeParamsSourcePublish" => self.params_source_publish(args, &mut context, scope)?,
+            #[cfg(target_arch = "wasm32")]
+            "web.paramsSourcePublish" => self.params_source_publish(args, &mut context, scope)?,
             "nativeParamsSourceStatus" => {
                 self.params_ledger.status_scoped(argument(args, 0), scope)?
             }
+            #[cfg(target_arch = "wasm32")]
+            "web.paramsSourceStatus" => {
+                self.params_ledger.status_scoped(argument(args, 0), scope)?
+            }
             "nativeParamsSourceAbort" => self.params_source_abort(args, &mut context, scope)?,
+            #[cfg(target_arch = "wasm32")]
+            "web.paramsSourceAbort" => self.params_source_abort(args, &mut context, scope)?,
             "nativeParamsTargetCreate" => self.params_target_create(args, &mut context, scope)?,
             "nativeParamsTargetStart" => self.params_target_start()?,
             "nativeParamsTargetStep" => self.params_target_step(args, &mut context)?,
@@ -1756,6 +1891,7 @@ impl NativeRuntime {
         &mut self,
         args: &[JsValue],
         context: &mut RuntimeContext<'_>,
+        web: bool,
     ) -> Result<JsValue, JsError> {
         let registration = params_registration(argument(args, 4))?;
         if self.source_busy() {
@@ -1779,6 +1915,39 @@ impl NativeRuntime {
                 .ingestion_owner_mut()
                 .acquire_async_lease()
                 .map_err(ingestion_error)?;
+            #[cfg(target_arch = "wasm32")]
+            let source = if web {
+                NativeParamsSource::capture_web(
+                    chart.ingestion_owner(),
+                    &lease,
+                    chart.model(),
+                    chart.indicators(),
+                    chart.series_caches(),
+                    argument(args, 0),
+                    argument(args, 1),
+                    revision,
+                    registration as f64,
+                    max_bytes,
+                    NumberDialect::PLATFORM,
+                    host,
+                )
+            } else {
+                NativeParamsSource::capture(
+                    chart.ingestion_owner(),
+                    &lease,
+                    chart.model(),
+                    chart.indicators(),
+                    chart.series_caches(),
+                    argument(args, 0),
+                    argument(args, 1),
+                    revision,
+                    registration as f64,
+                    max_bytes,
+                    NumberDialect::PLATFORM,
+                    host,
+                )
+            };
+            #[cfg(not(target_arch = "wasm32"))]
             let source = NativeParamsSource::capture(
                 chart.ingestion_owner(),
                 &lease,
@@ -1800,8 +1969,8 @@ impl NativeRuntime {
                     return Err(error);
                 }
             };
-            if !owner.matches_outer(chart, input, size)
-                || !owner.matches_source(chart, input)
+            if !params_owner_matches_outer(&owner, chart, input, size, web)
+                || !params_owner_matches_source(&owner, chart, input, web)
                 || !chart.ingestion_owner().validate_async_lease(&lease)
             {
                 chart.ingestion_owner_mut().release_async_lease(&mut lease);
@@ -1815,6 +1984,8 @@ impl NativeRuntime {
                 lease: Some(lease),
                 owner,
                 arm: None,
+                #[cfg(target_arch = "wasm32")]
+                web,
             });
             let phase = if self
                 .params_source
@@ -2024,8 +2195,7 @@ impl NativeRuntime {
         let valid = before_release
             && released
             && self.params_source.as_ref().is_some_and(|row| {
-                row.owner.matches_outer(chart, input, size)
-                    && row.owner.matches_source(chart, input)
+                row.matches_outer(chart, input, size) && row.matches_source(chart, input)
             });
         if !valid {
             self.drop_params_source(context, "failed");
@@ -2050,12 +2220,12 @@ impl NativeRuntime {
         let mut committed_to_ledger = false;
         let result = (|| {
             let (chart, input, size, _) = current_parts(context)?;
-            if !row.owner.matches_outer(chart, input, size) {
+            if !row.matches_outer(chart, input, size) {
                 return Err(ordinary_error(
                     "Workspace source stale: native owner replaced",
                 ));
             }
-            if !row.owner.matches_source(chart, input) {
+            if !row.matches_source(chart, input) {
                 return Err(stale_error("Native params stale: source/owner changed"));
             }
             let (receipt, receipt_memory) = {
@@ -2066,12 +2236,12 @@ impl NativeRuntime {
                 row.source
                     .publish_accounted(owner, model, engine, caches, revision)?
             };
-            if !row.owner.matches_outer(chart, input, size) {
+            if !row.matches_outer(chart, input, size) {
                 return Err(ordinary_error(
                     "Workspace source stale: native owner replaced",
                 ));
             }
-            if !row.owner.matches_source(chart, input) {
+            if !row.matches_source(chart, input) {
                 return Err(stale_error("Native params stale: source/owner changed"));
             }
             let status = match field(&receipt, "status") {
@@ -2127,7 +2297,7 @@ impl NativeRuntime {
         let result = (|| {
             let row = self.params_row(ticket)?;
             let (chart, input, size, _) = current_parts(context)?;
-            if !row.owner.matches_outer(chart, input, size)
+            if !row.matches_outer(chart, input, size)
                 || row
                     .lease
                     .as_ref()
@@ -2137,16 +2307,16 @@ impl NativeRuntime {
                     "Workspace source stale: native owner replaced",
                 ));
             }
-            if !row.owner.matches_source(chart, input) {
+            if !row.matches_source(chart, input) {
                 return Err(stale_error("Native params stale: source/owner changed"));
             }
             let result = operation(row, chart)?;
-            if !row.owner.matches_outer(chart, input, size) {
+            if !row.matches_outer(chart, input, size) {
                 return Err(ordinary_error(
                     "Workspace source stale: native owner replaced",
                 ));
             }
-            if !row.owner.matches_source(chart, input) {
+            if !row.matches_source(chart, input) {
                 return Err(stale_error("Native params stale: source/owner changed"));
             }
             Ok(result)
@@ -2324,7 +2494,7 @@ impl NativeRuntime {
                 (_, _, None) => Err(type_error("Workspace own data slot: nativeSize")),
                 (Some(chart), Some(input), Some(size)) => {
                     let row = self.params_source.as_ref().expect("matched params source");
-                    if !row.owner.matches_outer(chart, input, size)
+                    if !row.matches_outer(chart, input, size)
                         || row.lease.as_ref().is_some_and(|lease| {
                             !chart.ingestion_owner().validate_async_lease(lease)
                         })
@@ -2332,7 +2502,7 @@ impl NativeRuntime {
                         Err(ordinary_error(
                             "Workspace source stale: native owner replaced",
                         ))
-                    } else if !row.owner.matches_source(chart, input) {
+                    } else if !row.matches_source(chart, input) {
                         Err(stale_error("Native params stale: source/owner changed"))
                     } else {
                         row.source.check_buffer_slice(
@@ -2476,11 +2646,11 @@ impl NativeRuntime {
             let preflight = {
                 let (chart, input, size, _) = current_parts(&mut context)?;
                 let row = self.params_source.as_ref().expect("armed params source");
-                if !row.owner.matches_outer(chart, input, size) {
+                if !row.matches_outer(chart, input, size) {
                     Err(ordinary_error(
                         "Workspace source stale: native owner replaced",
                     ))
-                } else if !row.owner.matches_source(chart, input) {
+                } else if !row.matches_source(chart, input) {
                     Err(stale_error("Native params stale: source/owner changed"))
                 } else {
                     row.source.check_result_slice(

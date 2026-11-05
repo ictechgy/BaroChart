@@ -1,6 +1,6 @@
 # Support and operations status
 
-Status snapshot: **2026-11-04** · [한국어](SUPPORT.ko.md) · [migration guide](MIGRATING-FROM-LIGHTWEIGHT-CHARTS.md) · [browser measurement](measurements/2026-11-04-migration-operations.md).
+Status snapshot: **2026-11-06** · [한국어](SUPPORT.ko.md) · [migration guide](MIGRATING-FROM-LIGHTWEIGHT-CHARTS.md) · [browser measurement](measurements/2026-11-04-migration-operations.md).
 
 BaroChart `0.3.0-dev` is a development preview. The package is private and no npm, SwiftPM release tag, or Maven Central artifact has been published. “Supported lane” below describes the implementation and documentation available in this source tree; it is not a released-version compatibility promise.
 
@@ -14,7 +14,8 @@ BaroChart `0.3.0-dev` is a development preview. The package is private and no np
 | Mobile web | **Responsive host examples and explicit input presets.** | The measured viewport widths have no horizontal overflow for the migration page. Browser viewport emulation does not verify touch gestures, scrolling arbitration, VoiceOver, TalkBack, or a physical handset. |
 | Apple native | **Existing Swift/JavaScriptCore SDK integration.** SwiftUI and UIKit views are available from the local source checkout. | CI and dated simulator/device records are linked from the [native measurements](measurements/native-device-performance.json). The 2026-11-01 physical result is one iPhone and offscreen CPU work; it is not display FPS or broad device coverage. No public SwiftPM release tag is available. |
 | Android native | **Existing Android/QuickJS SDK integration.** View and Compose APIs and two packaged ABIs are available from the local source checkout. | CI, emulator, and dated physical-device evidence are linked from the [native measurements](measurements/native-device-performance.json). The 2026-11-01 physical result is one Samsung device and CPU bitmap rendering; it is not display FPS or broad device coverage. No Maven Central release is available. |
-| Rust native chart backend | **Incomplete and in development.** M1b ABI/package/internal-selection infrastructure is implemented; a complete chart backend and its conformance gates have not passed. | The [M1b checks](measurements/2026-11-04-rust-m1b.md) verify a count-echo scaffold. Do not claim JavaScript feature parity, a chart-speed ratio, or Rust as the default. Complete the authorized M1b–M7 implementation and host/platform gates before changing that status. |
+| Rust web/WASM | **Opt-in Worker-owned Rust core.** Canvas/WebGL2 presentation, asynchronous preparation/parameters, and main-demo backend migration. JavaScript remains the default. | [Integration and build guide](WEB-RUST-WASM.md) and [measured comparison](measurements/web-rust-wasm.md). Production WASM was exercised in Chrome 156, including the 100k-bar main demo and a 390px viewport. Safari automation was unavailable and Firefox was not installed; physical touch and screen-reader acceptance remain open. |
+| Rust native SDK | **Opt-in Swift/Android implementation.** M1b–M6 integration is implemented; JavaScript remains the default. | [Native integration and rollout gates](RUST-BACKEND.md). Android physical-device performance/soak and manual VoiceOver/TalkBack acceptance remain M7 gates. Dated [iPhone XR measurements](measurements/2026-11-05-native-rust-ios-ab.md) describe their recorded source and workload, not the current checkout or display FPS. |
 | Feeds, accounts, and trading | **Host-owned; not supplied.** | The local HTTP/SSE fixture uses synthetic data. Production provider authentication, entitlements, sequence/watermark policy, retries, accounts, and order execution remain application responsibilities. See [feed integration](FEED-INTEGRATION.md). |
 
 The web React name `AsterChart` and serialized `aster.*` schemas remain compatibility surfaces. Native SDK branding is `BaroChart`. Do not rename saved schemas as part of a product rename. This project is independent and does not claim an API relationship with TradingView products.
@@ -43,7 +44,7 @@ Before describing this preview as a release or changing a support claim:
 1. Run the tests and package/type checks for the exact reviewed source revision and confirm its CI result. Keep historical test counts labeled with their original date and revision.
 2. Run browser checks on the intended browser/version set and manual touch and screen-reader checks on physical devices; retain failures and unavailable environments.
 3. Keep React claims scoped to the React versions and runtime/SSR modes exercised by the actual consumer.
-4. Finish Rust M1b–M7 implementation and JS/native conformance across supported hosts before stating feature parity, enabling it as a default, or publishing a speed comparison. Compare performance only after both implementations perform the same visible work under a recorded method.
+4. Scope Rust conformance and performance claims to the implemented path, recorded source, and actual checks. Compare the same visible work under a recorded method. Complete the native M7 platform and manual acceptance gates before changing its default; the web backend remains an explicit opt-in.
 5. Separately approve versioning, package publication, release tags, signing, and platform distribution. Current local source/package checks do not publish artifacts.
 
 ## Privacy-safe failure report
@@ -52,7 +53,7 @@ Use this template for a defect report. Replace sensitive input with a synthetic 
 
 ```text
 Product/revision: BaroChart <version or git revision>
-Integration lane: <JS/web | React | Swift/iOS | Kotlin/Android | Rust work in progress>
+Integration lane: <JS/web | React | Swift/iOS | Kotlin/Android | Rust/WASM | Rust/native>
 Runtime and versions: <OS, browser/runtime, SDK/toolchain>
 Expected behavior: <one observable result>
 Observed behavior: <one observable result>

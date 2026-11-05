@@ -18,6 +18,8 @@ examples/kotlin-consumer/app/build/
 __pycache__/
 *.pyc
 artifacts/
+/src/web/wasm/barochart-core.wasm
+/src/web/wasm/barochart-core.manifest.json
 benchmarks/results/
 *.zip
 *.apk

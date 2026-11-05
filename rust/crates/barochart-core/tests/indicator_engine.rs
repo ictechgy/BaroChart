@@ -947,15 +947,29 @@ fn native_capture_job_group_splits_into_target_without_recharging_payload() {
     assert!(source.validate_native_capture(data.store(), &token));
     assert!(job_memory.requested_bytes() >= source_bytes);
     assert!(account.snapshot().requested_live_bytes > source_bytes);
+    let token_bytes =
+        account.snapshot().requested_live_bytes - source_bytes - job_memory.requested_bytes();
+    assert!(
+        token_bytes > 0,
+        "capture identity metadata owns a separate quota lease"
+    );
 
     let mut target =
         IndicatorEngine::new_with_memory(IndicatorEngineOptions::default(), context).unwrap();
     let stage = target
         .stage_native_restore_with_memory(data.store(), snapshots, job_memory)
         .unwrap();
-    assert_eq!(account.snapshot().requested_live_bytes, source_bytes * 2);
+    assert_eq!(
+        account.snapshot().requested_live_bytes,
+        source_bytes * 2 + token_bytes
+    );
     target.publish_native_restore(data.store(), stage).unwrap();
     assert_eq!(target.accounted_bytes(), source_bytes);
+    assert_eq!(
+        account.snapshot().requested_live_bytes,
+        source_bytes * 2 + token_bytes
+    );
+    drop(token);
     assert_eq!(account.snapshot().requested_live_bytes, source_bytes * 2);
     drop((source, target));
     assert_eq!(account.snapshot().requested_live_bytes, 0);

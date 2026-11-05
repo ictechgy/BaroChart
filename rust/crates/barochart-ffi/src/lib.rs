@@ -48,6 +48,9 @@ use barochart_js::memory::{
 use barochart_js::num::NumberDialect;
 use barochart_js::string::JsString;
 
+#[cfg(target_arch = "wasm32")]
+mod wasm_web;
+
 /// 무손실 BCJSON 입력과 출력을 선택하는 플래그다.
 pub const BC_FLAG_LOSSLESS: u32 = 1;
 
@@ -944,7 +947,7 @@ unsafe fn write_accounted_error(
     {
         let _ = account;
         // SAFETY: WASM Phase A는 기존 unscoped output 경계를 유지한다.
-        return unsafe { write_error(out, error) };
+        unsafe { write_error(out, error) }
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -2747,6 +2750,42 @@ pub fn wasm_link_anchor() {
             *mut BcBuf,
         ) -> BcStatus;
     let _ = bc_engine_free as unsafe extern "C" fn(*mut BcEngine);
+    let _ = wasm_web::bc_web_abi_version as extern "C" fn() -> u32;
+    let _ = wasm_web::bc_web_capabilities
+        as unsafe extern "C" fn(*mut BcEngine, *mut BcBuf) -> BcStatus;
+    let _ = wasm_web::bc_web_read_f64
+        as unsafe extern "C" fn(
+            *mut BcEngine,
+            *const u8,
+            usize,
+            *const u8,
+            usize,
+            u32,
+            *mut BcBuf,
+        ) -> BcStatus;
+    let _ = wasm_web::bc_web_write_f64
+        as unsafe extern "C" fn(
+            *mut BcEngine,
+            *const u8,
+            usize,
+            *const u8,
+            usize,
+            u32,
+            *const f64,
+            u32,
+            *mut u32,
+            *mut BcBuf,
+        ) -> BcStatus;
+    let _ = wasm_web::bc_web_packet
+        as unsafe extern "C" fn(
+            *mut BcEngine,
+            *const u8,
+            usize,
+            *mut BcBuf,
+            *mut BcBuf,
+        ) -> BcStatus;
+    let _ = wasm_web::bc_web_memory_stats
+        as unsafe extern "C" fn(*const BcEngine, *mut BcBuf) -> BcStatus;
 }
 
 /// Rust 소유 `double` 버퍼를 해제한다. canonical empty는 no-op이다.

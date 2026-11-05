@@ -8,6 +8,8 @@ const PANEL_SET_KEYS = new Set(PANEL_FRAME_KEYS);
 const AXIS_SET_KEYS = new Set(AXIS_FRAME_KEYS);
 const MAX_FRAME_ITEMS = 256;
 const MAX_LABEL_LENGTH = 128;
+const HISTORY_SCHEMA = 'barochart.layout-history';
+const HISTORY_VERSION = 1;
 
 function plainRecord(value,label) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || ![Object.prototype,null].includes(Object.getPrototypeOf(value))) throw new TypeError(label+': plain object required');
@@ -142,6 +144,38 @@ function cloneFrame(value,label='Layout frame') {
     if (!panelOrder.includes(entry.panel)) throw new TypeError(label+': generated axis panel is not in panel order');
   }
   return {panelOrder,placements,generatedPanels,generatedAxes};
+}
+
+function cloneCommand(value,index) {
+  plainRecord(value,'Layout history command '+index);
+  const keys = Object.keys(value),allowed = ['label','before','after'];
+  if (keys.length !== allowed.length || allowed.some(key => !Object.hasOwn(value,key)) || keys.some(key => !allowed.includes(key))) throw new TypeError('Layout history command '+index+': exact fields required');
+  const label = ownValue(value,'label','Layout history command '+index,true);
+  if (typeof label !== 'string' || label.length === 0 || label.length > MAX_LABEL_LENGTH) throw new TypeError('Layout history command '+index+': label required');
+  return {label,before:cloneFrame(ownValue(value,'before','Layout history command '+index,true),'Layout history before '+index),after:cloneFrame(ownValue(value,'after','Layout history command '+index,true),'Layout history after '+index)};
+}
+
+/** Validates and owns the portable host layout-history ledger used across backends. */
+export function readLayoutHistoryState(value) {
+  plainRecord(value,'Layout history');
+  const keys = ['schema','version','commands','cursor'],own = Object.keys(value);
+  if (own.length !== keys.length || keys.some(key => !Object.hasOwn(value,key)) || own.some(key => !keys.includes(key))) throw new TypeError('Layout history: exact fields required');
+  if (ownValue(value,'schema','Layout history',true) !== HISTORY_SCHEMA || ownValue(value,'version','Layout history',true) !== HISTORY_VERSION) throw new TypeError('Layout history: schema/version');
+  const rows = denseArray(ownValue(value,'commands','Layout history',true),'Layout history commands',30);
+  const commands = rows.map(cloneCommand),cursor = ownValue(value,'cursor','Layout history',true);
+  if (!Number.isSafeInteger(cursor) || cursor < 0 || cursor > commands.length) throw new RangeError('Layout history: cursor');
+  for (let index=1;index<commands.length;index++) if (!equalFrame(commands[index-1].after,commands[index].before)) throw new TypeError('Layout history: discontinuous commands');
+  return {schema:HISTORY_SCHEMA,version:HISTORY_VERSION,commands,cursor};
+}
+
+export function emptyLayoutHistoryState() { return {schema:HISTORY_SCHEMA,version:HISTORY_VERSION,commands:[],cursor:0}; }
+
+export function readLayoutFrame(value) { return cloneFrame(value); }
+
+export function currentLayoutHistoryFrame(value) {
+  const history = readLayoutHistoryState(value);
+  if (!history.commands.length) return null;
+  return cloneFrame(history.cursor === 0 ? history.commands[0].before : history.commands[history.cursor-1].after);
 }
 
 function isLiveModel(model) {
@@ -508,5 +542,27 @@ export function createLayoutHistory({getModel,capture=captureLayoutFrame,apply,m
     return {canUndo:cursor > 0,canRedo:cursor < commands.length,undoLabel:undoCommand?.label ?? null,redoLabel:redoCommand?.label ?? null,depth:commands.length,cursor};
   }
 
-  return {begin,commit,cancel,undo,redo,reset,status};
+  function exportState() {
+    if (active) throw new Error('Cannot export active layout history transaction');
+    if (!isBound() || !initializeExpected() || !reconcileCurrent({throwOnCapture:true})) throw ownerError();
+    return readLayoutHistoryState({schema:HISTORY_SCHEMA,version:HISTORY_VERSION,commands:commands.map(command=>({label:command.label,before:cloneFrame(command.before),after:cloneFrame(command.after)})),cursor});
+  }
+
+  function importState(value,model=getModel()) {
+    if (active) throw new Error('Cannot import active layout history transaction');
+    const history = readLayoutHistoryState(value);
+    if (!isLiveModel(model) || !ownerCanBind(model)) throw ownerError();
+    const actual = captureCurrent(model),expected = currentLayoutHistoryFrame(history);
+    if (expected && (!frameIntentSatisfied(actual,expected) || !frameIntentSatisfied(expected,actual))) throw error('LayoutHistorySourceMismatch','Layout history current frame does not match the chart');
+    const imported = history.commands.map(command=>({label:command.label,before:cloneFrame(command.before),after:cloneFrame(command.after)}));
+    if (imported.length) {
+      if (history.cursor > 0) imported[history.cursor-1].after = cloneFrame(actual);
+      else imported[0].before = cloneFrame(actual);
+      if (history.cursor < imported.length) imported[history.cursor].before = cloneFrame(actual);
+    }
+    boundModel = model;generation += 1;commands = imported;cursor = history.cursor;expectedFrame = actual;
+    return status();
+  }
+
+  return {begin,commit,cancel,undo,redo,reset,status,exportState,importState};
 }

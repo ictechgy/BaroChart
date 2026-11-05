@@ -1164,6 +1164,75 @@ struct ParamsSourceFingerprint {
     caches: SeriesCachesCaptureToken,
 }
 
+/// Web actor용 params source fingerprint다.
+///
+/// 기존 NativeParamsSource의 fingerprint는 NativeWorkspace source와 같은 보수적인
+/// model snapshot을 포함한다. 웹은 view/follow/theme/drawing/history/controller를
+/// 바꿀 수 있어야 하므로 그 fingerprint를 약화하지 않고 별도 토큰을 둔다. 이 토큰은
+/// 실제 data store와 indicator/model owner만 읽으며, 값 배열이나 표시 상태를 복제하지 않는다.
+/// Series cache는 data/value/configuration에서 재생성하는 파생 표시 상태라 stale read-set이 아니다.
+#[cfg(target_arch = "wasm32")]
+struct WebParamsSourceFingerprint {
+    data: DataIdentity,
+    serial_bits: u64,
+    version_bits: u64,
+    time_version_bits: u64,
+    length: usize,
+    capacity: usize,
+    model: crate::model_state::ModelWebParamsCaptureToken,
+    indicators: NativeIndicatorCaptureToken,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl WebParamsSourceFingerprint {
+    /// 웹 params 작업의 좁은 read-set을 capture한다.
+    pub fn capture(
+        owner: &IngestionOwner,
+        model: &ModelState,
+        engine: &IndicatorEngine,
+        _caches: &SeriesCaches,
+        _dialect: NumberDialect,
+    ) -> Result<Self, JsError> {
+        let store = owner.data().store();
+        Ok(Self {
+            data: store.data_identity(),
+            serial_bits: store.serial().to_bits(),
+            version_bits: store.version().to_bits(),
+            time_version_bits: store.time_version().to_bits(),
+            length: store.length(),
+            capacity: store.capacity(),
+            model: model.capture_web_params_state(),
+            indicators: engine.capture_native_token_accounted(store)?,
+        })
+    }
+
+    /// 표시 상태를 제외하고 web params 작업의 계산 read-set만 검증한다.
+    pub fn matches(
+        &self,
+        owner: &IngestionOwner,
+        model: &ModelState,
+        engine: &IndicatorEngine,
+        _caches: &SeriesCaches,
+        _dialect: NumberDialect,
+    ) -> bool {
+        let store = owner.data().store();
+        self.data.matches(&store.data_identity())
+            && self.serial_bits == store.serial().to_bits()
+            && self.version_bits == store.version().to_bits()
+            && self.time_version_bits == store.time_version().to_bits()
+            && self.length == store.length()
+            && self.capacity == store.capacity()
+            && model.validate_web_params_state(&self.model)
+            && engine.validate_native_capture(store, &self.indicators)
+    }
+}
+
+enum ParamsSourceFingerprintKind {
+    Strict(ParamsSourceFingerprint),
+    #[cfg(target_arch = "wasm32")]
+    Web(WebParamsSourceFingerprint),
+}
+
 impl ParamsSourceFingerprint {
     fn capture(
         owner: &IngestionOwner,
@@ -1204,7 +1273,7 @@ impl ParamsSourceFingerprint {
             model: model_fingerprint,
             model_identity: model.capture_workspace_state(),
             values_identity: model.capture_series_values_reference(),
-            indicators: engine.capture_native_token(owner.data().store()),
+            indicators: engine.capture_native_token_accounted(owner.data().store())?,
             caches: caches.capture_token(),
         })
     }
@@ -1354,7 +1423,7 @@ pub struct NativeParamsSource {
     source_capacity: usize,
     dialect: NumberDialect,
     phase: SourcePhase,
-    fingerprint: ParamsSourceFingerprint,
+    fingerprint: ParamsSourceFingerprintKind,
     noop: bool,
     layout: JsValue,
     binding: Option<NativeParamsBinding>,
@@ -1363,6 +1432,7 @@ pub struct NativeParamsSource {
     candidate: Option<NativeIndicatorEntrySnapshot>,
     offsets: [usize; 6],
     checkpoint_rows: Vec<CheckpointCursor>,
+    _checkpoint_rows_memory: MemoryGroup,
     checkpoint_at: usize,
     source_bytes: usize,
     old_checkpoint_bytes: usize,
@@ -1375,6 +1445,7 @@ pub struct NativeParamsSource {
     checkpoint_entries: Option<Vec<(usize, JsValue)>>,
     checkpoint_memory: Option<MemoryGroup>,
     dependent_ids: Vec<JsString>,
+    _dependent_ids_memory: MemoryGroup,
     receipt: Option<JsValue>,
     receipt_memory: MemoryGroup,
     receipt_build_bytes: u64,
@@ -1406,6 +1477,73 @@ impl NativeParamsSource {
         max_bytes: f64,
         dialect: NumberDialect,
         host: &dyn Host,
+    ) -> Result<Self, JsError> {
+        Self::capture_with_mode(
+            owner,
+            lease,
+            model,
+            engine,
+            caches,
+            id,
+            params,
+            revision,
+            registration,
+            max_bytes,
+            dialect,
+            host,
+            false,
+        )
+    }
+
+    /// 웹 actor가 표시 상태와 독립된 params read-set을 같은 begin 호출 안에서 capture한다.
+    #[cfg(target_arch = "wasm32")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn capture_web(
+        owner: &IngestionOwner,
+        lease: &AsyncIngestionLease,
+        model: &ModelState,
+        engine: &IndicatorEngine,
+        caches: &SeriesCaches,
+        id: &JsValue,
+        params: &JsValue,
+        revision: f64,
+        registration: f64,
+        max_bytes: f64,
+        dialect: NumberDialect,
+        host: &dyn Host,
+    ) -> Result<Self, JsError> {
+        Self::capture_with_mode(
+            owner,
+            lease,
+            model,
+            engine,
+            caches,
+            id,
+            params,
+            revision,
+            registration,
+            max_bytes,
+            dialect,
+            host,
+            true,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn capture_with_mode(
+        owner: &IngestionOwner,
+        lease: &AsyncIngestionLease,
+        model: &ModelState,
+        engine: &IndicatorEngine,
+        caches: &SeriesCaches,
+        id: &JsValue,
+        params: &JsValue,
+        revision: f64,
+        registration: f64,
+        max_bytes: f64,
+        dialect: NumberDialect,
+        host: &dyn Host,
+        web: bool,
     ) -> Result<Self, JsError> {
         let id = identifier(id, "Indicator id")?.clone();
         if !exact_integer(revision, 0.0, MAX_SAFE_INTEGER) {
@@ -1455,7 +1593,23 @@ impl NativeParamsSource {
             ),
             ("plotOffsets", JsValue::Object(offsets)),
         ]);
-        let fingerprint = ParamsSourceFingerprint::capture(owner, model, engine, caches, dialect)?;
+        #[cfg(target_arch = "wasm32")]
+        let fingerprint = if web {
+            ParamsSourceFingerprintKind::Web(WebParamsSourceFingerprint::capture(
+                owner, model, engine, caches, dialect,
+            )?)
+        } else {
+            ParamsSourceFingerprintKind::Strict(ParamsSourceFingerprint::capture(
+                owner, model, engine, caches, dialect,
+            )?)
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        let fingerprint = {
+            let _ = web;
+            ParamsSourceFingerprintKind::Strict(ParamsSourceFingerprint::capture(
+                owner, model, engine, caches, dialect,
+            )?)
+        };
         if noop {
             return Ok(Self {
                 revision,
@@ -1474,6 +1628,7 @@ impl NativeParamsSource {
                 candidate: None,
                 offsets: [0; 6],
                 checkpoint_rows: Vec::new(),
+                _checkpoint_rows_memory: MemoryGroup::empty(source_memory.clone()),
                 checkpoint_at: 0,
                 source_bytes: 0,
                 old_checkpoint_bytes: 0,
@@ -1486,6 +1641,7 @@ impl NativeParamsSource {
                 checkpoint_entries: None,
                 checkpoint_memory: None,
                 dependent_ids: Vec::new(),
+                _dependent_ids_memory: MemoryGroup::empty(source_memory.clone()),
                 receipt: None,
                 receipt_memory: MemoryGroup::empty(source_memory.clone()),
                 receipt_build_bytes: 0,
@@ -1581,27 +1737,43 @@ impl NativeParamsSource {
                     .saturating_mul(std::mem::size_of::<u16>()),
             )
             .map_err(|failure| failure.into_js_error())?;
-        let mut checkpoint_rows = Vec::new();
-        for entry_id in engine.entry_ids() {
-            let entry = engine
-                .entry(&JsValue::String(entry_id.clone()))
-                .expect("entry current");
-            for checkpoint in entry.checkpoint_keys() {
-                checkpoint_rows.try_reserve(1).map_err(|_| {
-                    owner
-                        .data()
-                        .store()
-                        .memory_context()
-                        .allocation_failure()
-                        .into_js_error()
-                })?;
+        let checkpoint_count = engine
+            .entry_ids_iter()
+            .map(|entry_id| {
+                engine
+                    .entry_by_id(entry_id)
+                    .expect("entry id current")
+                    .checkpoint_len()
+            })
+            .try_fold(0usize, |total, count| total.checked_add(count))
+            .ok_or_else(|| source_memory.allocation_failure().into_js_error())?;
+        let (mut checkpoint_rows, mut checkpoint_rows_memory) = source_memory
+            .try_vec_capacity(checkpoint_count)
+            .map_err(|failure| failure.into_js_error())?;
+        let mut checkpoint_scope = source_memory.scope();
+        for entry_id in engine.entry_ids_iter() {
+            let entry = engine.entry_by_id(entry_id).expect("entry current");
+            let mut after = None;
+            while let Some((checkpoint, _)) = entry.checkpoint_next(after) {
                 checkpoint_rows.push(CheckpointCursor {
-                    id: entry_id.clone(),
+                    id: entry_id
+                        .try_clone_scoped(&mut checkpoint_scope)
+                        .map_err(|failure| failure.into_js_error())?,
                     key: checkpoint,
-                    target: entry_id == id,
+                    target: entry_id == &id,
                 });
+                after = Some(checkpoint);
             }
         }
+        debug_assert_eq!(checkpoint_rows.len(), checkpoint_count);
+        let checkpoint_string_bytes = usize::try_from(checkpoint_scope.requested_bytes())
+            .map_err(|_| source_memory.allocation_failure().into_js_error())?;
+        let checkpoint_strings = checkpoint_scope
+            .split_persistent(checkpoint_string_bytes)
+            .map_err(|failure| failure.into_js_error())?;
+        checkpoint_rows_memory
+            .absorb(checkpoint_strings)
+            .map_err(|failure| failure.into_js_error())?;
         Ok(Self {
             revision,
             registration: registration as u64,
@@ -1619,6 +1791,7 @@ impl NativeParamsSource {
             candidate: Some(candidate),
             offsets: [0; 6],
             checkpoint_rows,
+            _checkpoint_rows_memory: checkpoint_rows_memory,
             checkpoint_at: 0,
             source_bytes: retained_source_bytes(
                 owner,
@@ -1638,6 +1811,7 @@ impl NativeParamsSource {
             checkpoint_entries: None,
             checkpoint_memory: None,
             dependent_ids: Vec::new(),
+            _dependent_ids_memory: MemoryGroup::empty(source_memory.clone()),
             receipt: None,
             receipt_memory: MemoryGroup::empty(source_memory),
             receipt_build_bytes: 0,
@@ -1653,12 +1827,18 @@ impl NativeParamsSource {
         caches: &SeriesCaches,
         revision: f64,
     ) -> Result<(), JsError> {
-        if self.phase == SourcePhase::Closed
-            || revision.to_bits() != self.revision.to_bits()
-            || !self
-                .fingerprint
-                .matches(owner, model, engine, caches, self.dialect)
-        {
+        let matches = match &self.fingerprint {
+            ParamsSourceFingerprintKind::Strict(fingerprint) => {
+                revision.to_bits() == self.revision.to_bits()
+                    && fingerprint.matches(owner, model, engine, caches, self.dialect)
+            }
+            #[cfg(target_arch = "wasm32")]
+            ParamsSourceFingerprintKind::Web(fingerprint) => {
+                revision.to_bits() == self.revision.to_bits()
+                    && fingerprint.matches(owner, model, engine, caches, self.dialect)
+            }
+        };
+        if self.phase == SourcePhase::Closed || !matches {
             return Err(JsError::new(
                 "StaleSourceError",
                 key("Native params stale: source/owner changed"),
@@ -1667,6 +1847,8 @@ impl NativeParamsSource {
         Ok(())
     }
 
+    /// 웹 params 작업의 계산 read-set을 검사한다. view/follow/theme/drawing/history/controller
+    /// 변경은 이 검사에서 stale을 만들지 않으며, data/indicator/cache 변경은 stale이다.
     /// Target metadata는 changed 요청에서 admission 완료 뒤에만 host가 사용한다.
     pub fn metadata_json(&self) -> Option<&JsString> {
         self.metadata_json.as_ref()
@@ -2067,20 +2249,34 @@ impl NativeParamsSource {
                 return Err(ordinary_error("Native params validation phase"));
             }
         } else {
-            let mut dependent_ids = Vec::new();
-            dependent_ids.try_reserve(model.series.len()).map_err(|_| {
-                owner
-                    .data()
-                    .store()
-                    .memory_context()
-                    .allocation_failure()
-                    .into_js_error()
-            })?;
+            let memory = owner.data().store().memory_context().clone();
+            let dependent_count = model
+                .series
+                .iter()
+                .filter(|series| series.indicator.as_ref() == Some(&self.id))
+                .count();
+            let (mut dependent_ids, mut dependent_ids_memory) = memory
+                .try_vec_capacity(dependent_count)
+                .map_err(|failure| failure.into_js_error())?;
+            let mut dependent_scope = memory.scope();
             for series in &model.series {
                 if series.indicator.as_ref() == Some(&self.id) {
-                    dependent_ids.push(series.id.clone());
+                    dependent_ids.push(
+                        series
+                            .id
+                            .try_clone_scoped(&mut dependent_scope)
+                            .map_err(|failure| failure.into_js_error())?,
+                    );
                 }
             }
+            let dependent_string_bytes = usize::try_from(dependent_scope.requested_bytes())
+                .map_err(|_| memory.allocation_failure().into_js_error())?;
+            let dependent_strings = dependent_scope
+                .split_persistent(dependent_string_bytes)
+                .map_err(|failure| failure.into_js_error())?;
+            dependent_ids_memory
+                .absorb(dependent_strings)
+                .map_err(|failure| failure.into_js_error())?;
             let (candidate, result_memory, checkpoint_entries, checkpoint_memory) = self
                 .import
                 .as_mut()
@@ -2091,6 +2287,7 @@ impl NativeParamsSource {
             // write-candidate lease before staging; this keeps the old+candidate peak exact.
             drop(result_memory);
             self.dependent_ids = dependent_ids;
+            self._dependent_ids_memory = dependent_ids_memory;
             self.replacement = Some(engine.stage_native_replacement(
                 owner.data().store(),
                 &JsValue::String(self.id.clone()),

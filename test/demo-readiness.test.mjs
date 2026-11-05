@@ -23,18 +23,21 @@ const root=new URL('../',import.meta.url);
 const src=readFileSync(new URL('examples/web/demo.mjs',root),'utf8'),html=readFileSync(new URL('examples/web/index.html',root),'utf8');
 function demo(t){
  const cleanup=[],env=fixture({after:fn=>cleanup.push(fn)}),nodes=new Map(),toolNodes=[];
- env.document.documentElement=env.node('html');env.document.hidden=false;env.document.addEventListener=()=>{};
+ env.document.nodeType=9;env.document.defaultView=env.window;env.document.documentElement=env.node('html');env.document.hidden=false;env.document.addEventListener=()=>{};
  for(const m of html.matchAll(/<([a-z-]+)\b[^>]*\bid="([^"]+)"[^>]*>/g)){const n=env.node(m[1]);nodes.set(m[2],n);const value=m[0].match(/\bvalue="([^"]*)"/);if(value)n.value=value[1];n.disabled=/\bdisabled\b/.test(m[0]);n.hidden=/\bhidden\b/.test(m[0]);}
  for(const m of html.matchAll(/<button data-tool="([^"]+)" title="([^"]+)"[^>]*>/g)){const n=env.node('button');n.dataset.tool=m[1];n.title=m[2];n.disabled=/\bdisabled\b/.test(m[0]);toolNodes.push(n);}
- const $=id=>nodes.get(id);env.document.getElementById=$;env.document.querySelectorAll=()=>toolNodes;env.document.querySelector=()=>toolNodes.find(n=>n.getAttribute('aria-pressed')==='true');
+ const $=id=>nodes.get(id);env.document.getElementById=$;env.document.querySelectorAll=selector=>selector==='[data-tool]'?toolNodes:[];env.document.querySelector=selector=>selector.startsWith('#')?$(selector.slice(1)):toolNodes.find(n=>n.getAttribute('aria-pressed')==='true');
  for(const[id,value]of Object.entries({market:'us',count:'64',series:'candles',scale:'linear',renderer:'canvas',indicator:'ema','crosshair-snap':'free',magnet:'off'}))$(id).value=value;
  const requests=[],workspaceRequests=[],timers=new Map();let timerSerial=0;
  const prepareChartModel=(request,options)=>new Promise((resolve,reject)=>{requests.push({request,options,resolve,reject});options.signal.addEventListener('abort',()=>reject(new DOMException('Cancelled','AbortError')),{once:true});});
  const createChart=(host,model,opts)=>{const chart=new lib.CanvasChart(host,model,{...opts,observeResize:false,layerCaching:false,dpr:()=>1,rendererFactory:()=>({kind:'canvas',render(){},dispose(){}})});env.charts.push(chart);env.models.push(model);return chart;};
  const prepareWorkspaceAsync=(store,text,options)=>new Promise((resolve,reject)=>{workspaceRequests.push({store,text,options,resolve,reject});options.signal.addEventListener('abort',()=>reject(new DOMException('Cancelled','AbortError')),{once:true});});
  const args={...lib,...layoutHelpers,...presetHelpers,...historyHelpers,...analysisHelpers,applyLayoutFrame,createLayoutMemory,createIndicatorEditor,createIndicatorPicker,createLiveReadout,safeCheckpointStringify,createChart,modelRequest,drawingImportMessage,createDrawingFileImport,prepareChartModel,prepareWorkspaceAsync,matchMedia:()=>({matches:false}),setInterval:(fn,delay)=>{const id=++timerSerial;timers.set(id,{fn,delay});return id;},clearInterval:id=>timers.delete(id)};
- const body=src.replace(/^import[^\n]+\n/gm,'').replaceAll('import.meta.url',JSON.stringify(new URL('examples/web/demo.mjs',root).href)).replace('await load();','const initialLoad=load(); return {initialLoad,load,addIndicator,install,importLayoutFile,importAnalysisFile:typeof importAnalysisFile==="function"?importAnalysisFile:null,get layoutHistoryStatus(){return layoutHistory.status();},get model(){return model;},get chart(){return chart;},get preparing(){return preparing;}};');
- const state=Function(...Object.keys(args),body)(...Object.values(args));
+ env.window.setInterval=args.setInterval;env.window.clearInterval=args.clearInterval;
+ const mountStart=src.indexOf('export async function mountJavaScriptDemo'),bodyStart=src.indexOf('){',mountStart)+2,bodyEnd=src.lastIndexOf('\n}');
+ const mountBody=src.slice(bodyStart,bodyEnd).replaceAll('import.meta.url',JSON.stringify(new URL('examples/web/demo.mjs',root).href));
+ const body=mountBody.slice(0,mountBody.indexOf('const state=initialState'))+'const initialLoad=load(); return {initialLoad,load,addIndicator,install,importLayoutFile,importAnalysisFile:typeof importAnalysisFile==="function"?importAnalysisFile:null,get layoutHistoryStatus(){return layoutHistory.status();},get model(){return model;},get chart(){return chart;},get preparing(){return preparing;}};';
+ const state=Function(...Object.keys(args),'root','initialModel','initialState','publish','signal',body)(...Object.values(args),env.document,null,null,true,undefined);
 
  const complete=async (index=requests.length-1)=>{const r=requests[index],m=new lib.ChartModel(r.request.options);m.store.setColumns(lib.seededColumns(64));const api=new lib.ChartAPI(m);for(const d of r.request.options.indicators??[])api.addIndicator(d.id,d.name,d.params);for(const s of r.request.options.series??[])m.addSeries(s);r.resolve(m);await Promise.resolve();await Promise.resolve();return m;};
  t.after(async()=>{event(env.window,'pagehide',{persisted:false});await state.initialLoad;await Promise.resolve();for(const fn of cleanup)fn();});
