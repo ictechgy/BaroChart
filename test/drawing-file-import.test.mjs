@@ -113,6 +113,6 @@ test('actual busy handler cancels pending read and disables Load during preparat
 test('install, renderer recreation and persisted pagehide are wired to invalidate reads',()=>{
  assert.match(demo,/function install\([^]*?\{\s*drawingFileImport\.cancel\(\);/);
  assert.match(demo,/\$\('renderer'\)\.onchange=\(\)=>\{if\(!model\|\|!chart\|\|chart\.disposed\|\|preparing\)return;drawingFileImport\.cancel\(\);/);
- assert.match(demo,/addEventListener\('pagehide',e=>\{\s*drawingFileImport\.cancel\(\);/);
+ assert.match(demo,/const onPageHide=e=>\{\s*drawingFileImport\.cancel\(\);/);
  assert.match(demo,/getChart:\(\)=>preparing\?null:chart/);
 });

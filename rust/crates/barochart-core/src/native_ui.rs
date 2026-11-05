@@ -4,6 +4,7 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use barochart_js::error::JsError;
 use barochart_js::json::{JsObject, JsValue};
@@ -41,6 +42,121 @@ const UI_CHUNK_REFS: usize = 64;
 const UI_CHUNK_POINTS: usize = 2_048;
 
 type DrawingFrames = Vec<Vec<Arc<Drawing>>>;
+
+static NEXT_UI_MIGRATION_REGISTRATION: AtomicU64 = AtomicU64::new(1);
+
+/// Backend migration에서 source UI와 workspace target을 묶는 opaque registration이다.
+///
+/// Registration은 `NativeUiCapture::register_migration`으로만 만들 수 있다. Host가 숫자
+/// ticket만 복사해 새 값을 조립할 수 없도록 payload와 소유 memory를 함께 보유한다.
+pub struct NativeUiMigrationRegistration {
+    registration: u64,
+    workspace_ticket: u64,
+    workspace_registration: u64,
+    source_revision: u64,
+    workspace_metadata: JsString,
+    header_json: JsString,
+    _memory: MemoryGroup,
+}
+
+/// Source registration이 Worker/actor 사이를 이동할 때 쓰는 값 전용 description이다.
+///
+/// 이 값은 인증 토큰이 아니다. Target actor는 실제 `NativeUiImport`와 workspace target을
+/// 먼저 준비한 뒤 `register_migration_target`으로 로컬 proof를 다시 민트해야 한다.
+impl NativeUiMigrationRegistration {
+    /// Rust 객체/MemoryGroup을 넘기지 않고 이동할 수 있는 description이다.
+    pub fn to_value_scoped(&self, scope: &mut MemoryScope) -> Result<JsValue, JsError> {
+        let header = self
+            .header_json
+            .try_clone_scoped(scope)
+            .map_err(|failure| failure.into_js_error())?;
+        let mut output = JsObject::new();
+        output.insert(key("schema"), text("aster.web-ui-migration"));
+        output.insert(key("version"), JsValue::Number(1.0));
+        output.insert(
+            key("registration"),
+            JsValue::Number(self.registration as f64),
+        );
+        output.insert(
+            key("workspaceTicket"),
+            JsValue::Number(self.workspace_ticket as f64),
+        );
+        output.insert(
+            key("workspaceRegistration"),
+            JsValue::Number(self.workspace_registration as f64),
+        );
+        output.insert(
+            key("sourceRevision"),
+            JsValue::Number(self.source_revision as f64),
+        );
+        output.insert(
+            key("workspaceMetadata"),
+            JsValue::String(
+                self.workspace_metadata
+                    .try_clone_scoped(scope)
+                    .map_err(|failure| failure.into_js_error())?,
+            ),
+        );
+        output.insert(key("header"), JsValue::String(header));
+        Ok(JsValue::Object(output))
+    }
+}
+
+/// Target actor가 실제 준비된 UI import에 대해 새로 민트하는 local proof다.
+pub struct NativeUiMigrationTargetRegistration {
+    registration: u64,
+    workspace_ticket: u64,
+    workspace_registration: u64,
+    source_revision: u64,
+    workspace_metadata: JsString,
+    _memory: MemoryGroup,
+}
+
+impl NativeUiMigrationTargetRegistration {
+    fn validate_identity(
+        &self,
+        workspace_ticket: u64,
+        workspace_registration: u64,
+        source_revision: u64,
+    ) -> Result<(), JsError> {
+        if workspace_ticket != self.workspace_ticket
+            || workspace_registration != self.workspace_registration
+            || source_revision != self.source_revision
+        {
+            return Err(ordinary_error(
+                "Web UI migration target registration is stale",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Target actor-local registration id다.
+    pub fn registration(&self) -> u64 {
+        self.registration
+    }
+}
+
+impl NativeUiMigrationRegistration {
+    /// Runtime이 workspace source ticket을 응답과 함께 기록할 때 쓰는 registration id다.
+    pub fn registration(&self) -> u64 {
+        self.registration
+    }
+
+    /// Source workspace ticket이다. 값만으로 registration을 재구성할 수 없다.
+    pub fn workspace_ticket(&self) -> u64 {
+        self.workspace_ticket
+    }
+
+    /// Source workspace registration epoch다.
+    pub fn workspace_registration(&self) -> u64 {
+        self.workspace_registration
+    }
+
+    /// Source host revision이다.
+    pub fn source_revision(&self) -> u64 {
+        self.source_revision
+    }
+}
 
 fn scoped_vec<T>(length: usize, scope: &mut MemoryScope) -> Result<Vec<T>, JsError> {
     let bytes = length
@@ -89,6 +205,65 @@ fn object<const N: usize>(entries: [(&str, JsValue); N]) -> JsValue {
 
 fn ordinary_error(message: &str) -> JsError {
     JsError::new("Error", key(message))
+}
+
+fn migration_description(
+    value: &JsValue,
+    scope: &mut MemoryScope,
+) -> Result<(u64, u64, u64, u64, JsString, JsString), JsError> {
+    option_record(
+        value,
+        &[
+            "schema",
+            "version",
+            "registration",
+            "workspaceTicket",
+            "workspaceRegistration",
+            "sourceRevision",
+            "workspaceMetadata",
+            "header",
+        ],
+        "Web UI migration description",
+    )?;
+    if !matches!(field(value, "schema"), Some(JsValue::String(value)) if value == &key("aster.web-ui-migration"))
+        || !matches!(field(value, "version"), Some(JsValue::Number(value)) if *value == 1.0)
+    {
+        return Err(type_error("Web UI migration description"));
+    }
+    let exact = |name: &str| -> Result<u64, JsError> {
+        let JsValue::Number(value) = required(value, name, "Web UI migration description")? else {
+            return Err(type_error("Web UI migration description"));
+        };
+        if !value.is_finite()
+            || value.fract() != 0.0
+            || *value < 1.0
+            || *value > 9_007_199_254_740_991.0
+        {
+            return Err(range_error("Web UI migration description"));
+        }
+        Ok(*value as u64)
+    };
+    let header = match required(value, "header", "Web UI migration description")? {
+        JsValue::String(header) if !header.as_units().is_empty() => header
+            .try_clone_scoped(scope)
+            .map_err(|failure| failure.into_js_error())?,
+        _ => return Err(type_error("Web UI migration description")),
+    };
+    let workspace_metadata =
+        match required(value, "workspaceMetadata", "Web UI migration description")? {
+            JsValue::String(metadata) if !metadata.as_units().is_empty() => metadata
+                .try_clone_scoped(scope)
+                .map_err(|failure| failure.into_js_error())?,
+            _ => return Err(type_error("Web UI migration description")),
+        };
+    Ok((
+        exact("registration")?,
+        exact("workspaceTicket")?,
+        exact("workspaceRegistration")?,
+        exact("sourceRevision")?,
+        workspace_metadata,
+        header,
+    ))
 }
 
 fn type_error(message: &str) -> JsError {
@@ -449,6 +624,7 @@ fn ui_state(
     input: &OwnedInteractionState,
     size: &NativeSizeState,
     prepared_input: Option<&JsValue>,
+    migration_controls: bool,
     scope: &mut MemoryScope,
 ) -> Result<JsValue, JsError> {
     if input.gesture_kind().is_some()
@@ -529,6 +705,10 @@ fn ui_state(
             .transpose()?
             .unwrap_or(JsValue::Null),
     );
+    if migration_controls {
+        state.insert(key("drawingMagnet"), input.drawing_magnet());
+        state.insert(key("crosshairSnap"), input.crosshair_snap_scoped(scope)?);
+    }
     let mut presentation_keys = scoped_vec(SERIES_KEYS.len(), scope)?;
     presentation_keys.extend(
         SERIES_KEYS
@@ -739,6 +919,7 @@ fn drawing_frames(
 /// Source runtime의 streaming UI snapshot이다.
 pub struct NativeUiCapture {
     prepared_input: Option<JsValue>,
+    migration_controls: bool,
     header_json: JsString,
     frames: Vec<Vec<Arc<Drawing>>>,
     frame: usize,
@@ -776,6 +957,27 @@ impl NativeUiCapture {
         prepared_input: Option<&JsValue>,
         dialect: NumberDialect,
     ) -> Result<Self, JsError> {
+        Self::new_with_controls(chart, input, size, prepared_input, dialect, false)
+    }
+
+    /// Backend migration 전용 controller 옵션을 함께 capture한다.
+    pub fn new_migration(
+        chart: &NativeChart,
+        input: &OwnedInteractionState,
+        size: &NativeSizeState,
+        dialect: NumberDialect,
+    ) -> Result<Self, JsError> {
+        Self::new_with_controls(chart, input, size, None, dialect, true)
+    }
+
+    fn new_with_controls(
+        chart: &NativeChart,
+        input: &OwnedInteractionState,
+        size: &NativeSizeState,
+        prepared_input: Option<&JsValue>,
+        dialect: NumberDialect,
+        migration_controls: bool,
+    ) -> Result<Self, JsError> {
         let context = chart
             .ingestion_owner()
             .data()
@@ -783,7 +985,14 @@ impl NativeUiCapture {
             .memory_context()
             .clone();
         let mut scope = context.scope();
-        let state = ui_state(chart, input, size, prepared_input, &mut scope)?;
+        let state = ui_state(
+            chart,
+            input,
+            size,
+            prepared_input,
+            migration_controls,
+            &mut scope,
+        )?;
         let header = header_state(&state, &mut scope)?;
         let temporary_header = bounded_string_scoped(&header, dialect, &mut scope)?;
         let mut retained_scope = context.scope();
@@ -816,6 +1025,7 @@ impl NativeUiCapture {
             .map_err(|failure| failure.into_js_error())?;
         Ok(Self {
             prepared_input,
+            migration_controls,
             header_json,
             frames,
             frame: 0,
@@ -826,6 +1036,76 @@ impl NativeUiCapture {
             memory,
             chunk_memory: MemoryGroup::empty(context),
         })
+    }
+
+    /// Workspace source와 이 UI snapshot을 묶는 opaque migration registration을 만든다.
+    ///
+    /// Source ticket/registration/revision은 workspace source가 만든 값을 그대로 받아야 하며,
+    /// 0은 초기화되지 않은 값으로 거절한다. Header는 별도 소유 lease로 복제해 registration
+    /// 생존 기간에도 source account와 분리된 안전한 proof를 유지한다.
+    pub fn register_migration(
+        &self,
+        workspace_ticket: u64,
+        workspace_registration: u64,
+        source_revision: u64,
+        workspace_metadata: &JsString,
+    ) -> Result<NativeUiMigrationRegistration, JsError> {
+        if workspace_ticket == 0
+            || workspace_registration == 0
+            || source_revision == 0
+            || workspace_metadata.as_units().is_empty()
+        {
+            return Err(ordinary_error(
+                "Web UI migration registration is not initialized",
+            ));
+        }
+        let registration = NEXT_UI_MIGRATION_REGISTRATION
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                current.checked_add(1)
+            })
+            .map_err(|_| ordinary_error("Web UI migration registration exhausted"))?;
+        let context = self.memory.context().clone();
+        let mut scope = context.scope();
+        let header_json = self
+            .header_json
+            .try_clone_scoped(&mut scope)
+            .map_err(|failure| failure.into_js_error())?;
+        let workspace_metadata = workspace_metadata
+            .try_clone_scoped(&mut scope)
+            .map_err(|failure| failure.into_js_error())?;
+        let memory = scope
+            .split_persistent(
+                js_string_heap_bytes(&header_json)
+                    .saturating_add(js_string_heap_bytes(&workspace_metadata)),
+            )
+            .map_err(|failure| failure.into_js_error())?;
+        Ok(NativeUiMigrationRegistration {
+            registration,
+            workspace_ticket,
+            workspace_registration,
+            source_revision,
+            workspace_metadata,
+            header_json,
+            _memory: memory,
+        })
+    }
+
+    /// Capture가 여전히 같은 source proof를 보유하는지 확인한다.
+    pub fn check_migration(
+        &self,
+        registration: &NativeUiMigrationRegistration,
+        workspace_metadata: &JsString,
+        chart: &NativeChart,
+        input: &OwnedInteractionState,
+        size: &NativeSizeState,
+    ) -> Result<(), JsError> {
+        if self.header_json != registration.header_json {
+            return Err(ordinary_error("Web UI migration source proof changed"));
+        }
+        if workspace_metadata != &registration.workspace_metadata {
+            return Err(ordinary_error("Web UI migration workspace source changed"));
+        }
+        self.check(chart, input, size)
     }
 
     pub fn direct(
@@ -849,7 +1129,7 @@ impl NativeUiCapture {
     ) -> Result<AccountedUiText, JsError> {
         let memory = chart.ingestion_owner().data().store().memory_context();
         let mut scope = memory.scope();
-        let state = ui_state(chart, input, size, prepared_input, &mut scope)?;
+        let state = ui_state(chart, input, size, prepared_input, false, &mut scope)?;
         let temporary_text = direct_state_text_scoped(&state, dialect, &mut scope)?;
         let mut retained_scope = memory.scope();
         let text = temporary_text
@@ -920,7 +1200,14 @@ impl NativeUiCapture {
     ) -> Result<(), JsError> {
         let context = self.memory.context().clone();
         let mut scope = context.scope();
-        let state = ui_state(chart, input, size, self.prepared_input.as_ref(), &mut scope)?;
+        let state = ui_state(
+            chart,
+            input,
+            size,
+            self.prepared_input.as_ref(),
+            self.migration_controls,
+            &mut scope,
+        )?;
         let header = header_state(&state, &mut scope)?;
         let current_header = bounded_string_scoped(&header, self.dialect, &mut scope)?;
         let (frames, frames_memory) = drawing_frames(chart, &context)?;
@@ -1072,6 +1359,8 @@ struct PendingUiHostState {
     tool: JsValue,
     text: JsValue,
     drawing_target: Option<JsValue>,
+    drawing_magnet: Option<JsValue>,
+    crosshair_snap: Option<JsValue>,
     crosshair: Option<(f64, f64)>,
     symbol: JsValue,
     _memory: MemoryGroup,
@@ -1142,6 +1431,12 @@ impl PreparedPublication {
             &key("setDrawingTarget"),
             std::slice::from_ref(pending.drawing_target.as_ref().unwrap_or(&null_target)),
         )?;
+        if let Some(value) = pending.drawing_magnet.as_ref() {
+            api.dispatch(&key("setDrawingMagnet"), std::slice::from_ref(value))?;
+        }
+        if let Some(value) = pending.crosshair_snap.as_ref() {
+            api.dispatch(&key("setCrosshairSnap"), std::slice::from_ref(value))?;
+        }
         if js_truthy(&pending.symbol) {
             api.dispatch(&key("setSymbol"), std::slice::from_ref(&pending.symbol))?;
         }
@@ -1159,6 +1454,8 @@ pub enum NativeUiFinishMode {
         memory: MemoryGroup,
     },
     Prepare,
+    /// Workspace candidate가 data/indicator를 준비한 뒤 source UI를 exact 복원한다.
+    Migration,
 }
 
 fn retain_finish_mode(
@@ -1184,6 +1481,7 @@ fn retain_finish_mode(
             })
         }
         NativeUiFinishMode::Prepare => Ok(NativeUiFinishMode::Prepare),
+        NativeUiFinishMode::Migration => Ok(NativeUiFinishMode::Migration),
     }
 }
 
@@ -1192,6 +1490,8 @@ struct ParsedUi {
     stage: NativeUiModelStage,
     follow: bool,
     drawing_target: Option<JsValue>,
+    drawing_magnet: Option<JsValue>,
+    crosshair_snap: Option<JsValue>,
     tool: JsValue,
     text: JsValue,
     crosshair: Option<(f64, f64)>,
@@ -1206,6 +1506,8 @@ fn retain_parsed_ui(parsed: ParsedUi, scope: &mut MemoryScope) -> Result<ParsedU
         stage,
         follow,
         drawing_target,
+        drawing_magnet,
+        crosshair_snap,
         tool,
         text,
         crosshair,
@@ -1220,6 +1522,22 @@ fn retain_parsed_ui(parsed: ParsedUi, scope: &mut MemoryScope) -> Result<ParsedU
         stage,
         follow,
         drawing_target: drawing_target
+            .as_ref()
+            .map(|value| {
+                value
+                    .try_clone_scoped(scope)
+                    .map_err(|failure| failure.into_js_error())
+            })
+            .transpose()?,
+        drawing_magnet: drawing_magnet
+            .as_ref()
+            .map(|value| {
+                value
+                    .try_clone_scoped(scope)
+                    .map_err(|failure| failure.into_js_error())
+            })
+            .transpose()?,
+        crosshair_snap: crosshair_snap
             .as_ref()
             .map(|value| {
                 value
@@ -1264,6 +1582,18 @@ fn parsed_ui_heap_bytes(parsed: &ParsedUi) -> usize {
                 .as_ref()
                 .map_or(0, js_value_heap_bytes),
         )
+        .saturating_add(
+            parsed
+                .drawing_magnet
+                .as_ref()
+                .map_or(0, js_value_heap_bytes),
+        )
+        .saturating_add(
+            parsed
+                .crosshair_snap
+                .as_ref()
+                .map_or(0, js_value_heap_bytes),
+        )
         .saturating_add(js_value_heap_bytes(&parsed.tool))
         .saturating_add(js_value_heap_bytes(&parsed.text))
         .saturating_add(js_value_heap_bytes(&parsed.symbol))
@@ -1292,6 +1622,8 @@ fn parse_ui(
             "panels",
             "axes",
             "drawingTarget",
+            "drawingMagnet",
+            "crosshairSnap",
             "series",
             "precision",
             "axisWidth",
@@ -1312,7 +1644,7 @@ fn parse_ui(
                 return Err(ordinary_error("Prepare stale: request/input binding"));
             }
         }
-        NativeUiFinishMode::Async { .. } => {
+        NativeUiFinishMode::Async { .. } | NativeUiFinishMode::Migration => {
             if field(value, "preparedInput").is_some() {
                 return Err(type_error("Async unsupported preparation signature"));
             }
@@ -1470,6 +1802,20 @@ fn parse_ui(
         })
         .transpose()?;
     let undefined = JsValue::Undefined;
+    let drawing_magnet = field(value, "drawingMagnet")
+        .map(|value| {
+            value
+                .try_clone_scoped(scope)
+                .map_err(|failure| failure.into_js_error())
+        })
+        .transpose()?;
+    let crosshair_snap = field(value, "crosshairSnap")
+        .map(|value| {
+            value
+                .try_clone_scoped(scope)
+                .map_err(|failure| failure.into_js_error())
+        })
+        .transpose()?;
     let tool = field(value, "tool")
         .unwrap_or(&undefined)
         .try_clone_scoped(scope)
@@ -1501,6 +1847,8 @@ fn parse_ui(
         stage,
         follow,
         drawing_target,
+        drawing_magnet,
+        crosshair_snap,
         tool,
         text: text_value,
         crosshair,
@@ -1706,7 +2054,18 @@ fn build_publication(
 ) -> Result<PreparedPublication, JsError> {
     let memory_context = core.owner.data().store().memory_context().clone();
     let host_state = prepare_pending_host_state(&parsed, &memory_context)?;
-    if let Some(document) = parsed.ingestion.as_ref() {
+    if matches!(mode, NativeUiFinishMode::Migration) {
+        let mut compare_scope = memory_context.scope();
+        let current = match core.owner.save_scoped(&mut compare_scope) {
+            Ok(value) => Some(value),
+            Err(error) if error.code() == "NOT_CONFIGURED" => None,
+            Err(error) => return Err(ingestion_error(error)),
+        };
+        if current.as_ref() != parsed.ingestion.as_ref() {
+            core.owner.dispose();
+            return Err(ordinary_error("Web UI migration ingestion changed"));
+        }
+    } else if let Some(document) = parsed.ingestion.as_ref() {
         let mut load_scope = memory_context.scope();
         let document = document
             .try_clone_scoped(&mut load_scope)
@@ -1758,6 +2117,9 @@ fn apply_view_effect(
     prepared_view: VisibleRange,
     source_follow: bool,
 ) {
+    if matches!(mode, NativeUiFinishMode::Migration) {
+        return;
+    }
     if matches!(mode, NativeUiFinishMode::Prepare) {
         if source_follow {
             model.publish_view_replacement(prepared_view, true);
@@ -1972,6 +2334,118 @@ impl NativeUiImport {
         Ok(())
     }
 
+    /// Candidate UI header가 source migration registration과 같은 immutable snapshot인지 확인한다.
+    ///
+    /// 이 검사는 workspace target의 exact indicator bindings/series metadata 검사를 완화하지
+    /// 않으며, `finish` 전에 별도로 호출하는 web migration 전용 proof gate다.
+    pub fn check_migration_target(
+        &self,
+        registration: &NativeUiMigrationTargetRegistration,
+        workspace_ticket: u64,
+        workspace_registration: u64,
+        source_revision: u64,
+        workspace_metadata: &JsString,
+    ) -> Result<(), JsError> {
+        registration.validate_identity(
+            workspace_ticket,
+            workspace_registration,
+            source_revision,
+        )?;
+        if &registration.workspace_metadata != workspace_metadata {
+            return Err(ordinary_error("Web UI migration workspace target changed"));
+        }
+        if self.pending_state.is_none() && self.parsed.is_none() && self.publication.is_none() {
+            return Err(ordinary_error("Web UI migration target is unavailable"));
+        }
+        Ok(())
+    }
+
+    /// Registration proof를 검사한 뒤 기존 exact UI import/finish 경로를 호출한다.
+    pub fn finish_migration(
+        &mut self,
+        registration: &NativeUiMigrationTargetRegistration,
+        workspace_ticket: u64,
+        workspace_registration: u64,
+        source_revision: u64,
+        workspace_metadata: &JsString,
+    ) -> Result<PreparedPublication, JsError> {
+        self.check_migration_target(
+            registration,
+            workspace_ticket,
+            workspace_registration,
+            source_revision,
+            workspace_metadata,
+        )?;
+        self.finish()
+    }
+
+    /// Portable source description을 실제 이 target import에 확인하고 target-local proof를 민트한다.
+    ///
+    /// 호출자는 이 함수를 workspace target이 `finish` 완료되고 현재 data owner에 설치된 뒤에만
+    /// 호출해야 한다. 이 함수는 target import header와 source description header, ticket/revision을
+    /// exact 비교하지만 workspace row의 생존 여부 자체는 Runtime glue가 검사한다.
+    pub fn register_migration_target(
+        &self,
+        description: &JsValue,
+        workspace_ticket: u64,
+        workspace_registration: u64,
+        source_revision: u64,
+        workspace_metadata: &JsString,
+    ) -> Result<NativeUiMigrationTargetRegistration, JsError> {
+        let context = self.memory.context().clone();
+        let mut scope = context.scope();
+        let (
+            source_registration,
+            description_ticket,
+            description_registration,
+            description_revision,
+            description_metadata,
+            header_json,
+        ) = migration_description(description, &mut scope)?;
+        if source_registration == 0 {
+            return Err(ordinary_error(
+                "Web UI migration source registration is not initialized",
+            ));
+        }
+        if description_ticket != workspace_ticket
+            || description_registration != workspace_registration
+            || description_revision != source_revision
+        {
+            return Err(ordinary_error(
+                "Web UI migration target registration is stale",
+            ));
+        }
+        if &description_metadata != workspace_metadata {
+            return Err(ordinary_error("Web UI migration workspace target changed"));
+        }
+        if self.pending_state.is_none() {
+            return Err(ordinary_error("Web UI migration target is unavailable"));
+        }
+        let pending_header = self.pending_header_text(&mut scope)?;
+        if pending_header != header_json {
+            return Err(ordinary_error("Web UI migration target proof changed"));
+        }
+        let retained_metadata = description_metadata
+            .try_clone_scoped(&mut scope)
+            .map_err(|failure| failure.into_js_error())?;
+        let memory = scope
+            .split_persistent(js_string_heap_bytes(&retained_metadata))
+            .map_err(|failure| failure.into_js_error())?;
+        let registration = NEXT_UI_MIGRATION_REGISTRATION
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                current.checked_add(1)
+            })
+            .map_err(|_| ordinary_error("Web UI migration registration exhausted"))?;
+        Ok(NativeUiMigrationTargetRegistration {
+            registration,
+            workspace_ticket,
+            workspace_registration,
+            source_revision,
+            workspace_metadata: retained_metadata,
+            _memory: memory,
+        })
+    }
+
     /// Ready core가 없어도 header와 chunk 상태를 explicit runtime account에 보존한다.
     pub fn new_pending(
         text: &JsString,
@@ -2109,6 +2583,25 @@ impl NativeUiImport {
             memory,
             publication: None,
         })
+    }
+
+    fn pending_header_text(&self, scope: &mut MemoryScope) -> Result<JsString, JsError> {
+        let state = self
+            .pending_state
+            .as_ref()
+            .ok_or_else(|| ordinary_error("Web UI migration target is unavailable"))?;
+        let state = state
+            .try_clone_scoped(scope)
+            .map_err(|failure| failure.into_js_error())?;
+        bounded_string_scoped(
+            &object([
+                ("schema", text("aster.async.ui")),
+                ("protocol", JsValue::Number(1.0)),
+                ("state", state),
+            ]),
+            self.dialect,
+            scope,
+        )
     }
 
     pub fn new(
@@ -2407,7 +2900,28 @@ impl NativeUiImport {
         let redo = DrawingSnapshotList::try_from_vec(redo, redo_memory)?;
         store.install_native_ui_history(items, undo, redo, selected, serial)?;
         let host_state = prepare_pending_host_state(parsed, &context)?;
-        if let Some(document) = parsed.ingestion.as_ref() {
+        if matches!(self.mode, Some(NativeUiFinishMode::Migration)) {
+            let mut compare_scope = context.scope();
+            let current = match self
+                .core
+                .as_ref()
+                .expect("attached import core")
+                .owner
+                .save_scoped(&mut compare_scope)
+            {
+                Ok(value) => Some(value),
+                Err(error) if error.code() == "NOT_CONFIGURED" => None,
+                Err(error) => return Err(ingestion_error(error)),
+            };
+            if current.as_ref() != parsed.ingestion.as_ref() {
+                self.core
+                    .as_mut()
+                    .expect("attached import core")
+                    .owner
+                    .dispose();
+                return Err(ordinary_error("Web UI migration ingestion changed"));
+            }
+        } else if let Some(document) = parsed.ingestion.as_ref() {
             let mut load_scope = context.scope();
             let document = document
                 .try_clone_scoped(&mut load_scope)
@@ -2437,6 +2951,8 @@ impl NativeUiImport {
             stage,
             follow,
             drawing_target: _,
+            drawing_magnet: _,
+            crosshair_snap: _,
             tool: _,
             text: _,
             crosshair: _,
@@ -2519,6 +3035,24 @@ fn prepare_pending_host_state(
                 .map_err(|failure| failure.into_js_error())
         })
         .transpose()?;
+    let drawing_magnet = parsed
+        .drawing_magnet
+        .as_ref()
+        .map(|value| {
+            value
+                .try_clone_scoped(&mut scope)
+                .map_err(|failure| failure.into_js_error())
+        })
+        .transpose()?;
+    let crosshair_snap = parsed
+        .crosshair_snap
+        .as_ref()
+        .map(|value| {
+            value
+                .try_clone_scoped(&mut scope)
+                .map_err(|failure| failure.into_js_error())
+        })
+        .transpose()?;
     let symbol = parsed
         .symbol
         .try_clone_scoped(&mut scope)
@@ -2526,6 +3060,8 @@ fn prepare_pending_host_state(
     let bytes = js_value_heap_bytes(&tool)
         .checked_add(js_value_heap_bytes(&text))
         .and_then(|bytes| bytes.checked_add(drawing_target.as_ref().map_or(0, js_value_heap_bytes)))
+        .and_then(|bytes| bytes.checked_add(drawing_magnet.as_ref().map_or(0, js_value_heap_bytes)))
+        .and_then(|bytes| bytes.checked_add(crosshair_snap.as_ref().map_or(0, js_value_heap_bytes)))
         .and_then(|bytes| bytes.checked_add(js_value_heap_bytes(&symbol)))
         .ok_or_else(|| scope.allocation_failure().into_js_error())?;
     let memory = scope
@@ -2535,6 +3071,8 @@ fn prepare_pending_host_state(
         tool,
         text,
         drawing_target,
+        drawing_magnet,
+        crosshair_snap,
         crosshair: parsed.crosshair,
         symbol,
         _memory: memory,

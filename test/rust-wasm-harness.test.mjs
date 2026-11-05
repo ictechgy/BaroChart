@@ -108,7 +108,7 @@ test('debug WASM probes execute V8 math and Intl time-zone imports through the A
 });
 
 test('WASM owned result is freed even when fatal UTF-8 transport decoding fails', {skip}, async t => {
-  const harness=await createWasmHarness({profile:'debug',targetDirectory:'artifacts/rust-wasm/transport-debug-target'});
+  const harness=await createWasmHarness({profile:'debug',targetDirectory:'artifacts/rust-wasm/harness-debug-target'});
   t.after(()=>harness.dispose());
   const before=(await harness.call('__bcAllocationStatsForTest',[])).value;
   const Original=globalThis.TextDecoder;

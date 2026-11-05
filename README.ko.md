@@ -131,7 +131,12 @@ window.addEventListener('pageshow', event => {
 
 **아직 npm에 게시하지 않았습니다.** 이름이 같은 다른 registry 패키지를 설치하지 말고, 이 소스로 로컬 tarball을 만드세요.
 
+Node 22와 [고정된 Rust/EH 빌드 의존성](docs/WEB-RUST-WASM.md#packaging-and-deployment)을 먼저 준비하세요. 패키지에 포함되는 선택형 WASM 모듈과 manifest는 Git에 저장하지 않고 로컬에서 생성합니다.
+
 ```sh
+python3 scripts/rust/prepare-wasm-eh.py --offline
+node scripts/rust/build-web-wasm.mjs --offline
+node scripts/rust/build-web-wasm.mjs --check
 mkdir -p /tmp/barochart-pack
 npm pack --ignore-scripts --pack-destination /tmp/barochart-pack
 
@@ -231,6 +236,8 @@ toolbar.setOptions({labels: {select: '이동', fit: '전체 보기'}});
 
 [API·수명 관리](docs/API.md) · [데이터 규칙](docs/DATA.md) · [독립 가격축](docs/INDEPENDENT-AXES.md) · [구조](docs/ARCHITECTURE.md) · [기여](CONTRIBUTING.md)
 
+선택형 웹 Rust/WASM 백엔드는 [WEB-RUST-WASM.md](docs/WEB-RUST-WASM.md)에 정리했습니다. `barochart/wasm`을 통해 명시적으로 선택하며 JavaScript가 기본이고 자동 폴백은 없습니다.
+
 ## 지원과 검증 범위
 
 현재 [지원·호환성 표, 출시 관문, 개인정보를 보호하는 문제 보고 양식](docs/SUPPORT.ko.md)을 참고하세요. 아래 날짜가 붙은 이력은 당시 검증 범위와 한계를 그대로 유지합니다.
@@ -242,7 +249,8 @@ toolbar.setOptions({labels: {select: '이동', fit: '전체 보기'}});
 | 모바일 웹 | 명시적 입력 프리셋·반응형 예제 CSS | 이미지는 설명용 미리보기. 터치·스크롤·보조 기술 미검증 |
 | Apple 네이티브 | Swift 패키지 `BaroChart`: 타입 API, SwiftUI/UIKit 뷰, 개인정보 매니페스트 | [iOS 가이드](docs/IOS-GUIDE.ko.md). iOS 27 시뮬레이터와 macOS JavaScriptCore에서 runner 통과. 기록되면 [실기기 측정](docs/measurements/native-device-performance.json) |
 | Android 네이티브 | `kr.coden:barochart-android` + Compose 모듈: 타입 API, View/Compose, 두 ABI | [Android 가이드](docs/ANDROID-GUIDE.ko.md). API 36 에뮬레이터에서 runner 통과, x86_64는 CI. 기록되면 [실기기 측정](docs/measurements/native-device-performance.json) |
-| Rust 네이티브 차트 백엔드 | 개발 중; M1b ABI/패키징 통합 진행 중 | 완성된 차트 백엔드 아님. JS 동등성·속도 비율·기본 백엔드 주장을 하지 않음 |
+| Rust 웹/WASM 백엔드 | Worker가 Rust 엔진을 소유하고 Canvas/WebGL2가 화면을 표시하는 선택형 경로, 비동기 준비·파라미터·workspace 이전 | Chrome 156 production WASM 흐름 확인. Vite·Safari·Firefox·터치·스크린리더 범위는 환경에 따라 다르며 JavaScript가 기본 |
+| Rust 네이티브 SDK | 선택형 Swift/Android 통합 | Android 실기기 성능·soak 및 VoiceOver/TalkBack 수동 관문이 남아 있으며 기본 백엔드 전환 주장은 없음 |
 
 네이티브 경로는 WebView가 아닙니다. React Native/Flutter 어댑터는 없습니다. 0.3.0부터 네이티브 SDK는 `BaroChart` 이름을 씁니다([마이그레이션 가이드](docs/MIGRATING-FROM-ASTER.ko.md)). 저장 스키마 `aster.*`와 웹 React export `AsterChart`는 호환을 위해 이름을 유지합니다. 저장 스키마 이름을 바꾸면 안 됩니다.
 

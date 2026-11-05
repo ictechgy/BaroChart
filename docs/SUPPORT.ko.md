@@ -1,6 +1,6 @@
 # 지원 및 운영 상태
 
-상태 기준일: **2026-11-04** · [English](SUPPORT.md) · [마이그레이션 가이드](MIGRATING-FROM-LIGHTWEIGHT-CHARTS.ko.md) · [브라우저 측정](measurements/2026-11-04-migration-operations.md).
+상태 기준일: **2026-11-06** · [English](SUPPORT.md) · [마이그레이션 가이드](MIGRATING-FROM-LIGHTWEIGHT-CHARTS.ko.md) · [브라우저 측정](measurements/2026-11-04-migration-operations.md).
 
 BaroChart `0.3.0-dev`는 개발 프리뷰입니다. 패키지는 private이며 npm, SwiftPM 릴리스 태그, Maven Central에 공개되지 않았습니다. 아래의 “지원 경로”는 이 소스 트리에 구현과 문서가 있다는 뜻이며, 공개 릴리스의 호환성 보장은 아닙니다.
 
@@ -14,7 +14,8 @@ BaroChart `0.3.0-dev`는 개발 프리뷰입니다. 패키지는 private이며 n
 | 모바일 웹 | **반응형 호스트 예제와 명시적 입력 프리셋.** | 마이그레이션 페이지를 측정한 폭에서는 가로 넘침이 없습니다. 브라우저 viewport 에뮬레이션은 터치 제스처, 스크롤 처리, VoiceOver, TalkBack, 실기기를 검증하지 않습니다. |
 | Apple 네이티브 | **기존 Swift/JavaScriptCore SDK 통합.** 로컬 소스 체크아웃에서 SwiftUI/UIKit 뷰를 제공합니다. | CI, 날짜가 기록된 시뮬레이터/실기기 근거는 [네이티브 측정](measurements/native-device-performance.json)에 있습니다. 2026-11-01 실기기 결과는 iPhone 한 대의 화면 밖 CPU 작업이며 display FPS나 폭넓은 기기 지원을 뜻하지 않습니다. SwiftPM 릴리스 태그는 없습니다. |
 | Android 네이티브 | **기존 Android/QuickJS SDK 통합.** 로컬 소스 체크아웃에서 View/Compose API와 두 ABI를 제공합니다. | CI, 에뮬레이터, 날짜가 기록된 실기기 근거는 [네이티브 측정](measurements/native-device-performance.json)에 있습니다. 2026-11-01 실기기 결과는 Samsung 기기 한 대의 CPU bitmap 렌더링이며 display FPS나 폭넓은 기기 지원을 뜻하지 않습니다. Maven Central 릴리스는 없습니다. |
-| Rust 네이티브 차트 백엔드 | **미완성·개발 중.** M1b ABI/패키징/내부 선택 기반은 구현됐으며 완전한 차트 백엔드와 적합성 관문은 아직 통과하지 않았습니다. | [M1b 검사](measurements/2026-11-04-rust-m1b.md)는 count-echo 뼈대를 검증합니다. JS 기능 동등성·차트 속도 비율·Rust 기본값을 주장하지 마세요. 승인된 M1b–M7 구현과 호스트/플랫폼 관문을 마친 뒤 상태를 갱신합니다. |
+| Rust 웹/WASM | **Worker가 소유하는 선택형 Rust 코어.** Canvas/WebGL2 표시, 비동기 준비·파라미터와 메인 데모의 백엔드 이전을 제공합니다. JavaScript가 기본입니다. | [통합·빌드 가이드](WEB-RUST-WASM.md)와 [실측 비교](measurements/web-rust-wasm.md). Chrome 156에서 production WASM, 100k봉 메인 데모와 390px viewport를 확인했습니다. Safari 자동화와 Firefox는 사용할 수 없었으며 실기기 터치·스크린 리더 수동 관문은 남아 있습니다. |
+| Rust 네이티브 SDK | **선택형 Swift/Android 구현.** M1b–M6 통합을 구현했으며 JavaScript가 기본입니다. | [네이티브 통합·전환 관문](RUST-BACKEND.md). Android 실기기 성능·soak와 VoiceOver/TalkBack 수동 검증은 M7 관문으로 남아 있습니다. 날짜가 붙은 [iPhone XR 측정](measurements/2026-11-05-native-rust-ios-ab.md)은 기록된 소스와 작업의 결과이며 현재 체크아웃이나 표시 FPS를 뜻하지 않습니다. |
 | 피드·계정·거래 | **호스트 소유이며 제공하지 않습니다.** | 로컬 HTTP/SSE fixture는 합성 데이터만 씁니다. 운영 공급자 인증, 사용 권한, 순번/watermark 정책, 재시도, 계정, 주문 실행은 앱 책임입니다. [피드 통합](FEED-INTEGRATION.ko.md)을 참고하세요. |
 
 웹 React 이름 `AsterChart`와 저장용 `aster.*` 스키마는 호환 표면으로 유지합니다. 네이티브 SDK의 브랜드 이름은 `BaroChart`입니다. 제품 이름을 바꾼다고 저장 스키마를 개명하지 마세요. 이 프로젝트는 TradingView 제품과 독립적이며 API 관계를 주장하지 않습니다.
@@ -43,7 +44,7 @@ BaroChart `0.3.0-dev`는 개발 프리뷰입니다. 패키지는 private이며 n
 1. 검토가 끝난 정확한 소스 revision에서 테스트, 패키지, 타입 검사를 실행하고 CI 결과를 확인하세요. 과거 테스트 수치는 원래 날짜와 revision을 유지하세요.
 2. 대상 브라우저/버전으로 브라우저 검사를 하고, 실기기에서 터치 및 스크린 리더 수동 검사를 하세요. 실패와 사용할 수 없는 환경을 함께 기록하세요.
 3. React 주장은 실제 소비자 앱으로 실행한 React 버전과 런타임/SSR 범위에 한정하세요.
-4. Rust M1b–M7 구현 및 지원 호스트 전체의 JS/네이티브 적합성을 완료하기 전에는 기능 동등성을 주장하거나 기본 경로로 켜거나 속도 비교를 공개하지 마세요. 성능은 두 구현이 같은 화면 작업을 수행하고 측정 방법을 기록한 뒤 비교하세요.
+4. Rust 적합성·성능 주장은 구현 경로, 기록된 소스와 실제 검사 범위에 한정하세요. 같은 화면 작업과 기록된 방법으로 성능을 비교하세요. 네이티브 기본값 전환 전에는 M7 플랫폼·수동 관문을 완료해야 하며 웹은 명시적인 선택형 백엔드로 유지합니다.
 5. 버전 관리, 패키지 공개, 릴리스 태그, 서명과 플랫폼 배포는 별도 승인을 받으세요. 현재 로컬 소스/패키지 검사는 artifact를 게시하지 않습니다.
 
 ## 개인정보를 보호하는 문제 재현 양식
@@ -52,7 +53,7 @@ BaroChart `0.3.0-dev`는 개발 프리뷰입니다. 패키지는 private이며 n
 
 ```text
 제품/revision: BaroChart <버전 또는 git revision>
-통합 경로: <JS/web | React | Swift/iOS | Kotlin/Android | Rust 개발 중>
+통합 경로: <JS/web | React | Swift/iOS | Kotlin/Android | Rust/WASM | Rust/native>
 런타임과 버전: <OS, 브라우저/런타임, SDK/도구체인>
 기대 동작: <관찰 가능한 결과 1개>
 실제 동작: <관찰 가능한 결과 1개>

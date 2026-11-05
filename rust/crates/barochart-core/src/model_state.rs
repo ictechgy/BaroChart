@@ -404,6 +404,18 @@ pub struct ModelWorkspaceCaptureToken {
     series: Vec<WorkspaceSeriesScalar>,
 }
 
+/// Web params가 표시 상태를 제외한 model 계산 read-set을 고정하는 opaque token이다.
+///
+/// Heap allocation 없이 Arc identity와 scalar만 보존한다. Theme/view/follow와 계산 뒤 파생되는
+/// series revision/dirty scalar는 의도적으로 포함하지 않는다.
+pub struct ModelWebParamsCaptureToken {
+    identity: Arc<()>,
+    containers_identity: Arc<()>,
+    values_reference_identity: Arc<()>,
+    axis_width: u64,
+    precision: u8,
+}
+
 /// Frame static-state가 external values object identity만 비교하는 opaque token이다.
 #[derive(Clone)]
 pub struct SeriesValuesReferenceToken {
@@ -420,6 +432,11 @@ pub struct ThemeValueReferenceToken {
 pub(crate) struct NativeUiModelStage {
     model: ModelState,
     drawing_target: Option<JsValue>,
+}
+
+/// 웹 layout이 metadata만 교체하도록 완성한 detached model 후보다.
+pub(crate) struct WebLayoutStage {
+    model: ModelState,
 }
 
 impl NativeUiModelStage {
@@ -580,6 +597,29 @@ impl ModelState {
                     series.revision.map(f64::to_bits) == expected.revision
                         && series.dirty_from.to_bits() == expected.dirty_from
                 })
+    }
+
+    /// Web params가 읽는 model/config/value-owner identity를 allocation 없이 capture한다.
+    pub fn capture_web_params_state(&self) -> ModelWebParamsCaptureToken {
+        ModelWebParamsCaptureToken {
+            identity: Arc::clone(&self.identity),
+            containers_identity: Arc::clone(&self.containers_identity),
+            values_reference_identity: Arc::clone(&self.values_reference_identity),
+            axis_width: self.axis_width.to_bits(),
+            precision: self.precision,
+        }
+    }
+
+    /// Capture 뒤 model/config/value-owner identity가 그대로인지 검사한다.
+    pub fn validate_web_params_state(&self, token: &ModelWebParamsCaptureToken) -> bool {
+        Arc::ptr_eq(&self.identity, &token.identity)
+            && Arc::ptr_eq(&self.containers_identity, &token.containers_identity)
+            && Arc::ptr_eq(
+                &self.values_reference_identity,
+                &token.values_reference_identity,
+            )
+            && self.axis_width.to_bits() == token.axis_width
+            && self.precision == token.precision
     }
 
     /// Root ChartAPI가 검증한 replacement candidate를 같은 slot에 게시한다.
@@ -878,6 +918,191 @@ impl ModelState {
             model: candidate,
             drawing_target,
         })
+    }
+
+    /// 웹 복합 layout이 model metadata 전체를 detached 후보로 검증한다.
+    ///
+    /// 외부 values, range/cache scalar와 indicator output owner는 후보로 복사하지 않는다. 후보는
+    /// panel/axis/series metadata와 view identity만 소유하며 [`publish_web_layout`]이 한 번에 게시한다.
+    pub(crate) fn stage_web_layout(
+        &self,
+        store: &BarStore,
+        panels: &JsValue,
+        axes: &JsValue,
+        series_records: &[JsValue],
+        drawing_series: &[(JsString, JsString, Option<JsString>)],
+        context: &ModelContext<'_>,
+    ) -> Result<WebLayoutStage, JsError> {
+        let memory = self.memory_context().clone();
+        let mut scope = memory.scope();
+        let mut options = JsObject::new();
+        options.insert(
+            JsString::from_str("panels"),
+            panels
+                .try_clone_scoped(&mut scope)
+                .map_err(|failure| failure.into_js_error())?,
+        );
+        options.insert(
+            JsString::from_str("axes"),
+            axes.try_clone_scoped(&mut scope)
+                .map_err(|failure| failure.into_js_error())?,
+        );
+        options.insert(
+            JsString::from_str("theme"),
+            self.theme
+                .try_clone_scoped(&mut scope)
+                .map_err(|failure| failure.into_js_error())?,
+        );
+        options.insert(
+            JsString::from_str("axisWidth"),
+            JsValue::Number(self.axis_width),
+        );
+        options.insert(
+            JsString::from_str("precision"),
+            JsValue::Number(f64::from(self.precision)),
+        );
+        options.insert(
+            JsString::from_str("visibleBars"),
+            JsValue::Number(js_max(&[self.view.to - self.view.from, 1.0])),
+        );
+        let mut candidate = ModelState::new(store, &JsValue::Object(options))?;
+        if series_records.len() != self.series.len() {
+            return Err(error("Layout series changed"));
+        }
+        let (mut seen, _seen_memory) = memory
+            .try_vec_capacity(series_records.len())
+            .map_err(|failure| failure.into_js_error())?;
+        let (mut series, series_memory) = memory
+            .try_vec_capacity(series_records.len())
+            .map_err(|failure| failure.into_js_error())?;
+        for record in series_records {
+            option_record(record, SERIES_KEYS, "Layout series")?;
+            let record_object = object_ref(record, "Layout series object required")?;
+            if property(record_object, "values").is_some() {
+                return Err(type_error("Layout series values are not portable"));
+            }
+            let id = identifier_field(record_object, "id", "Layout series id")?;
+            let current = self
+                .series
+                .iter()
+                .find(|series| series.id == id)
+                .ok_or_else(|| error("Layout series binding changed"))?;
+            if seen.iter().any(|seen: &JsString| seen == &id) {
+                return Err(type_error("Duplicate layout series"));
+            }
+            let current_record = object_ref(current.raw_record_ref(), "Series record")?;
+            for name in ["indicator", "output", "source"] {
+                if !same_js_value(
+                    property_or_undefined(record_object, name),
+                    property_or_undefined(current_record, name),
+                ) {
+                    return Err(error("Layout series binding changed"));
+                }
+            }
+            let next = normalize_series_inner(
+                record,
+                None,
+                None,
+                current.values.is_some(),
+                &candidate,
+                context,
+                None,
+            )?;
+            seen.push(id);
+            series.push(next);
+        }
+        series.sort_unstable_by_key(|next| {
+            self.series
+                .iter()
+                .position(|current| current.id == next.id)
+                .expect("validated layout series references a live series")
+        });
+        for panel in context.drawings.panels {
+            if !candidate
+                .panels
+                .iter()
+                .any(|candidate| &candidate.id == panel)
+            {
+                return Err(error("Panel is referenced by drawing history"));
+            }
+        }
+        for axis in context.drawings.axes {
+            if !candidate.axes.iter().any(|candidate| &candidate.id == axis) {
+                return Err(error("Axis is referenced by drawing history/transaction"));
+            }
+        }
+        if context.drawings.controller_panel.is_some_and(|panel| {
+            !candidate
+                .panels
+                .iter()
+                .any(|candidate| &candidate.id == panel)
+        }) || context
+            .drawings
+            .controller_axis
+            .is_some_and(|axis| !candidate.axes.iter().any(|candidate| &candidate.id == axis))
+        {
+            return Err(error("Drawing target layout is missing"));
+        }
+        for (series_id, panel, axis_id) in drawing_series {
+            let was_bound = self.series.iter().any(|series| {
+                &series.id == series_id && &series.panel == panel && &series.axis_id == axis_id
+            });
+            if was_bound
+                && !series.iter().any(|series| {
+                    &series.id == series_id && &series.panel == panel && &series.axis_id == axis_id
+                })
+            {
+                return Err(error("Missing or mismatched drawing series binding"));
+            }
+        }
+        candidate.series = series;
+        candidate.series_memory = series_memory;
+        candidate.publish_view_replacement(self.view, self.follow);
+        Ok(WebLayoutStage { model: candidate })
+    }
+
+    /// 검증·할당이 끝난 웹 layout metadata를 추가 실패 지점 없이 게시한다.
+    pub(crate) fn publish_web_layout(&mut self, stage: WebLayoutStage) {
+        let mut staged = stage.model;
+        debug_assert_eq!(self.series.len(), staged.series.len());
+        for (current, next) in self.series.iter_mut().zip(staged.series.drain(..)) {
+            current.record = next.record;
+            current.id = next.id;
+            current.panel = next.panel;
+            current.axis_id = next.axis_id;
+            current.kind = next.kind;
+            current.indicator = next.indicator;
+            current.output = next.output;
+            current.offset = next.offset;
+            current.visible = next.visible;
+            current.metadata_memory = next.metadata_memory;
+        }
+        let staged_theme_memory = staged
+            .topology_memory
+            .split(js_value_heap_bytes(&staged.theme))
+            .expect("staged layout theme bytes are accounted");
+        let previous_record_bytes = self
+            .panels
+            .iter()
+            .map(panel_heap_bytes)
+            .chain(self.axes.iter().map(axis_heap_bytes))
+            .sum();
+        let previous_record_memory = self
+            .topology_memory
+            .split(previous_record_bytes)
+            .expect("current layout records are accounted");
+        self.topology_memory
+            .absorb(staged.topology_memory)
+            .expect("staged layout uses the model account");
+        self.panels = staged.panels;
+        self.panels_memory = staged.panels_memory;
+        self.axes = staged.axes;
+        self.axes_memory = staged.axes_memory;
+        self.series_memory = staged.series_memory;
+        self.containers_identity = Arc::new(());
+        drop(previous_record_memory);
+        drop(staged.theme);
+        drop(staged_theme_memory);
     }
 
     /// 검증된 UI 후보를 실패 없는 구간에서 게시하고 source identity hooks를 회전한다.

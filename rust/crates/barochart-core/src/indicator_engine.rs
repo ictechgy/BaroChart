@@ -533,6 +533,7 @@ pub struct EngineEntryCaptureToken {
     engine_identity: Arc<u8>,
     entries_identity: Arc<u8>,
     entries: Vec<EngineEntryCapture>,
+    _memory: MemoryGroup,
 }
 
 /// Native async/params 전송이 보존해야 하는 한 entry의 실제 typed payload다.
@@ -592,7 +593,7 @@ impl NativeStoreCapture {
 pub struct NativeIndicatorCaptureToken {
     engine: EngineEntryCaptureToken,
     store: NativeStoreCapture,
-    registry_names: Vec<&'static str>,
+    registry_len: usize,
     checkpoint_size: usize,
     max_output_bytes: usize,
 }
@@ -991,6 +992,13 @@ impl IndicatorEngine {
         })
     }
 
+    /// 내부 native job이 새 key allocation 없이 현재 entry를 찾는다.
+    pub(crate) fn entry_by_id(&self, id: &JsString) -> Option<IndicatorEntryView<'_>> {
+        self.find_id(id).map(|index| IndicatorEntryView {
+            entry: &self.entries[index],
+        })
+    }
+
     /// 현재 bound entry/definition identity를 frame key용 token으로 잡는다.
     pub fn capture_render_entry(&self, id: &JsString) -> Option<IndicatorRenderEntryToken> {
         let index = self.find_id(id)?;
@@ -1039,7 +1047,49 @@ impl IndicatorEngine {
                     checkpoints_len: entry.checkpoints.len(),
                 })
                 .collect(),
+            _memory: MemoryGroup::empty(self.memory.context().clone()),
         }
+    }
+
+    /// Native job fingerprint용 entry token을 엔진 account에 먼저 예약해 capture한다.
+    pub fn capture_entries_accounted(&self) -> Result<EngineEntryCaptureToken, JsError> {
+        let memory = self.memory.context().clone();
+        let (mut entries, mut group) = memory
+            .try_vec_capacity(self.entries.len())
+            .map_err(|failure| failure.into_js_error())?;
+        let mut scope = memory.scope();
+        for entry in &self.entries {
+            entries.push(EngineEntryCapture {
+                id: entry
+                    .id
+                    .try_clone_scoped(&mut scope)
+                    .map_err(|failure| failure.into_js_error())?,
+                identity: Arc::clone(&entry.identity),
+                dirty: entry.dirty,
+                dirty_to: entry.dirty_to,
+                invalidated: entry.invalidated,
+                length: entry.length,
+                revision_bits: entry.revision.to_bits(),
+                arrays_epoch: entry.arrays_epoch,
+                arrays_len: entry.arrays.len(),
+                checkpoints_epoch: entry.checkpoints_epoch,
+                checkpoints_len: entry.checkpoints.len(),
+            });
+        }
+        let bytes = usize::try_from(scope.requested_bytes())
+            .map_err(|_| memory.allocation_failure().into_js_error())?;
+        let strings = scope
+            .split_persistent(bytes)
+            .map_err(|failure| failure.into_js_error())?;
+        group
+            .absorb(strings)
+            .map_err(|failure| failure.into_js_error())?;
+        Ok(EngineEntryCaptureToken {
+            engine_identity: Arc::clone(&self.identity),
+            entries_identity: Arc::clone(&self.entries_identity),
+            entries,
+            _memory: group,
+        })
     }
 
     /// Capture 뒤 container/entry 교체나 sourceRefs scalar 변경이 없었는지 확인한다.
@@ -1071,10 +1121,24 @@ impl IndicatorEngine {
         NativeIndicatorCaptureToken {
             engine: self.capture_entries(),
             store: NativeStoreCapture::capture(store),
-            registry_names: self.registry_names(),
+            registry_len: self.registry.len(),
             checkpoint_size: self.options.checkpoint_size,
             max_output_bytes: self.options.max_output_bytes,
         }
+    }
+
+    /// Native params fingerprint를 엔진 account에 예약해 capture한다.
+    pub fn capture_native_token_accounted(
+        &self,
+        store: &BarStore,
+    ) -> Result<NativeIndicatorCaptureToken, JsError> {
+        Ok(NativeIndicatorCaptureToken {
+            engine: self.capture_entries_accounted()?,
+            store: NativeStoreCapture::capture(store),
+            registry_len: self.registry.len(),
+            checkpoint_size: self.options.checkpoint_size,
+            max_output_bytes: self.options.max_output_bytes,
+        })
     }
 
     /// 실제 entry payload를 insertion order로 소유 복사하고 source token을 함께 만든다.
@@ -1129,7 +1193,7 @@ impl IndicatorEngine {
         ),
         JsError,
     > {
-        let token = self.capture_native_token(store);
+        let token = self.capture_native_token_accounted(store)?;
         let (mut entries, mut group) = memory
             .try_vec_capacity(self.entries.len())
             .map_err(|failure| failure.into_js_error())?;
@@ -1224,7 +1288,7 @@ impl IndicatorEngine {
     ) -> bool {
         self.validate_capture(&token.engine)
             && token.store.matches(store)
-            && self.registry_names() == token.registry_names
+            && self.registry.len() == token.registry_len
             && self.options.checkpoint_size == token.checkpoint_size
             && self.options.max_output_bytes == token.max_output_bytes
     }

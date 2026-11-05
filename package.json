@@ -31,6 +31,22 @@
     "./worker-entry": {
       "types": "./src/web/worker-entry.d.mts",
       "import": "./src/web/worker-entry.mjs"
+    },
+    "./wasm": {
+      "types": "./src/web/wasm/index.d.mts",
+      "import": "./src/web/wasm/index.mjs"
+    },
+    "./wasm-asset": {
+      "types": "./src/web/wasm/asset.d.mts",
+      "import": "./src/web/wasm/asset.mjs"
+    },
+    "./wasm-worker-entry": {
+      "types": "./src/web/wasm/worker-entry.d.mts",
+      "import": "./src/web/wasm/worker-entry.mjs"
+    },
+    "./wasm-migration": {
+      "types": "./src/web/wasm/javascript-migration.d.mts",
+      "import": "./src/web/wasm/javascript-migration.mjs"
     }
   },
   "types": "./src/index.d.mts",
@@ -39,6 +55,7 @@
     "demo": "node scripts/serve.mjs",
     "bench": "node --expose-gc benchmarks/core.mjs",
     "build:native": "node scripts/build-native.mjs",
+    "build:web:wasm": "node scripts/rust/build-web-wasm.mjs --offline",
     "test:native": "./artifacts/aster-native --self-test",
     "bench:native": "./artifacts/aster-native --bench",
     "check": "node scripts/check.mjs",
@@ -128,7 +145,10 @@
     "check:quickjs": "node scripts/test-quickjs-cloud.mjs",
     "check:quickjs:checkpoints": "node scripts/test-quickjs-cloud.mjs --checkpoint",
     "check:quickjs:target": "node scripts/test-quickjs-cloud.mjs --target",
-    "check:quickjs:source": "node scripts/test-quickjs-cloud.mjs --source"
+    "check:quickjs:source": "node scripts/test-quickjs-cloud.mjs --source",
+    "test:wasm:browser": "node test/web-rust-chart-browser.mjs && node test/web-backend-switch-browser.mjs && node test/web-layout-history-switch-browser.mjs && node test/web-rust-demo-browser.mjs && node test/web-rust-widgets-browser.mjs && node test/web-rust-tools-browser.mjs && node test/web-wasm-workspace-browser.mjs",
+    "test:wasm:package": "node scripts/test-wasm-package-consumers.mjs",
+    "bench:wasm": "node benchmarks/web-rust-wasm.mjs"
   },
   "engines": {
     "node": ">=22"
@@ -137,6 +157,8 @@
   "private": true,
   "files": [
     "src",
+    "src/web/wasm/barochart-core.wasm",
+    "src/web/wasm/barochart-core.manifest.json",
     "native",
     "Package.swift",
     "docs",
@@ -154,6 +176,7 @@
   },
   "sideEffects": [
     "./src/web/compute-worker.mjs",
-    "./src/web/worker-entry.mjs"
+    "./src/web/worker-entry.mjs",
+    "./src/web/wasm/worker-entry.mjs"
   ]
 }

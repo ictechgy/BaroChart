@@ -35,3 +35,5 @@ button:disabled{opacity:.45;cursor:default}button,select{-webkit-tap-highlight-c
 @media(max-width:600px){.workflow-steps a{flex:1;min-width:130px}#drawing-controls label{display:flex}#drawing-controls li{align-items:start;flex-wrap:wrap}#drawing-controls input[type=text]{width:100%}#drawing-controls li button{margin-left:27px}#drawing-controls legend{font-size:11px}}
 
 .example-links{margin:12px 0;font-size:12px}.example-links summary{cursor:pointer;min-height:44px;padding:12px 0}.example-links p{line-height:1.8;overflow-wrap:anywhere}
+
+header{height:auto;min-height:72px;flex-wrap:wrap;padding-top:12px;padding-bottom:12px}.backend-choice{display:flex;align-items:center;gap:8px;font-size:11px;color:#91a3bb}#backend-status{font-size:10px;flex:0 1 240px;min-width:0;overflow-wrap:anywhere}@media(max-width:800px){header .live{display:none}#backend-status{flex-basis:100%}}

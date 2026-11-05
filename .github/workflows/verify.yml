@@ -15,7 +15,7 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -37,6 +37,20 @@ jobs:
             --prefix "${typescript_dir}" typescript@5.9.3
           echo "TSC_PATH=${typescript_dir}/node_modules/typescript/lib/tsc.js" >> "${GITHUB_ENV}"
 
+      - name: Prepare the pinned production WebAssembly toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd rust
+          rustup toolchain install --no-self-update
+          rust_channel="$(python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]["channel"])')"
+          rustup component add --toolchain "${rust_channel}" rust-src
+          cd ..
+          node scripts/rust/cargo.mjs fetch --locked
+          python3 scripts/rust/prepare-wasm-eh.py --download --json > "${RUNNER_TEMP}/web-wasm-eh-preparation.json"
+          node scripts/rust/build-web-wasm.mjs --offline
+          node scripts/rust/build-web-wasm.mjs --check
+
       - name: Run unit tests
         run: npm test
 
@@ -48,6 +62,42 @@ jobs:
 
       - name: Verify offline npm package
         run: npm run check:package
+
+      - name: Run production Rust web charts and backend migration in Chrome CDP
+        shell: bash
+        run: |
+          set -euo pipefail
+          chrome_bin="$(command -v google-chrome || true)"
+          if [[ -z "${chrome_bin}" ]]; then
+            echo 'google-chrome is required for production WASM browser verification' >&2
+            exit 1
+          fi
+          mkdir -p artifacts/web-rust-wasm
+          CHROME_BIN="${chrome_bin}" npm run test:wasm:browser
+          CHROME_BIN="${chrome_bin}" node test/web-bootstrap-failures-browser.mjs
+
+      - name: Install checksum-locked package verification tools in runner temp
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools_dir="${RUNNER_TEMP}/barochart-wasm-consumer-tools"
+          mkdir -p "${tools_dir}"
+          cp test/toolchains/web-wasm/package.json test/toolchains/web-wasm/package-lock.json "${tools_dir}/"
+          : > "${tools_dir}/npm-user.conf"
+          : > "${tools_dir}/npm-global.conf"
+          npm --cache "${tools_dir}/npm-cache" --userconfig "${tools_dir}/npm-user.conf" \
+            --globalconfig "${tools_dir}/npm-global.conf" --registry https://registry.npmjs.org \
+            --prefix "${tools_dir}" ci --ignore-scripts --no-audit --no-fund
+          echo "WASM_CONSUMER_TOOLS=${tools_dir}" >> "${GITHUB_ENV}"
+
+      - name: Execute the offline npm tarball in Vite and esbuild consumers
+        shell: bash
+        run: |
+          set -euo pipefail
+          chrome_bin="$(command -v google-chrome)"
+          CHROME_BIN="${chrome_bin}" node scripts/test-wasm-package-consumers.mjs \
+            --tools-dir "${WASM_CONSUMER_TOOLS}" \
+            --workdir "/tmp/barochart-wasm-consumer-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
       - name: Run customization studio in Chrome CDP
         shell: bash
@@ -75,7 +125,9 @@ jobs:
 
   rust:
     # Rust 네이티브 코어 워크스페이스: 포맷, clippy 경고 0, 테스트, 이식 코드 금지 패턴, JS 의미 커널의 V8·QuickJS 대조
-    runs-on: ubuntu-latest
+    # 비교용 QuickJS C 호스트는 -Werror로 빌드한다. Ubuntu 26.04의 새 문자열
+    # const 규약과 충돌하므로 이 오라클 작업의 호스트를 24.04로 고정한다.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - name: Check out source

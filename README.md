@@ -131,7 +131,12 @@ For component unmount, call `chart.destroy({ disposeModel: true })` only when th
 
 There is **no published npm release yet**. Make a local source tarball instead of installing an unrelated registry package:
 
+Use Node 22 and prepare the [pinned Rust/EH build dependencies](docs/WEB-RUST-WASM.md#packaging-and-deployment) first. The package includes the optional WASM backend; its generated module and manifest are built locally and are not stored in Git.
+
 ```sh
+python3 scripts/rust/prepare-wasm-eh.py --offline
+node scripts/rust/build-web-wasm.mjs --offline
+node scripts/rust/build-web-wasm.mjs --check
 mkdir -p /tmp/barochart-pack
 npm pack --ignore-scripts --pack-destination /tmp/barochart-pack
 
@@ -229,6 +234,8 @@ toolbar.setOptions({labels: {select: 'Pan', fit: 'Fit view'}});
 
 [API/lifecycle](docs/API.md) · [Data rules](docs/DATA.md) · [Independent axes](docs/INDEPENDENT-AXES.md) · [Architecture](docs/ARCHITECTURE.md) · [Contributing](CONTRIBUTING.md)
 
+The optional web Rust/WASM backend is documented in [WEB-RUST-WASM.md](docs/WEB-RUST-WASM.md). Select it explicitly through `barochart/wasm`; JavaScript remains the default and there is no automatic backend fallback.
+
 ## Support and validation
 
 See the current [support/compatibility matrix, release gates, and privacy-safe issue template](docs/SUPPORT.md) for current scope. The dated entries below retain their original validation limits.
@@ -240,7 +247,8 @@ See the current [support/compatibility matrix, release gates, and privacy-safe i
 | Mobile web | Explicit input preset and responsive example CSS | Preview images are illustrations; touch, scrolling and assistive technology remain unverified |
 | Apple native | Swift package `BaroChart`: typed API, SwiftUI/UIKit views, privacy manifest | [iOS guide](docs/IOS-GUIDE.md); runners pass on iOS 27 Simulator and macOS JavaScriptCore; [device measurements](docs/measurements/native-device-performance.json) when recorded |
 | Android native | `kr.coden:barochart-android` + Compose module: typed API, View/Compose, two ABIs | [Android guide](docs/ANDROID-GUIDE.md); runners pass on an API 36 emulator, x86_64 in CI; [device measurements](docs/measurements/native-device-performance.json) when recorded |
-| Rust native chart backend | In development; M1b ABI/package integration is in progress | Not a complete chart backend; no JS parity, speed-ratio, or default-backend claim |
+| Rust web/WASM backend | Optional Worker-owned Rust engine, Canvas/WebGL2 presentation host, async prepare/params/workspace migration | Chrome 156 production-WASM flows verified; Vite/Safari/Firefox/touch/screen-reader coverage depends on the local environment; JavaScript remains the default |
+| Rust native SDK | Opt-in Swift/Android integration | Android physical-device performance/soak and manual VoiceOver/TalkBack gates remain open; no default-backend claim |
 
 Native paths are not WebViews. React Native/Flutter adapters are not supplied. Since 0.3.0 the native SDK uses `BaroChart` names ([migration guide](docs/MIGRATING-FROM-ASTER.md)); serialized `aster.*` schemas and the web React export `AsterChart` keep their names for compatibility. Do not rename serialized schemas.
 

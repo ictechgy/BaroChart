@@ -14,7 +14,10 @@ header = "/* cbindgen 0.29.4가 생성한 파일이다. 수정하지 말고 node
 parse_deps = false
 
 [export]
-exclude = ["host_release", "js_log", "js_exp", "js_hypot", "zone_resolve", "zone_offset_seconds"]
+# 웹 전용 export는 WASM 모듈의 버전 handshake로 배포하며 네이티브 C ABI에 선언하지 않는다.
+exclude = ["host_release", "js_log", "js_exp", "js_hypot", "zone_resolve", "zone_offset_seconds",
+  "bc_web_abi_version", "bc_web_capabilities", "bc_web_memory_stats", "bc_web_packet",
+  "bc_web_read_f64", "bc_web_write_f64"]
 include = [
   "BC_FLAG_LOSSLESS",
   "BcBuf",

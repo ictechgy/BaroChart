@@ -12,6 +12,8 @@ const cache=join(scratch,'cache'),consumer=join(scratch,'consumer');await mkdir(
 const run=(executable,args,cwd=root)=>{const r=spawnSync(executable,args,{cwd,encoding:'utf8',maxBuffer:16*1024*1024});if(r.status!==0)throw new Error(`${executable} ${args[0]} failed:\n${r.stdout}${r.stderr}`);return r.stdout;};
 const tsc=resolve(process.env.TSC_PATH??join(root,'node_modules/typescript/lib/tsc.js'));
 const ts=(await import(pathToFileURL(join(dirname(tsc),'typescript.js')).href)).default;
+const sourcePackage=JSON.parse(await readFile(join(root,'package.json'),'utf8'));
+if(sourcePackage.exports?.['./wasm'])run(process.execPath,['scripts/rust/build-web-wasm.mjs','--check']);
 const packed=JSON.parse(run('npm',['--cache',cache,'pack','--offline','--ignore-scripts','--json','--pack-destination',scratch]))[0];
 assert(packed?.filename);const tarball=join(scratch,packed.filename),names=packed.files.map(f=>f.path);
 assert(names.length>0);assert(!names.some(n=>/^(artifacts|benchmarks|test|examples|scripts)\//.test(n)),'npm payload includes development/evidence outputs');
@@ -26,6 +28,14 @@ await writeFile(join(consumer,'ingestion.mts'),(await readFile(join(root,'test/i
 await writeFile(join(consumer,'tsconfig-core.json'),JSON.stringify({compilerOptions:{strict:true,noEmit:true,skipLibCheck:false,module:'NodeNext',target:'ES2022',lib:['ES2022'],types:[]},files:['core-node.mts','ingestion.mts']}));
 run(process.execPath,[tsc,'--project','tsconfig-core.json'],consumer);
 const installed=join(consumer,'node_modules/barochart'),pkg=JSON.parse(await readFile(join(installed,'package.json'),'utf8'));
+if(pkg.exports['./wasm']){
+ for(const file of ['src/web/wasm/barochart-core.wasm','src/web/wasm/barochart-core.manifest.json'])assert(names.includes(file),`Missing production WASM package asset ${file}`);
+ const wasm=await readFile(join(installed,'src/web/wasm/barochart-core.wasm'));
+ const manifest=JSON.parse(await readFile(join(installed,'src/web/wasm/barochart-core.manifest.json'),'utf8'));
+ assert.equal(manifest.schema,'aster.web-wasm-build');assert.equal(manifest.version,1);
+ assert.equal(manifest.panicStrategy,'unwind');assert.equal(manifest.exceptionHandling,true);
+ assert.equal(manifest.asset.bytes,wasm.byteLength);assert.equal(manifest.asset.sha256,createHash('sha256').update(wasm).digest('hex'));
+}
 assert.equal(pkg.private,true);assert.equal(pkg.license,'Apache-2.0');assert.equal(Object.keys(pkg.dependencies??{}).length,0);
 assert.equal(await access(join(consumer,'node_modules/react')).then(()=>true,()=>false),false,'base package installed React');
 const entries=[];

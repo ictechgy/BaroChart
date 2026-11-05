@@ -136,6 +136,11 @@ pub mod native_runtime;
 /// Native UI 캡처와 분할 전송·복원을 다룬다.
 pub mod native_ui;
 
+/// 웹 actor의 제한된 표시·메타데이터 조회다.
+#[cfg(any(target_arch = "wasm32", test))]
+pub mod web;
+pub mod web_layout;
+
 use barochart_js::error::JsError;
 use barochart_js::json::JsValue;
 use barochart_js::memory::{MemoryContext, MemoryGroup, MemoryScope, OomStyle};

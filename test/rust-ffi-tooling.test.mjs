@@ -39,6 +39,7 @@ test('committed header identifies cbindgen and keeps the engine incomplete',asyn
  ]);
  assert.match(config,/cbindgen 0\.29\.4/);
  assert.match(header,/cbindgen 0\.29\.4/);
+ assert.doesNotMatch(header,/\bbc_web_/,'WASM-only exports must not declare unavailable native symbols');
  assert.match(header,/typedef struct BcEngine BcEngine;/);
  assert.doesNotMatch(header,/_opaque\s*\[/);
  assert.match(header,/BC_OK = 0/);
