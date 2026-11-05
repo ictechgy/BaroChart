@@ -598,10 +598,7 @@ class _NoRedirect(HTTPRedirectHandler):
 
 
 def crate_url(package: LockedPackage) -> str:
-    return (
-        f"{CRATES_BASE}/{quote(package.name, safe='')}/{quote(package.version, safe='')}"
-        f"/{quote(package.filename, safe='')}"
-    )
+    return f"{CRATES_BASE}/{quote(package.name, safe='')}/{quote(package.filename, safe='')}"
 
 
 def download_archive(archive: Path, package: LockedPackage, *, timeout: float = 30.0) -> None:

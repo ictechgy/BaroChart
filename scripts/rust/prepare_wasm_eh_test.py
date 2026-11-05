@@ -9,6 +9,7 @@ fully isolated temporary fixture.
 
 from __future__ import annotations
 
+import gzip
 import importlib.util
 import io
 import json
@@ -21,6 +22,7 @@ import tarfile
 import tempfile
 import unittest
 from unittest import mock
+from urllib.request import Request
 
 
 SCRIPT = Path(__file__).with_name("prepare-wasm-eh.py")
@@ -138,7 +140,7 @@ hash = "411c3dccf3782ed6eb784357999cd1bffeb65a6dd55196817992a6421c0f9689"
 
 def _crate_bytes(name: str, version: str, payload: bytes = b"fixture") -> bytes:
     output = io.BytesIO()
-    with tarfile.open(fileobj=output, mode="w:gz") as archive:
+    with tarfile.open(fileobj=output, mode="w") as archive:
         for relative, content in (
             ("Cargo.toml", b'[package]\nname = "fixture"\n'),
             ("src.txt", payload),
@@ -149,7 +151,7 @@ def _crate_bytes(name: str, version: str, payload: bytes = b"fixture") -> bytes:
             info.uid = info.gid = 0
             info.uname = info.gname = ""
             archive.addfile(info, io.BytesIO(content))
-    return output.getvalue()
+    return gzip.compress(output.getvalue(), mtime=0)
 
 
 def _write_archive(fixture: FixtureRoot, package: PREPARER.LockedPackage, data: bytes | None = None) -> None:
@@ -168,6 +170,13 @@ class PreparerTests(unittest.TestCase):
 
     def _prepare(self, *, download: bool = False) -> dict[str, object]:
         return PREPARER.prepare(root=self.fixture.root, download=download, pinned_rustc=self.fixture.rustc)
+
+    def test_fixture_archive_bytes_do_not_depend_on_wall_clock(self) -> None:
+        with mock.patch("gzip.time.time", return_value=1_700_000_000):
+            first = _crate_bytes("clock-fixture", "1.0.0")
+        with mock.patch("gzip.time.time", return_value=1_700_000_001):
+            second = _crate_bytes("clock-fixture", "1.0.0")
+        self.assertEqual(first, second)
 
     def test_checksum_mismatch_is_rejected_before_extraction(self) -> None:
         package = self.fixture.package("checksum-fixture", "1.0.0")
@@ -222,6 +231,32 @@ class PreparerTests(unittest.TestCase):
             with self.assertRaisesRegex(PREPARER.PrepareError, "offline cache is missing"):
                 self._prepare()
         downloader.assert_not_called()
+
+    def test_download_requests_the_registry_archive_object(self) -> None:
+        cases = (
+            ("addr2line", "0.25.1", "https://static.crates.io/crates/addr2line/addr2line-0.25.1.crate"),
+            ("wasip2", "1.0.3+wasi-0.2.9", "https://static.crates.io/crates/wasip2/wasip2-1.0.3%2Bwasi-0.2.9.crate"),
+        )
+        for name, version, url in cases:
+            with self.subTest(name=name):
+                payload = _crate_bytes(name, version)
+                package = PREPARER.LockedPackage(name, version, PREPARER.sha256_bytes(payload))
+                response = mock.MagicMock()
+                response.__enter__.return_value = response
+                response.geturl.return_value = url
+                response.read.side_effect = (payload, b"")
+
+                def receive(request: Request, *, timeout: float) -> object:
+                    self.assertEqual(request.full_url, url)
+                    return response
+
+                opener = mock.Mock()
+                opener.open.side_effect = receive
+                destination = self.fixture.archives / package.filename
+                with mock.patch.object(PREPARER, "build_opener", return_value=opener):
+                    PREPARER.download_archive(destination, package)
+                self.assertEqual(destination.read_bytes(), payload)
+                opener.open.assert_called_once()
 
     def test_vendor_and_config_are_idempotent(self) -> None:
         package = self.fixture.package("idempotent-fixture", "1.0.0")
