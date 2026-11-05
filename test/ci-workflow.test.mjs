@@ -26,9 +26,9 @@ function jobBlock(name){
  return lines.slice(start,end<0?lines.length:end).join('\n');
 }
 
-test('the Rust workspace job installs the pinned toolchain and runs every Rust gate on Linux',()=>{
+test('the Rust workspace job pins its Linux oracle host and runs every Rust gate',()=>{
  const job=jobBlock('rust');
- assert.match(job,/runs-on: ubuntu-latest/);
+ assert.match(job,/runs-on: ubuntu-24\.04/);
  for(const command of [
   'rustup toolchain install',
   'node scripts/rust/cargo.mjs fmt --check',

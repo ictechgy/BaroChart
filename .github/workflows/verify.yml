@@ -125,7 +125,9 @@ jobs:
 
   rust:
     # Rust 네이티브 코어 워크스페이스: 포맷, clippy 경고 0, 테스트, 이식 코드 금지 패턴, JS 의미 커널의 V8·QuickJS 대조
-    runs-on: ubuntu-latest
+    # 비교용 QuickJS C 호스트는 -Werror로 빌드한다. Ubuntu 26.04의 새 문자열
+    # const 규약과 충돌하므로 이 오라클 작업의 호스트를 24.04로 고정한다.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - name: Check out source
