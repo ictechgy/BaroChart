@@ -1,8 +1,9 @@
 use barochart_core::block_range;
 use barochart_core::range_index;
+use barochart_js::memory::{MemoryAccount, MemoryContext, OomStyle};
 
 use block_range::BlockRangeIndex;
-use range_index::RangeQuery;
+use range_index::{RangeIndexBuilder, RangeQuery};
 
 #[test]
 fn block_index_borrows_values_and_matches_unaligned_scans() {
@@ -98,4 +99,82 @@ fn bounds_and_source_extent_fail_before_tree_mutation() {
     );
     assert_eq!(index.bytes(), bytes);
     assert!(BlockRangeIndex::new(65, &values, 128, 32).is_err());
+}
+
+#[test]
+fn owned_block_tree_adoption_is_o1_and_matches_fresh_queries() {
+    let capacity = 128usize;
+    let length = 67usize;
+    let values = (0..length)
+        .map(|index| {
+            if index % 5 == 0 {
+                f64::NAN
+            } else {
+                index as f64
+            }
+        })
+        .collect::<Vec<_>>();
+    let mut builder = RangeIndexBuilder::new(capacity / 32, false, true).unwrap();
+    for block in 0..length.div_ceil(32) {
+        let finite = values
+            .iter()
+            .skip(block * 32)
+            .take(32)
+            .copied()
+            .filter(|value| value.is_finite())
+            .collect::<Vec<_>>();
+        let min = barochart_js::num::js_min(&finite);
+        let max = barochart_js::num::js_max(&finite);
+        builder.leaf(block, min, max, finite.len() as f64).unwrap();
+    }
+    for position in (1..capacity / 32).rev() {
+        builder.merge(position).unwrap();
+    }
+    let before = builder.buffer_view();
+    let pointers = (
+        before.min.as_ptr(),
+        before.max.as_ptr(),
+        before.sum.unwrap().as_ptr(),
+    );
+    let tree = builder.finish(length.div_ceil(32)).unwrap();
+    let adopted = BlockRangeIndex::from_owned_tree(length, capacity, 32, tree).unwrap();
+    let after = adopted.buffer_view();
+    assert_eq!(
+        pointers,
+        (
+            after.min.as_ptr(),
+            after.max.as_ptr(),
+            after.sum.unwrap().as_ptr()
+        )
+    );
+    let fresh = BlockRangeIndex::new(length, &values, capacity, 32).unwrap();
+    for (from, to) in [(0, 67), (3, 64), (31, 66), (64, 128)] {
+        assert_eq!(
+            adopted.query(&values, from, to).unwrap(),
+            fresh.query(&values, from, to).unwrap()
+        );
+        assert_eq!(
+            adopted.finite_count(&values, from, to).unwrap(),
+            fresh.finite_count(&values, from, to).unwrap()
+        );
+    }
+}
+
+#[test]
+fn accounted_block_builder_releases_scratch_and_retains_only_summary_tree() {
+    let values = (0..67).map(|value| value as f64).collect::<Vec<_>>();
+    let account = MemoryAccount::new(1_024, OomStyle::InternalErrorLowercase);
+    let context = MemoryContext::accounted(&account);
+    let (index, group) = BlockRangeIndex::new_with_memory(67, &values, 128, 32, &context).unwrap();
+    assert_eq!(group.requested_bytes(), index.bytes() as u64);
+    assert_eq!(
+        account.snapshot().requested_live_bytes,
+        index.bytes() as u64
+    );
+    assert!(
+        account.snapshot().requested_peak_bytes > account.snapshot().requested_live_bytes,
+        "temporary low/high/count scratch must overlap the final tree"
+    );
+    drop((index, group));
+    assert_eq!(account.snapshot().requested_live_bytes, 0);
 }

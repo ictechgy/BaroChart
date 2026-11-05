@@ -4,6 +4,12 @@ import SwiftUI
 @main
 struct SampleApp: App {
     var body: some Scene {
-        WindowGroup { ChartScreen() }
+        WindowGroup {
+            if ProcessInfo.processInfo.environment["BAROCHART_DEVICE_TEST_HOST"] == "1" {
+                Color.clear
+            } else {
+                ChartScreen()
+            }
+        }
     }
 }

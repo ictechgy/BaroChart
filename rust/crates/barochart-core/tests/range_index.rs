@@ -1,6 +1,7 @@
 use barochart_core::range_index;
+use barochart_js::memory::{MemoryAccount, MemoryContext, OomStyle};
 
-use range_index::{RangeIndex, RangeQuery};
+use range_index::{RangeIndex, RangeIndexBuilder, RangeQuery};
 
 fn bits(value: f64) -> u64 {
     value.to_bits()
@@ -141,4 +142,147 @@ fn seeded_queries_match_bounded_bruteforce_for_more_than_one_thousand_ranges() {
         assert_eq!((actual.min, actual.max), (expected_min, expected_max));
         assert_eq!(actual.sum, volume[from..to].iter().sum::<f64>());
     }
+}
+
+#[test]
+fn bounded_builder_matches_constructor_and_moves_tree_allocations() {
+    let low = [3.0, -0.0, f64::NAN, 7.0, 2.0];
+    let high = [4.0, 0.0, f64::INFINITY, 8.0, 6.0];
+    let volume = [1.0, 2.0, 3.0, 4.0, 5.0];
+    let expected = RangeIndex::new(5, &low, &high, Some(&volume), 8, false).unwrap();
+    let mut builder = RangeIndexBuilder::new(8, false, true).unwrap();
+    for index in 0..5 {
+        builder
+            .leaf(index, low[index], high[index], volume[index])
+            .unwrap();
+    }
+    for position in (1..8).rev() {
+        builder.merge(position).unwrap();
+    }
+    let before = builder.buffer_view();
+    let pointers = (
+        before.min.as_ptr(),
+        before.max.as_ptr(),
+        before.sum.unwrap().as_ptr(),
+    );
+    let actual = builder.finish(5).unwrap();
+    let after = actual.buffer_view();
+    assert_eq!(actual, expected);
+    assert_eq!(
+        pointers,
+        (
+            after.min.as_ptr(),
+            after.max.as_ptr(),
+            after.sum.unwrap().as_ptr()
+        )
+    );
+}
+
+#[test]
+fn bounded_builder_rejects_order_incomplete_role_and_root_overflow() {
+    assert!(RangeIndexBuilder::new(8, true, true).is_err());
+    let mut builder = RangeIndexBuilder::new(8, false, true).unwrap();
+    assert!(builder.leaf(1, 1.0, 1.0, 1.0).is_err());
+    builder.leaf(0, 1.0, 1.0, f64::MAX).unwrap();
+    builder.leaf(1, 1.0, 1.0, f64::MAX).unwrap();
+    assert!(builder.merge(6).is_err());
+    for position in (1..8).rev() {
+        builder.merge(position).unwrap();
+    }
+    assert_eq!(
+        builder.finish(2).unwrap_err().message.to_string_lossy(),
+        "Volume sum overflow"
+    );
+
+    let builder = RangeIndexBuilder::new(8, false, true).unwrap();
+    assert_eq!(
+        builder.finish(0).unwrap_err().message.to_string_lossy(),
+        "Index builder incomplete"
+    );
+}
+
+#[test]
+fn native_buffer_adoption_preserves_allocations_and_validates_count_tree() {
+    let values = [1.0, f64::NAN, -0.0];
+    let source = RangeIndex::new(3, &values, &values, None, 4, true).unwrap();
+    let source = source.buffer_view();
+    let min = source.min.to_vec();
+    let max = source.max.to_vec();
+    let sum = source.sum.unwrap().to_vec();
+    let pointers = (min.as_ptr(), max.as_ptr(), sum.as_ptr());
+    let adopted = RangeIndex::from_native_buffers(4, min, max, Some(sum), true).unwrap();
+    adopted.validate_native_count_tree(1).unwrap();
+    let view = adopted.buffer_view();
+    assert_eq!(
+        pointers,
+        (
+            view.min.as_ptr(),
+            view.max.as_ptr(),
+            view.sum.unwrap().as_ptr()
+        )
+    );
+
+    let mut corrupted = view.sum.unwrap().to_vec();
+    corrupted[1] += 1.0;
+    let corrupted = RangeIndex::from_native_buffers(
+        4,
+        view.min.to_vec(),
+        view.max.to_vec(),
+        Some(corrupted),
+        true,
+    )
+    .unwrap();
+    assert_eq!(
+        corrupted
+            .validate_native_count_tree(1)
+            .unwrap_err()
+            .message
+            .to_string_lossy(),
+        "Async finite-count cache aggregate"
+    );
+}
+
+#[test]
+fn accounted_constructor_and_clone_charge_actual_tree_capacity_and_release() {
+    let account = MemoryAccount::new(1_024, OomStyle::InternalErrorLowercase);
+    let context = MemoryContext::accounted(&account);
+    let values = [1.0, 2.0, 3.0];
+    let volume = [4.0, 5.0, 6.0];
+    let (index, group) =
+        RangeIndex::new_with_memory(3, &values, &values, Some(&volume), 8, false, &context)
+            .unwrap();
+    assert_eq!(group.requested_bytes(), index.bytes() as u64);
+    assert_eq!(
+        account.snapshot().requested_live_bytes,
+        index.bytes() as u64
+    );
+    let (copy, copy_group) = index.try_clone_with_memory(&context).unwrap();
+    assert_eq!(copy, index);
+    assert_eq!(copy_group.requested_bytes(), copy.bytes() as u64);
+    assert_eq!(
+        account.snapshot().requested_live_bytes,
+        (index.bytes() + copy.bytes()) as u64
+    );
+    drop((copy, copy_group));
+    assert_eq!(
+        account.snapshot().requested_live_bytes,
+        index.bytes() as u64
+    );
+    drop((index, group));
+    assert_eq!(account.snapshot().requested_live_bytes, 0);
+
+    let limited = MemoryAccount::new(383, OomStyle::InternalErrorLowercase);
+    assert!(
+        RangeIndex::new_with_memory(
+            3,
+            &values,
+            &values,
+            Some(&volume),
+            8,
+            false,
+            &MemoryContext::accounted(&limited),
+        )
+        .is_err()
+    );
+    assert_eq!(limited.snapshot().requested_live_bytes, 0);
 }

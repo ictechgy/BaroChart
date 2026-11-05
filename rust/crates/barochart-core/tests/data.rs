@@ -1,10 +1,12 @@
 use barochart_core::batch_options;
 use barochart_core::data;
 
+use barochart_js::memory::{MemoryAccount, MemoryContext, OomStyle};
 use batch_options::BatchOptions;
 use data::{
     Bar, BatchEvent, ChangeKind, ColumnInputs, DataEvent, DataEventValue, ModelDataState,
-    NumericColumn, PlainNumber, ResetData, StoreOptions, seeded_columns, validate_bar,
+    NumericColumn, PlainNumber, ResetData, StoreOptions, seeded_columns,
+    seeded_columns_with_memory, validate_bar,
 };
 
 const T: f64 = 1_700_000_000_000.0;
@@ -656,4 +658,116 @@ fn six_data_event_kinds_route_to_the_same_store_contracts() {
         )
         .unwrap();
     assert_eq!(state.store().length(), 2);
+}
+
+#[test]
+fn accounted_store_replacement_counts_old_plus_candidate_and_is_atomic_on_denial() {
+    let denied_account = MemoryAccount::new(4_607, OomStyle::InternalErrorLowercase);
+    let mut denied = ModelDataState::new_with_memory(
+        StoreOptions::default(),
+        Vec::new(),
+        MemoryContext::accounted(&denied_account),
+    )
+    .unwrap();
+    assert_eq!(
+        denied_account.snapshot().requested_live_bytes,
+        denied.store().bytes() as u64
+    );
+    let before_identity = denied.store().data_identity();
+    let before_version = denied.store().version();
+    let bars = (0..20)
+        .map(|index| bar(T + index as f64, 1.0, 1.0))
+        .collect::<Vec<_>>();
+    let error = denied.store_mut().set_data(bars.clone()).unwrap_err();
+    assert_eq!(error.code.as_deref(), Some("__BAROCHART_OOM_LIMIT__"));
+    assert!(before_identity.matches(&denied.store().data_identity()));
+    assert_eq!(denied.store().version(), before_version);
+    assert_eq!(denied.store().length(), 0);
+    assert_eq!(denied_account.snapshot().requested_live_bytes, 1_536);
+    drop(denied);
+    assert_eq!(denied_account.snapshot().requested_live_bytes, 0);
+
+    let account = MemoryAccount::new(4_608, OomStyle::InternalErrorLowercase);
+    let mut state = ModelDataState::new_with_memory(
+        StoreOptions::default(),
+        Vec::new(),
+        MemoryContext::accounted(&account),
+    )
+    .unwrap();
+    state.store_mut().set_data(bars).unwrap();
+    assert_eq!(state.store().capacity(), 32);
+    assert_eq!(account.snapshot().requested_live_bytes, 3_072);
+    assert_eq!(account.snapshot().requested_peak_bytes, 4_608);
+    drop(state);
+    assert_eq!(account.snapshot().requested_live_bytes, 0);
+}
+
+#[test]
+fn accounted_growth_and_compaction_move_candidate_groups_without_double_charge() {
+    let bars = (0..16)
+        .map(|index| bar(T + index as f64, 1.0, 1.0))
+        .collect::<Vec<_>>();
+    let denied_account = MemoryAccount::new(6_143, OomStyle::InternalErrorLowercase);
+    let mut denied = ModelDataState::new_with_memory(
+        StoreOptions::default(),
+        bars.clone(),
+        MemoryContext::accounted(&denied_account),
+    )
+    .unwrap();
+    let before = denied.store().data_identity();
+    let error = denied
+        .store_mut()
+        .append(bar(T + 16.0, 2.0, 2.0))
+        .unwrap_err();
+    assert_eq!(error.code.as_deref(), Some("__BAROCHART_OOM_LIMIT__"));
+    assert!(before.matches(&denied.store().data_identity()));
+    assert_eq!(denied.store().length(), 16);
+    assert_eq!(denied_account.snapshot().requested_live_bytes, 1_536);
+    drop(denied);
+    assert_eq!(denied_account.snapshot().requested_live_bytes, 0);
+
+    let account = MemoryAccount::new(0, OomStyle::RangeErrorCapitalized);
+    let mut state = ModelDataState::new_with_memory(
+        StoreOptions::default(),
+        bars,
+        MemoryContext::accounted(&account),
+    )
+    .unwrap();
+    state.store_mut().append(bar(T + 16.0, 2.0, 2.0)).unwrap();
+    assert_eq!(state.store().capacity(), 32);
+    assert_eq!(account.snapshot().requested_live_bytes, 3_072);
+    assert_eq!(account.snapshot().requested_peak_bytes, 6_144);
+
+    let candidate = state.store().prepare_compaction(8, usize::MAX).unwrap();
+    assert_eq!(account.snapshot().requested_live_bytes, 4_608);
+    state.store_mut().publish_compaction(candidate).unwrap();
+    assert_eq!(state.store().capacity(), 16);
+    assert_eq!(state.store().accounted_bytes(), 1_536);
+    assert_eq!(account.snapshot().requested_live_bytes, 1_536);
+    drop(state);
+    assert_eq!(account.snapshot().requested_live_bytes, 0);
+}
+
+#[test]
+fn native_owned_columns_handoff_moves_group_and_charges_only_new_index() {
+    let account = MemoryAccount::new(1_536, OomStyle::InternalErrorLowercase);
+    let context = MemoryContext::accounted(&account);
+    let (columns, columns_memory) = seeded_columns_with_memory(16, 42, &context).unwrap();
+    assert_eq!(columns_memory.requested_bytes(), 768);
+    assert_eq!(account.snapshot().requested_live_bytes, 768);
+    let state = ModelDataState::from_native_snapshot_columns_with_memory(
+        1.0,
+        StoreOptions::default(),
+        columns,
+        16,
+        1.0,
+        1.0,
+        columns_memory,
+    )
+    .unwrap();
+    assert_eq!(state.store().accounted_bytes(), 1_536);
+    assert_eq!(account.snapshot().requested_live_bytes, 1_536);
+    assert_eq!(account.snapshot().requested_peak_bytes, 1_536);
+    drop(state);
+    assert_eq!(account.snapshot().requested_live_bytes, 0);
 }

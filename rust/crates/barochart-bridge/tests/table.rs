@@ -1,4 +1,6 @@
-use barochart_bridge::{FUNCTIONS, FunctionStatus, call, supports};
+use barochart_bridge::{
+    FUNCTIONS, FunctionStatus, call, call_scoped_with_reply_admission, supports,
+};
 use barochart_core::{Engine, Host, HostError};
 use barochart_js::json::JsValue;
 use barochart_js::string::JsString;
@@ -41,11 +43,11 @@ fn the_table_covers_every_defined_name_without_claiming_pending_handlers() {
 
 #[test]
 fn unavailable_names_have_the_documented_error() {
-    let error = call(&mut engine(), "nativeSceneJSON", &[]).unwrap_err();
+    let error = call(&mut engine(), "nativeSelfTest", &[]).unwrap_err();
     assert_eq!(error.name, "UnavailableError");
     assert_eq!(
         error.message,
-        JsString::from_str("nativeSceneJSON is not available in the Rust backend")
+        JsString::from_str("nativeSelfTest is not available in the Rust backend")
     );
     assert_eq!(error.code, None);
 }
@@ -59,6 +61,32 @@ fn custom_source_is_rejected_before_any_model_or_argument_validation() {
         JsString::from_str("Indicator source registration requires the javaScript backend")
     );
     assert_eq!(error.code.as_deref(), Some("JAVASCRIPT_BACKEND_REQUIRED"));
+}
+
+#[test]
+fn pointer_and_key_missing_input_error_precedes_success_reply_admission() {
+    let mut engine = engine();
+    for (name, args) in [
+        (
+            "nativePointer",
+            vec![JsValue::String(JsString::from_str("cancel"))],
+        ),
+        (
+            "nativeKey",
+            vec![JsValue::String(JsString::from_str("Home"))],
+        ),
+    ] {
+        let mut admitted = false;
+        let mut scope = engine.memory_context().scope();
+        let error =
+            call_scoped_with_reply_admission(&mut engine, name, &args, &mut scope, &mut |_| {
+                admitted = true;
+                Ok(())
+            })
+            .expect_err("missing nativeInput");
+        assert_eq!(error.name, "ReferenceError", "{name}");
+        assert!(!admitted, "{name}");
+    }
 }
 
 #[test]

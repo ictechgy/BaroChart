@@ -34,7 +34,7 @@ let rustBinaryTarget: Target? = rustXCFrameworkPackagePath.map {
     .binaryTarget(name: "BaroChartCoreRust", path: $0)
 }
 var packageTargets: [Target] = [
-    .target(name: "BaroChart", dependencies: hasRustXCFramework ? ["BaroChartCoreRust"] : [], path: "native", exclude: ["android"], sources: ["BaroChartEngine.swift", "BaroChartCoreRuntime.swift", "BaroChartRustCoreRuntime.swift", "BaroChartTrace.swift", "BaroChartEngine+Typed.swift", "BaroChartError.swift", "BaroChartTypes.swift", "BaroChartColumns.swift", "BaroChartFrameRenderer.swift", "BaroChartUIView.swift", "BaroChartSwiftUI.swift"], resources: [.copy("Resources/aster-core.js"), .copy("Resources/PrivacyInfo.xcprivacy")]),
+    .target(name: "BaroChart", dependencies: hasRustXCFramework ? ["BaroChartCoreRust"] : [], path: "native", exclude: ["android"], sources: ["BaroChartEngine.swift", "BaroChartCoreRuntime.swift", "BaroChartRustCoreRuntime.swift", "BaroChartTrace.swift", "BaroChartEngine+Typed.swift", "BaroChartError.swift", "BaroChartTypes.swift", "BaroChartColumns.swift", "BaroChartFrameRenderer.swift", "BaroChartUIView.swift", "BaroChartSwiftUI.swift", "BaroChartValidation.swift"], resources: [.copy("Resources/aster-core.js"), .copy("Resources/PrivacyInfo.xcprivacy")]),
     .testTarget(name: "BaroChartTests", dependencies: ["BaroChart"], path: "Tests/BaroChartTests", resources: [.copy("Resources/vocabulary.json"), .copy("Resources/aster-workspace-v1.json"), .copy("Fixtures/traces")])
 ]
 if let rustBinaryTarget { packageTargets.append(rustBinaryTarget) }

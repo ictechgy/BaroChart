@@ -1,0 +1,99 @@
+{
+  "schema": "barochart.native-rust-ios-ab",
+  "version": 1,
+  "date": "2026-11-05",
+  "device": {
+    "model": "iPhone XR",
+    "productType": "iPhone11,8",
+    "os": "18.7.10",
+    "physical": true
+  },
+  "configuration": "Release",
+  "rustProfile": {
+    "optLevel": "s",
+    "panic": "unwind",
+    "lto": "fat"
+  },
+  "rustSourceSha256": "67512c06b9c639de4e284a3d61bd345779b5d4c3da2818a8244899a1f81fc583",
+  "appExecutableSha256": "b37d7afe462bac0373fc344a7ebbaf5053d00dd19890de6709514ebef7a72cbf",
+  "fixtureId": "seeded-sine-bars-10k-ema20-v1",
+  "method": {
+    "launch": "devicectl foreground app; identical DeviceBenchmark.run; UI automation not exercised",
+    "startup": "12 engine/setBars/first-layer renders; first2 excluded;10 measured",
+    "pan": "2 warm-up renders then120 measured on device CPU; not displayFPS",
+    "percentiles": "nearest-rank",
+    "uiAutomation": "XCTest UI automation initialization timed out; same app benchmark invoked directly"
+  },
+  "budget": {
+    "startupP50Ms": 500,
+    "panP95Ms": 16.7,
+    "sizePerAbiBytes": 5242880
+  },
+  "backends": {
+    "javascript": {
+      "startup": {
+        "maxMs": 230.673292,
+        "p50Ms": 207.147791,
+        "p95Ms": 230.673292,
+        "runs": 10
+      },
+      "pan10k": {
+        "actualBackend": "javascript",
+        "footprintMB": 77.84480285644531,
+        "maxMs": 6.321583,
+        "p50Ms": 5.029208,
+        "p95Ms": 6.104834,
+        "runs": 120,
+        "runtimeAllocationBytes": null,
+        "runtimeAllocationNote": "Swift FFI does not expose requested Rust runtime bytes; phys_footprint is reported separately."
+      },
+      "actualBackend": "javascript",
+      "backendVerified": true,
+      "physicalDevice": true,
+      "performanceWithinBudget": true
+    },
+    "rust": {
+      "startup": {
+        "maxMs": 285.950458,
+        "p50Ms": 282.950167,
+        "p95Ms": 285.950458,
+        "runs": 10
+      },
+      "pan10k": {
+        "actualBackend": "rust",
+        "footprintMB": 58.313514709472656,
+        "maxMs": 8.32775,
+        "p50Ms": 6.876333,
+        "p95Ms": 7.242166,
+        "runs": 120,
+        "runtimeAllocationBytes": null,
+        "runtimeAllocationNote": "Swift FFI does not expose requested Rust runtime bytes; phys_footprint is reported separately."
+      },
+      "actualBackend": "rust",
+      "backendVerified": true,
+      "physicalDevice": true,
+      "performanceWithinBudget": true
+    }
+  },
+  "debugDiagnostic": {
+    "javascript": {
+      "startupP50Ms": 220.977042,
+      "panP95Ms": 6.518583
+    },
+    "rust": {
+      "startupP50Ms": 534.386917,
+      "panP95Ms": 9.941125
+    }
+  },
+  "debugConfiguration": "Debug, diagnostic only",
+  "debugAppExecutableSha256": "6dd6a9e805e4151414b6acd9f2cf60a4c51d0d0e2d84f5513ac2daaf67514cc3",
+  "sdkSize": {
+    "configuration": "Release",
+    "codeBytes": 3221430,
+    "resourceBytes": 618161,
+    "totalBytes": 3839591,
+    "sizeExecutableSha256": "b909659ce4088d214b9a3d082f9b9174bffcd37b2d4e53503714977f408d3fae",
+    "budgetBytes": 5242880,
+    "withinBudget": true
+  }
+}

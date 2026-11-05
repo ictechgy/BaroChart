@@ -11,6 +11,7 @@ if (providers.gradleProperty('sampleBuildRoot').isPresent()) layout.buildDirecto
 android {
     namespace 'kr.coden.barochart.sample'
     compileSdk 36
+    ndkVersion '29.0.14033849'
     defaultConfig {
         applicationId 'kr.coden.barochart.sample'
         minSdk 26

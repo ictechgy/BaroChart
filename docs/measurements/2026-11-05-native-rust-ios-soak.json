@@ -1,0 +1,258 @@
+{
+  "schema": "barochart.native-rust-ios-soak",
+  "version": 1,
+  "date": "2026-11-05",
+  "device": {
+    "model": "iPhone XR",
+    "productType": "iPhone11,8",
+    "os": "18.7.10",
+    "physical": true
+  },
+  "configuration": "Debug app-hosted XCTest",
+  "backend": "rust",
+  "rustSourceSha256": "67512c06b9c639de4e284a3d61bd345779b5d4c3da2818a8244899a1f81fc583",
+  "testStatus": 0,
+  "passed": true,
+  "streamingSeconds": 1800.594,
+  "workloadSource": "Tests/BaroChartTests/SoakTests.swift",
+  "workloadSha256": "297bb5951b96c4b9b21cc6be8d3ed8abd737d19a6ba066a96617d4be4ea7e38a",
+  "hostExecutableSha256": "e0c2939a6827e2405ed7013a34e7791b08180719afdc55d99a48650e23f5e28a",
+  "testExecutableSha256": "2cd172b986296db38322c5a26983d1fd3f65949b281fb77cd3d9c884881737df",
+  "reports": {
+    "ios-create-dispose": {
+      "backend": "rust",
+      "baselineFootprint": 12469394.666666666,
+      "cycles": 500,
+      "passed": true,
+      "projectedGrowthPercent": -2.5601026657414683,
+      "rule": "least-squares footprint slope over samples every 25 cycles after warm-up, projected over the measured cycles, <= 5% of baseline",
+      "runtimeAllocationBytes": null,
+      "runtimeAllocationNote": "Swift FFI does not expose requested Rust runtime bytes; process phys_footprint remains a separate metric.",
+      "samples": [
+        {
+          "cycle": 50,
+          "footprint": 12518560
+        },
+        {
+          "cycle": 75,
+          "footprint": 12436600
+        },
+        {
+          "cycle": 100,
+          "footprint": 12453024
+        },
+        {
+          "cycle": 125,
+          "footprint": 12469368
+        },
+        {
+          "cycle": 150,
+          "footprint": 12485792
+        },
+        {
+          "cycle": 175,
+          "footprint": 12469368
+        },
+        {
+          "cycle": 200,
+          "footprint": 12485792
+        },
+        {
+          "cycle": 225,
+          "footprint": 12469368
+        },
+        {
+          "cycle": 250,
+          "footprint": 12485792
+        },
+        {
+          "cycle": 275,
+          "footprint": 12354680
+        },
+        {
+          "cycle": 300,
+          "footprint": 12272800
+        },
+        {
+          "cycle": 325,
+          "footprint": 12239992
+        },
+        {
+          "cycle": 350,
+          "footprint": 12256416
+        },
+        {
+          "cycle": 375,
+          "footprint": 12239992
+        },
+        {
+          "cycle": 400,
+          "footprint": 12256416
+        },
+        {
+          "cycle": 425,
+          "footprint": 12239992
+        },
+        {
+          "cycle": 450,
+          "footprint": 12256416
+        },
+        {
+          "cycle": 475,
+          "footprint": 12239992
+        },
+        {
+          "cycle": 500,
+          "footprint": 12256416
+        }
+      ],
+      "slopeBytesPerCycle": -709.3984561403507,
+      "warmupCycles": 50
+    },
+    "ios-streaming-soak": {
+      "backend": "rust",
+      "failures": 0,
+      "minutes": 30,
+      "passed": true,
+      "rule": "after 5 min warm-up, footprint growth <= 5% per 10-min window",
+      "runtimeAllocationBytes": null,
+      "runtimeAllocationNote": "Swift FFI does not expose requested Rust runtime bytes; process phys_footprint remains a separate metric.",
+      "samples": [
+        {
+          "footprint": 22791368,
+          "seconds": 0.01857900619506836
+        },
+        {
+          "footprint": 23463152,
+          "seconds": 60.11581492424011
+        },
+        {
+          "footprint": 22824176,
+          "seconds": 120.14824795722961
+        },
+        {
+          "footprint": 22840560,
+          "seconds": 180.30150592327118
+        },
+        {
+          "footprint": 22824176,
+          "seconds": 240.40457594394684
+        },
+        {
+          "footprint": 22824176,
+          "seconds": 300.4950100183487
+        },
+        {
+          "footprint": 22824176,
+          "seconds": 360.5116059780121
+        },
+        {
+          "footprint": 22824176,
+          "seconds": 420.57703399658203
+        },
+        {
+          "footprint": 22824176,
+          "seconds": 480.6691949367523
+        },
+        {
+          "footprint": 22824176,
+          "seconds": 540.780247926712
+        },
+        {
+          "footprint": 22824176,
+          "seconds": 600.8585360050201
+        },
+        {
+          "footprint": 22824176,
+          "seconds": 660.961797952652
+        },
+        {
+          "footprint": 22824176,
+          "seconds": 721.1073600053787
+        },
+        {
+          "footprint": 22824176,
+          "seconds": 781.1138179302216
+        },
+        {
+          "footprint": 22824176,
+          "seconds": 841.2272329330444
+        },
+        {
+          "footprint": 22824176,
+          "seconds": 901.3013099431992
+        },
+        {
+          "footprint": 22824176,
+          "seconds": 961.3323240280151
+        },
+        {
+          "footprint": 22840560,
+          "seconds": 1021.3588429689407
+        },
+        {
+          "footprint": 22840560,
+          "seconds": 1081.4124079942703
+        },
+        {
+          "footprint": 22840560,
+          "seconds": 1141.5591459274292
+        },
+        {
+          "footprint": 22840560,
+          "seconds": 1201.6135779619217
+        },
+        {
+          "footprint": 22840560,
+          "seconds": 1261.6645560264587
+        },
+        {
+          "footprint": 22840560,
+          "seconds": 1321.8135769367218
+        },
+        {
+          "footprint": 22840560,
+          "seconds": 1381.8492169380188
+        },
+        {
+          "footprint": 22840560,
+          "seconds": 1441.8820569515228
+        },
+        {
+          "footprint": 22840560,
+          "seconds": 1502.0407630205154
+        },
+        {
+          "footprint": 22840560,
+          "seconds": 1562.1156640052795
+        },
+        {
+          "footprint": 22840560,
+          "seconds": 1622.2644529342651
+        },
+        {
+          "footprint": 22840560,
+          "seconds": 1682.2895319461823
+        },
+        {
+          "footprint": 22856944,
+          "seconds": 1742.3183159828186
+        }
+      ],
+      "ticks": 11201,
+      "windows": [
+        {
+          "fromSeconds": 300.4950100183487,
+          "growthPercent": 0,
+          "toSeconds": 901.3013099431992
+        },
+        {
+          "fromSeconds": 901.3013099431992,
+          "growthPercent": 0.0717835333902087,
+          "toSeconds": 1502.0407630205154
+        }
+      ]
+    }
+  },
+  "method": "Same SDK soak workload in blank app-hosted XCTest; process phys_footprint, distinct from runtime requested bytes"
+}

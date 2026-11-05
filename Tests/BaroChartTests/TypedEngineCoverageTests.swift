@@ -3,7 +3,7 @@ import XCTest
 
 /// 타입 API 전 메서드의 정상·오류 경로, 오류 분류 표, 이름 변경 이전 저장본 복원을 실제 JavaScriptCore에서 확인한다(G3).
 @MainActor
-final class TypedEngineCoverageTests: XCTestCase {
+final class TypedEngineCoverageTests: BackendSelectedTestCase {
     private static let start = 1_700_000_000_000.0
 
     /// 1분봉 count개(종가 102부터 1씩 증가)

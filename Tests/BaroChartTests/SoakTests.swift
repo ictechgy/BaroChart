@@ -2,7 +2,7 @@
 import Darwin
 import UIKit
 import XCTest
-@testable import BaroChart
+@_spi(BaroChartValidation) @testable import BaroChart
 
 /// 장시간 안정성(G5): 스트리밍 중 메모리가 평탄하고, 엔진·뷰 생성/해제를 반복해도 누수가 없어야 한다.
 ///
@@ -10,7 +10,16 @@ import XCTest
 /// (scripts/run-native-soak.mjs). 판정 기준은 soak 모드(15분 이상)에서만 적용하고, 짧은 실행은 동작만 확인한다.
 @MainActor
 final class SoakTests: XCTestCase {
-    private var soakMinutes: Double { Double(ProcessInfo.processInfo.environment["BAROCHART_SOAK_MINUTES"] ?? "") ?? 0.2 }
+    private var soakMinutes: Double { Double(ProcessInfo.processInfo.environment["TEST_RUNNER_BAROCHART_SOAK_MINUTES"] ?? ProcessInfo.processInfo.environment["BAROCHART_SOAK_MINUTES"] ?? "") ?? 0.2 }
+    private var backend: String { ProcessInfo.processInfo.environment["TEST_RUNNER_BAROCHART_BACKEND"] ?? "javascript" }
+    private var runId: String { ProcessInfo.processInfo.environment["TEST_RUNNER_BAROCHART_RUN_ID"] ?? "missing-run-id" }
+
+    private func makeEngine() throws -> BaroChartEngine {
+        let engine = try BaroChartValidation.makeEngine(options: BaroChartEngineOptions(), backend: backend)
+        let actualBackend = try BaroChartValidation.actualBackend(for: engine)
+        guard actualBackend == backend else { throw NSError(domain: "BaroChartValidation", code: 2) }
+        return engine
+    }
 
     /// 현재 프로세스의 물리 메모리 사용량(phys_footprint, 바이트)
     private func footprint() -> Double {
@@ -32,12 +41,16 @@ final class SoakTests: XCTestCase {
     /// 보고서를 임시 폴더에 쓰고 경로를 출력한다(runner가 읽는다)
     private func writeReport(_ name: String, _ report: [String: Any]) throws {
         let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("barochart-\(name).json")
+        var report = report
+        report["runId"] = runId; report["backend"] = backend
+        report["runtimeAllocationBytes"] = NSNull()
+        report["runtimeAllocationNote"] = "Swift FFI does not expose requested Rust runtime bytes; process phys_footprint remains a separate metric."
         try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys, .prettyPrinted]).write(to: url)
         print("BAROCHART_SOAK_REPORT \(name) \(url.path) \(String(data: try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]), encoding: .utf8)!)")
     }
 
     func testStreamingSoak() async throws {
-        let engine = try BaroChartEngine(options: BaroChartEngineOptions())
+        let engine = try makeEngine()
         defer { try? engine.close() }
         var data = bars(10_000)
         try engine.setBars(data)
@@ -135,7 +148,7 @@ final class SoakTests: XCTestCase {
             // 커밋하지 않으면 해제된 뷰의 백킹 스토어가 미커밋 트랜잭션에 남는다. SDK가 자기 임시 JSValue를
             // 바깥 풀 없이도 비우는지는 EngineMemoryTests가 따로 확인한다.
             try autoreleasepool {
-                let engine = try BaroChartEngine(options: BaroChartEngineOptions())
+                let engine = try makeEngine()
                 try engine.setBars(bars(200))
                 let view = BaroChartUIView(engine: engine, frame: CGRect(x: 0, y: 0, width: 320, height: 240))
                 view.setNeedsDisplay(); view.layer.displayIfNeeded()

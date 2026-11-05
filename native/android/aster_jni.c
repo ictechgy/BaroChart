@@ -62,6 +62,30 @@ static char *utf8_n(JNIEnv *env,jstring text,size_t limit,size_t *written){
  jbyteArray bytes=(*env)->CallObjectMethod(env,text,encode,charset);if(!bytes||(*env)->ExceptionCheck(env))return NULL;jsize n=(*env)->GetArrayLength(env,bytes);if((size_t)n>limit){fail(env,"Native argument size limit");return NULL;}char *result=malloc((size_t)n+1);if(result){(*env)->GetByteArrayRegion(env,bytes,0,n,(jbyte*)result);if((*env)->ExceptionCheck(env)){free(result);result=NULL;}else{result[n]=0;if(written)*written=(size_t)n;}}(*env)->DeleteLocalRef(env,bytes);(*env)->DeleteLocalRef(env,charset);return result;
 }
 static char *utf8(JNIEnv *env,jstring text,size_t limit){return utf8_n(env,text,limit,NULL);}
+#if BAROCHART_WITH_RUST
+/* utf8() already enforced the complete Java string's byte limit. Source QuickJS
+ * JS_NewString sees the C string up to its first NUL; quote those same bytes. */
+static size_t json_quote_utf8_n(char *dst,size_t capacity,const char *src,size_t length){
+ static const char hex[]="0123456789abcdef";size_t n=0;
+ if(capacity<3)return 0;dst[n++]='"';
+ for(const unsigned char *p=(const unsigned char*)src,*end=p+length;p<end;p++){
+  size_t needed=*p<0x20?6:(*p=='"'||*p=='\\'?2:1);if(needed>capacity-n-2)return 0;
+  if(*p<0x20){dst[n++]='\\';dst[n++]='u';dst[n++]='0';dst[n++]='0';dst[n++]=hex[*p>>4];dst[n++]=hex[*p&15];}
+  else {if(*p=='"'||*p=='\\')dst[n++]='\\';dst[n++]=(char)*p;}
+ }
+ dst[n++]='"';dst[n]=0;return n;
+}
+static size_t json_quote_utf8(char *dst,size_t capacity,const char *src){return json_quote_utf8_n(dst,capacity,src,strlen(src));}
+/* Java's decimal encoding is locale independent and round-trips binary64. */
+static char *json_double(JNIEnv *env,jdouble value){
+ jclass type=(*env)->FindClass(env,"java/lang/Double");if(!type)return NULL;
+ jmethodID encode=(*env)->GetStaticMethodID(env,type,"toString","(D)Ljava/lang/String;");
+ jstring text=encode?(*env)->CallStaticObjectMethod(env,type,encode,value):NULL;
+ char *result=text?utf8(env,text,64):NULL;
+ if(text)(*env)->DeleteLocalRef(env,text);(*env)->DeleteLocalRef(env,type);return result;
+}
+#endif
+
 /* JSON 파서에 들어가기 전에 깊이만 검사한다. 문자열/이스케이프는 건너뛰고 문법 오류는 기존 파서가 결정한다. */
 static int argument_depth_exceeded(const char *text,size_t length){
  int depth=0,in_string=0,escaped=0;
@@ -107,11 +131,11 @@ static int32_t rust_zone_offset(void *context,const uint8_t *zone,size_t length,
 }
 static void rust_host_release(void *context){(void)context;}
 static int rust_failure(AsterHost *h,BcStatus status,BcBuf body){
- JNIEnv *env=h->env;jstring envelope=body.ptr?java_string_n(env,(const char*)body.ptr,body.len):NULL,message=NULL;jmethodID method=(*env)->GetStaticMethodID(env,h->bridge,"rustErrorMessage","(ILjava/lang/String;)Ljava/lang/String;");
+ JNIEnv *env=h->env;if(status==BC_OOM_LIMIT||status==BC_OOM_SYSTEM){bc_buf_free(body);fail(env,status==BC_OOM_LIMIT?"InternalError: out of memory":"RangeError: Out of memory");return 1;}jstring envelope=body.ptr?java_string_n(env,(const char*)body.ptr,body.len):NULL,message=NULL;jmethodID method=(*env)->GetStaticMethodID(env,h->bridge,"rustErrorMessage","(ILjava/lang/String;)Ljava/lang/String;");
  if(method)message=(*env)->CallStaticObjectMethod(env,h->bridge,method,(jint)status,envelope);bc_buf_free(body);if(!(*env)->ExceptionCheck(env)&&message)fail_jstring(env,message);if(message)(*env)->DeleteLocalRef(env,message);if(envelope)(*env)->DeleteLocalRef(env,envelope);return 1;
 }
 static int rust_memory(AsterHost *h){
- BcBuf stats={0};BcStatus status=bc_memory_stats(h->rust,&stats);if(status!=BC_OK)return rust_failure(h,status,stats);size_t capacity=0;if(stats.ptr&&stats.len<SIZE_MAX){char *json=malloc(stats.len+1);if(json){memcpy(json,stats.ptr,stats.len);json[stats.len]=0;const char *key="\"byteCapacity\":";char *found=strstr(json,key);if(found)capacity=(size_t)strtoull(found+strlen(key),NULL,10);key="\"f64Capacity\":";found=strstr(json,key);if(found)capacity+=(size_t)strtoull(found+strlen(key),NULL,10);free(json);}}bc_buf_free(stats);h->allocated=capacity+1;if(h->allocated>h->allocation_peak)h->allocation_peak=h->allocated;return 0;
+ BcBuf stats={0};BcStatus status=bc_memory_stats(h->rust,&stats);if(status!=BC_OK)return rust_failure(h,status,stats);size_t live=0,peak=0;int valid=0;if(stats.ptr&&stats.len<SIZE_MAX){char *json=malloc(stats.len+1);if(json){memcpy(json,stats.ptr,stats.len);json[stats.len]=0;const char *live_key="\"requestedLiveBytes\":",*peak_key="\"requestedPeakBytes\":";char *live_at=strstr(json,live_key),*peak_at=strstr(json,peak_key);if(live_at&&peak_at){live=(size_t)strtoull(live_at+strlen(live_key),NULL,10);peak=(size_t)strtoull(peak_at+strlen(peak_key),NULL,10);valid=1;}free(json);}}bc_buf_free(stats);if(!valid){fail(h->env,"Rust memory stats unavailable");return 1;}h->allocated=live;h->allocation_peak=peak;return 0;
 }
 #endif
 JNIEXPORT jlong JNICALL Java_kr_coden_barochart_BaroChartEngine_create(JNIEnv *env,jclass cls,jstring bundle){
@@ -131,15 +155,15 @@ JNIEXPORT jlong JNICALL Java_kr_coden_barochart_BaroChartEngine_create(JNIEnv *e
 JNIEXPORT jlong JNICALL Java_kr_coden_barochart_BaroChartEngine_createRust(JNIEnv *env,jclass cls){
 #if BAROCHART_WITH_RUST
  AsterHost *h=calloc(1,sizeof(*h));if(!h){fail(env,"Allocation failed");return 0;}h->backend=BACKEND_RUST;h->env=env;(*env)->GetJavaVM(env,&h->vm);h->bridge=(*env)->NewGlobalRef(env,cls);if(!h->bridge||(*env)->ExceptionCheck(env)){fail(env,"Rust engine unavailable");goto error;}
- BcHost host={h,rust_zone_resolve,rust_zone_offset,NULL,rust_host_release};BcBuf body={0};BcStatus status=bc_engine_new(&host,&h->rust,&body);if(status!=BC_OK){rust_failure(h,status,body);goto error;}
- h->allocated=h->allocation_peak=1;h->counted=1;atomic_fetch_add_explicit(&live_hosts,1,memory_order_relaxed);atomic_fetch_add_explicit(&created_hosts,1,memory_order_relaxed);return (jlong)(intptr_t)h;
- error:if(h->bridge)(*env)->DeleteGlobalRef(env,h->bridge);free(h);return 0;
+ BcHost host={h,rust_zone_resolve,rust_zone_offset,NULL,rust_host_release};BcBuf body={0};BcStatus status=bc_engine_new_with_limit(&host,805306368,&h->rust,&body);if(status!=BC_OK){rust_failure(h,status,body);goto error;}
+ if(rust_memory(h))goto error;h->counted=1;atomic_fetch_add_explicit(&live_hosts,1,memory_order_relaxed);atomic_fetch_add_explicit(&created_hosts,1,memory_order_relaxed);return (jlong)(intptr_t)h;
+ error:if(h->rust)bc_engine_free(h->rust);if(h->bridge)(*env)->DeleteGlobalRef(env,h->bridge);free(h);return 0;
 #else
  (void)cls;fail(env,"UnavailableError: rust backend is not included in this build");return 0;
 #endif
 }
 JNIEXPORT jstring JNICALL Java_kr_coden_barochart_BaroChartEngine_call(JNIEnv *env,jclass cls,jlong handle,jstring name,jstring arguments){
- (void)cls;AsterHost *h=enter(env,handle);if(!h){fail(env,"Engine closed");return NULL;}char *json=utf8(env,arguments,256*1024*1024);if(!json){fail(env,"UTF-8 allocation failed");return NULL;}size_t json_length=strlen(json);if(argument_depth_exceeded(json,json_length)){free(json);fail(env,"SyntaxError: Native argument depth limit");return NULL;}size_t function_length=0;char *function=utf8_n(env,name,512,&function_length);if(!function){free(json);fail(env,"UTF-8 allocation failed");return NULL;}
+ (void)cls;AsterHost *h=enter(env,handle);if(!h){fail(env,"Engine closed");return NULL;}char *json=utf8(env,arguments,256*1024*1024);if(!json){fail(env,"UTF-8 allocation failed");return NULL;}size_t json_length=strlen(json);if(argument_depth_exceeded(json,json_length)){free(json);fail(env,"SyntaxError: Native argument depth limit");return NULL;}size_t function_length=0;char *function=utf8_n(env,name,512,&function_length);if(!function){free(json);fail(env,"UTF-8 allocation failed");return NULL;}function_length=strlen(function);
 #if BAROCHART_WITH_RUST
  if(h->backend==BACKEND_RUST){BcBuf out={0};BcStatus status=bc_call(h->rust,(const uint8_t*)function,function_length,(const uint8_t*)json,json_length,0,&out);if(status==BC_UNAVAILABLE&&!bc_supports(h->rust,(const uint8_t*)function,function_length)){bc_buf_free(out);free(function);free(json);fail(env,"TypeError: not a function");return NULL;}free(function);free(json);if(status!=BC_OK){rust_failure(h,status,out);return NULL;}jstring result=java_string_n(env,(const char*)out.ptr,out.len);bc_buf_free(out);return result;}
 #endif
@@ -177,7 +201,14 @@ JNIEXPORT jobjectArray JNICALL Java_kr_coden_barochart_BaroChartEngine_packet(JN
  size_t kind_length=0,identity_length=0;char *kind=utf8_n(env,mode,16,&kind_length),*identity=token?utf8_n(env,token,512,&identity_length):NULL;if(!kind||(token&&!identity)){free(kind);free(identity);fail(env,"Native packet UTF-8 arguments");return NULL;}
  if(kind_length!=5||(memcmp(kind,"scene",5)&&memcmp(kind,"frame",5))||(!memcmp(kind,"frame",5)&&(!identity||identity_length<1||(*env)->GetStringLength(env,token)>128))){free(kind);free(identity);fail(env,"Native packet mode/token");return NULL;}
 #if BAROCHART_WITH_RUST
- if(h->backend==BACKEND_RUST){free(kind);free(identity);BcBuf metadata={0};BcF64Buf numbers={0};static const uint8_t args[]="[]";BcStatus status=bc_packet(h->rust,args,2,&metadata,&numbers);if(status!=BC_OK){bc_f64_buf_free(numbers);rust_failure(h,status,metadata);return NULL;}if(metadata.len>1048576||numbers.len>8388608||(numbers.ptr&&(uintptr_t)numbers.ptr%_Alignof(double))){bc_buf_free(metadata);bc_f64_buf_free(numbers);fail(env,"Native packet Float64Array bounds/byte budget");return NULL;}jstring java_metadata=java_string_n(env,(const char*)metadata.ptr,metadata.len);jdoubleArray java_numbers=(*env)->NewDoubleArray(env,(jsize)numbers.len);if(java_numbers&&numbers.len)(*env)->SetDoubleArrayRegion(env,java_numbers,0,(jsize)numbers.len,numbers.ptr);jobjectArray output=NULL;if(java_metadata&&java_numbers&&!(*env)->ExceptionCheck(env)){jclass object=(*env)->FindClass(env,"java/lang/Object");if(object){output=(*env)->NewObjectArray(env,2,object,NULL);(*env)->DeleteLocalRef(env,object);}if(output){(*env)->SetObjectArrayElement(env,output,0,java_metadata);if(!(*env)->ExceptionCheck(env))(*env)->SetObjectArrayElement(env,output,1,java_numbers);}}if(java_metadata)(*env)->DeleteLocalRef(env,java_metadata);if(java_numbers)(*env)->DeleteLocalRef(env,java_numbers);bc_buf_free(metadata);bc_f64_buf_free(numbers);return (*env)->ExceptionCheck(env)?NULL:output;}
+ if(h->backend==BACKEND_RUST){
+  char args[2*(512*6+2)+192];size_t at=0;args[at++]='[';
+  size_t quoted=json_quote_utf8_n(args+at,sizeof(args)-at,kind,kind_length);free(kind);if(!quoted){free(identity);fail(env,"Native packet UTF-8 arguments");return NULL;}at+=quoted;args[at++]=',';
+  if(identity){quoted=json_quote_utf8_n(args+at,sizeof(args)-at,identity,identity_length);free(identity);if(!quoted){fail(env,"Native packet UTF-8 arguments");return NULL;}at+=quoted;}
+  else{memcpy(args+at,"null",4);at+=4;}
+  char *w=json_double(env,width),*htext=json_double(env,height);if(!w||!htext){free(w);free(htext);if(!(*env)->ExceptionCheck(env))fail(env,"Native packet UTF-8 arguments");return NULL;}
+  int n=snprintf(args+at,sizeof(args)-at,",%s,%s,%s]",w,htext,force?"true":"false");free(w);free(htext);if(n<0||(size_t)n>=sizeof(args)-at){fail(env,"Native packet UTF-8 arguments");return NULL;}at+=(size_t)n;
+  BcBuf metadata={0};BcF64Buf numbers={0};BcStatus status=bc_packet(h->rust,(const uint8_t*)args,at,&metadata,&numbers);if(status!=BC_OK){bc_f64_buf_free(numbers);rust_failure(h,status,metadata);return NULL;}if(metadata.len>1048576||numbers.len>8388608||(numbers.ptr&&(uintptr_t)numbers.ptr%_Alignof(double))){bc_buf_free(metadata);bc_f64_buf_free(numbers);fail(env,"Native packet Float64Array bounds/byte budget");return NULL;}jstring java_metadata=java_string_n(env,(const char*)metadata.ptr,metadata.len);jdoubleArray java_numbers=(*env)->NewDoubleArray(env,(jsize)numbers.len);if(java_numbers&&numbers.len)(*env)->SetDoubleArrayRegion(env,java_numbers,0,(jsize)numbers.len,numbers.ptr);jobjectArray output=NULL;if(java_metadata&&java_numbers&&!(*env)->ExceptionCheck(env)){jclass object=(*env)->FindClass(env,"java/lang/Object");if(object){output=(*env)->NewObjectArray(env,2,object,NULL);(*env)->DeleteLocalRef(env,object);}if(output){(*env)->SetObjectArrayElement(env,output,0,java_metadata);if(!(*env)->ExceptionCheck(env))(*env)->SetObjectArrayElement(env,output,1,java_numbers);}}if(java_metadata)(*env)->DeleteLocalRef(env,java_metadata);if(java_numbers)(*env)->DeleteLocalRef(env,java_numbers);bc_buf_free(metadata);bc_f64_buf_free(numbers);return (*env)->ExceptionCheck(env)?NULL:output;}
 #endif
 #if BAROCHART_WITH_QUICKJS
  JSContext *ctx=h->context;JSValue argv[]={JS_NewStringLen(ctx,kind,kind_length),identity?JS_NewStringLen(ctx,identity,identity_length):JS_NULL,JS_NewFloat64(ctx,width),JS_NewFloat64(ctx,height),JS_NewBool(ctx,force)};free(kind);free(identity);
@@ -254,7 +285,16 @@ JNIEXPORT void JNICALL Java_kr_coden_barochart_BaroChartColumns_writeSlice(JNIEn
 JNIEXPORT jbyteArray JNICALL Java_kr_coden_barochart_BaroChartEngine_indicatorSlice(JNIEnv *env,jclass cls,jlong handle,jstring id,jstring output,jint offset,jint count){
  (void)cls;AsterHost *h=enter(env,handle);if(!h){fail(env,"Engine closed");return NULL;}if(offset<0||count<1||count>262144||(int64_t)offset+count>4194304){fail(env,"Indicator byte slice bounds");return NULL;}char *identifier=utf8(env,id,512),*name=utf8(env,output,512);if(!identifier||!name){free(identifier);free(name);fail(env,"Indicator identifier UTF-8 failed");return NULL;}
 #if BAROCHART_WITH_RUST
- if(h->backend==BACKEND_RUST){free(identifier);free(name);size_t length=(size_t)count*sizeof(double);double *values=malloc(length);if(!values){fail(env,"Async copy allocation failed");return NULL;}static const uint8_t args[]="[]";BcBuf error={0};BcStatus status=bc_read_f64(h->rust,(const uint8_t*)"nativeIndicatorBuffer",21,args,2,values,(size_t)count,&error);if(status!=BC_OK){free(values);rust_failure(h,status,error);return NULL;}jbyteArray bytes=(*env)->NewByteArray(env,(jsize)length);if(bytes)(*env)->SetByteArrayRegion(env,bytes,0,(jsize)length,(const jbyte*)values);free(values);return (*env)->ExceptionCheck(env)?NULL:bytes;}
+ if(h->backend==BACKEND_RUST){
+  char args[2*(512*6+2)+96];size_t at=0;args[at++]='[';
+  size_t quoted=json_quote_utf8(args+at,sizeof(args)-at,identifier);free(identifier);if(!quoted){free(name);fail(env,"Indicator identifier UTF-8 failed");return NULL;}at+=quoted;args[at++]=',';
+  quoted=json_quote_utf8(args+at,sizeof(args)-at,name);free(name);if(!quoted){fail(env,"Indicator identifier UTF-8 failed");return NULL;}at+=quoted;
+  int n=snprintf(args+at,sizeof(args)-at,",%d,%d]",(int)offset,(int)count);if(n<0||(size_t)n>=sizeof(args)-at){fail(env,"Indicator byte slice bounds");return NULL;}at+=(size_t)n;
+  size_t length=(size_t)count*sizeof(double);double *values=malloc(length);if(!values){fail(env,"Async copy allocation failed");return NULL;}
+  BcBuf error={0};BcStatus status=bc_read_f64(h->rust,(const uint8_t*)"nativeIndicatorBuffer",21,(const uint8_t*)args,at,values,(size_t)count,&error);
+  if(status!=BC_OK){free(values);rust_failure(h,status,error);return NULL;}
+  jbyteArray bytes=(*env)->NewByteArray(env,(jsize)length);if(bytes)(*env)->SetByteArrayRegion(env,bytes,0,(jsize)length,(const jbyte*)values);free(values);return (*env)->ExceptionCheck(env)?NULL:bytes;
+ }
 #endif
 #if BAROCHART_WITH_QUICKJS
  JSContext *ctx=h->context;JSValue argv[]={JS_NewString(ctx,identifier),JS_NewString(ctx,name),JS_NewInt32(ctx,offset),JS_NewInt32(ctx,count)};free(identifier);free(name);JSValue value=typed_call(h,"nativeIndicatorBuffer",4,argv),buffer=JS_UNDEFINED;jbyteArray bytes=NULL;

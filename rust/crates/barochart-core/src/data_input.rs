@@ -4,14 +4,14 @@
 
 use barochart_js::error::JsError;
 use barochart_js::json::{JsObject, JsValue};
+use barochart_js::memory::{MemoryContext, MemoryGroup};
 use barochart_js::num::NumberDialect;
 use barochart_js::string::JsString;
 
-use crate::batch_options::{BatchOptions, snapshot_batch_options};
-use crate::coercion::js_to_number_with;
+use crate::batch_options::snapshot_batch_options_with_memory;
+use crate::coercion::js_to_number_scoped;
 use crate::data::{
-    Bar, BarStore, BatchEvent, ColumnInputs, Committed, DataEvent, DataEventValue, NumericColumn,
-    validate_bar,
+    Bar, BarStore, BatchEvent, ColumnInputs, Committed, DataEventValue, NumericColumn, validate_bar,
 };
 
 const FIELDS: [&str; 6] = ["time", "open", "high", "low", "close", "volume"];
@@ -50,6 +50,16 @@ pub enum DataInputError {
     },
 }
 
+enum InputEventKind {
+    Batch,
+    Reset,
+    Prepend,
+    Append,
+    Update,
+    Correction,
+    Unknown,
+}
+
 impl From<JsError> for DataInputError {
     fn from(value: JsError) -> Self {
         Self::Js(value)
@@ -62,8 +72,23 @@ pub fn set_data_input(
     input: &JsValue,
     _mode: DataInputMode,
 ) -> Result<Committed<DataEventValue>, DataInputError> {
-    let bars = bars_input(input, store.max_bars(), "OHLCV array required")?;
-    let committed = store.set_data(bars)?;
+    set_data_input_with_reply_gate(store, input, _mode, &mut || Ok(()))
+}
+
+/// 전체 bar 입력을 소유·검증한 뒤 고정 reply admission 직전에 게시한다.
+pub fn set_data_input_with_reply_gate(
+    store: &mut BarStore,
+    input: &JsValue,
+    _mode: DataInputMode,
+    gate: &mut dyn FnMut() -> Result<(), JsError>,
+) -> Result<Committed<DataEventValue>, DataInputError> {
+    let (bars, _snapshot_memory) = bars_input(
+        input,
+        store.max_bars(),
+        "OHLCV array required",
+        store.memory_context(),
+    )?;
+    let committed = store.set_data_with_reply_gate(bars, gate)?;
     Ok(map_value(committed, DataEventValue::None))
 }
 
@@ -75,16 +100,27 @@ pub fn set_columns_input(
     length: Option<&JsValue>,
     mode: DataInputMode,
 ) -> Result<Committed<DataEventValue>, DataInputError> {
+    set_columns_input_with_reply_gate(store, input, length, mode, &mut || Ok(()))
+}
+
+/// 숫자 열을 소유·검증한 뒤 고정 reply admission 직전에 게시한다.
+pub fn set_columns_input_with_reply_gate(
+    store: &mut BarStore,
+    input: &JsValue,
+    length: Option<&JsValue>,
+    mode: DataInputMode,
+    gate: &mut dyn FnMut() -> Result<(), JsError>,
+) -> Result<Committed<DataEventValue>, DataInputError> {
     match mode {
         DataInputMode::LegacyStore => {
             let requested = explicit_length(length, store.max_bars())?;
-            let owned = legacy_columns(input, requested, store.max_bars())?;
-            commit_columns(store, &owned, Some(owned.inferred_length))
+            let owned = legacy_columns(input, requested, store.max_bars(), store.memory_context())?;
+            commit_columns(store, &owned, Some(owned.inferred_length), gate)
         }
         DataInputMode::ApiFacade => {
-            let owned = api_columns(input)?;
+            let owned = api_columns(input, store.memory_context())?;
             let requested = explicit_length(length, store.max_bars())?;
-            commit_columns(store, &owned, requested)
+            commit_columns(store, &owned, requested, gate)
         }
     }
 }
@@ -95,44 +131,59 @@ pub fn apply_data_event_input(
     event: &JsValue,
     mode: DataInputMode,
 ) -> Result<Committed<DataEventValue>, DataInputError> {
-    let kind = event_kind(event)?;
-    match kind.as_str() {
-        "batch" => {
-            let events = property(event, "events");
-            apply_data_events_input(store, &events, None, mode)
+    apply_data_event_input_with_reply_gate(store, event, mode, &mut || Ok(()))
+}
+
+/// 단일 data event를 소유·검증한 뒤 고정 reply admission 직전에 게시한다.
+pub fn apply_data_event_input_with_reply_gate(
+    store: &mut BarStore,
+    event: &JsValue,
+    mode: DataInputMode,
+    gate: &mut dyn FnMut() -> Result<(), JsError>,
+) -> Result<Committed<DataEventValue>, DataInputError> {
+    match event_kind(event)? {
+        InputEventKind::Batch => {
+            let undefined = JsValue::Undefined;
+            let events = property_optional(event, "events").unwrap_or(&undefined);
+            apply_data_events_input_with_reply_gate(store, events, None, mode, gate)
         }
-        "reset" => {
-            let columns = property(event, "columns");
-            if js_truthy(&columns) {
-                let length = property(event, "length");
-                set_columns_input(store, &columns, Some(&length), mode)
+        InputEventKind::Reset => {
+            let undefined = JsValue::Undefined;
+            let columns = property_optional(event, "columns").unwrap_or(&undefined);
+            if js_truthy(columns) {
+                let length = property_optional(event, "length").unwrap_or(&undefined);
+                set_columns_input_with_reply_gate(store, columns, Some(length), mode, gate)
             } else {
-                let bars = property(event, "bars");
-                set_data_input(store, &bars, mode)
+                let bars = property_optional(event, "bars").unwrap_or(&undefined);
+                set_data_input_with_reply_gate(store, bars, mode, gate)
             }
         }
-        "prepend" => {
+        InputEventKind::Prepend => {
             let label = match mode {
                 DataInputMode::LegacyStore => "Prepend bars required",
                 DataInputMode::ApiFacade => "OHLCV array required",
             };
-            let bars = property(event, "bars");
-            prepend_input(store, &bars, label)
+            let undefined = JsValue::Undefined;
+            let bars = property_optional(event, "bars").unwrap_or(&undefined);
+            prepend_input(store, bars, label, gate)
         }
-        "append" => {
-            let bar = property(event, "bar");
-            let committed = store.append(read_bar(&bar)?)?;
+        InputEventKind::Append => {
+            let undefined = JsValue::Undefined;
+            let bar = property_optional(event, "bar").unwrap_or(&undefined);
+            let committed = store.append_with_reply_gate(read_bar(bar)?, gate)?;
             Ok(map_with(committed, DataEventValue::Index))
         }
-        "update" => {
-            let bar = property(event, "bar");
-            update_input(store, &bar)
+        InputEventKind::Update => {
+            let undefined = JsValue::Undefined;
+            let bar = property_optional(event, "bar").unwrap_or(&undefined);
+            update_input(store, bar, gate)
         }
-        "correction" => {
-            let bar = property(event, "bar");
-            correction_input(store, &bar)
+        InputEventKind::Correction => {
+            let undefined = JsValue::Undefined;
+            let bar = property_optional(event, "bar").unwrap_or(&undefined);
+            correction_input(store, bar, gate)
         }
-        _ => Err(type_error("Unknown data event").into()),
+        InputEventKind::Unknown => Err(type_error("Unknown data event").into()),
     }
 }
 
@@ -143,20 +194,32 @@ pub fn apply_data_events_input(
     options: Option<&JsValue>,
     mode: DataInputMode,
 ) -> Result<Committed<DataEventValue>, DataInputError> {
+    apply_data_events_input_with_reply_gate(store, events, options, mode, &mut || Ok(()))
+}
+
+/// Strict batch를 stage한 뒤 고정 reply admission 직전에 게시한다.
+pub fn apply_data_events_input_with_reply_gate(
+    store: &mut BarStore,
+    events: &JsValue,
+    options: Option<&JsValue>,
+    mode: DataInputMode,
+    gate: &mut dyn FnMut() -> Result<(), JsError>,
+) -> Result<Committed<DataEventValue>, DataInputError> {
     let default_options = JsValue::Object(JsObject::new());
-    let options = snapshot_batch_options(
+    let options = snapshot_batch_options_with_memory(
         match options {
             None | Some(JsValue::Undefined) => &default_options,
             Some(options) => options,
         },
         mode == DataInputMode::LegacyStore,
+        store.memory_context(),
     )?;
     let events = match mode {
-        DataInputMode::LegacyStore => legacy_batch_events(events)?,
-        DataInputMode::ApiFacade => api_batch_events(events)?,
+        DataInputMode::LegacyStore => legacy_batch_events(events, store.memory_context())?,
+        DataInputMode::ApiFacade => api_batch_events(events, store.memory_context())?,
     };
     let committed = store
-        .apply_events(&events, &options)
+        .apply_events_with_reply_gate(&events.values, &options, gate)
         .map_err(batch_store_error)?;
     Ok(map_with(committed, DataEventValue::Batch))
 }
@@ -164,12 +227,19 @@ pub fn apply_data_events_input(
 struct OwnedColumns {
     values: [Vec<f64>; 6],
     inferred_length: usize,
+    _memory: [MemoryGroup; 6],
+}
+
+struct OwnedBatchEvents {
+    values: Vec<BatchEvent>,
+    _memory: MemoryGroup,
 }
 
 fn legacy_columns(
     input: &JsValue,
     explicit_length: Option<usize>,
     max_bars: usize,
+    memory: &MemoryContext,
 ) -> Result<OwnedColumns, DataInputError> {
     let sources: [Option<&JsValue>; 6] = FIELDS.map(|key| property_optional(input, key));
     let length = match explicit_length {
@@ -187,8 +257,7 @@ fn legacy_columns(
             return Err(type_error("Numeric column arrays required").into());
         }
     }
-    let mut values: [Vec<f64>; 6] = std::array::from_fn(|_| Vec::with_capacity(length));
-    for (slot, source) in sources.into_iter().enumerate() {
+    for source in sources {
         let Some(JsValue::Array(source)) = source else {
             unreachable!()
         };
@@ -199,40 +268,114 @@ fn legacy_columns(
             if !value.is_finite() {
                 return Err(type_error("Numeric column values required").into());
             }
-            values[slot].push(*value);
         }
+    }
+    let (mut values, memory) = numeric_column_snapshots(length, memory)?;
+    for (slot, source) in sources.into_iter().enumerate() {
+        let Some(JsValue::Array(source)) = source else {
+            unreachable!()
+        };
+        values[slot].extend(source[..length].iter().map(|value| {
+            let JsValue::Number(value) = value else {
+                unreachable!("numeric columns were validated before allocation")
+            };
+            *value
+        }));
     }
     Ok(OwnedColumns {
         values,
         inferred_length: length,
+        _memory: memory,
     })
 }
 
-fn api_columns(input: &JsValue) -> Result<OwnedColumns, DataInputError> {
-    let mut values: [Vec<f64>; 6] = std::array::from_fn(|_| Vec::new());
-    for (slot, key) in FIELDS.into_iter().enumerate() {
-        let Some(JsValue::Array(source)) = property_optional(input, key) else {
+fn api_columns(input: &JsValue, memory: &MemoryContext) -> Result<OwnedColumns, DataInputError> {
+    let sources = FIELDS.map(|key| property_optional(input, key));
+    for source in sources {
+        let Some(JsValue::Array(source)) = source else {
             return Err(type_error("Values must be Float64Array or a JSON array").into());
         };
-        values[slot].reserve(source.len());
         for value in source {
             match value {
-                JsValue::Null => values[slot].push(f64::NAN),
-                JsValue::Number(value) if value.is_finite() => values[slot].push(*value),
+                JsValue::Null => {}
+                JsValue::Number(value) if value.is_finite() => {}
                 _ => return Err(type_error("Finite numbers or null gaps required").into()),
             }
         }
     }
+    let inferred_length = match sources[0] {
+        Some(JsValue::Array(source)) => source.len(),
+        _ => unreachable!("column sources were validated"),
+    };
+    let capacities = sources.map(|source| match source {
+        Some(JsValue::Array(source)) => source.len(),
+        _ => unreachable!("column sources were validated"),
+    });
+    let (mut values, memory) = numeric_column_snapshots_with_capacities(capacities, memory)?;
+    for (slot, source) in sources.into_iter().enumerate() {
+        let Some(JsValue::Array(source)) = source else {
+            unreachable!("column sources were validated")
+        };
+        values[slot].extend(source.iter().map(|value| match value {
+            JsValue::Null => f64::NAN,
+            JsValue::Number(value) => *value,
+            _ => unreachable!("column values were validated before allocation"),
+        }));
+    }
     Ok(OwnedColumns {
-        inferred_length: values[0].len(),
+        inferred_length,
         values,
+        _memory: memory,
     })
+}
+
+fn numeric_column_snapshots(
+    capacity: usize,
+    memory: &MemoryContext,
+) -> Result<([Vec<f64>; 6], [MemoryGroup; 6]), DataInputError> {
+    numeric_column_snapshots_with_capacities([capacity; 6], memory)
+}
+
+fn numeric_column_snapshots_with_capacities(
+    capacities: [usize; 6],
+    memory: &MemoryContext,
+) -> Result<([Vec<f64>; 6], [MemoryGroup; 6]), DataInputError> {
+    let (time, time_memory) = memory
+        .try_vec_capacity(capacities[0])
+        .map_err(memory_input_error)?;
+    let (open, open_memory) = memory
+        .try_vec_capacity(capacities[1])
+        .map_err(memory_input_error)?;
+    let (high, high_memory) = memory
+        .try_vec_capacity(capacities[2])
+        .map_err(memory_input_error)?;
+    let (low, low_memory) = memory
+        .try_vec_capacity(capacities[3])
+        .map_err(memory_input_error)?;
+    let (close, close_memory) = memory
+        .try_vec_capacity(capacities[4])
+        .map_err(memory_input_error)?;
+    let (volume, volume_memory) = memory
+        .try_vec_capacity(capacities[5])
+        .map_err(memory_input_error)?;
+    Ok((
+        [time, open, high, low, close, volume],
+        [
+            time_memory,
+            open_memory,
+            high_memory,
+            low_memory,
+            close_memory,
+            volume_memory,
+        ],
+    ))
 }
 
 fn commit_columns(
     store: &mut BarStore,
     owned: &OwnedColumns,
     length: Option<usize>,
+    gate: &mut dyn FnMut() -> Result<(), JsError>,
 ) -> Result<Committed<DataEventValue>, DataInputError> {
     let inputs = ColumnInputs {
         time: NumericColumn::F64(&owned.values[0]),
@@ -242,7 +385,7 @@ fn commit_columns(
         close: NumericColumn::F64(&owned.values[4]),
         volume: NumericColumn::F64(&owned.values[5]),
     };
-    let committed = store.set_columns(&inputs, length)?;
+    let committed = store.set_columns_with_reply_gate(&inputs, length, gate)?;
     Ok(map_value(committed, DataEventValue::None))
 }
 
@@ -250,12 +393,13 @@ fn prepend_input(
     store: &mut BarStore,
     input: &JsValue,
     array_error: &str,
+    gate: &mut dyn FnMut() -> Result<(), JsError>,
 ) -> Result<Committed<DataEventValue>, DataInputError> {
     let JsValue::Array(values) = input else {
         return Err(type_error(array_error).into());
     };
     if values.is_empty() {
-        let committed = store.prepend(Vec::new())?;
+        let committed = store.prepend_with_reply_gate(Vec::new(), gate)?;
         return Ok(map_value(committed, DataEventValue::None));
     }
     if values.len() + store.length() > store.max_bars() {
@@ -264,9 +408,11 @@ fn prepend_input(
     if store.length() != 0 {
         let last = values.last().expect("nonempty prepend");
         let raw_time = raw_time_value(last, "bars[bars.length - 1].time")?;
-        let time = js_to_number_with(
+        let mut scope = store.memory_context().scope();
+        let time = js_to_number_scoped(
             raw_time.unwrap_or(&JsValue::Undefined),
             NumberDialect::PLATFORM,
+            &mut scope,
         )?;
         if time >= store.columns().time[0] {
             return Err(
@@ -274,14 +420,19 @@ fn prepend_input(
             );
         }
     }
-    let bars: Vec<Bar> = values.iter().map(bar_from_any).collect();
-    let committed = store.prepend(bars)?;
+    let (mut bars, _snapshot_memory) = store
+        .memory_context()
+        .try_vec_capacity(values.len())
+        .map_err(memory_input_error)?;
+    bars.extend(values.iter().map(bar_from_any));
+    let committed = store.prepend_with_reply_gate(bars, gate)?;
     Ok(map_value(committed, DataEventValue::None))
 }
 
 fn update_input(
     store: &mut BarStore,
     value: &JsValue,
+    gate: &mut dyn FnMut() -> Result<(), JsError>,
 ) -> Result<Committed<DataEventValue>, DataInputError> {
     if store.length() == 0 {
         return Err(range_error("Update is only the current bar").into());
@@ -290,22 +441,24 @@ fn update_input(
     if !matches!(raw_time, Some(time) if time == store.columns().time[store.length() - 1]) {
         return Err(range_error("Update is only the current bar").into());
     }
-    let committed =
-        store.apply_event(DataEvent::Update(read_bar(value)?), &BatchOptions::empty())?;
-    Ok(committed)
+    let committed = store.update_with_reply_gate(store.length() - 1, read_bar(value)?, gate)?;
+    Ok(map_value(committed, DataEventValue::None))
 }
 
 fn correction_input(
     store: &mut BarStore,
     value: &JsValue,
+    gate: &mut dyn FnMut() -> Result<(), JsError>,
 ) -> Result<Committed<DataEventValue>, DataInputError> {
     let raw_time = raw_time_value(value, "event.bar.time")?;
     if store.length() == 0 {
         return Err(range_error("Correction requires an existing timestamp").into());
     }
-    let time = js_to_number_with(
+    let mut scope = store.memory_context().scope();
+    let time = js_to_number_scoped(
         raw_time.unwrap_or(&JsValue::Undefined),
         NumberDialect::PLATFORM,
+        &mut scope,
     )?;
     let index = store.lower_bound(time);
     if index == store.length()
@@ -313,11 +466,8 @@ fn correction_input(
     {
         return Err(range_error("Correction requires an existing timestamp").into());
     }
-    let committed = store.apply_event(
-        DataEvent::Correction(read_bar(value)?),
-        &BatchOptions::empty(),
-    )?;
-    Ok(committed)
+    let committed = store.update_with_reply_gate(index, read_bar(value)?, gate)?;
+    Ok(map_value(committed, DataEventValue::None))
 }
 
 fn raw_property_time(
@@ -354,14 +504,24 @@ fn bars_input(
     input: &JsValue,
     max_bars: usize,
     array_error: &str,
-) -> Result<Vec<Bar>, DataInputError> {
+    memory: &MemoryContext,
+) -> Result<(Vec<Bar>, MemoryGroup), DataInputError> {
     let JsValue::Array(values) = input else {
         return Err(type_error(array_error).into());
     };
     if values.len() > max_bars {
         return Err(bar_count_error(max_bars).into());
     }
-    values.iter().map(read_bar).collect()
+    for value in values {
+        read_bar(value)?;
+    }
+    let (mut bars, group) = memory
+        .try_vec_capacity(values.len())
+        .map_err(memory_input_error)?;
+    for value in values {
+        bars.push(read_bar(value)?);
+    }
+    Ok((bars, group))
 }
 
 fn read_bar(value: &JsValue) -> Result<Bar, DataInputError> {
@@ -404,21 +564,26 @@ fn strict_bar(value: &JsValue, label: &str) -> Result<Bar, DataInputError> {
     Ok(bar_from_object(object))
 }
 
-fn legacy_batch_events(value: &JsValue) -> Result<Vec<BatchEvent>, DataInputError> {
+fn legacy_batch_events(
+    value: &JsValue,
+    memory: &MemoryContext,
+) -> Result<OwnedBatchEvents, DataInputError> {
     let JsValue::Array(events) = value else {
         return Err(type_error("Data batch array required").into());
     };
     if events.is_empty() || events.len() > 4096 {
         return Err(range_error("Data batch event count must be 1..4096").into());
     }
-    let mut output = Vec::with_capacity(events.len());
+    let (mut output, memory) = memory
+        .try_vec_capacity(events.len())
+        .map_err(memory_input_error)?;
     for value in events {
         let event = strict_record(value, &["kind", "bar"], "Data batch event", true)?;
         let kind = string_value(event.get(&JsString::from_str("kind")));
-        let kind = match kind.as_deref() {
-            Some("append") => 0,
-            Some("update") => 1,
-            Some("correction") => 2,
+        let kind = match kind {
+            Some(value) if text_eq(value, "append") => 0,
+            Some(value) if text_eq(value, "update") => 1,
+            Some(value) if text_eq(value, "correction") => 2,
             _ => {
                 return Err(type_error(
                     "Data batch event kind must be append, update or correction",
@@ -437,28 +602,37 @@ fn legacy_batch_events(value: &JsValue) -> Result<Vec<BatchEvent>, DataInputErro
             _ => BatchEvent::Correction(bar),
         });
     }
-    Ok(output)
+    Ok(OwnedBatchEvents {
+        values: output,
+        _memory: memory,
+    })
 }
 
-fn api_batch_events(value: &JsValue) -> Result<Vec<BatchEvent>, DataInputError> {
+fn api_batch_events(
+    value: &JsValue,
+    memory: &MemoryContext,
+) -> Result<OwnedBatchEvents, DataInputError> {
     let JsValue::Array(events) = value else {
         return Err(ingestion_error("1–4096 ordered events required").into());
     };
     if events.is_empty() || events.len() > 4096 {
         return Err(ingestion_error("1–4096 ordered events required").into());
     }
-    let mut output = Vec::with_capacity(events.len());
+    let (mut output, memory) = memory
+        .try_vec_capacity(events.len())
+        .map_err(memory_input_error)?;
     for value in events {
         let event = ingestion_record(value, &["kind", "bar"], "Event")?;
         let kind = string_value(event.get(&JsString::from_str("kind")));
-        let kind = match kind.as_deref() {
-            Some("append") => 0,
-            Some("update") => 1,
-            Some("correction") => 2,
+        let kind = match kind {
+            Some(value) if text_eq(value, "append") => 0,
+            Some(value) if text_eq(value, "update") => 1,
+            Some(value) if text_eq(value, "correction") => 2,
             _ => return Err(ingestion_error("Ordered append/update/correction required").into()),
         };
-        let bar_value = property(value, "bar");
-        let bar_object = ingestion_record(&bar_value, &FIELDS, "OHLCV")?;
+        let undefined = JsValue::Undefined;
+        let bar_value = property_optional(value, "bar").unwrap_or(&undefined);
+        let bar_object = ingestion_record(bar_value, &FIELDS, "OHLCV")?;
         let bar = bar_from_object(bar_object);
         if let Err(error) = validate_bar(&bar, f64::NEG_INFINITY) {
             return Err(ingestion_error(&error.message.to_string_lossy()).into());
@@ -469,7 +643,10 @@ fn api_batch_events(value: &JsValue) -> Result<Vec<BatchEvent>, DataInputError> 
             _ => BatchEvent::Correction(bar),
         });
     }
-    Ok(output)
+    Ok(OwnedBatchEvents {
+        values: output,
+        _memory: memory,
+    })
 }
 
 fn strict_record<'a>(
@@ -517,16 +694,25 @@ fn ingestion_record<'a>(
     Ok(object)
 }
 
-fn event_kind(value: &JsValue) -> Result<String, DataInputError> {
-    property_optional(value, "kind")
+fn event_kind(value: &JsValue) -> Result<InputEventKind, DataInputError> {
+    let value = property_optional(value, "kind")
         .and_then(|value| string_value(Some(value)))
-        .ok_or_else(|| type_error("Data event kind required").into())
-}
-
-fn property(value: &JsValue, key: &str) -> JsValue {
-    property_optional(value, key)
-        .cloned()
-        .unwrap_or(JsValue::Undefined)
+        .ok_or_else(|| DataInputError::from(type_error("Data event kind required")))?;
+    Ok(if text_eq(value, "batch") {
+        InputEventKind::Batch
+    } else if text_eq(value, "reset") {
+        InputEventKind::Reset
+    } else if text_eq(value, "prepend") {
+        InputEventKind::Prepend
+    } else if text_eq(value, "append") {
+        InputEventKind::Append
+    } else if text_eq(value, "update") {
+        InputEventKind::Update
+    } else if text_eq(value, "correction") {
+        InputEventKind::Correction
+    } else {
+        InputEventKind::Unknown
+    })
 }
 
 fn property_optional<'a>(value: &'a JsValue, key: &str) -> Option<&'a JsValue> {
@@ -561,9 +747,9 @@ fn number_or_nan(value: Option<&JsValue>) -> f64 {
     }
 }
 
-fn string_value(value: Option<&JsValue>) -> Option<String> {
+fn string_value(value: Option<&JsValue>) -> Option<&JsString> {
     match value {
-        Some(JsValue::String(value)) => Some(value.to_string_lossy()),
+        Some(JsValue::String(value)) => Some(value),
         _ => None,
     }
 }
@@ -626,4 +812,8 @@ fn batch_store_error(mut error: JsError) -> DataInputError {
         error.code = Some("STORE_BUDGET".to_owned());
     }
     DataInputError::Js(error)
+}
+
+fn memory_input_error(error: barochart_js::memory::MemoryFailure) -> DataInputError {
+    DataInputError::Js(error.into_js_error())
 }

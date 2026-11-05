@@ -2,6 +2,8 @@
 
 BaroChart draws financial charts natively: the chart core runs in JavaScriptCore and the UI is drawn with Core Graphics. It is not a WebView. Your app owns the data and the engine; BaroChart never fetches market data. [한국어](IOS-GUIDE.ko.md)
 
+The JavaScript backend remains the default. The local, explicit Rust selector and its current limitations are documented in [Native Rust backend](RUST-BACKEND.md).
+
 ## Support
 
 | Item | Value |

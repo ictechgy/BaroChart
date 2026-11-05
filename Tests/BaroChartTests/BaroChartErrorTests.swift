@@ -2,7 +2,7 @@ import XCTest
 @testable import BaroChart
 
 /// 저수준 오류가 타입 API 오류(BaroChartError)로 일관되게 바뀌는지 확인한다.
-final class BaroChartErrorTests: XCTestCase {
+final class BaroChartErrorTests: BackendSelectedTestCase {
     /// 던진 오류의 코드를 꺼낸다(BaroChartError가 아니면 nil)
     private func code(_ body: () throws -> Void) -> BaroChartError.Code? {
         do { try body() } catch { return (error as? BaroChartError)?.code }

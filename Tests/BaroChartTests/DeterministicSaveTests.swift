@@ -17,7 +17,7 @@ import XCTest
 /// - 스타일: `color, width, fill, font` / 앵커: `time, price`
 /// - 패널·시리즈·테마·심볼: 검증기 허용 목록 순서 / 지표 params: 정의가 선언한 순서
 @MainActor
-final class DeterministicSaveTests: XCTestCase {
+final class DeterministicSaveTests: BackendSelectedTestCase {
     /// 첫 봉 시각(UTC epoch ms). 레거시 픽스처와 같은 시각이다.
     private static let start = 1_700_000_000_000.0
 

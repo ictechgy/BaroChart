@@ -2,7 +2,8 @@
 
 use barochart_core::Engine;
 use barochart_core::data_input::{
-    DataInputError, DataInputMode, NullishBase, apply_data_event_input, set_data_input,
+    DataInputError, DataInputMode, NullishBase, apply_data_event_input_with_reply_gate,
+    set_data_input_with_reply_gate,
 };
 use barochart_js::error::JsError;
 use barochart_js::json::JsValue;
@@ -22,12 +23,30 @@ fn property_error(base: NullishBase, _property: &str, _expression: &str) -> JsEr
     JsError::new("TypeError", JsString::from_str(&message))
 }
 
-fn missing_store() -> JsError {
+pub(super) fn missing_store() -> JsError {
     property_error(
         NullishBase::Undefined,
         "store",
         "globalThis.nativeModel.store",
     )
+}
+
+pub(super) fn missing_drawings() -> JsError {
+    property_error(
+        NullishBase::Undefined,
+        "drawings",
+        "globalThis.nativeModel.drawings",
+    )
+}
+
+pub(super) fn missing_native_model() -> JsError {
+    #[cfg(target_os = "android")]
+    let message = "'nativeModel' is not defined";
+    #[cfg(all(not(target_os = "android"), target_vendor = "apple"))]
+    let message = "Can't find variable: nativeModel";
+    #[cfg(all(not(target_os = "android"), not(target_vendor = "apple")))]
+    let message = "nativeModel is not defined";
+    JsError::new("ReferenceError", JsString::from_str(message))
 }
 
 pub(super) fn input_error(error: DataInputError) -> JsError {
@@ -52,24 +71,64 @@ pub(super) fn missing_native_api() -> JsError {
 }
 
 pub(crate) fn native_set_data(engine: &mut Engine, args: &[JsValue]) -> Result<JsValue, JsError> {
-    let data = engine.data_state_mut().ok_or_else(missing_store)?;
-    set_data_input(
-        data.store_mut(),
-        args.first().unwrap_or(&JsValue::Undefined),
-        DataInputMode::LegacyStore,
-    )
-    .map_err(input_error)?;
-    // M4가 같은 commit에 view/indicator/model 내부 invalidation을 연결한다.
+    native_set_data_with_reply_gate(engine, args, &mut || Ok(()))
+}
+
+pub(crate) fn native_set_data_with_reply_gate(
+    engine: &mut Engine,
+    args: &[JsValue],
+    gate: &mut dyn FnMut() -> Result<(), JsError>,
+) -> Result<JsValue, JsError> {
+    let chart = engine.chart_mut().ok_or_else(missing_store)?;
+    let mut publication = None;
+    let mut explicit_fit = None;
+    let committed = {
+        let (model, store) = chart.fixed_reply_data_parts();
+        set_data_input_with_reply_gate(
+            store,
+            args.first().unwrap_or(&JsValue::Undefined),
+            DataInputMode::LegacyStore,
+            &mut || {
+                publication = Some(model.prepare_store_change_publication());
+                explicit_fit = Some(model.prepare_store_change_publication());
+                gate()
+            },
+        )
+        .map_err(input_error)?
+    };
+    chart.commit_data_change_with_publication(committed, publication);
+    let fit = chart.model().prepare_fit_with_store_publication(
+        chart.data().store(),
+        explicit_fit.expect("setData always publishes a reset"),
+    );
+    chart.model_mut().publish_prepared_view(fit);
     Ok(JsValue::Undefined)
 }
 
 pub(crate) fn native_data_event(engine: &mut Engine, args: &[JsValue]) -> Result<JsValue, JsError> {
-    let data = engine.data_state_mut().ok_or_else(missing_store)?;
-    apply_data_event_input(
-        data.store_mut(),
-        args.first().unwrap_or(&JsValue::Undefined),
-        DataInputMode::LegacyStore,
-    )
-    .map_err(input_error)?;
+    native_data_event_with_reply_gate(engine, args, &mut || Ok(()))
+}
+
+pub(crate) fn native_data_event_with_reply_gate(
+    engine: &mut Engine,
+    args: &[JsValue],
+    gate: &mut dyn FnMut() -> Result<(), JsError>,
+) -> Result<JsValue, JsError> {
+    let chart = engine.chart_mut().ok_or_else(missing_store)?;
+    let mut publication = None;
+    let committed = {
+        let (model, store) = chart.fixed_reply_data_parts();
+        apply_data_event_input_with_reply_gate(
+            store,
+            args.first().unwrap_or(&JsValue::Undefined),
+            DataInputMode::LegacyStore,
+            &mut || {
+                publication = Some(model.prepare_store_change_publication());
+                gate()
+            },
+        )
+        .map_err(input_error)?
+    };
+    chart.commit_data_change_with_publication(committed, publication);
     Ok(JsValue::Undefined)
 }

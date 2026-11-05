@@ -4,6 +4,41 @@ import JavaScriptCore
 @testable import BaroChart
 
 final class RustRuntimeTests: XCTestCase {
+    func testCanonicalEmptyResourceStatusesKeepTheirPlatformErrorClass() {
+        let cases: [(UInt32, String)] = [(7, "InternalError: out of memory"), (8, "RangeError: Out of memory")]
+        for (status, expected) in cases {
+            guard case .rejected(let error) = BaroChartRustStatusDecoder.outcome(status: status, value: nil),
+                  case .javaScript(let message)? = error as? BaroChartLowLevelError else {
+                return XCTFail("Resource status must keep its fixed platform error")
+            }
+            XCTAssertEqual(message, expected)
+        }
+    }
+
+    func testGenericNativeIndicatorCallReturnsAFloat64Array() throws {
+        let engine = try BaroChartEngine(options: BaroChartEngineOptions(), backend: .rust)
+        defer {try? engine.close()}
+        _ = try engine.call("nativeInit", [32, [:] as [String: Any]])
+        _ = try engine.addIndicator("s", "sma", ["period": 3])
+        let values = try engine.call("nativeIndicatorBuffer", ["s", "value", -0.0, 4])
+        XCTAssertEqual(values.forProperty("constructor")?.forProperty("name")?.toString(), "Float64Array")
+        XCTAssertEqual(values.forProperty("length")?.toInt32(), 4)
+        XCTAssertTrue(try XCTUnwrap(values.atIndex(0)).toDouble().isNaN)
+        XCTAssertTrue(try XCTUnwrap(values.atIndex(2)).toDouble().isFinite)
+        XCTAssertEqual(values.invokeMethod("subarray", withArguments: [1, 3])?.forProperty("length")?.toInt32(), 2)
+    }
+
+    func testGenericPacketCallKeepsItsFloat64NumberBuffer() throws {
+        let engine = try BaroChartEngine(options: BaroChartEngineOptions(), backend: .rust)
+        defer {try? engine.close()}
+        _ = try engine.call("nativeInit", [16, [:] as [String: Any]])
+        let packet = try engine.call("nativeScenePacket", ["scene", NSNull(), 320, 240, false])
+        XCTAssertEqual(packet.forProperty("metadata")?.isString, true)
+        let numbers = try XCTUnwrap(packet.forProperty("numbers"))
+        XCTAssertEqual(numbers.forProperty("constructor")?.forProperty("name")?.toString(), "Float64Array")
+        XCTAssertGreaterThan(try XCTUnwrap(numbers.forProperty("length")).toInt32(), 0)
+    }
+
     func testRustBusyStatusMapsToTransientUnavailableInsteadOfClosed() {
         let outcome = BaroChartRustStatusDecoder.outcome(status: 5, value: nil) // BC_BUSY
         guard case .rejected(let error) = outcome else {return XCTFail("BC_BUSY must be a host rejection")}
@@ -48,6 +83,23 @@ final class RustRuntimeTests: XCTestCase {
         _ = try engine.call("nativeReleaseDataIngestion")
         let closed = try engine.call("nativeDataIngestionCommand", ["dataIngestionStats"])
         XCTAssertEqual(closed.forProperty("error")?.forProperty("code")?.toString(), "CLOSED")
+    }
+
+    func testNativeIndicatorF64ReadsActualSliceAndKeepsWarmupNan() throws {
+        let runtime = try XCTUnwrap(BaroChartRustCoreRuntime())
+        _ = try runtime.invoke("nativeInit", [32, [:] as [String: Any]])
+        _ = try runtime.invoke("nativeCommand", ["addIndicator", ["ema", "ema", ["period": 3]] as [Any]])
+        var values = [Double](repeating: 123, count: 4)
+        try values.withUnsafeMutableBytes { bytes in
+            try runtime.readFloat64("nativeIndicatorBuffer", ["ema", "value", 0, 4], into: bytes.baseAddress!, count: 4)
+        }
+        XCTAssertTrue(values[0].isNaN); XCTAssertTrue(values[1].isNaN)
+        XCTAssertTrue(values[2].isFinite); XCTAssertTrue(values[3].isFinite)
+        let previous = values.map(\.bitPattern)
+        XCTAssertThrowsError(try values.withUnsafeMutableBytes { bytes in
+            try runtime.readFloat64("nativeIndicatorBuffer", ["ema", "value", 31, 4], into: bytes.baseAddress!, count: 4)
+        })
+        XCTAssertEqual(values.map(\.bitPattern), previous)
     }
 
     func testDecodedUTF16StringKeepsTheCoreStringContract() throws {
@@ -115,14 +167,14 @@ final class RustRuntimeTests: XCTestCase {
         defer {BaroChartTraceSettings.directory = nil;try? FileManager.default.removeItem(at: directory)}
         let engine = try BaroChartEngine(options: nil, runtimeBackend: .rust)
         XCTAssertEqual(try engine.call("nativeInit", [3]).toInt32(), 3)
-        XCTAssertThrowsError(try engine.fit())
+        XCTAssertThrowsError(try engine.call("nativeView", [2, 1]))
         try engine.close()
         XCTAssertTrue(BaroChartTraceSettings.failuresForTesting.isEmpty)
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
         XCTAssertEqual(files.count, 1)
         let text = try String(contentsOf: files[0], encoding: .utf8)
         XCTAssertTrue(text.contains("nativeInit"))
-        XCTAssertTrue(text.contains("UnavailableError"))
+        XCTAssertTrue(text.contains("RangeError"))
     }
 
     func testBCJSONEncoderPreservesNumericKindsAndSortsKeysByUTF16() throws {
@@ -151,13 +203,19 @@ final class RustRuntimeTests: XCTestCase {
         let engine = try BaroChartEngine(options: nil, runtimeBackend: .rust)
         defer {try? engine.close()}
         XCTAssertFalse(engine.isClosed)
-        let typed = try XCTUnwrap(failure {try engine.fit()})
-        XCTAssertEqual(typed.code, .unavailable)
-        XCTAssertTrue(typed.message.contains("nativeCommand"), typed.message)
-        for name in ["nativeSceneJSON", "nativeAsyncBegin", "nativeSelfTest"] {
+        XCTAssertNoThrow(try engine.fit())
+        let rejected = ["nativeWorkspaceTargetDispose", "nativeWorkspaceSourceBuffer", "nativeWorkspaceSourceDispose",
+                        "nativeAsyncUI", "nativeRegisterIndicatorSource", "nativeAnalysisDemo", "nativeAnalysisReload",
+                        "nativeStudyVerification", "nativePublicationOrderSelfTest", "nativeSelfTest", "nativeExtendedSelfTest",
+                        "nativeHardeningSelfTest", "nativeComparisonDemo", "nativeComparisonReadout", "nativeComparisonAction",
+                        "nativeAxesSelfTest", "nativeParamsTargetDispose"]
+        for name in rejected {
             let lowLevel = try XCTUnwrap(failure {try engine.call(name)})
             XCTAssertEqual(lowLevel.code, .unavailable)
-            XCTAssertTrue(lowLevel.message.contains(name), lowLevel.message)
+            let expected = name == "nativeRegisterIndicatorSource"
+                ? "Indicator source registration requires the javaScript backend"
+                : "\(name) is not available in the Rust backend"
+            XCTAssertEqual(lowLevel.message, expected)
         }
     }
 

@@ -1,11 +1,13 @@
 use barochart_core::checkpoint_codec;
 
 use barochart_js::json::{JsObject, JsValue, JsonMode, parse_json_utf16, stringify_json};
+use barochart_js::memory::{MemoryAccount, MemoryScope, OomStyle};
 use barochart_js::num::NumberDialect;
 use barochart_js::string::JsString;
 use checkpoint_codec::{
-    safe_checkpoint_parse_with as safe_checkpoint_parse,
-    safe_checkpoint_stringify_with as safe_checkpoint_stringify, safe_checkpoint_stringify_with,
+    safe_checkpoint_parse_scoped, safe_checkpoint_parse_with as safe_checkpoint_parse,
+    safe_checkpoint_stringify_scoped, safe_checkpoint_stringify_with as safe_checkpoint_stringify,
+    safe_checkpoint_stringify_with,
 };
 
 fn value(text: &str) -> JsValue {
@@ -330,4 +332,47 @@ fn checkpoint_stringify_rejects_undefined_and_lone_surrogates() {
         error(safe_checkpoint_stringify(&nested, NumberDialect::Ecma)),
         ("TypeError".into(), "Checkpoint unsupported value".into())
     );
+}
+
+#[test]
+fn scoped_checkpoint_codec_is_bit_equal_fallible_and_releases_temporaries() {
+    let input = JsValue::Array(
+        (0..1_000)
+            .map(|index| {
+                JsValue::Array(vec![
+                    JsValue::Number(index as f64),
+                    JsValue::Number(f64::NAN),
+                    JsValue::String(JsString::from_str("checkpoint")),
+                ])
+            })
+            .collect(),
+    );
+    let limited = MemoryAccount::new(512, OomStyle::InternalErrorLowercase);
+    {
+        let mut scope = MemoryScope::new(&limited);
+        let error =
+            safe_checkpoint_stringify_scoped(&input, NumberDialect::Ecma, &mut scope).unwrap_err();
+        assert_eq!(error.code.as_deref(), Some("__BAROCHART_OOM_LIMIT__"));
+    }
+    assert_eq!(limited.snapshot().requested_live_bytes, 0);
+
+    let account = MemoryAccount::new(4 << 20, OomStyle::InternalErrorLowercase);
+    {
+        let mut scope = MemoryScope::new(&account);
+        let encoded =
+            safe_checkpoint_stringify_scoped(&input, NumberDialect::Ecma, &mut scope).unwrap();
+        assert_eq!(
+            encoded,
+            safe_checkpoint_stringify(&input, NumberDialect::Ecma).unwrap()
+        );
+        let decoded = safe_checkpoint_parse_scoped(
+            &JsValue::String(encoded),
+            NumberDialect::Ecma,
+            &mut scope,
+        )
+        .unwrap();
+        assert_eq!(text(&decoded), text(&input));
+        assert!(scope.requested_bytes() > 0);
+    }
+    assert_eq!(account.snapshot().requested_live_bytes, 0);
 }

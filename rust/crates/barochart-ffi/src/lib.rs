@@ -5,10 +5,12 @@
 
 #![warn(missing_docs)]
 
+#[cfg(not(target_arch = "wasm32"))]
+use std::alloc::{Layout, alloc, dealloc};
 use std::cell::UnsafeCell;
 use std::collections::BTreeMap;
 use std::ffi::c_void;
-use std::mem::{align_of, size_of};
+use std::mem::{ManuallyDrop, align_of, size_of};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
 use std::slice;
@@ -33,9 +35,17 @@ unsafe extern "C" {
     fn host_release(host_id: u32);
 }
 
+use barochart_core::native_runtime::NativeParamsStatusLedger;
 use barochart_core::{Engine, Host, HostError};
 use barochart_js::error::JsError;
-use barochart_js::json::{JsObject, JsValue, JsonMode, parse_json, stringify_json};
+use barochart_js::json::{
+    JsObject, JsValue, JsonFailure, JsonMode, parse_json_scoped, stringify_json_scoped,
+};
+use barochart_js::memory::{
+    MemoryAccount, MemoryContext, MemoryFailure, MemoryLease, MemoryScope, OomStyle,
+    oom_style_from_error,
+};
+use barochart_js::num::NumberDialect;
 use barochart_js::string::JsString;
 
 /// 무손실 BCJSON 입력과 출력을 선택하는 플래그다.
@@ -79,6 +89,10 @@ pub enum BcStatus {
     BC_BUSY = 5,
     /// 포인터·UTF-8·JSON·플래그 같은 전송 계약이 틀렸다.
     BC_INVALID = 6,
+    /// 제한된 엔진의 requested-byte 한도 또는 allocation이 실패했다.
+    BC_OOM_LIMIT = 7,
+    /// 무제한 엔진의 system allocation이 실패했다.
+    BC_OOM_SYSTEM = 8,
 }
 
 /// Rust가 할당한 바이트 버퍼다.
@@ -127,6 +141,16 @@ impl Default for BcF64Buf {
     }
 }
 
+/// 관찰형 typed write의 실제 target 길이와 복사 여부다.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BcF64WriteReceipt {
+    /// Core가 한 번 handout한 실제 `double` 원소 수다.
+    pub actual_count: usize,
+    /// Host source가 유효하고 실제 길이와 정확히 같아 복사됐는지 나타낸다.
+    pub did_write: bool,
+}
+
 /// 엔진이 소유하는 플랫폼 콜백 표다.
 /// 모든 콜백은 unwind하지 않아야 하고, 바이트 입력은 해당 콜백 중에만 유효하다.
 /// `bc_engine_new == BC_OK`일 때만 context 소유권이 엔진으로 넘어간다.
@@ -160,20 +184,25 @@ struct EngineSlot {
     busy: AtomicBool,
     closed: AtomicBool,
     poisoned: AtomicBool,
+    host_release_armed: AtomicBool,
     host: BcHost,
-    core: UnsafeCell<Engine>,
+    account: Arc<MemoryAccount>,
+    _base_memory: MemoryLease,
+    params_ledger: NativeParamsStatusLedger,
+    core: UnsafeCell<Option<ManuallyDrop<Engine>>>,
     #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
     test_f64: Mutex<Vec<u64>>,
+    #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
+    test_panic_name: Mutex<Option<String>>,
 }
 
 // SAFETY: core는 busy CAS를 통해 한 스레드만 접근하고 Arc lease가 활성 호출 중 drop을 막는다.
 unsafe impl Send for EngineSlot {}
-// SAFETY: 위와 같은 gate가 `UnsafeCell<Engine>`의 배타적 접근을 보장한다.
+// SAFETY: 위와 같은 gate가 `UnsafeCell<Option<ManuallyDrop<Engine>>>`의 배타적 접근을 보장한다.
 unsafe impl Sync for EngineSlot {}
 
 struct FfiHost {
     raw: BcHost,
-    release_armed: Arc<AtomicBool>,
 }
 
 // SAFETY: BcHost 계약은 엔진과 함께 스레드 간 순차 이동해도 context가 유효하다고 정한다.
@@ -242,13 +271,33 @@ impl Host for FfiHost {
     }
 }
 
-impl Drop for FfiHost {
+impl EngineSlot {
+    /// busy holder 또는 마지막 Arc drop만 호출해 core 소유권을 한 번 가져간다.
+    unsafe fn retire_core(&self) {
+        // SAFETY: 호출자는 busy 배타권을 보유하거나 마지막 Arc 소유자다.
+        let core = unsafe { (&mut *self.core.get()).take() };
+        if let Some(mut core) = core {
+            // ManuallyDrop이라 중첩 drop panic 뒤에도 같은 Engine을 다시 drop하지 않는다.
+            let _ = catch_unwind(AssertUnwindSafe(|| {
+                // SAFETY: Option에서 가져온 유일한 Engine 소유권이다.
+                unsafe { ManuallyDrop::drop(&mut core) };
+            }));
+        }
+    }
+}
+
+impl Drop for EngineSlot {
     fn drop(&mut self) {
-        if self.release_armed.swap(false, Ordering::AcqRel)
-            && let Some(release) = self.raw.release
+        // SAFETY: 마지막 Arc를 drop 중이므로 활성 core 접근자가 없다.
+        unsafe { self.retire_core() };
+        if self.host_release_armed.swap(false, Ordering::AcqRel)
+            && let Some(release) = self.host.release
         {
-            // SAFETY: 소유권은 성공한 new에서 이 FfiHost로 한 번만 이동했다.
-            unsafe { release(self.raw.context) };
+            let raw = self.host;
+            let _ = catch_unwind(AssertUnwindSafe(|| {
+                // SAFETY: 성공한 new가 넘긴 context를 Slot lifetime이 정확히 한 번 해제한다.
+                unsafe { release(raw.context) };
+            }));
         }
     }
 }
@@ -360,6 +409,22 @@ unsafe fn empty_f64_buf(out: *mut BcF64Buf) -> bool {
     true
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+unsafe fn empty_f64_write_receipt(out: *mut BcF64WriteReceipt) -> bool {
+    if out.is_null()
+        || !wasm_memory_range(
+            out.addr(),
+            size_of::<BcF64WriteReceipt>(),
+            align_of::<BcF64WriteReceipt>(),
+        )
+    {
+        return false;
+    }
+    // SAFETY: 호출자가 writable receipt 출력을 넘긴다는 export 계약을 따른다.
+    unsafe { out.write(BcF64WriteReceipt::default()) };
+    true
+}
+
 unsafe fn bytes<'a>(data: *const u8, len: usize) -> Option<&'a [u8]> {
     if len == 0 {
         return Some(&[]);
@@ -404,7 +469,120 @@ fn valid_f64_output(data: *mut f64, count: usize) -> bool {
             ))
 }
 
-fn allocate_bytes(source: &[u8]) -> Result<BcBuf, BcStatus> {
+#[cfg(not(target_arch = "wasm32"))]
+const OUTPUT_MAGIC: u64 = 0x4243_4f55_5450_5554;
+#[cfg(not(target_arch = "wasm32"))]
+const OUTPUT_KIND_BYTES: u32 = 1;
+#[cfg(not(target_arch = "wasm32"))]
+const OUTPUT_KIND_F64: u32 = 2;
+
+#[cfg(not(target_arch = "wasm32"))]
+struct OutputHeader {
+    magic: u64,
+    kind: u32,
+    len: usize,
+    cap: usize,
+    _lease: Option<MemoryLease>,
+}
+
+fn oom_status(style: OomStyle) -> BcStatus {
+    match style {
+        OomStyle::InternalErrorLowercase => BcStatus::BC_OOM_LIMIT,
+        OomStyle::RangeErrorCapitalized => BcStatus::BC_OOM_SYSTEM,
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn output_layout<T>(capacity: usize) -> Result<(Layout, usize), BcStatus> {
+    let payload = Layout::array::<T>(capacity).map_err(|_| BcStatus::BC_OOM_SYSTEM)?;
+    let (layout, offset) = Layout::new::<OutputHeader>()
+        .extend(payload)
+        .map_err(|_| BcStatus::BC_OOM_SYSTEM)?;
+    Ok((layout.pad_to_align(), offset))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn allocate_output_uninit<T>(
+    length: usize,
+    kind: u32,
+    account: Option<&Arc<MemoryAccount>>,
+    style: OomStyle,
+) -> Result<(*mut T, usize), BcStatus> {
+    if length == 0 {
+        return Ok((ptr::null_mut(), 0));
+    }
+    let (layout, offset) = output_layout::<T>(length).map_err(|_| oom_status(style))?;
+    let lease = match account {
+        Some(account) => Some(
+            account
+                .reserve_output(layout.size() as u64)
+                .map_err(|failure| oom_status(failure.style()))?,
+        ),
+        None => None,
+    };
+    // SAFETY: layout은 nonzero payload를 포함한 유효 layout이다.
+    let allocation = unsafe { alloc(layout) };
+    if allocation.is_null() {
+        drop(lease);
+        return Err(oom_status(style));
+    }
+    let header = allocation.cast::<OutputHeader>();
+    let payload = allocation.wrapping_add(offset).cast::<T>();
+    // SAFETY: header와 payload는 layout의 겹치지 않는 초기화 구간이다.
+    unsafe {
+        header.write(OutputHeader {
+            magic: OUTPUT_MAGIC,
+            kind,
+            len: length,
+            cap: length,
+            _lease: lease,
+        });
+    }
+    Ok((payload, length))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn allocate_output_copy<T: Copy>(
+    source: &[T],
+    kind: u32,
+    account: Option<&Arc<MemoryAccount>>,
+    style: OomStyle,
+) -> Result<(*mut T, usize), BcStatus> {
+    let (payload, capacity) = allocate_output_uninit(source.len(), kind, account, style)?;
+    if !source.is_empty() {
+        // SAFETY: payload는 source.len() 원소의 초기화되지 않은 output 구간이다.
+        unsafe { ptr::copy_nonoverlapping(source.as_ptr(), payload, source.len()) };
+    }
+    Ok((payload, capacity))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+unsafe fn free_output<T>(pointer: *mut T, len: usize, cap: usize, kind: u32) -> bool {
+    if pointer.is_null() || cap == 0 || len > cap {
+        return false;
+    }
+    let Ok((layout, offset)) = output_layout::<T>(cap) else {
+        return false;
+    };
+    let allocation = pointer.cast::<u8>().wrapping_sub(offset);
+    let header_pointer = allocation.cast::<OutputHeader>();
+    // SAFETY: caller contract requires an unchanged live descriptor from this allocator.
+    let header = unsafe { &*header_pointer };
+    if header.magic != OUTPUT_MAGIC || header.kind != kind || header.len != len || header.cap != cap
+    {
+        return false;
+    }
+    // SAFETY: exact descriptor proves the header is uniquely owned and initialized.
+    let owned = unsafe { header_pointer.read() };
+    // SAFETY: allocation was created with the same recomputed layout.
+    unsafe { dealloc(allocation, layout) };
+    drop(owned);
+    true
+}
+
+fn allocate_bytes_with_style(source: &[u8], style: OomStyle) -> Result<BcBuf, BcStatus> {
+    #[cfg(target_arch = "wasm32")]
+    let _ = style;
     if source.is_empty() {
         return Ok(BcBuf::default());
     }
@@ -430,45 +608,189 @@ fn allocate_bytes(source: &[u8]) -> Result<BcBuf, BcStatus> {
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let mut owned = Vec::new();
-        owned
-            .try_reserve_exact(source.len())
-            .map_err(|_| BcStatus::BC_THROW)?;
-        owned.extend_from_slice(source);
-        Ok(leak_bytes(owned))
+        let (pointer, capacity) = allocate_output_copy(source, OUTPUT_KIND_BYTES, None, style)?;
+        BYTE_BUFFERS.fetch_add(1, Ordering::Relaxed);
+        BYTE_CAPACITY.fetch_add(capacity, Ordering::Relaxed);
+        Ok(BcBuf {
+            ptr: pointer,
+            len: source.len(),
+            cap: capacity,
+        })
+    }
+}
+
+fn allocate_bytes(source: &[u8]) -> Result<BcBuf, BcStatus> {
+    allocate_bytes_with_style(source, OomStyle::RangeErrorCapitalized)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn allocate_accounted_bytes(
+    source: &[u8],
+    account: &Arc<MemoryAccount>,
+) -> Result<BcBuf, BcStatus> {
+    if source.is_empty() {
+        return Ok(BcBuf::default());
+    }
+    let (pointer, capacity) = allocate_output_copy(
+        source,
+        OUTPUT_KIND_BYTES,
+        Some(account),
+        account.allocation_failure().style(),
+    )?;
+    BYTE_BUFFERS.fetch_add(1, Ordering::Relaxed);
+    BYTE_CAPACITY.fetch_add(capacity, Ordering::Relaxed);
+    Ok(BcBuf {
+        ptr: pointer,
+        len: source.len(),
+        cap: capacity,
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn allocate_accounted_f64(
+    source: &[f64],
+    account: &Arc<MemoryAccount>,
+) -> Result<BcF64Buf, BcStatus> {
+    if source.is_empty() {
+        return Ok(BcF64Buf::default());
+    }
+    let (pointer, capacity) = allocate_output_copy(
+        source,
+        OUTPUT_KIND_F64,
+        Some(account),
+        account.allocation_failure().style(),
+    )?;
+    F64_BUFFERS.fetch_add(1, Ordering::Relaxed);
+    F64_CAPACITY.fetch_add(capacity, Ordering::Relaxed);
+    Ok(BcF64Buf {
+        ptr: pointer,
+        len: source.len(),
+        cap: capacity,
+    })
+}
+
+/// Publication 전에 실제 최종 owned byte allocation을 보유한다.
+///
+/// 고정 reply는 이 값이 만들어진 뒤 Core 상태를 게시하고, 추가 allocation 없이 payload를 채운다.
+#[derive(Debug)]
+struct PendingByteOutput {
+    buffer: BcBuf,
+}
+
+impl PendingByteOutput {
+    fn new(length: usize, account: &Arc<MemoryAccount>) -> Result<Self, BcStatus> {
+        if length == 0 {
+            return Ok(Self {
+                buffer: BcBuf::default(),
+            });
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        let (pointer, capacity) = allocate_output_uninit(
+            length,
+            OUTPUT_KIND_BYTES,
+            Some(account),
+            account.allocation_failure().style(),
+        )?;
+        #[cfg(target_arch = "wasm32")]
+        let (pointer, capacity) = {
+            let _ = account;
+            let layout = std::alloc::Layout::from_size_align(length, WASM_ALLOC_ALIGN)
+                .map_err(|_| BcStatus::BC_THROW)?;
+            // SAFETY: fixed reply length는 nonzero이고 free_buf가 같은 layout으로 반환한다.
+            let pointer = unsafe { std::alloc::alloc(layout) };
+            if pointer.is_null() {
+                return Err(BcStatus::BC_THROW);
+            }
+            (pointer, length)
+        };
+        BYTE_BUFFERS.fetch_add(1, Ordering::Relaxed);
+        BYTE_CAPACITY.fetch_add(capacity, Ordering::Relaxed);
+        Ok(Self {
+            buffer: BcBuf {
+                ptr: pointer,
+                len: length,
+                cap: capacity,
+            },
+        })
+    }
+
+    fn publish(mut self, source: &[u8]) -> BcBuf {
+        assert_eq!(source.len(), self.buffer.len, "fixed reply byte length");
+        if !source.is_empty() {
+            // SAFETY: pending payload는 source.len() 바이트 writable이고 아직 공개되지 않았다.
+            unsafe { ptr::copy_nonoverlapping(source.as_ptr(), self.buffer.ptr, source.len()) };
+        }
+        std::mem::take(&mut self.buffer)
+    }
+}
+
+impl Drop for PendingByteOutput {
+    fn drop(&mut self) {
+        // SAFETY: 아직 게시하지 않은 정확한 output descriptor를 소유한다.
+        unsafe { free_buf(std::mem::take(&mut self.buffer)) };
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn leak_bytes(mut owned: Vec<u8>) -> BcBuf {
-    if owned.is_empty() {
-        return BcBuf::default();
-    }
-    let result = BcBuf {
-        ptr: owned.as_mut_ptr(),
-        len: owned.len(),
-        cap: owned.capacity(),
-    };
-    BYTE_BUFFERS.fetch_add(1, Ordering::Relaxed);
-    BYTE_CAPACITY.fetch_add(result.cap, Ordering::Relaxed);
-    std::mem::forget(owned);
-    result
+struct PendingF64Output {
+    buffer: BcF64Buf,
 }
 
-#[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
-fn leak_f64(mut owned: Vec<f64>) -> BcF64Buf {
-    if owned.is_empty() {
-        return BcF64Buf::default();
+#[cfg(not(target_arch = "wasm32"))]
+impl PendingF64Output {
+    fn new(count: usize, account: &Arc<MemoryAccount>) -> Result<Self, BcStatus> {
+        if count == 0 {
+            return Ok(Self {
+                buffer: BcF64Buf::default(),
+            });
+        }
+        let (pointer, capacity) = allocate_output_uninit(
+            count,
+            OUTPUT_KIND_F64,
+            Some(account),
+            account.allocation_failure().style(),
+        )?;
+        F64_BUFFERS.fetch_add(1, Ordering::Relaxed);
+        F64_CAPACITY.fetch_add(capacity, Ordering::Relaxed);
+        Ok(Self {
+            buffer: BcF64Buf {
+                ptr: pointer,
+                len: count,
+                cap: capacity,
+            },
+        })
     }
-    let result = BcF64Buf {
-        ptr: owned.as_mut_ptr(),
-        len: owned.len(),
-        cap: owned.capacity(),
-    };
-    F64_BUFFERS.fetch_add(1, Ordering::Relaxed);
-    F64_CAPACITY.fetch_add(result.cap, Ordering::Relaxed);
-    std::mem::forget(owned);
-    result
+
+    #[cfg(debug_assertions)]
+    fn publish(mut self, values: &[f64]) -> Result<BcF64Buf, BcStatus> {
+        self.copy_from(values)?;
+        Ok(self.finish())
+    }
+
+    fn copy_from(&mut self, values: &[f64]) -> Result<(), BcStatus> {
+        if values.len() != self.buffer.len {
+            return Err(BcStatus::BC_INVALID);
+        }
+        if !values.is_empty() {
+            // SAFETY: pending payload는 values.len() 원소 writable이며 아직 공개되지 않았다.
+            unsafe {
+                ptr::copy_nonoverlapping(values.as_ptr(), self.buffer.ptr, values.len());
+            }
+        }
+        Ok(())
+    }
+
+    fn finish(mut self) -> BcF64Buf {
+        std::mem::take(&mut self.buffer)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for PendingF64Output {
+    fn drop(&mut self) {
+        // SAFETY: 아직 게시하지 않은 정확한 output descriptor를 소유한다.
+        unsafe { free_f64_buf(std::mem::take(&mut self.buffer)) };
+    }
 }
 
 fn subtract(counter: &AtomicUsize, amount: usize) {
@@ -499,10 +821,11 @@ unsafe fn free_buf(buf: BcBuf) {
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        subtract(&BYTE_BUFFERS, 1);
-        subtract(&BYTE_CAPACITY, buf.cap);
         // SAFETY: 호출자는 Rust가 만든 변경하지 않은 고유 BcBuf를 정확히 한 번 반환한다.
-        drop(unsafe { Vec::from_raw_parts(buf.ptr, buf.len, buf.cap) });
+        if unsafe { free_output(buf.ptr, buf.len, buf.cap, OUTPUT_KIND_BYTES) } {
+            subtract(&BYTE_BUFFERS, 1);
+            subtract(&BYTE_CAPACITY, buf.cap);
+        }
     }
 }
 
@@ -518,58 +841,132 @@ unsafe fn free_f64_buf(buf: BcF64Buf) {
     {
         return;
     }
-    subtract(&F64_BUFFERS, 1);
-    subtract(&F64_CAPACITY, buf.cap);
     // SAFETY: 호출자는 Rust가 만든 변경하지 않은 고유 BcF64Buf를 정확히 한 번 반환한다.
-    drop(unsafe { Vec::from_raw_parts(buf.ptr, buf.len, buf.cap) });
+    if unsafe { free_output(buf.ptr, buf.len, buf.cap, OUTPUT_KIND_F64) } {
+        subtract(&F64_BUFFERS, 1);
+        subtract(&F64_CAPACITY, buf.cap);
+    }
 }
 
 unsafe fn write_bytes(out: *mut BcBuf, source: &[u8]) -> Result<(), BcStatus> {
-    let allocated = allocate_bytes(source)?;
+    // SAFETY: 기본 control 경계는 무제한/Apple OOM 종류를 쓴다.
+    unsafe { write_bytes_with_style(out, source, OomStyle::RangeErrorCapitalized) }
+}
+
+unsafe fn write_bytes_with_style(
+    out: *mut BcBuf,
+    source: &[u8],
+    style: OomStyle,
+) -> Result<(), BcStatus> {
+    let allocated = allocate_bytes_with_style(source, style)?;
     // SAFETY: 출력은 export 진입 시 writable임을 확인했다.
     unsafe { out.write(allocated) };
     Ok(())
 }
 
-fn error_json(error: &JsError) -> Vec<u8> {
+unsafe fn write_accounted_bytes(
+    out: *mut BcBuf,
+    source: &[u8],
+    account: &Arc<MemoryAccount>,
+) -> Result<(), BcStatus> {
+    #[cfg(not(target_arch = "wasm32"))]
+    let allocated = allocate_accounted_bytes(source, account)?;
+    #[cfg(target_arch = "wasm32")]
+    let allocated = {
+        let _ = account;
+        allocate_bytes(source)?
+    };
+    // SAFETY: 출력은 export 진입 시 writable임을 확인했다.
+    unsafe { out.write(allocated) };
+    Ok(())
+}
+
+fn error_json_scoped(error: &JsError, scope: &mut MemoryScope) -> Result<Vec<u8>, MemoryFailure> {
     let mut object = JsObject::new();
     object.insert(
-        JsString::from_str("name"),
-        JsValue::String(JsString::from_str(error.name)),
+        JsString::try_from_str("name", scope)?,
+        JsValue::String(JsString::try_from_str(error.name, scope)?),
     );
     object.insert(
-        JsString::from_str("message"),
-        JsValue::String(error.message.clone()),
+        JsString::try_from_str("message", scope)?,
+        JsValue::String(error.message.try_clone_scoped(scope)?),
     );
     object.insert(
-        JsString::from_str("code"),
-        error.code.as_ref().map_or(JsValue::Null, |code| {
-            JsValue::String(JsString::from_str(code))
-        }),
+        JsString::try_from_str("code", scope)?,
+        match error.code.as_deref() {
+            Some(code) => JsValue::String(JsString::try_from_str(code, scope)?),
+            None => JsValue::Null,
+        },
     );
-    stringify_json(&JsValue::Object(object), JsonMode::Standard)
+    stringify_json_scoped(
+        &JsValue::Object(object),
+        JsonMode::Standard,
+        NumberDialect::PLATFORM,
+        scope,
+    )
 }
 
 unsafe fn write_error(out: *mut BcBuf, error: &JsError) -> BcStatus {
+    // SAFETY: 엔진 account가 없는 생성/전송 경계다.
+    unsafe { write_error_with_style(out, error, OomStyle::RangeErrorCapitalized) }
+}
+
+unsafe fn write_error_with_style(out: *mut BcBuf, error: &JsError, style: OomStyle) -> BcStatus {
+    if let Some(style) = oom_style_from_error(error) {
+        return oom_status(style);
+    }
     let status = if error.name == "UnavailableError" {
         BcStatus::BC_UNAVAILABLE
     } else {
         BcStatus::BC_THROW
     };
+    let mut scope = MemoryScope::unaccounted(style);
+    let encoded = match error_json_scoped(error, &mut scope) {
+        Ok(encoded) => encoded,
+        Err(failure) => return oom_status(failure.style()),
+    };
     // SAFETY: 호출자가 유효한 출력을 넘겼고 진입에서 빈 값으로 초기화했다.
-    if unsafe { write_bytes(out, &error_json(error)) }.is_err() {
-        BcStatus::BC_THROW
-    } else {
-        status
+    match unsafe { write_bytes_with_style(out, &encoded, style) } {
+        Ok(()) => status,
+        Err(allocation) => allocation,
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn unavailable(name: &str) -> JsError {
-    JsError::new(
-        "UnavailableError",
-        JsString::from_str(&format!("{name} is not available in the Rust backend yet")),
-    )
+unsafe fn write_accounted_error(
+    out: *mut BcBuf,
+    error: &JsError,
+    account: &Arc<MemoryAccount>,
+) -> BcStatus {
+    if let Some(style) = oom_style_from_error(error) {
+        return oom_status(style);
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = account;
+        // SAFETY: WASM Phase A는 기존 unscoped output 경계를 유지한다.
+        return unsafe { write_error(out, error) };
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let status = if error.name == "UnavailableError" {
+            BcStatus::BC_UNAVAILABLE
+        } else {
+            BcStatus::BC_THROW
+        };
+        let mut scope = MemoryScope::new(account);
+        let encoded = match error_json_scoped(error, &mut scope) {
+            Ok(encoded) => encoded,
+            Err(failure) => return oom_status(failure.style()),
+        };
+        match allocate_accounted_bytes(&encoded, account) {
+            Ok(buffer) => {
+                // SAFETY: caller validated the canonical-empty writable output slot.
+                unsafe { out.write(buffer) };
+                status
+            }
+            Err(allocation) => allocation,
+        }
+    }
 }
 
 struct BusyGuard<'a>(&'a EngineSlot);
@@ -588,15 +985,141 @@ fn log_panic(slot: &EngineSlot) {
     }
 }
 
-unsafe fn stateful<Prepared>(
+fn poison_slot(slot: &EngineSlot) {
+    slot.poisoned.store(true, Ordering::Release);
+    slot.params_ledger.poison();
+    // SAFETY: stateful은 poison transition 전체 동안 busy 배타권을 보유한다.
+    unsafe { slot.retire_core() };
+    // log callback 동안도 busy gate를 유지해 재진입을 BC_BUSY로 만든다.
+    log_panic(slot);
+}
+
+fn cleanup_whitelisted(name: &str) -> bool {
+    matches!(
+        name,
+        "nativeWorkspaceSourceAbort"
+            | "nativeParamsSourceStatus"
+            | "nativeParamsSourceAbort"
+            | "nativeAsyncRelease"
+            | "nativeReleaseFrameCaches"
+            | "nativeReleaseFrameCache"
+            | "nativeReleaseDataIngestion"
+    )
+}
+
+fn cleanup_registration(value: &JsValue, message: &'static str) -> Result<u64, JsError> {
+    let JsValue::Number(value) = value else {
+        return Err(JsError::new("RangeError", JsString::from_str(message)));
+    };
+    if !value.is_finite()
+        || value.fract() != 0.0
+        || !(1.0..=9_007_199_254_740_991.0).contains(value)
+    {
+        return Err(JsError::new("RangeError", JsString::from_str(message)));
+    }
+    Ok(*value as u64)
+}
+
+fn poisoned_cleanup_value(
+    slot: &EngineSlot,
+    name: &str,
+    arguments: &[JsValue],
+    scope: &mut MemoryScope,
+) -> Result<JsValue, JsError> {
+    let undefined = JsValue::Undefined;
+    let first = arguments.first().unwrap_or(&undefined);
+    match name {
+        "nativeWorkspaceSourceAbort" => {
+            cleanup_registration(first, "Workspace registration")?;
+            Ok(JsValue::Bool(false))
+        }
+        "nativeParamsSourceStatus" => slot.params_ledger.status_scoped(first, scope),
+        "nativeParamsSourceAbort" => slot.params_ledger.abort_scoped(first, scope),
+        "nativeAsyncRelease" | "nativeReleaseFrameCaches" | "nativeReleaseFrameCache" => {
+            Ok(JsValue::Bool(true))
+        }
+        "nativeReleaseDataIngestion" => {
+            let mut output = JsObject::new();
+            output.insert(JsString::from_str("cancelled"), JsValue::Number(0.0));
+            output.insert(JsString::from_str("pendingEvents"), JsValue::Number(0.0));
+            output.insert(JsString::from_str("ownedBytes"), JsValue::Number(0.0));
+            Ok(JsValue::Object(output))
+        }
+        _ => unreachable!("checked cleanup whitelist"),
+    }
+}
+
+unsafe fn poisoned_call_answer(
+    slot: &EngineSlot,
+    name: &str,
+    args: *const u8,
+    args_len: usize,
+    flags: u32,
+    out: *mut BcBuf,
+) -> BcStatus {
+    let Some(json_mode) = mode(flags) else {
+        return BcStatus::BC_INVALID;
+    };
+    // SAFETY: bc_call의 입력 포인터 계약을 그대로 검사한다.
+    let Some(args) = (unsafe { bytes(args, args_len) }) else {
+        return BcStatus::BC_INVALID;
+    };
+    let mut scope = MemoryScope::new(&slot.account);
+    let parsed = match parse_args(args, json_mode, &mut scope) {
+        Ok(parsed) => parsed,
+        Err(status) => return status,
+    };
+    let JsValue::Array(arguments) = &parsed else {
+        unreachable!("validated array")
+    };
+    match poisoned_cleanup_value(slot, name, arguments, &mut scope) {
+        Err(error) => {
+            // SAFETY: bc_call 진입에서 out을 canonical empty로 만들었다.
+            unsafe { write_accounted_error(out, &error, &slot.account) }
+        }
+        Ok(value) => {
+            let encoded =
+                match stringify_json_scoped(&value, json_mode, NumberDialect::PLATFORM, &mut scope)
+                {
+                    Ok(encoded) => encoded,
+                    Err(failure) => return oom_status(failure.style()),
+                };
+            // SAFETY: bc_call 진입에서 out을 canonical empty로 만들었다.
+            match unsafe { write_accounted_bytes(out, &encoded, &slot.account) } {
+                Ok(()) => BcStatus::BC_OK,
+                Err(status) => status,
+            }
+        }
+    }
+}
+
+#[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
+fn debug_panic_if_armed(slot: &EngineSlot, name: &str) {
+    let mut armed = slot
+        .test_panic_name
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if armed.as_deref() == Some(name) {
+        *armed = None;
+        drop(armed);
+        panic!("armed native test panic");
+    }
+}
+
+#[cfg(any(not(debug_assertions), target_arch = "wasm32"))]
+fn debug_panic_if_armed(_: &EngineSlot, _: &str) {}
+
+unsafe fn stateful<Prepared: Copy>(
     slot: &Arc<EngineSlot>,
     error_out: *mut BcBuf,
     prepare_name: impl FnOnce() -> Result<Prepared, BcStatus>,
     run: impl FnOnce(&mut Engine, Prepared) -> BcStatus,
+    poison_answer: impl Fn(Prepared) -> Option<BcStatus>,
 ) -> BcStatus {
     if slot.closed.load(Ordering::Acquire) {
         // SAFETY: export 진입에서 error_out을 writable canonical empty로 만들었다.
-        let _ = unsafe { write_bytes(error_out, DISPOSED_ERROR) };
+        let _ =
+            unsafe { write_bytes_with_style(error_out, DISPOSED_ERROR, slot.account.oom_style()) };
         return BcStatus::BC_CLOSED;
     }
     if slot
@@ -609,7 +1132,8 @@ unsafe fn stateful<Prepared>(
     let _busy = BusyGuard(slot);
     if slot.closed.load(Ordering::Acquire) {
         // SAFETY: export 진입에서 error_out을 writable canonical empty로 만들었다.
-        let _ = unsafe { write_bytes(error_out, DISPOSED_ERROR) };
+        let _ =
+            unsafe { write_bytes_with_style(error_out, DISPOSED_ERROR, slot.account.oom_style()) };
         return BcStatus::BC_CLOSED;
     }
     let prepared = match prepare_name() {
@@ -617,25 +1141,39 @@ unsafe fn stateful<Prepared>(
         Err(status) => return status,
     };
     if slot.poisoned.load(Ordering::Acquire) {
+        if let Some(status) = poison_answer(prepared) {
+            return status;
+        }
         // SAFETY: export 진입에서 error_out을 writable canonical empty로 만들었다.
-        let _ = unsafe { write_bytes(error_out, DISPOSED_ERROR) };
+        let _ =
+            unsafe { write_bytes_with_style(error_out, DISPOSED_ERROR, slot.account.oom_style()) };
         return BcStatus::BC_POISONED;
     }
     let result = catch_unwind(AssertUnwindSafe(|| {
         // SAFETY: busy gate가 core에 대한 유일한 가변 접근을 보장한다.
-        run(unsafe { &mut *slot.core.get() }, prepared)
+        let core = unsafe { &mut *slot.core.get() }
+            .as_mut()
+            .expect("open slot owns core");
+        run(core, prepared)
     }));
-    match result {
+    let status = match result {
         Ok(status) => status,
         Err(_) => {
-            slot.poisoned.store(true, Ordering::Release);
-            // log callback 동안도 busy gate를 유지해 재진입을 BC_BUSY로 만든다.
-            log_panic(slot);
-            // SAFETY: export 진입에서 error_out을 writable canonical empty로 만들었다.
-            let _ = unsafe { write_bytes(error_out, DISPOSED_ERROR) };
-            BcStatus::BC_POISONED
+            poison_slot(slot);
+            if let Some(status) = poison_answer(prepared) {
+                status
+            } else {
+                // SAFETY: export 진입에서 error_out을 writable canonical empty로 만들었다.
+                let _ = unsafe {
+                    write_bytes_with_style(error_out, DISPOSED_ERROR, slot.account.oom_style())
+                };
+                BcStatus::BC_POISONED
+            }
         }
-    }
+    };
+    // dispatch catch_unwind 범위 밖에서 guard를 항상 해제한다.
+    drop(_busy);
+    status
 }
 
 fn mode(flags: u32) -> Option<JsonMode> {
@@ -648,9 +1186,40 @@ fn mode(flags: u32) -> Option<JsonMode> {
     }
 }
 
-fn parse_args(source: &[u8], mode: JsonMode) -> Option<JsValue> {
-    let parsed = parse_json(source, mode).ok()?;
-    matches!(parsed, JsValue::Array(_)).then_some(parsed)
+fn parse_args(source: &[u8], mode: JsonMode, scope: &mut MemoryScope) -> Result<JsValue, BcStatus> {
+    match parse_json_scoped(source, mode, NumberDialect::PLATFORM, scope) {
+        Ok(parsed @ JsValue::Array(_)) => Ok(parsed),
+        Ok(_) | Err(JsonFailure::Syntax(_)) => Err(BcStatus::BC_INVALID),
+        Err(JsonFailure::Memory(failure)) => Err(oom_status(failure.style())),
+    }
+}
+
+fn scoped_echo(
+    name: &str,
+    parsed: &JsValue,
+    scope: &mut MemoryScope,
+) -> Option<Result<JsValue, BcStatus>> {
+    let JsValue::Array(arguments) = parsed else {
+        return None;
+    };
+    if name == "nativeEcho" {
+        return Some(
+            arguments
+                .first()
+                .unwrap_or(&JsValue::Undefined)
+                .try_clone_scoped(scope)
+                .map_err(|failure| oom_status(failure.style())),
+        );
+    }
+    #[cfg(debug_assertions)]
+    if name == "__bcEchoForTest" {
+        return Some(
+            parsed
+                .try_clone_scoped(scope)
+                .map_err(|failure| oom_status(failure.style())),
+        );
+    }
+    None
 }
 
 #[cfg(debug_assertions)]
@@ -822,6 +1391,7 @@ unsafe fn clear_engine_new_outputs(engine_out: *mut *mut BcEngine, error_out: *m
 
 unsafe fn engine_new_prepared(
     raw: BcHost,
+    memory_limit: u64,
     engine_out: *mut *mut BcEngine,
     error_out: *mut BcBuf,
 ) -> BcStatus {
@@ -834,19 +1404,36 @@ unsafe fn engine_new_prepared(
             // SAFETY: error_out은 비운 writable 출력이다.
             return unsafe { write_error(error_out, &error) };
         };
-        let release_armed = Arc::new(AtomicBool::new(false));
-        let core = Engine::new(Box::new(FfiHost {
-            raw,
-            release_armed: Arc::clone(&release_armed),
-        }));
+        let style = if memory_limit == 0 {
+            OomStyle::RangeErrorCapitalized
+        } else {
+            OomStyle::InternalErrorLowercase
+        };
+        let account = MemoryAccount::new(memory_limit, style);
+        let base_memory = match account.reserve(size_of::<EngineSlot>() as u64) {
+            Ok(lease) => lease,
+            Err(failure) => return oom_status(failure.style()),
+        };
+        let mut core = Engine::new(Box::new(FfiHost { raw }));
+        if let Err(error) = core.set_memory_context(MemoryContext::accounted(&account)) {
+            // SAFETY: 생성 출력은 canonical empty이며 host ownership은 아직 이전되지 않았다.
+            return unsafe { write_error_with_style(error_out, &error, style) };
+        }
+        let params_ledger = core.params_status_ledger();
         let slot = Arc::new(EngineSlot {
             busy: AtomicBool::new(false),
             closed: AtomicBool::new(false),
             poisoned: AtomicBool::new(false),
+            host_release_armed: AtomicBool::new(false),
             host: raw,
-            core: UnsafeCell::new(core),
+            account,
+            _base_memory: base_memory,
+            params_ledger,
+            core: UnsafeCell::new(Some(ManuallyDrop::new(core))),
             #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
             test_f64: Mutex::new(Vec::new()),
+            #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
+            test_panic_name: Mutex::new(None),
         });
         {
             let mut engines = locked_registry();
@@ -855,7 +1442,7 @@ unsafe fn engine_new_prepared(
             };
             entry.insert(Arc::clone(&slot));
             // registry lock을 유지한 채 ownership을 arm하고 token을 게시해 중간 상태 조회를 막는다.
-            release_armed.store(true, Ordering::Release);
+            slot.host_release_armed.store(true, Ordering::Release);
             // SAFETY: engine_out은 writable고 token은 역참조하지 않는다.
             unsafe { engine_out.write(handle_from_id(id)) };
         }
@@ -885,7 +1472,31 @@ pub unsafe extern "C" fn bc_engine_new(
         // SAFETY: 호출자가 C ABI에 따라 읽기 가능한 BcHost를 보장한다.
         let raw = unsafe { *host };
         // SAFETY: 출력 slot을 검증하고 초기화했다.
-        unsafe { engine_new_prepared(raw, engine_out, error_out) }
+        unsafe { engine_new_prepared(raw, 0, engine_out, error_out) }
+    })
+}
+
+/// 요청 바이트 한도를 가진 빈 Rust 엔진을 만든다. 0은 무제한이다.
+///
+/// # Safety
+/// `bc_engine_new`과 같은 포인터·alias·host 수명 계약을 따른다.
+#[cfg(not(target_arch = "wasm32"))]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bc_engine_new_with_limit(
+    host: *const BcHost,
+    memory_limit: u64,
+    engine_out: *mut *mut BcEngine,
+    error_out: *mut BcBuf,
+) -> BcStatus {
+    ffi_status(|| {
+        // SAFETY: 네이티브 출력 slot을 먼저 canonical empty로 만든다.
+        if !unsafe { clear_engine_new_outputs(engine_out, error_out) } || host.is_null() {
+            return BcStatus::BC_INVALID;
+        }
+        // SAFETY: 호출자가 C ABI에 따라 읽기 가능한 BcHost를 보장한다.
+        let raw = unsafe { *host };
+        // SAFETY: 출력 slot은 검증되어 비어 있다.
+        unsafe { engine_new_prepared(raw, memory_limit, engine_out, error_out) }
     })
 }
 
@@ -1009,7 +1620,7 @@ pub unsafe extern "C" fn bc_engine_new(
             release: Some(wasm_release),
         };
         // SAFETY: 출력 slot을 검증하고 초기화했다.
-        unsafe { engine_new_prepared(raw, engine_out, error_out) }
+        unsafe { engine_new_prepared(raw, 0, engine_out, error_out) }
     })
 }
 
@@ -1049,32 +1660,115 @@ pub unsafe extern "C" fn bc_call(
                     str::from_utf8(name).map_err(|_| BcStatus::BC_INVALID)
                 },
                 |core, name| {
+                    debug_panic_if_armed(&slot, name);
                     let Some(json_mode) = mode(flags) else {
                         return BcStatus::BC_INVALID;
                     };
                     let Some(args) = bytes(args, args_len) else {
                         return BcStatus::BC_INVALID;
                     };
-                    let Some(parsed) = parse_args(args, json_mode) else {
-                        return BcStatus::BC_INVALID;
-                    };
-                    let result = debug_call(core, name, &parsed).unwrap_or_else(|| {
-                        let JsValue::Array(values) = &parsed else {
-                            unreachable!()
-                        };
-                        barochart_bridge::call(core, name, values)
-                    });
-                    match result {
-                        Ok(value) => {
-                            let encoded = stringify_json(&value, json_mode);
-                            if write_bytes(out, &encoded).is_ok() {
-                                BcStatus::BC_OK
-                            } else {
-                                BcStatus::BC_THROW
+                    let mut scope = MemoryScope::new(&slot.account);
+                    let bulk = if matches!(name, "nativeSetData" | "nativeCommand") {
+                        match barochart_bridge::bulk::decode_bulk_call(
+                            name,
+                            args,
+                            json_mode,
+                            NumberDialect::PLATFORM,
+                            &mut scope,
+                        ) {
+                            Ok(decoded) => decoded,
+                            Err(barochart_bridge::bulk::BulkFailure::Syntax { .. }) => {
+                                return BcStatus::BC_INVALID;
+                            }
+                            Err(barochart_bridge::bulk::BulkFailure::Memory(failure)) => {
+                                return oom_status(failure.style());
                             }
                         }
-                        Err(error) => write_error(out, &error),
+                    } else {
+                        None
+                    };
+                    let mut pending_reply = None;
+                    let mut admitted_reply = None;
+                    let result = {
+                        let mut admit_reply =
+                            |reply: barochart_bridge::reply_policy::FixedReply| {
+                                assert!(pending_reply.is_none(), "fixed reply admitted once");
+                                let pending = PendingByteOutput::new(
+                                    reply.encoded(json_mode).len(),
+                                    &slot.account,
+                                )
+                                .map_err(|_| slot.account.allocation_failure().into_js_error())?;
+                                pending_reply = Some(pending);
+                                admitted_reply = Some(reply);
+                                Ok(())
+                            };
+                        if let Some(decoded) = bulk {
+                            barochart_bridge::call_bulk_with_reply_admission(
+                                core,
+                                decoded,
+                                &mut admit_reply,
+                            )
+                        } else {
+                            let parsed = match parse_args(args, json_mode, &mut scope) {
+                                Ok(parsed) => parsed,
+                                Err(status) => return status,
+                            };
+                            match scoped_echo(name, &parsed, &mut scope) {
+                                Some(Ok(value)) => Ok(value),
+                                Some(Err(status)) => return status,
+                                None => debug_call(core, name, &parsed).unwrap_or_else(|| {
+                                    let JsValue::Array(values) = &parsed else {
+                                        unreachable!()
+                                    };
+                                    barochart_bridge::call_scoped_with_reply_admission(
+                                        core,
+                                        name,
+                                        values,
+                                        &mut scope,
+                                        &mut admit_reply,
+                                    )
+                                }),
+                            }
+                        }
+                    };
+                    match result {
+                        Ok(value) => {
+                            if let Some(pending) = pending_reply {
+                                let reply = admitted_reply.expect("pending fixed reply kind");
+                                assert!(
+                                    reply.matches(&value),
+                                    "fixed reply census/handler mismatch"
+                                );
+                                // SAFETY: admission allocated the final owned descriptor and the
+                                // fixed literal copy cannot allocate or fail after publication.
+                                out.write(pending.publish(reply.encoded(json_mode)));
+                                return BcStatus::BC_OK;
+                            }
+                            let encoded = match stringify_json_scoped(
+                                &value,
+                                json_mode,
+                                NumberDialect::PLATFORM,
+                                &mut scope,
+                            ) {
+                                Ok(encoded) => encoded,
+                                Err(failure) => return oom_status(failure.style()),
+                            };
+                            match write_accounted_bytes(out, &encoded, &slot.account) {
+                                Ok(()) => BcStatus::BC_OK,
+                                Err(status) => status,
+                            }
+                        }
+                        Err(error) => {
+                            // Source-ordered fixed calls may fail after admission. Their unused
+                            // success buffer must release quota before the actual error payload.
+                            drop(pending_reply.take());
+                            write_accounted_error(out, &error, &slot.account)
+                        }
                     }
+                },
+                |name| {
+                    cleanup_whitelisted(name)
+                        .then(|| poisoned_call_answer(&slot, name, args, args_len, flags, out))
                 },
             )
         }
@@ -1107,6 +1801,62 @@ pub unsafe extern "C" fn bc_supports(
         str::from_utf8(name).is_ok_and(barochart_bridge::supports)
     }))
     .unwrap_or(false)
+}
+
+/// 다음 한 번의 알려진 native 함수 dispatch에서 정적 test panic을 일으킨다.
+/// debug 빌드에만 존재하며 release artifact에는 export되지 않는다.
+/// cbindgen:ignore
+///
+/// # Safety
+/// token은 live `bc_engine_new` 반환값이어야 하고 nonempty name 구간은 읽기 가능해야 한다.
+#[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bc_debug_panic_on(
+    engine: *mut BcEngine,
+    name: *const u8,
+    name_len: usize,
+) -> BcStatus {
+    ffi_status(|| {
+        let slot = match lease(engine) {
+            Ok(slot) => slot,
+            Err(status) => return status,
+        };
+        if slot.closed.load(Ordering::Acquire) {
+            return BcStatus::BC_CLOSED;
+        }
+        if slot
+            .busy
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            return BcStatus::BC_BUSY;
+        }
+        let busy = BusyGuard(&slot);
+        let result = if slot.closed.load(Ordering::Acquire) {
+            BcStatus::BC_CLOSED
+        } else if slot.poisoned.load(Ordering::Acquire) {
+            BcStatus::BC_POISONED
+        } else {
+            // SAFETY: helper가 raw name 구간을 구조 검증한 뒤 slice로 만든다.
+            let Some(name) = (unsafe { bytes(name, name_len) }) else {
+                return BcStatus::BC_INVALID;
+            };
+            let Ok(name) = str::from_utf8(name) else {
+                return BcStatus::BC_INVALID;
+            };
+            if !barochart_bridge::supports(name) {
+                BcStatus::BC_INVALID
+            } else {
+                *slot
+                    .test_panic_name
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(name.to_owned());
+                BcStatus::BC_OK
+            }
+        };
+        drop(busy);
+        result
+    })
 }
 
 /// Rust 함수의 숫자 배열 결과를 호스트 `double` 배열로 복사한다.
@@ -1146,14 +1896,17 @@ pub unsafe extern "C" fn bc_read_f64(
                     str::from_utf8(name).map_err(|_| BcStatus::BC_INVALID)
                 },
                 |core, name| {
+                    debug_panic_if_armed(&slot, name);
                     if count > F64_TRANSFER_LIMIT || !valid_f64_output(dst, count) {
                         return BcStatus::BC_INVALID;
                     }
                     let Some(args) = bytes(args, args_len) else {
                         return BcStatus::BC_INVALID;
                     };
-                    let Some(parsed) = parse_args(args, JsonMode::Standard) else {
-                        return BcStatus::BC_INVALID;
+                    let mut scope = MemoryScope::new(&slot.account);
+                    let parsed = match parse_args(args, JsonMode::Standard, &mut scope) {
+                        Ok(parsed) => parsed,
+                        Err(status) => return status,
                     };
                     let JsValue::Array(arguments) = &parsed else {
                         unreachable!()
@@ -1180,12 +1933,13 @@ pub unsafe extern "C" fn bc_read_f64(
                         };
                         if !bits.is_empty() {
                             if bits.len() != count {
-                                return write_error(
+                                return write_accounted_error(
                                     error_out,
                                     &JsError::new(
                                         "RangeError",
                                         JsString::from_str("Float64Array length"),
                                     ),
+                                    &slot.account,
                                 );
                             }
                             for (index, bits) in bits.iter().copied().enumerate() {
@@ -1195,41 +1949,158 @@ pub unsafe extern "C" fn bc_read_f64(
                             return BcStatus::BC_OK;
                         }
                     }
-                    let result = barochart_bridge::call(core, name, arguments);
-                    match &result {
-                        Err(error) => write_error(error_out, error),
-                        Ok(JsValue::Array(values)) if values.len() == count => {
-                            let mut copied = Vec::new();
-                            if copied.try_reserve_exact(count).is_err() {
-                                return BcStatus::BC_THROW;
-                            }
-                            for value in values {
-                                let JsValue::Number(number) = value else {
-                                    return write_error(
-                                        error_out,
-                                        &JsError::new(
-                                            "TypeError",
-                                            JsString::from_str("Float64Array result required"),
-                                        ),
-                                    );
-                                };
-                                copied.push(*number);
-                            }
+                    match barochart_bridge::read_f64_scoped(core, name, arguments, &mut scope) {
+                        Err(error) => write_accounted_error(error_out, &error, &slot.account),
+                        Ok(values) if values.len() == count => {
                             if count != 0 {
-                                // SAFETY: dst는 위에서 정렬·길이를 검증했고 여기까지 쓰지 않았다.
-                                ptr::copy_nonoverlapping(copied.as_ptr(), dst, count);
+                                // SAFETY: dst 정렬과 count는 위에서 검증했고 같은 호출에서만 원본을 빌린다.
+                                ptr::copy_nonoverlapping(values.as_ptr(), dst, count);
                             }
                             BcStatus::BC_OK
                         }
-                        Ok(_) => write_error(
+                        Ok(_) => write_accounted_error(
                             error_out,
                             &JsError::new(
                                 "TypeError",
                                 JsString::from_str("Float64Array result required"),
                             ),
+                            &slot.account,
                         ),
                     }
                 },
+                |_| None,
+            )
+        }
+    })
+}
+
+/// Rust 함수의 실제 숫자 배열 결과 전체를 소유 snapshot으로 돌려준다.
+///
+/// 기존 fast read와 달리 host destination/count를 받거나 검증하지 않는다. Core 함수는 정확히 한 번
+/// 실행하며, caller가 payload를 기록한 뒤 별도로 길이를 검증할 수 있다.
+///
+/// # Safety
+/// token/name/args는 `bc_read_f64`와 같은 계약을 따르고, `out`과 `error_out`은 비어 있는 writable
+/// output slot이며 서로와 입력에 alias하지 않아야 한다.
+#[cfg(not(target_arch = "wasm32"))]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bc_read_f64_snapshot(
+    engine: *mut BcEngine,
+    name: *const u8,
+    name_len: usize,
+    args: *const u8,
+    args_len: usize,
+    out: *mut BcF64Buf,
+    error_out: *mut BcBuf,
+) -> BcStatus {
+    // SAFETY: 기존 Standard JSON 계약을 확장 함수의 flags=0으로 전달한다.
+    unsafe {
+        bc_read_f64_snapshot_with_flags(engine, name, name_len, args, args_len, 0, out, error_out)
+    }
+}
+
+/// JSON/BCJSON 인자를 보존하며 실제 typed 결과 전체를 소유 snapshot으로 돌려준다.
+/// `flags`는 `bc_call`과 같고, 숫자 결과는 JSON으로 펼치지 않는다.
+///
+/// # Safety
+/// token/name/args와 비어 있는 두 output slot은 `bc_read_f64_snapshot`의 계약을 따른다.
+#[cfg(not(target_arch = "wasm32"))]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bc_read_f64_snapshot_with_flags(
+    engine: *mut BcEngine,
+    name: *const u8,
+    name_len: usize,
+    args: *const u8,
+    args_len: usize,
+    flags: u32,
+    out: *mut BcF64Buf,
+    error_out: *mut BcBuf,
+) -> BcStatus {
+    ffi_status(|| {
+        // SAFETY: 두 출력을 상태 gate 전에 canonical empty로 만든다.
+        if !unsafe { empty_f64_buf(out) }
+            || !unsafe { empty_buf(error_out) }
+            || out.cast::<u8>() == error_out.cast::<u8>()
+        {
+            return BcStatus::BC_INVALID;
+        }
+        let slot = match lease(engine) {
+            Ok(slot) => slot,
+            Err(status) => return unsafe { lease_error(status, error_out) },
+        };
+        // SAFETY: Arc lease가 slot을 유지하고 두 output은 비어 있다.
+        unsafe {
+            stateful(
+                &slot,
+                error_out,
+                || {
+                    let name = bytes(name, name_len).ok_or(BcStatus::BC_INVALID)?;
+                    str::from_utf8(name).map_err(|_| BcStatus::BC_INVALID)
+                },
+                |core, name| {
+                    debug_panic_if_armed(&slot, name);
+                    let Some(json_mode) = mode(flags) else {
+                        return BcStatus::BC_INVALID;
+                    };
+                    let Some(args) = bytes(args, args_len) else {
+                        return BcStatus::BC_INVALID;
+                    };
+                    let mut scope = MemoryScope::new(&slot.account);
+                    let parsed = match parse_args(args, json_mode, &mut scope) {
+                        Ok(parsed) => parsed,
+                        Err(status) => return status,
+                    };
+                    let JsValue::Array(arguments) = &parsed else {
+                        unreachable!()
+                    };
+                    #[cfg(debug_assertions)]
+                    {
+                        let fixed = [
+                            0.0,
+                            -0.0,
+                            f64::from_bits(0x7ff8_0000_0000_0042),
+                            f64::INFINITY,
+                        ];
+                        if name == "__bcReadF64ForTest" {
+                            return match allocate_accounted_f64(&fixed, &slot.account) {
+                                Ok(buffer) => {
+                                    out.write(buffer);
+                                    BcStatus::BC_OK
+                                }
+                                Err(status) => status,
+                            };
+                        }
+                        if name == "__bcReadLastF64ForTest" {
+                            let locked = slot
+                                .test_f64
+                                .lock()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner());
+                            let mut values = Vec::new();
+                            if values.try_reserve_exact(locked.len()).is_err() {
+                                return oom_status(slot.account.allocation_failure().style());
+                            }
+                            values.extend(locked.iter().copied().map(f64::from_bits));
+                            return match allocate_accounted_f64(&values, &slot.account) {
+                                Ok(buffer) => {
+                                    out.write(buffer);
+                                    BcStatus::BC_OK
+                                }
+                                Err(status) => status,
+                            };
+                        }
+                    }
+                    match barochart_bridge::read_f64_scoped(core, name, arguments, &mut scope) {
+                        Err(error) => write_accounted_error(error_out, &error, &slot.account),
+                        Ok(values) => match allocate_accounted_f64(values, &slot.account) {
+                            Ok(buffer) => {
+                                out.write(buffer);
+                                BcStatus::BC_OK
+                            }
+                            Err(status) => status,
+                        },
+                    }
+                },
+                |_| None,
             )
         }
     })
@@ -1253,9 +2124,236 @@ pub unsafe extern "C" fn bc_write_f64(
     count: usize,
     error_out: *mut BcBuf,
 ) -> BcStatus {
+    // SAFETY: 공개 함수의 포인터 계약을 공통 구현에 그대로 전달한다.
+    unsafe {
+        write_f64_impl(
+            engine, name, name_len, args, args_len, src, count, None, error_out,
+        )
+    }
+}
+
+/// 호스트 `double` 배열을 쓰면서 write 직전 target-owned 값을 소유 snapshot으로 돌려준다.
+///
+/// # Safety
+/// `bc_write_f64` 계약에 더해 `before_out`은 비어 있는 writable `BcF64Buf` slot이어야 하며
+/// 다른 입출력과 alias하지 않아야 한다.
+#[cfg(not(target_arch = "wasm32"))]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bc_write_f64_snapshot(
+    engine: *mut BcEngine,
+    name: *const u8,
+    name_len: usize,
+    args: *const u8,
+    args_len: usize,
+    src: *const f64,
+    count: usize,
+    before_out: *mut BcF64Buf,
+    error_out: *mut BcBuf,
+) -> BcStatus {
+    // SAFETY: 공개 함수의 확장 포인터 계약을 공통 구현에 그대로 전달한다.
+    unsafe {
+        write_f64_impl(
+            engine,
+            name,
+            name_len,
+            args,
+            args_len,
+            src,
+            count,
+            Some(before_out),
+            error_out,
+        )
+    }
+}
+
+/// Core typed target을 한 번 관찰한 뒤 host source가 정확할 때만 쓴다.
+///
+/// `host_count`는 signed host 값 그대로 받는다. Core target handout과 선택적 `before_out` snapshot이
+/// 먼저 일어나며, 이후 count가 `1...262144`가 아니거나 실제 길이와 다르거나 source가 유효하지 않으면
+/// `BC_OK`와 `did_write=false`를 돌려준다. 따라서 host는 실제 Core 결과를 기록한 뒤 자체 protocol 오류를
+/// 만들 수 있다. Core 오류는 host count 오류보다 먼저 반환된다.
+///
+/// # Safety
+/// token/name/args는 `bc_write_f64`와 같은 계약을 따른다. `receipt_out`은 writable slot이어야 한다.
+/// `before_out`은 NULL이거나 비어 있는 writable `BcF64Buf` slot이어야 하고, `error_out`은 비어 있는
+/// writable `BcBuf` slot이어야 한다. 출력들은 서로 alias하지 않아야 한다. `src`는 실제 target 길이와
+/// 일치하는 유효 host count에서만 읽으며, 그때 정렬된 readable `double[host_count]`여야 한다.
+#[cfg(not(target_arch = "wasm32"))]
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn bc_write_f64_observe(
+    engine: *mut BcEngine,
+    name: *const u8,
+    name_len: usize,
+    args: *const u8,
+    args_len: usize,
+    flags: u32,
+    src: *const f64,
+    host_count: i64,
+    receipt_out: *mut BcF64WriteReceipt,
+    before_out: *mut BcF64Buf,
+    error_out: *mut BcBuf,
+) -> BcStatus {
     ffi_status(|| {
-        // SAFETY: 오류 출력만 상태 gate 전에 비운다.
-        if !unsafe { empty_buf(error_out) } {
+        // SAFETY: 모든 필수 출력을 상태 gate 전에 canonical empty로 만든다. before는 선택적이다.
+        let receipt_ready = unsafe { empty_f64_write_receipt(receipt_out) };
+        let before_ready = before_out.is_null() || unsafe { empty_f64_buf(before_out) };
+        let error_ready = unsafe { empty_buf(error_out) };
+        let receipt_address = receipt_out.cast::<u8>();
+        let before_address = before_out.cast::<u8>();
+        let error_address = error_out.cast::<u8>();
+        if !receipt_ready
+            || !before_ready
+            || !error_ready
+            || receipt_address == error_address
+            || (!before_out.is_null()
+                && (before_address == receipt_address || before_address == error_address))
+        {
+            return BcStatus::BC_INVALID;
+        }
+        let slot = match lease(engine) {
+            Ok(slot) => slot,
+            Err(status) => return unsafe { lease_error(status, error_out) },
+        };
+        // SAFETY: Arc lease가 slot을 유지하고 출력들은 위에서 검증·초기화했다.
+        unsafe {
+            stateful(
+                &slot,
+                error_out,
+                || {
+                    let name = bytes(name, name_len).ok_or(BcStatus::BC_INVALID)?;
+                    str::from_utf8(name).map_err(|_| BcStatus::BC_INVALID)
+                },
+                |core, name| {
+                    debug_panic_if_armed(&slot, name);
+                    let Some(json_mode) = mode(flags) else {
+                        return BcStatus::BC_INVALID;
+                    };
+                    let Some(args) = bytes(args, args_len) else {
+                        return BcStatus::BC_INVALID;
+                    };
+                    let mut scope = MemoryScope::new(&slot.account);
+                    let parsed = match parse_args(args, json_mode, &mut scope) {
+                        Ok(parsed) => parsed,
+                        Err(status) => return status,
+                    };
+                    let JsValue::Array(arguments) = &parsed else {
+                        unreachable!()
+                    };
+
+                    let mut pending_before: Option<PendingF64Output> = None;
+                    let mut callback_status = None;
+                    let access = |target: &mut [f64]| -> Result<(), JsError> {
+                        receipt_out.write(BcF64WriteReceipt {
+                            actual_count: target.len(),
+                            did_write: false,
+                        });
+                        if !before_out.is_null() {
+                            let mut output =
+                                match PendingF64Output::new(target.len(), &slot.account) {
+                                    Ok(output) => output,
+                                    Err(status) => {
+                                        callback_status = Some(status);
+                                        return Err(JsError::new(
+                                            "RangeError",
+                                            JsString::from_str("Out of memory"),
+                                        ));
+                                    }
+                                };
+                            if let Err(status) = output.copy_from(target) {
+                                callback_status = Some(status);
+                                return Err(JsError::new(
+                                    "TypeError",
+                                    JsString::from_str("Float64Array result required"),
+                                ));
+                            }
+                            pending_before = Some(output);
+                        }
+
+                        let Ok(count) = usize::try_from(host_count) else {
+                            return Ok(());
+                        };
+                        if count == 0 || count > F64_TRANSFER_LIMIT || count != target.len() {
+                            return Ok(());
+                        }
+                        let Some(source) = f64_input(src, count) else {
+                            return Ok(());
+                        };
+                        target.copy_from_slice(source);
+                        receipt_out.write(BcF64WriteReceipt {
+                            actual_count: target.len(),
+                            did_write: true,
+                        });
+                        Ok(())
+                    };
+                    #[cfg(debug_assertions)]
+                    let mut access = access;
+
+                    #[cfg(debug_assertions)]
+                    let result = if name == "__bcWriteF64ForTest" {
+                        let mut locked = slot
+                            .test_f64
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        let mut values = Vec::new();
+                        if values.try_reserve_exact(locked.len()).is_err() {
+                            return oom_status(slot.account.allocation_failure().style());
+                        }
+                        values.extend(locked.iter().copied().map(f64::from_bits));
+                        let result = access(&mut values);
+                        if receipt_out.read().did_write {
+                            locked.clear();
+                            locked.extend(values.iter().map(|value| value.to_bits()));
+                        }
+                        result
+                    } else {
+                        barochart_bridge::with_write_f64_target_scoped(
+                            core, name, arguments, &mut scope, access,
+                        )
+                    };
+                    #[cfg(not(debug_assertions))]
+                    let result = barochart_bridge::with_write_f64_target_scoped(
+                        core, name, arguments, &mut scope, access,
+                    );
+
+                    if let Some(status) = callback_status {
+                        return status;
+                    }
+                    match result {
+                        Err(error) => write_accounted_error(error_out, &error, &slot.account),
+                        Ok(()) => {
+                            if let Some(output) = pending_before {
+                                before_out.write(output.finish());
+                            }
+                            BcStatus::BC_OK
+                        }
+                    }
+                },
+                |_| None,
+            )
+        }
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(clippy::too_many_arguments)]
+unsafe fn write_f64_impl(
+    engine: *mut BcEngine,
+    name: *const u8,
+    name_len: usize,
+    args: *const u8,
+    args_len: usize,
+    src: *const f64,
+    count: usize,
+    before_out: Option<*mut BcF64Buf>,
+    error_out: *mut BcBuf,
+) -> BcStatus {
+    ffi_status(|| {
+        // SAFETY: 모든 출력을 상태 gate 전에 canonical empty로 만든다.
+        if !unsafe { empty_buf(error_out) }
+            || before_out.is_some_and(|output| !unsafe { empty_f64_buf(output) })
+            || before_out.is_some_and(|output| output.cast::<u8>() == error_out.cast::<u8>())
+        {
             return BcStatus::BC_INVALID;
         }
         let slot = match lease(engine) {
@@ -1272,45 +2370,103 @@ pub unsafe extern "C" fn bc_write_f64(
                     str::from_utf8(name).map_err(|_| BcStatus::BC_INVALID)
                 },
                 |core, name| {
+                    debug_panic_if_armed(&slot, name);
                     if count > F64_TRANSFER_LIMIT {
                         return BcStatus::BC_INVALID;
                     }
-                    let Some(_source) = f64_input(src, count) else {
+                    let Some(source) = f64_input(src, count) else {
                         return BcStatus::BC_INVALID;
                     };
                     let Some(args) = bytes(args, args_len) else {
                         return BcStatus::BC_INVALID;
                     };
-                    let Some(parsed) = parse_args(args, JsonMode::Standard) else {
-                        return BcStatus::BC_INVALID;
+                    let mut scope = MemoryScope::new(&slot.account);
+                    let parsed = match parse_args(args, JsonMode::Standard, &mut scope) {
+                        Ok(parsed) => parsed,
+                        Err(status) => return status,
                     };
-                    #[cfg(debug_assertions)]
-                    if name == "__bcWriteF64ForTest" {
-                        let mut copied = Vec::new();
-                        if copied.try_reserve_exact(count).is_err() {
-                            return BcStatus::BC_THROW;
-                        }
-                        copied.extend(_source.iter().map(|value| value.to_bits()));
-                        *slot
-                            .test_f64
-                            .lock()
-                            .unwrap_or_else(|poisoned| poisoned.into_inner()) = copied;
-                        return BcStatus::BC_OK;
-                    }
                     let JsValue::Array(arguments) = &parsed else {
                         unreachable!()
                     };
-                    match barochart_bridge::call(core, name, arguments) {
-                        Err(error) => write_error(error_out, &error),
-                        Ok(_) => write_error(
-                            error_out,
-                            &JsError::new(
-                                "TypeError",
-                                JsString::from_str("Float64Array result required"),
-                            ),
-                        ),
+                    let mut pending = if before_out.is_some() {
+                        match PendingF64Output::new(count, &slot.account) {
+                            Ok(output) => Some(output),
+                            Err(status) => return status,
+                        }
+                    } else {
+                        None
+                    };
+                    #[cfg(debug_assertions)]
+                    if name == "__bcWriteF64ForTest" {
+                        let mut locked = slot
+                            .test_f64
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        let before = if pending.is_some() {
+                            if locked.len() != count {
+                                return write_accounted_error(
+                                    error_out,
+                                    &JsError::new(
+                                        "RangeError",
+                                        JsString::from_str("Float64Array length"),
+                                    ),
+                                    &slot.account,
+                                );
+                            }
+                            let mut values = Vec::new();
+                            if values.try_reserve_exact(count).is_err() {
+                                return oom_status(slot.account.allocation_failure().style());
+                            }
+                            values.extend(locked.iter().copied().map(f64::from_bits));
+                            Some(values)
+                        } else {
+                            None
+                        };
+                        let mut copied = Vec::new();
+                        if copied.try_reserve_exact(count).is_err() {
+                            return oom_status(slot.account.allocation_failure().style());
+                        }
+                        copied.extend(source.iter().map(|value| value.to_bits()));
+                        *locked = copied;
+                        drop(locked);
+                        if let (Some(output), Some(before)) = (pending, before) {
+                            let buffer = match output.publish(&before) {
+                                Ok(buffer) => buffer,
+                                Err(status) => return status,
+                            };
+                            // SAFETY: snapshot export validated the writable output slot.
+                            before_out.expect("snapshot output").write(buffer);
+                        }
+                        return BcStatus::BC_OK;
+                    }
+                    match barochart_bridge::write_f64_scoped(
+                        core,
+                        name,
+                        arguments,
+                        source,
+                        &mut scope,
+                        |before| {
+                            if let Some(output) = pending.as_mut() {
+                                output.copy_from(before).map_err(|_| {
+                                    JsError::new(
+                                        "TypeError",
+                                        JsString::from_str("Float64Array result required"),
+                                    )
+                                })?;
+                            }
+                            Ok(())
+                        },
+                    ) {
+                        Err(error) => write_accounted_error(error_out, &error, &slot.account),
+                        Ok(()) => {
+                            if let Some(output) = pending {
+                                before_out.expect("snapshot output").write(output.finish());
+                            }
+                            BcStatus::BC_OK
+                        }
                     }
                 },
+                |_| None,
             )
         }
     })
@@ -1348,44 +2504,94 @@ pub unsafe extern "C" fn bc_packet(
                 &slot,
                 metadata_out,
                 || Ok(()),
-                |_core, ()| {
+                |core, ()| {
                     let Some(args) = bytes(args, args_len) else {
                         return BcStatus::BC_INVALID;
                     };
-                    let Some(_parsed) = parse_args(args, JsonMode::Standard) else {
-                        return BcStatus::BC_INVALID;
+                    let mut scope = MemoryScope::new(&slot.account);
+                    let _parsed = match parse_args(args, JsonMode::Standard, &mut scope) {
+                        Ok(parsed) => parsed,
+                        Err(status) => return status,
                     };
                     #[cfg(debug_assertions)]
                     if let JsValue::Array(values) = &_parsed
                         && let Some(JsValue::String(name)) = values.first()
                     {
                         let name = name.to_string_lossy();
-                        if name == "__bcPacketForTest" || name == "__bcEmptyPacketForTest" {
+                        if matches!(
+                            name.as_str(),
+                            "__bcPacketForTest"
+                                | "__bcEmptyPacketForTest"
+                                | "__bcPacketForTestLarge"
+                        ) {
                             let mut numbers = Vec::new();
-                            let needed = usize::from(name == "__bcPacketForTest") * 4;
+                            let needed = match name.as_str() {
+                                "__bcPacketForTest" => 4,
+                                "__bcPacketForTestLarge" => 8_192,
+                                _ => 0,
+                            };
                             if numbers.try_reserve_exact(needed).is_err() {
                                 return BcStatus::BC_THROW;
                             }
                             if needed != 0 {
-                                numbers.extend([
+                                numbers.resize(needed, 0.0);
+                                numbers[..4].copy_from_slice(&[
                                     0.0,
                                     -0.0,
                                     f64::from_bits(0x7ff8_0000_0000_0042),
                                     f64::INFINITY,
                                 ]);
                             }
-                            let metadata = match allocate_bytes(br#"{"kind":"test"}"#) {
+                            let metadata = match allocate_accounted_bytes(
+                                br#"{"kind":"test"}"#,
+                                &slot.account,
+                            ) {
                                 Ok(metadata) => metadata,
                                 Err(status) => return status,
                             };
-                            let numbers = leak_f64(numbers);
+                            let numbers = match allocate_accounted_f64(&numbers, &slot.account) {
+                                Ok(numbers) => numbers,
+                                Err(status) => {
+                                    free_buf(metadata);
+                                    return status;
+                                }
+                            };
                             metadata_out.write(metadata);
                             numbers_out.write(numbers);
                             return BcStatus::BC_OK;
                         }
                     }
-                    write_error(metadata_out, &unavailable("nativeScenePacket"))
+                    let JsValue::Array(arguments) = &_parsed else {
+                        unreachable!("validated array")
+                    };
+                    match barochart_bridge::packet_scoped(core, arguments, &mut scope) {
+                        Err(error) => write_accounted_error(metadata_out, &error, &slot.account),
+                        Ok(packet) => {
+                            let text = match packet.metadata.try_to_string_lossy_scoped(&mut scope)
+                            {
+                                Ok(text) => text,
+                                Err(error) => return oom_status(error.style()),
+                            };
+                            let metadata =
+                                match allocate_accounted_bytes(text.as_bytes(), &slot.account) {
+                                    Ok(value) => value,
+                                    Err(status) => return status,
+                                };
+                            let numbers =
+                                match allocate_accounted_f64(&packet.numbers, &slot.account) {
+                                    Ok(numbers) => numbers,
+                                    Err(status) => {
+                                        free_buf(metadata);
+                                        return status;
+                                    }
+                                };
+                            metadata_out.write(metadata);
+                            numbers_out.write(numbers);
+                            BcStatus::BC_OK
+                        }
+                    }
                 },
+                |_| None,
             )
         }
     })
@@ -1423,20 +2629,19 @@ pub unsafe extern "C" fn bc_memory_stats(engine: *const BcEngine, out: *mut BcBu
         if slot.closed.load(Ordering::Acquire) {
             return unsafe { lease_error(BcStatus::BC_CLOSED, out) };
         }
+        let snapshot = slot.account.snapshot();
         let json = format!(
-            "{{\"byteBuffers\":{},\"byteCapacity\":{},\"f64Buffers\":{},\"f64Capacity\":{},\"liveEngines\":{},\"poisoned\":{}}}",
-            BYTE_BUFFERS.load(Ordering::Relaxed),
-            BYTE_CAPACITY.load(Ordering::Relaxed),
-            F64_BUFFERS.load(Ordering::Relaxed),
-            F64_CAPACITY.load(Ordering::Relaxed),
-            locked_registry().len(),
-            slot.poisoned.load(Ordering::Acquire)
+            "{{\"requestedLiveBytes\":{},\"requestedPeakBytes\":{},\"limitBytes\":{},\"retainedOutputBytes\":{},\"poisoned\":{}}}",
+            snapshot.requested_live_bytes,
+            snapshot.requested_peak_bytes,
+            snapshot.limit_bytes,
+            snapshot.retained_output_bytes,
+            slot.poisoned.load(Ordering::Acquire),
         );
         // SAFETY: out은 진입에서 writable임을 확인했다.
-        if unsafe { write_bytes(out, json.as_bytes()) }.is_ok() {
-            BcStatus::BC_OK
-        } else {
-            BcStatus::BC_THROW
+        match unsafe { write_bytes_with_style(out, json.as_bytes(), slot.account.oom_style()) } {
+            Ok(()) => BcStatus::BC_OK,
+            Err(status) => status,
         }
     })
 }
@@ -1559,12 +2764,28 @@ pub unsafe extern "C" fn bc_f64_buf_free(buf: BcF64Buf) {
 mod tests {
     use std::ffi::c_void;
     use std::ptr;
+    use std::slice;
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Mutex, MutexGuard, OnceLock};
 
     use super::{
-        BcBuf, BcEngine, BcHost, BcStatus, NEXT_ENGINE_ID, bc_buf_free, bc_engine_new,
-        next_engine_id,
+        BC_FLAG_LOSSLESS, BcBuf, BcEngine, BcHost, BcStatus, EngineSlot, NEXT_ENGINE_ID,
+        PendingByteOutput, bc_buf_free, bc_buf_new_copy, bc_call, bc_engine_free, bc_engine_new,
+        bc_engine_new_with_limit, lease, next_engine_id,
     };
+    use barochart_js::json::{JsObject, JsValue, JsonMode, stringify_json};
+    use barochart_js::memory::{MemoryAccount, OomStyle};
+    use barochart_js::string::JsString;
+
+    static TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    fn serial() -> MutexGuard<'static, ()> {
+        TEST_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 
     unsafe extern "C" fn zone_resolve(
         _: *mut c_void,
@@ -1585,6 +2806,31 @@ mod tests {
         1
     }
 
+    unsafe extern "C" fn zone_resolve_ok(
+        _: *mut c_void,
+        _: *const u8,
+        _: usize,
+        out: *mut BcBuf,
+    ) -> i32 {
+        // SAFETY: callback receives a writable BcBuf output and copies a static UTF-8 zone.
+        let status = unsafe { bc_buf_new_copy(b"UTC".as_ptr(), 3, out) };
+        i32::from(status != BcStatus::BC_OK)
+    }
+
+    unsafe extern "C" fn zone_offset_ok(
+        _: *mut c_void,
+        _: *const u8,
+        _: usize,
+        _: f64,
+        out: *mut i32,
+    ) -> i32 {
+        if !out.is_null() {
+            // SAFETY: callback contract provides one writable i32.
+            unsafe { out.write(0) };
+        }
+        0
+    }
+
     unsafe extern "C" fn release(context: *mut c_void) {
         // SAFETY: 테스트 context는 호출 동안 유효한 AtomicUsize다.
         unsafe { &*context.cast::<AtomicUsize>() }.fetch_add(1, Ordering::SeqCst);
@@ -1592,6 +2838,7 @@ mod tests {
 
     #[test]
     fn handle_id_exhaustion_never_wraps_or_reuses_zero() {
+        let _guard = serial();
         let maximum = (usize::MAX >> 3).min((i64::MAX as usize) >> 3);
         NEXT_ENGINE_ID.store(maximum, Ordering::Relaxed);
         assert_eq!(next_engine_id(), Some(maximum));
@@ -1615,5 +2862,982 @@ mod tests {
         // SAFETY: bc_engine_new이 만든 Rust 소유 오류 버퍼다.
         unsafe { bc_buf_free(error) };
         NEXT_ENGINE_ID.store(1, Ordering::Relaxed);
+    }
+
+    #[test]
+    fn pending_byte_output_is_final_owned_storage_and_drops_without_retention() {
+        let _guard = serial();
+        let account = MemoryAccount::new(0, OomStyle::RangeErrorCapitalized);
+        let pending = PendingByteOutput::new(4, &account).expect("fixed reply allocation");
+        let admitted = account.snapshot();
+        assert!(admitted.retained_output_bytes >= 4);
+        let output = pending.publish(b"null");
+        // SAFETY: pending output owns exactly output.len initialized bytes until bc_buf_free.
+        assert_eq!(
+            unsafe { slice::from_raw_parts(output.ptr, output.len) },
+            b"null"
+        );
+        assert_eq!(
+            account.snapshot().retained_output_bytes,
+            admitted.retained_output_bytes
+        );
+        // SAFETY: PendingByteOutput published this exact unique descriptor once.
+        unsafe { bc_buf_free(output) };
+        assert_eq!(account.snapshot().retained_output_bytes, 0);
+
+        let denied = MemoryAccount::new(1, OomStyle::InternalErrorLowercase);
+        assert_eq!(
+            PendingByteOutput::new(4, &denied).unwrap_err(),
+            BcStatus::BC_OOM_LIMIT
+        );
+        assert_eq!(denied.snapshot().requested_live_bytes, 0);
+        assert_eq!(denied.snapshot().retained_output_bytes, 0);
+    }
+
+    unsafe fn call_bytes(engine: *mut BcEngine, name: &[u8], args: &[u8]) -> (BcStatus, BcBuf) {
+        let mut output = BcBuf::default();
+        // SAFETY: test engine/name/args/output satisfy bc_call's ownership contract.
+        let status = unsafe {
+            bc_call(
+                engine,
+                name.as_ptr(),
+                name.len(),
+                args.as_ptr(),
+                args.len(),
+                0,
+                &mut output,
+            )
+        };
+        (status, output)
+    }
+
+    fn capture_model(slot: &EngineSlot) -> barochart_core::model_state::ModelWorkspaceCaptureToken {
+        // SAFETY: these serialized tests own an idle engine and make only immutable observations.
+        let core = unsafe { &*slot.core.get() }.as_ref().expect("open core");
+        core.chart()
+            .expect("initialized chart")
+            .model()
+            .capture_workspace_state()
+    }
+
+    fn model_matches(
+        slot: &EngineSlot,
+        token: &barochart_core::model_state::ModelWorkspaceCaptureToken,
+    ) -> bool {
+        // SAFETY: the preceding call completed and the engine is idle.
+        let core = unsafe { &*slot.core.get() }.as_ref().expect("open core");
+        core.chart()
+            .expect("initialized chart")
+            .model()
+            .validate_workspace_state(token)
+    }
+
+    fn capture_view(slot: &EngineSlot) -> (u64, u64, bool) {
+        // SAFETY: immutable observation of an idle serialized test engine.
+        let core = unsafe { &*slot.core.get() }.as_ref().expect("open core");
+        let model = core.chart().expect("initialized chart").model();
+        (
+            model.view.from.to_bits(),
+            model.view.to.to_bits(),
+            model.follow,
+        )
+    }
+
+    fn capture_store(slot: &EngineSlot) -> (barochart_core::data::DataIdentity, u64, usize) {
+        // SAFETY: immutable observation of an idle serialized test engine.
+        let core = unsafe { &*slot.core.get() }.as_ref().expect("open core");
+        let store = core.chart().expect("initialized chart").data().store();
+        (
+            store.data_identity(),
+            store.version().to_bits(),
+            store.length(),
+        )
+    }
+
+    fn store_matches(
+        slot: &EngineSlot,
+        token: &(barochart_core::data::DataIdentity, u64, usize),
+    ) -> bool {
+        // SAFETY: immutable observation after the completed serialized call.
+        let core = unsafe { &*slot.core.get() }.as_ref().expect("open core");
+        let store = core.chart().expect("initialized chart").data().store();
+        store.data_identity().matches(&token.0)
+            && store.version().to_bits() == token.1
+            && store.length() == token.2
+    }
+
+    fn capture_interaction(slot: &EngineSlot) -> Vec<u8> {
+        // SAFETY: immutable observation of an idle serialized test engine.
+        let core = unsafe { &*slot.core.get() }.as_ref().expect("open core");
+        let input = core.input().expect("initialized input");
+        stringify_json(
+            &object([
+                ("tool", JsValue::String(input.tool().clone())),
+                ("text", input.text().clone()),
+                (
+                    "drawingTarget",
+                    input.drawing_target().cloned().unwrap_or(JsValue::Null),
+                ),
+                ("drawingMagnet", input.drawing_magnet()),
+                ("crosshairSnap", input.crosshair_snap()),
+                ("pointers", JsValue::Number(input.pointer_count() as f64)),
+                (
+                    "gesture",
+                    input.gesture_kind().map_or(JsValue::Null, |value| {
+                        JsValue::String(JsString::from_str(value))
+                    }),
+                ),
+            ]),
+            JsonMode::Standard,
+        )
+    }
+
+    fn capture_native_size(slot: &EngineSlot) -> Option<Vec<u8>> {
+        // SAFETY: immutable observation of an idle serialized test engine.
+        let core = unsafe { &*slot.core.get() }.as_ref().expect("open core");
+        core.native_size().map(|size| {
+            stringify_json(
+                &JsValue::Array(vec![size.width().clone(), size.height().clone()]),
+                JsonMode::Standard,
+            )
+        })
+    }
+
+    fn capture_drawings(
+        slot: &EngineSlot,
+    ) -> barochart_core::drawings::DrawingWorkspaceCaptureToken {
+        // SAFETY: immutable observation of an idle serialized test engine.
+        let core = unsafe { &*slot.core.get() }.as_ref().expect("open core");
+        core.chart()
+            .expect("initialized chart")
+            .drawings()
+            .capture_workspace_state()
+            .expect("drawing capture")
+    }
+
+    fn drawings_match(
+        slot: &EngineSlot,
+        token: &barochart_core::drawings::DrawingWorkspaceCaptureToken,
+    ) -> bool {
+        // SAFETY: immutable observation after a completed serialized call.
+        let core = unsafe { &*slot.core.get() }.as_ref().expect("open core");
+        core.chart()
+            .expect("initialized chart")
+            .drawings()
+            .validate_workspace_state(token)
+    }
+
+    fn object<const N: usize>(entries: [(&str, JsValue); N]) -> JsValue {
+        let mut object = JsObject::new();
+        for (name, value) in entries {
+            object.insert(JsString::from_str(name), value);
+        }
+        JsValue::Object(object)
+    }
+
+    #[test]
+    fn fixed_navigation_reply_quota_is_admitted_before_one_publication() {
+        let _guard = serial();
+        const LIMIT: u64 = 16 * 1024 * 1024;
+        let host = BcHost {
+            context: ptr::null_mut(),
+            zone_resolve: Some(zone_resolve),
+            zone_offset_seconds: Some(zone_offset),
+            log: None,
+            release: None,
+        };
+        let mut engine = ptr::null_mut();
+        let mut error = BcBuf::default();
+        // SAFETY: outputs are writable and callbacks live for the engine lifetime.
+        assert_eq!(
+            unsafe { bc_engine_new_with_limit(&host, LIMIT, &mut engine, &mut error) },
+            BcStatus::BC_OK
+        );
+        assert!(error.ptr.is_null());
+        let (status, init) = unsafe { call_bytes(engine, b"nativeInit", b"[0]") };
+        assert_eq!(status, BcStatus::BC_OK);
+        // SAFETY: bc_call returned one unique owned buffer.
+        unsafe { bc_buf_free(init) };
+
+        let slot = lease(engine).expect("live test engine");
+        let account = Arc::clone(&slot.account);
+        let args = br#"["setVisibleRange",[-0.5,20.5]]"#;
+        let attempt = |headroom: u64| -> bool {
+            let before = capture_model(&slot);
+            let live = account.snapshot().requested_live_bytes;
+            let pressure = account
+                .reserve(LIMIT - live - headroom)
+                .expect("headroom pressure");
+            let (status, output) = unsafe { call_bytes(engine, b"nativeCommand", args) };
+            let unchanged = model_matches(&slot, &before);
+            let succeeded = match status {
+                BcStatus::BC_OOM_LIMIT => {
+                    assert!(output.ptr.is_null());
+                    assert!(
+                        unchanged,
+                        "reply denial published the view at {headroom} bytes"
+                    );
+                    assert_eq!(account.snapshot().retained_output_bytes, 0);
+                    false
+                }
+                BcStatus::BC_OK => {
+                    assert!(
+                        !unchanged,
+                        "successful navigation must publish one new view identity"
+                    );
+                    // SAFETY: successful bc_call returned initialized output.len bytes.
+                    assert_eq!(
+                        unsafe { slice::from_raw_parts(output.ptr, output.len) },
+                        b"null"
+                    );
+                    true
+                }
+                other => panic!("unexpected navigation status at {headroom}: {other:?}"),
+            };
+            // SAFETY: exact successful descriptor or canonical empty is returned once.
+            unsafe { bc_buf_free(output) };
+            assert_eq!(account.snapshot().retained_output_bytes, 0);
+            drop(pressure);
+            succeeded
+        };
+        let mut last_denied = 0_u64;
+        let mut first_success = None;
+        let mut headroom = 1_u64;
+
+        while headroom <= 65_536 {
+            if attempt(headroom) {
+                first_success = Some(headroom);
+                break;
+            }
+            last_denied = headroom;
+            headroom *= 2;
+        }
+        let mut first_success = first_success.expect("bounded fixed reply headroom");
+        while first_success - last_denied > 1 {
+            let middle = last_denied + (first_success - last_denied) / 2;
+            if attempt(middle) {
+                first_success = middle;
+            } else {
+                last_denied = middle;
+            }
+        }
+        assert_eq!(last_denied + 1, first_success);
+
+        // The exact byte immediately below a known success must still leave state untouched.
+        assert!(!attempt(last_denied));
+        assert!(attempt(first_success));
+
+        // Semantic validation precedes reply admission even when that admission would be denied.
+        let malformed_before = capture_model(&slot);
+        let mut admission_called = false;
+        let result = {
+            // SAFETY: this test exclusively owns the idle engine during the direct Core call.
+            let core = unsafe { &mut *slot.core.get() }
+                .as_mut()
+                .expect("open core");
+            let mut scope = core.memory_context().scope();
+            barochart_bridge::call_scoped_with_reply_admission(
+                core,
+                "nativeCommand",
+                &[
+                    JsValue::String(JsString::from_str("setVisibleRange")),
+                    JsValue::Array(vec![
+                        JsValue::String(JsString::from_str("bad")),
+                        JsValue::Number(20.5),
+                    ]),
+                ],
+                &mut scope,
+                &mut |_| {
+                    admission_called = true;
+                    Err(account.allocation_failure().into_js_error())
+                },
+            )
+        };
+        let malformed = result.expect_err("malformed range");
+        assert_eq!(malformed.name, "RangeError");
+        assert_eq!(malformed.message.to_string_lossy(), "Visible range");
+        assert!(!admission_called);
+        assert!(model_matches(&slot, &malformed_before));
+
+        drop(slot);
+        // SAFETY: terminally release the unique engine token.
+        unsafe { bc_engine_free(engine) };
+        assert_eq!(account.snapshot().requested_live_bytes, 0);
+    }
+
+    #[test]
+    fn bulk_fixed_reply_owns_output_before_store_publication() {
+        let _guard = serial();
+        const LIMIT: u64 = 16 * 1024 * 1024;
+        let host = BcHost {
+            context: ptr::null_mut(),
+            zone_resolve: Some(zone_resolve),
+            zone_offset_seconds: Some(zone_offset),
+            log: None,
+            release: None,
+        };
+        let mut engine = ptr::null_mut();
+        let mut error = BcBuf::default();
+        // SAFETY: outputs and callbacks satisfy the constructor contract.
+        assert_eq!(
+            unsafe { bc_engine_new_with_limit(&host, LIMIT, &mut engine, &mut error) },
+            BcStatus::BC_OK
+        );
+        let (status, init) = unsafe { call_bytes(engine, b"nativeInit", b"[0]") };
+        assert_eq!(status, BcStatus::BC_OK);
+        // SAFETY: exact successful descriptor.
+        unsafe { bc_buf_free(init) };
+        let slot = lease(engine).expect("live engine");
+        let account = Arc::clone(&slot.account);
+        let args = br#"["setData",[[{"time":1,"open":2,"high":3,"low":1,"close":2,"volume":4}]]]"#;
+        let mut headroom = 1_u64;
+        let mut observed_denial = false;
+        let mut observed_success = false;
+        while headroom <= 65_536 {
+            let before = capture_store(&slot);
+            let live = account.snapshot().requested_live_bytes;
+            let pressure = account
+                .reserve(LIMIT - live - headroom)
+                .expect("bulk headroom pressure");
+            let (status, output) = unsafe { call_bytes(engine, b"nativeCommand", args) };
+            match status {
+                BcStatus::BC_OOM_LIMIT => {
+                    observed_denial = true;
+                    assert!(output.ptr.is_null());
+                    assert!(
+                        store_matches(&slot, &before),
+                        "bulk reply denial published store"
+                    );
+                }
+                BcStatus::BC_OK => {
+                    observed_success = true;
+                    assert!(!store_matches(&slot, &before));
+                    // SAFETY: successful fixed reply owns output.len initialized bytes.
+                    assert_eq!(
+                        unsafe { slice::from_raw_parts(output.ptr, output.len) },
+                        b"null"
+                    );
+                }
+                other => panic!("unexpected bulk status at {headroom}: {other:?}"),
+            }
+            // SAFETY: exact successful descriptor or canonical empty.
+            unsafe { bc_buf_free(output) };
+            assert_eq!(account.snapshot().retained_output_bytes, 0);
+            drop(pressure);
+            if observed_success {
+                break;
+            }
+            headroom *= 2;
+        }
+        assert!(observed_denial && observed_success);
+        drop(slot);
+        // SAFETY: terminal unique engine release.
+        unsafe { bc_engine_free(engine) };
+    }
+
+    #[test]
+    fn every_staged_navigation_alias_reaches_admission_before_publication() {
+        let _guard = serial();
+        use barochart_bridge::reply_policy::FixedReply;
+
+        let host = BcHost {
+            context: ptr::null_mut(),
+            zone_resolve: Some(zone_resolve),
+            zone_offset_seconds: Some(zone_offset),
+            log: None,
+            release: None,
+        };
+        let mut engine = ptr::null_mut();
+        let mut error = BcBuf::default();
+        // SAFETY: outputs and callbacks satisfy the constructor contract.
+        assert_eq!(
+            unsafe { bc_engine_new(&host, &mut engine, &mut error) },
+            BcStatus::BC_OK
+        );
+        let (status, init) = unsafe { call_bytes(engine, b"nativeInit", b"[0]") };
+        assert_eq!(status, BcStatus::BC_OK);
+        // SAFETY: exact successful output descriptor.
+        unsafe { bc_buf_free(init) };
+        let slot = lease(engine).expect("live engine");
+        let account = Arc::clone(&slot.account);
+        let command = |name: &str, args: Vec<JsValue>| {
+            vec![
+                JsValue::String(JsString::from_str(name)),
+                JsValue::Array(args),
+            ]
+        };
+        let empty_columns = || {
+            object([
+                ("time", JsValue::Array(vec![])),
+                ("open", JsValue::Array(vec![])),
+                ("high", JsValue::Array(vec![])),
+                ("low", JsValue::Array(vec![])),
+                ("close", JsValue::Array(vec![])),
+                ("volume", JsValue::Array(vec![])),
+            ])
+        };
+        let cases = [
+            (
+                "nativeCommand",
+                command("setData", vec![JsValue::Array(vec![])]),
+                FixedReply::Null,
+            ),
+            (
+                "nativeCommand",
+                command("setColumns", vec![empty_columns()]),
+                FixedReply::Null,
+            ),
+            (
+                "nativeView",
+                vec![JsValue::Number(-0.5), JsValue::Number(20.5)],
+                FixedReply::Undefined,
+            ),
+            ("nativeFit", vec![], FixedReply::Undefined),
+            (
+                "nativeCommand",
+                command(
+                    "setVisibleRange",
+                    vec![JsValue::Number(-0.5), JsValue::Number(20.5)],
+                ),
+                FixedReply::Null,
+            ),
+            ("nativeCommand", command("fit", vec![]), FixedReply::Null),
+            (
+                "nativeCommand",
+                command("zoom", vec![JsValue::Number(0.8)]),
+                FixedReply::Null,
+            ),
+            (
+                "nativeCommand",
+                command("pan", vec![JsValue::Number(1.0)]),
+                FixedReply::Null,
+            ),
+        ];
+        for (name, args, expected) in cases {
+            let before = capture_model(&slot);
+            let view_before = capture_view(&slot);
+            let mut admitted = None;
+            let result = {
+                // SAFETY: serialized unit test owns the idle engine exclusively.
+                let core = unsafe { &mut *slot.core.get() }
+                    .as_mut()
+                    .expect("open core");
+                let mut scope = core.memory_context().scope();
+                barochart_bridge::call_scoped_with_reply_admission(
+                    core,
+                    name,
+                    &args,
+                    &mut scope,
+                    &mut |reply| {
+                        admitted = Some(reply);
+                        Err(account.allocation_failure().into_js_error())
+                    },
+                )
+            };
+            assert!(
+                barochart_js::memory::oom_style_from_error(
+                    &result.expect_err("denied reply admission")
+                )
+                .is_some()
+            );
+            assert_eq!(admitted, Some(expected), "{name}");
+            if name == "nativeWheel" {
+                // Source layout may publish lazy indicator/cache effects before zoom validation.
+                assert_eq!(capture_view(&slot), view_before, "{name}");
+            } else {
+                assert!(model_matches(&slot, &before), "{name}");
+            }
+        }
+        for (name, args, expected) in [
+            ("nativeView", "[-0.5,20.5]", b"undefined".as_slice()),
+            ("nativeFit", "[]", b"undefined".as_slice()),
+            ("nativeCommand", "[\"fit\"]", b"null".as_slice()),
+        ] {
+            let mut output = BcBuf::default();
+            // SAFETY: live engine and borrowed UTF-8 inputs remain valid for the call.
+            let status = unsafe {
+                bc_call(
+                    engine,
+                    name.as_ptr(),
+                    name.len(),
+                    args.as_ptr(),
+                    args.len(),
+                    BC_FLAG_LOSSLESS,
+                    &mut output,
+                )
+            };
+            assert_eq!(status, BcStatus::BC_OK, "{name}");
+            // SAFETY: successful fixed reply owns output.len initialized bytes.
+            assert_eq!(
+                unsafe { slice::from_raw_parts(output.ptr, output.len) },
+                expected
+            );
+            // SAFETY: exact successful descriptor is returned once.
+            unsafe { bc_buf_free(output) };
+        }
+        drop(slot);
+        // SAFETY: terminal unique engine release.
+        unsafe { bc_engine_free(engine) };
+    }
+
+    #[test]
+    fn staged_model_fixed_replies_deny_before_publication() {
+        use barochart_bridge::reply_policy::FixedReply;
+
+        let _guard = serial();
+        let host = BcHost {
+            context: ptr::null_mut(),
+            zone_resolve: Some(zone_resolve_ok),
+            zone_offset_seconds: Some(zone_offset_ok),
+            log: None,
+            release: None,
+        };
+        let mut engine = ptr::null_mut();
+        let mut error = BcBuf::default();
+        // SAFETY: outputs and callbacks satisfy the constructor contract.
+        assert_eq!(
+            unsafe { bc_engine_new(&host, &mut engine, &mut error) },
+            BcStatus::BC_OK
+        );
+        let (status, init) = unsafe { call_bytes(engine, b"nativeInit", b"[0]") };
+        assert_eq!(status, BcStatus::BC_OK);
+        // SAFETY: exact successful descriptor.
+        unsafe { bc_buf_free(init) };
+        for setup in [
+            br#"["addPanel",[{"id":"aux-panel"}]]"#.as_slice(),
+            br#"["addAxis",[{"id":"aux","panel":"price"}]]"#.as_slice(),
+            br#"["addSeries",[{"id":"external","type":"line","panel":"price"}]]"#.as_slice(),
+            br#"["addIndicator",["gate-ind","sma",{"period":2}]]"#.as_slice(),
+        ] {
+            let (status, output) = unsafe { call_bytes(engine, b"nativeCommand", setup) };
+            assert_eq!(status, BcStatus::BC_OK);
+            // SAFETY: exact successful setup descriptor.
+            unsafe { bc_buf_free(output) };
+        }
+        for setup in [
+            br#"["addDrawing",[{"id":"gate-d1","type":"horizontal","panel":"price","seriesId":"price","points":[{"time":1,"price":2}]}]]"#.as_slice(),
+            br#"["addDrawing",[{"id":"gate-d2","type":"horizontal","panel":"price","seriesId":"price","points":[{"time":2,"price":3}]}]]"#.as_slice(),
+            br#"["undo",[]]"#.as_slice(),
+            br#"["selectDrawing",[null]]"#.as_slice(),
+        ] {
+            let (status, output) = unsafe { call_bytes(engine, b"nativeCommand", setup) };
+            assert_eq!(status, BcStatus::BC_OK, "{}", String::from_utf8_lossy(setup));
+            // SAFETY: exact successful setup descriptor.
+            unsafe { bc_buf_free(output) };
+        }
+
+        let slot = lease(engine).expect("live engine");
+        let account = Arc::clone(&slot.account);
+        let command = |name: &str, args: Vec<JsValue>| {
+            vec![
+                JsValue::String(JsString::from_str(name)),
+                JsValue::Array(args),
+            ]
+        };
+        let empty_columns = || {
+            object([
+                ("time", JsValue::Array(vec![])),
+                ("open", JsValue::Array(vec![])),
+                ("high", JsValue::Array(vec![])),
+                ("low", JsValue::Array(vec![])),
+                ("close", JsValue::Array(vec![])),
+                ("volume", JsValue::Array(vec![])),
+            ])
+        };
+        let drawing_document = {
+            // SAFETY: immutable observation of the idle engine.
+            let core = unsafe { &*slot.core.get() }.as_ref().expect("open core");
+            core.chart()
+                .expect("initialized chart")
+                .drawings()
+                .save()
+                .expect("drawing document")
+        };
+        let symbol = object([
+            ("id", JsValue::String(JsString::from_str("TEST"))),
+            ("exchange", JsValue::String(JsString::from_str("DEMO"))),
+            ("timezone", JsValue::String(JsString::from_str("UTC"))),
+            ("currency", JsValue::String(JsString::from_str("USD"))),
+            ("volumeUnit", JsValue::String(JsString::from_str("shares"))),
+            ("priceDecimals", JsValue::Number(2.0)),
+            ("tickSize", JsValue::Number(0.01)),
+            ("adjustment", JsValue::String(JsString::from_str("raw"))),
+        ]);
+        let cases = [
+            (
+                "nativeCommand",
+                command(
+                    "setPanel",
+                    vec![
+                        JsValue::String(JsString::from_str("price")),
+                        object([("weight", JsValue::Number(2.0))]),
+                    ],
+                ),
+                FixedReply::Null,
+            ),
+            (
+                "nativeCommand",
+                command(
+                    "setSeries",
+                    vec![
+                        JsValue::String(JsString::from_str("external")),
+                        object([("color", JsValue::String(JsString::from_str("#abcdef")))]),
+                    ],
+                ),
+                FixedReply::Null,
+            ),
+            (
+                "nativeCommand",
+                command(
+                    "removePanel",
+                    vec![JsValue::String(JsString::from_str("aux-panel"))],
+                ),
+                FixedReply::Null,
+            ),
+            (
+                "nativeCommand",
+                command(
+                    "removeSeries",
+                    vec![JsValue::String(JsString::from_str("external"))],
+                ),
+                FixedReply::Null,
+            ),
+            (
+                "nativeCommand",
+                command(
+                    "removeIndicator",
+                    vec![JsValue::String(JsString::from_str("gate-ind"))],
+                ),
+                FixedReply::Null,
+            ),
+            (
+                "nativeCommand",
+                command(
+                    "setAxis",
+                    vec![
+                        JsValue::String(JsString::from_str("aux")),
+                        object([("width", JsValue::Number(40.0))]),
+                    ],
+                ),
+                FixedReply::Null,
+            ),
+            (
+                "nativeCommand",
+                command(
+                    "removeAxis",
+                    vec![JsValue::String(JsString::from_str("aux"))],
+                ),
+                FixedReply::Null,
+            ),
+            (
+                "nativeCommand",
+                command(
+                    "setSeriesValues",
+                    vec![
+                        JsValue::String(JsString::from_str("external")),
+                        JsValue::Array(vec![]),
+                    ],
+                ),
+                FixedReply::Null,
+            ),
+            (
+                "nativeCommand",
+                command(
+                    "setTheme",
+                    vec![object([(
+                        "background",
+                        JsValue::String(JsString::from_str("#010203")),
+                    )])],
+                ),
+                FixedReply::Null,
+            ),
+            (
+                "nativeCommand",
+                command("setSymbol", vec![symbol]),
+                FixedReply::Null,
+            ),
+            (
+                "nativeCommand",
+                command(
+                    "editDrawing",
+                    vec![
+                        JsValue::String(JsString::from_str("gate-d1")),
+                        object([("visible", JsValue::Bool(false))]),
+                    ],
+                ),
+                FixedReply::Null,
+            ),
+            (
+                "nativeCommand",
+                command(
+                    "selectDrawing",
+                    vec![JsValue::String(JsString::from_str("gate-d1"))],
+                ),
+                FixedReply::Null,
+            ),
+            (
+                "nativeCommand",
+                command(
+                    "loadDrawings",
+                    vec![JsValue::String(drawing_document.clone())],
+                ),
+                FixedReply::Null,
+            ),
+            ("nativeCommand", command("undo", vec![]), FixedReply::Null),
+            ("nativeCommand", command("redo", vec![]), FixedReply::Null),
+            (
+                "nativeLoad",
+                vec![JsValue::String(drawing_document)],
+                FixedReply::Undefined,
+            ),
+            (
+                "nativeCommand",
+                command("setDrawingTarget", vec![JsValue::Null]),
+                FixedReply::Null,
+            ),
+            (
+                "nativeCommand",
+                command(
+                    "setDrawingMagnet",
+                    vec![object([
+                        ("mode", JsValue::String(JsString::from_str("weak"))),
+                        ("radiusPx", JsValue::Number(8.0)),
+                    ])],
+                ),
+                FixedReply::Null,
+            ),
+            (
+                "nativeCommand",
+                command(
+                    "setCrosshairSnap",
+                    vec![object([(
+                        "mode",
+                        JsValue::String(JsString::from_str("free")),
+                    )])],
+                ),
+                FixedReply::Null,
+            ),
+            (
+                "nativeCommand",
+                command(
+                    "setTool",
+                    vec![JsValue::String(JsString::from_str("horizontal"))],
+                ),
+                FixedReply::Null,
+            ),
+            (
+                "nativeCommand",
+                command(
+                    "setText",
+                    vec![JsValue::String(JsString::from_str("reply-gated"))],
+                ),
+                FixedReply::Null,
+            ),
+            (
+                "nativeSetData",
+                vec![JsValue::Array(vec![])],
+                FixedReply::Undefined,
+            ),
+            (
+                "nativeDataEvent",
+                vec![object([
+                    ("kind", JsValue::String(JsString::from_str("reset"))),
+                    ("columns", empty_columns()),
+                ])],
+                FixedReply::Undefined,
+            ),
+            (
+                "nativeSetPanel",
+                vec![
+                    JsValue::String(JsString::from_str("price")),
+                    object([("weight", JsValue::Number(2.0))]),
+                ],
+                FixedReply::Undefined,
+            ),
+            (
+                "nativeRemoveSeries",
+                vec![JsValue::String(JsString::from_str("external"))],
+                FixedReply::Undefined,
+            ),
+            (
+                "nativeTheme",
+                vec![object([(
+                    "background",
+                    JsValue::String(JsString::from_str("#010203")),
+                )])],
+                FixedReply::Undefined,
+            ),
+            (
+                "nativeTool",
+                vec![JsValue::String(JsString::from_str("horizontal"))],
+                FixedReply::Undefined,
+            ),
+            (
+                "nativeWheel",
+                vec![JsValue::Number(1.0), JsValue::Number(100.0)],
+                FixedReply::Undefined,
+            ),
+            (
+                "nativeResize",
+                vec![JsValue::Number(800.0), JsValue::Number(600.0)],
+                FixedReply::Undefined,
+            ),
+            (
+                "nativePointer",
+                vec![JsValue::String(JsString::from_str("cancel"))],
+                FixedReply::Undefined,
+            ),
+            (
+                "nativeKey",
+                vec![
+                    JsValue::String(JsString::from_str("Home")),
+                    JsValue::Bool(false),
+                    JsValue::Bool(false),
+                ],
+                FixedReply::Undefined,
+            ),
+        ];
+        for (name, args, expected) in cases {
+            let before = capture_model(&slot);
+            let store_before = capture_store(&slot);
+            let view_before = capture_view(&slot);
+            let interaction_before = capture_interaction(&slot);
+            let size_before = capture_native_size(&slot);
+            let drawings_before = capture_drawings(&slot);
+            let formatter = {
+                // SAFETY: immutable observation of the idle engine.
+                let core = unsafe { &*slot.core.get() }.as_ref().expect("open core");
+                core.chart()
+                    .expect("initialized chart")
+                    .capture_formatter_identity()
+            };
+            let mut admitted = None;
+            let result = {
+                // SAFETY: serialized unit test owns the idle engine exclusively.
+                let core = unsafe { &mut *slot.core.get() }
+                    .as_mut()
+                    .expect("open core");
+                let mut scope = core.memory_context().scope();
+                barochart_bridge::call_scoped_with_reply_admission(
+                    core,
+                    name,
+                    &args,
+                    &mut scope,
+                    &mut |reply| {
+                        admitted = Some(reply);
+                        Err(account.allocation_failure().into_js_error())
+                    },
+                )
+            };
+            assert!(
+                barochart_js::memory::oom_style_from_error(
+                    &result.expect_err("denied reply admission")
+                )
+                .is_some()
+            );
+            assert_eq!(admitted, Some(expected), "{name}");
+            if name == "nativeWheel" {
+                // Source layout may publish lazy indicator/cache effects before zoom validation.
+                assert_eq!(capture_view(&slot), view_before, "{name}");
+            } else {
+                assert!(model_matches(&slot, &before), "{name}");
+            }
+            assert!(store_matches(&slot, &store_before), "{name}");
+            assert_eq!(capture_interaction(&slot), interaction_before, "{name}");
+            assert_eq!(capture_native_size(&slot), size_before, "{name}");
+            assert!(drawings_match(&slot, &drawings_before), "{name}");
+            // SAFETY: immutable observation after the completed call.
+            let core = unsafe { &*slot.core.get() }.as_ref().expect("open core");
+            assert!(
+                core.chart()
+                    .expect("initialized chart")
+                    .validate_formatter_identity(&formatter),
+                "{name}"
+            );
+        }
+        {
+            let name = "nativePointer";
+            let args = vec![JsValue::String(JsString::from_str("invalid"))];
+            let model_before = capture_model(&slot);
+            let interaction_before = capture_interaction(&slot);
+            let drawings_before = capture_drawings(&slot);
+            let mut admission_called = false;
+            let result = {
+                // SAFETY: serialized unit test owns the idle engine exclusively.
+                let core = unsafe { &mut *slot.core.get() }
+                    .as_mut()
+                    .expect("open core");
+                let mut scope = core.memory_context().scope();
+                barochart_bridge::call_scoped_with_reply_admission(
+                    core,
+                    name,
+                    &args,
+                    &mut scope,
+                    &mut |_| {
+                        admission_called = true;
+                        Err(account.allocation_failure().into_js_error())
+                    },
+                )
+            };
+            let error = result.expect_err("operation kind validation must win");
+            assert_eq!(error.name, "TypeError");
+            assert_eq!(error.message.to_string_lossy(), "Pointer operation");
+            assert!(!admission_called);
+            assert!(model_matches(&slot, &model_before));
+            assert_eq!(capture_interaction(&slot), interaction_before);
+            assert!(drawings_match(&slot, &drawings_before));
+        }
+        for (name, args, expected_name, expected_message) in [
+            (
+                "nativePointer",
+                vec![
+                    JsValue::String(JsString::from_str("down")),
+                    JsValue::Number(1.0),
+                    JsValue::Number(0.0),
+                    JsValue::Number(0.0),
+                    JsValue::Number(0.0),
+                ],
+                "RangeError",
+                "Pointer hit tolerance must be 1..32 logical pixels",
+            ),
+            (
+                "nativeKey",
+                vec![JsValue::Number(1.0), JsValue::Bool(true)],
+                "TypeError",
+                "key.toLowerCase is not a function",
+            ),
+        ] {
+            let model_before = capture_model(&slot);
+            let interaction_before = capture_interaction(&slot);
+            let drawings_before = capture_drawings(&slot);
+            let mut admission_called = false;
+            let result = {
+                // SAFETY: serialized unit test owns the idle engine exclusively.
+                let core = unsafe { &mut *slot.core.get() }
+                    .as_mut()
+                    .expect("open core");
+                let mut scope = core.memory_context().scope();
+                barochart_bridge::call_scoped_with_reply_admission(
+                    core,
+                    name,
+                    &args,
+                    &mut scope,
+                    &mut |_| {
+                        admission_called = true;
+                        Err(account.allocation_failure().into_js_error())
+                    },
+                )
+            };
+            let error = result.expect_err("source-ordered semantic error");
+            assert_eq!(error.name, expected_name, "{name}");
+            assert_eq!(error.message.to_string_lossy(), expected_message, "{name}");
+            assert!(!admission_called, "{name}");
+            assert!(model_matches(&slot, &model_before), "{name}");
+            assert_eq!(capture_interaction(&slot), interaction_before, "{name}");
+            assert!(drawings_match(&slot, &drawings_before), "{name}");
+        }
+        drop(slot);
+        // SAFETY: terminal unique engine release.
+        unsafe { bc_engine_free(engine) };
     }
 }

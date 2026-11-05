@@ -7,12 +7,12 @@
   "v8": "12.4.254.21-node.33",
   "icu": "77.1",
   "tz": "2025b",
-  "scope": "M2 owned data operations; full model/view/indicator invalidation remains M3/M4 internal-selector integration",
+  "scope": "Native core integration: 83 implemented functions and 17 explicit JavaScript-only/test rejections; complete memory/lifetime and SDK/device acceptance gates remain in progress; public default remains JavaScript",
   "functions": [
     {
       "name": "nativeAsyncBegin",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_async_begin",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 5
@@ -20,8 +20,8 @@
     },
     {
       "name": "nativePrepareBegin",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_prepare_begin",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 6
@@ -29,8 +29,8 @@
     },
     {
       "name": "nativeDataAsyncBegin",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_data_async_begin",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 7
@@ -39,7 +39,7 @@
     {
       "name": "nativeReleaseDataIngestion",
       "status": "implemented",
-      "handler": "release_ingestion",
+      "handler": "super::native_jobs_handlers::native_release_data_ingestion",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 13
@@ -47,8 +47,8 @@
     },
     {
       "name": "nativePrepareCreate",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_prepare_create",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 14
@@ -56,8 +56,8 @@
     },
     {
       "name": "nativeWorkspaceTargetCreate",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_workspace_target_create",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 25
@@ -65,8 +65,8 @@
     },
     {
       "name": "nativeWorkspaceTargetFinish",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_workspace_target_finish",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 34
@@ -83,8 +83,8 @@
     },
     {
       "name": "nativeWorkspaceSourceBegin",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_workspace_source_begin",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 40
@@ -92,8 +92,8 @@
     },
     {
       "name": "nativeWorkspaceSourceStep",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_workspace_source_step",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 41
@@ -101,8 +101,8 @@
     },
     {
       "name": "nativeWorkspaceSourceCheck",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_workspace_source_check",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 42
@@ -119,8 +119,8 @@
     },
     {
       "name": "nativeWorkspaceSourceFinish",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_workspace_source_finish",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 44
@@ -138,7 +138,7 @@
     {
       "name": "nativeWorkspaceSourceAbort",
       "status": "implemented",
-      "handler": "workspace_abort",
+      "handler": "super::native_jobs_handlers::native_workspace_source_abort",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 47
@@ -146,8 +146,8 @@
     },
     {
       "name": "nativeAsyncCheck",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_async_check",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 48
@@ -155,8 +155,8 @@
     },
     {
       "name": "nativeAsyncBuffer",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_async_buffer",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 49
@@ -164,8 +164,8 @@
     },
     {
       "name": "nativeAsyncCheckpoint",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_async_checkpoint",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 50
@@ -182,8 +182,8 @@
     },
     {
       "name": "nativeAsyncUIBegin",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_async_u_i_begin",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 52
@@ -191,8 +191,8 @@
     },
     {
       "name": "nativeAsyncUINext",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_async_u_i_next",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 53
@@ -200,8 +200,8 @@
     },
     {
       "name": "nativeAsyncUICheck",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_async_u_i_check",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 54
@@ -210,7 +210,7 @@
     {
       "name": "nativeAsyncRelease",
       "status": "implemented",
-      "handler": "release_true",
+      "handler": "super::native_jobs_handlers::native_async_release",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 55
@@ -218,8 +218,8 @@
     },
     {
       "name": "nativeAsyncCreate",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_async_create",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 56
@@ -227,8 +227,8 @@
     },
     {
       "name": "nativeAsyncTargetBuffer",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_target_buffer",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 57
@@ -236,8 +236,8 @@
     },
     {
       "name": "nativeAsyncCheckpointImport",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_async_checkpoint_import",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 58
@@ -245,8 +245,8 @@
     },
     {
       "name": "nativeAsyncStart",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_async_start",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 59
@@ -254,8 +254,8 @@
     },
     {
       "name": "nativeAsyncStep",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_async_step",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 60
@@ -263,8 +263,8 @@
     },
     {
       "name": "nativeAsyncUIImportBegin",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_async_u_i_import_begin",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 61
@@ -272,8 +272,8 @@
     },
     {
       "name": "nativeAsyncUIImportChunk",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_async_u_i_import_chunk",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 62
@@ -281,8 +281,8 @@
     },
     {
       "name": "nativeAsyncUIImportEnd",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_async_u_i_import_end",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 63
@@ -290,8 +290,8 @@
     },
     {
       "name": "nativeAsyncFinish",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_async_finish",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 64
@@ -299,8 +299,8 @@
     },
     {
       "name": "nativeIndicatorBuffer",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_indicator_buffer",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 65
@@ -353,8 +353,8 @@
     },
     {
       "name": "nativeSaveWorkspace",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::chart_handlers::save_workspace",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 85
@@ -362,8 +362,8 @@
     },
     {
       "name": "nativePreflightWorkspace",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::chart_handlers::preflight_workspace",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 86
@@ -389,8 +389,8 @@
     },
     {
       "name": "nativeGestureKind",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::input_handlers::gesture_kind",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 96
@@ -398,8 +398,8 @@
     },
     {
       "name": "nativeThemeFont",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::chart_handlers::theme_font",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 97
@@ -407,8 +407,8 @@
     },
     {
       "name": "nativeAccessibility",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::input_handlers::accessibility",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 98
@@ -416,8 +416,8 @@
     },
     {
       "name": "nativeIndicator",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::input_handlers::indicator",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 99
@@ -425,8 +425,8 @@
     },
     {
       "name": "nativeAccessibilityText",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::input_handlers::accessibility_text",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 100
@@ -461,8 +461,8 @@
     },
     {
       "name": "nativeView",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::chart_handlers::view",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 136
@@ -470,8 +470,8 @@
     },
     {
       "name": "nativeFit",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::chart_handlers::fit",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 137
@@ -479,8 +479,8 @@
     },
     {
       "name": "nativeAddPanel",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::chart_handlers::add_panel",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 138
@@ -488,8 +488,8 @@
     },
     {
       "name": "nativeSetPanel",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::chart_handlers::set_panel",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 139
@@ -497,8 +497,8 @@
     },
     {
       "name": "nativeAddSeries",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::chart_handlers::add_series",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 140
@@ -506,8 +506,8 @@
     },
     {
       "name": "nativeRemoveSeries",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::chart_handlers::remove_series",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 141
@@ -515,8 +515,8 @@
     },
     {
       "name": "nativeTheme",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::chart_handlers::theme",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 142
@@ -524,8 +524,8 @@
     },
     {
       "name": "nativeInspect",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::input_handlers::inspect",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 143
@@ -533,8 +533,8 @@
     },
     {
       "name": "nativeSceneJSON",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::chart_handlers::scene_json",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 144
@@ -542,8 +542,8 @@
     },
     {
       "name": "nativeResize",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::chart_handlers::resize",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 145
@@ -551,8 +551,8 @@
     },
     {
       "name": "nativePointer",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::input_handlers::pointer",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 146
@@ -560,8 +560,8 @@
     },
     {
       "name": "nativeTool",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::input_handlers::tool",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 147
@@ -569,8 +569,8 @@
     },
     {
       "name": "nativeWheel",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::input_handlers::wheel",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 148
@@ -578,8 +578,8 @@
     },
     {
       "name": "nativeKey",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::input_handlers::key",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 149
@@ -587,8 +587,8 @@
     },
     {
       "name": "nativeSave",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::chart_handlers::save",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 150
@@ -596,8 +596,8 @@
     },
     {
       "name": "nativeLoad",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::chart_handlers::load",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 151
@@ -641,8 +641,8 @@
     },
     {
       "name": "nativeBenchmarkEvent",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::chart_handlers::benchmark_event",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 189
@@ -650,8 +650,8 @@
     },
     {
       "name": "nativeBenchmarkDigest",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::chart_handlers::benchmark_digest",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 190
@@ -659,8 +659,8 @@
     },
     {
       "name": "nativeRenderFrameJSON",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::chart_handlers::render_frame_json",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 195
@@ -668,8 +668,8 @@
     },
     {
       "name": "nativeScenePacket",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_scene_packet",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 196
@@ -678,7 +678,7 @@
     {
       "name": "nativeReleaseFrameCache",
       "status": "implemented",
-      "handler": "release_true",
+      "handler": "super::chart_handlers::release_frame_cache",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 202
@@ -687,7 +687,7 @@
     {
       "name": "nativeReleaseFrameCaches",
       "status": "implemented",
-      "handler": "release_true",
+      "handler": "super::chart_handlers::release_frame_caches",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 203
@@ -731,8 +731,8 @@
     },
     {
       "name": "nativeHoverExit",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::input_handlers::hover_exit",
       "source": {
         "path": "examples/native/bridge.mjs",
         "line": 237
@@ -740,8 +740,8 @@
     },
     {
       "name": "nativeParamsSourceBegin",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_params_source_begin",
       "source": {
         "path": "examples/native/params-bridge.mjs",
         "line": 11
@@ -749,8 +749,8 @@
     },
     {
       "name": "nativeParamsSourceStep",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_params_source_step",
       "source": {
         "path": "examples/native/params-bridge.mjs",
         "line": 17
@@ -758,8 +758,8 @@
     },
     {
       "name": "nativeParamsSourceCheck",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_params_source_check",
       "source": {
         "path": "examples/native/params-bridge.mjs",
         "line": 18
@@ -767,8 +767,8 @@
     },
     {
       "name": "nativeParamsSourceReceive",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_params_source_receive",
       "source": {
         "path": "examples/native/params-bridge.mjs",
         "line": 19
@@ -776,8 +776,8 @@
     },
     {
       "name": "nativeParamsSourceArmWrite",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_params_source_arm_write",
       "source": {
         "path": "examples/native/params-bridge.mjs",
         "line": 21
@@ -785,8 +785,8 @@
     },
     {
       "name": "nativeParamsSourceCheckpoint",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_params_source_checkpoint",
       "source": {
         "path": "examples/native/params-bridge.mjs",
         "line": 23
@@ -794,8 +794,8 @@
     },
     {
       "name": "nativeParamsSourceValidate",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_params_source_validate",
       "source": {
         "path": "examples/native/params-bridge.mjs",
         "line": 24
@@ -803,8 +803,8 @@
     },
     {
       "name": "nativeParamsSourcePrepare",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_params_source_prepare",
       "source": {
         "path": "examples/native/params-bridge.mjs",
         "line": 25
@@ -812,8 +812,8 @@
     },
     {
       "name": "nativeParamsSourcePublish",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_params_source_publish",
       "source": {
         "path": "examples/native/params-bridge.mjs",
         "line": 26
@@ -822,7 +822,7 @@
     {
       "name": "nativeParamsSourceStatus",
       "status": "implemented",
-      "handler": "params_abort",
+      "handler": "super::native_jobs_handlers::native_params_source_status",
       "source": {
         "path": "examples/native/params-bridge.mjs",
         "line": 27
@@ -831,7 +831,7 @@
     {
       "name": "nativeParamsSourceAbort",
       "status": "implemented",
-      "handler": "params_abort",
+      "handler": "super::native_jobs_handlers::native_params_source_abort",
       "source": {
         "path": "examples/native/params-bridge.mjs",
         "line": 28
@@ -839,8 +839,8 @@
     },
     {
       "name": "nativeParamsTargetCreate",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_params_target_create",
       "source": {
         "path": "examples/native/params-bridge.mjs",
         "line": 29
@@ -848,8 +848,8 @@
     },
     {
       "name": "nativeParamsTargetStart",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_params_target_start",
       "source": {
         "path": "examples/native/params-bridge.mjs",
         "line": 31
@@ -857,8 +857,8 @@
     },
     {
       "name": "nativeParamsTargetStep",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_params_target_step",
       "source": {
         "path": "examples/native/params-bridge.mjs",
         "line": 32
@@ -866,8 +866,8 @@
     },
     {
       "name": "nativeParamsTargetDescriptor",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_params_target_descriptor",
       "source": {
         "path": "examples/native/params-bridge.mjs",
         "line": 33
@@ -875,8 +875,8 @@
     },
     {
       "name": "nativeParamsTargetCheckpoint",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::native_jobs_handlers::native_params_target_checkpoint",
       "source": {
         "path": "examples/native/params-bridge.mjs",
         "line": 34
@@ -893,8 +893,8 @@
     },
     {
       "name": "nativeDataExploration",
-      "status": "pending",
-      "handler": null,
+      "status": "implemented",
+      "handler": "super::chart_handlers::data_exploration",
       "source": {
         "path": "examples/native/exploration-bridge.mjs",
         "line": 6

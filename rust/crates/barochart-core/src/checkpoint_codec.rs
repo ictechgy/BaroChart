@@ -5,9 +5,13 @@
 //! 32 이하임을 확인한 후에만 표식을 재귀 변환한다.
 
 use std::collections::HashSet;
+use std::mem::size_of;
 
 use barochart_js::error::JsError;
-use barochart_js::json::{JsObject, JsValue, JsonMode, parse_json_utf16_with, stringify_json_with};
+use barochart_js::json::{
+    JsValue, JsonFailure, JsonMode, parse_json_utf16_scoped, stringify_json_scoped,
+};
+use barochart_js::memory::{MemoryScope, OomStyle};
 use barochart_js::num::NumberDialect;
 use barochart_js::string::{JsString, is_js_whitespace};
 
@@ -61,16 +65,27 @@ fn marker_value(value: &JsValue) -> Option<Result<f64, ()>> {
         return Some(Err(()));
     };
     Some(match marker.as_units() {
-        units if units == "NaN".encode_utf16().collect::<Vec<_>>() => Ok(f64::NAN),
-        units if units == "Infinity".encode_utf16().collect::<Vec<_>>() => Ok(f64::INFINITY),
-        units if units == "-Infinity".encode_utf16().collect::<Vec<_>>() => Ok(f64::NEG_INFINITY),
-        units if units == "-0".encode_utf16().collect::<Vec<_>>() => Ok(-0.0),
+        units if units.iter().copied().eq("NaN".encode_utf16()) => Ok(f64::NAN),
+        units if units.iter().copied().eq("Infinity".encode_utf16()) => Ok(f64::INFINITY),
+        units if units.iter().copied().eq("-Infinity".encode_utf16()) => Ok(f64::NEG_INFINITY),
+        units if units.iter().copied().eq("-0".encode_utf16()) => Ok(-0.0),
         _ => Err(()),
     })
 }
 
-fn validate_tree(root: &JsValue, decode: bool) -> Result<(), JsError> {
-    let mut stack = vec![(root, 0usize)];
+fn validate_tree_scoped(
+    root: &JsValue,
+    decode: bool,
+    scope: &mut MemoryScope,
+) -> Result<(), JsError> {
+    scope
+        .try_grow(size_of::<(&JsValue, usize)>())
+        .map_err(|failure| failure.into_js_error())?;
+    let mut stack = Vec::new();
+    stack
+        .try_reserve(1)
+        .map_err(|_| scope.allocation_failure().into_js_error())?;
+    stack.push((root, 0usize));
     let mut nodes = 0usize;
     while let Some((value, depth)) = stack.pop() {
         nodes += 1;
@@ -91,9 +106,12 @@ fn validate_tree(root: &JsValue, decode: bool) -> Result<(), JsError> {
                 }
             }
             JsValue::Array(items) => {
+                scope
+                    .try_grow(items.len().saturating_mul(size_of::<(&JsValue, usize)>()))
+                    .map_err(|failure| failure.into_js_error())?;
                 stack
                     .try_reserve(items.len())
-                    .map_err(|_| type_error("unsupported value"))?;
+                    .map_err(|_| scope.allocation_failure().into_js_error())?;
                 for item in items.iter().rev() {
                     stack.push((item, depth + 1));
                 }
@@ -105,15 +123,29 @@ fn validate_tree(root: &JsValue, decode: bool) -> Result<(), JsError> {
                     }
                     continue;
                 }
-                let entries: Vec<_> = object.iter().collect();
+                scope
+                    .try_grow(
+                        object
+                            .len()
+                            .saturating_mul(size_of::<(&JsString, &JsValue)>()),
+                    )
+                    .map_err(|failure| failure.into_js_error())?;
+                let mut entries = Vec::new();
+                entries
+                    .try_reserve(object.len())
+                    .map_err(|_| scope.allocation_failure().into_js_error())?;
+                entries.extend(object.iter());
                 for (key, _) in &entries {
                     if !is_unicode_scalar_string(key) {
                         return Err(type_error("Unicode scalar"));
                     }
                 }
+                scope
+                    .try_grow(entries.len().saturating_mul(size_of::<(&JsValue, usize)>()))
+                    .map_err(|failure| failure.into_js_error())?;
                 stack
                     .try_reserve(entries.len())
-                    .map_err(|_| type_error("unsupported value"))?;
+                    .map_err(|_| scope.allocation_failure().into_js_error())?;
                 for (_, child) in entries.into_iter().rev() {
                     stack.push((child, depth + 1));
                 }
@@ -121,64 +153,6 @@ fn validate_tree(root: &JsValue, decode: bool) -> Result<(), JsError> {
         }
     }
     Ok(())
-}
-
-fn marker(number: f64) -> JsValue {
-    let text = if number.is_nan() {
-        "NaN"
-    } else if number == f64::INFINITY {
-        "Infinity"
-    } else if number == f64::NEG_INFINITY {
-        "-Infinity"
-    } else {
-        "-0"
-    };
-    let mut object = JsObject::new();
-    object.insert(
-        JsString::from_str(NUMBER_MARKER),
-        JsValue::String(JsString::from_str(text)),
-    );
-    JsValue::Object(object)
-}
-
-fn encode_markers(value: &JsValue) -> JsValue {
-    match value {
-        JsValue::Number(number)
-            if !number.is_finite() || *number == 0.0 && number.is_sign_negative() =>
-        {
-            marker(*number)
-        }
-        JsValue::Array(items) => JsValue::Array(items.iter().map(encode_markers).collect()),
-        JsValue::Object(object) => {
-            let mut encoded = JsObject::new();
-            for (key, value) in object.iter() {
-                encoded.insert(key.clone(), encode_markers(value));
-            }
-            JsValue::Object(encoded)
-        }
-        _ => value.clone(),
-    }
-}
-
-fn decode_markers(value: &JsValue) -> JsValue {
-    match value {
-        JsValue::Object(_) => match marker_value(value) {
-            Some(Ok(number)) => JsValue::Number(number),
-            Some(Err(())) => unreachable!("validated checkpoint marker"),
-            None => {
-                let JsValue::Object(object) = value else {
-                    unreachable!()
-                };
-                let mut decoded = JsObject::new();
-                for (key, child) in object.iter() {
-                    decoded.insert(key.clone(), decode_markers(child));
-                }
-                JsValue::Object(decoded)
-            }
-        },
-        JsValue::Array(items) => JsValue::Array(items.iter().map(decode_markers).collect()),
-        _ => value.clone(),
-    }
 }
 
 /// 이 빌드의 수 방언으로 특수 숫자를 표식 처리해 체크포인트 JSON을 쓴다.
@@ -191,20 +165,137 @@ pub fn safe_checkpoint_stringify_with(
     value: &JsValue,
     dialect: NumberDialect,
 ) -> Result<JsString, JsError> {
-    validate_tree(value, false)?;
-    let tagged = encode_markers(value);
-    let bytes = stringify_json_with(&tagged, JsonMode::Standard, dialect);
+    let mut scope = MemoryScope::unaccounted(OomStyle::RangeErrorCapitalized);
+    safe_checkpoint_stringify_scoped(value, dialect, &mut scope)
+}
+
+/// 지정한 수 방언으로 checkpoint JSON을 scoped fallible allocation해 쓴다.
+pub fn safe_checkpoint_stringify_scoped(
+    value: &JsValue,
+    dialect: NumberDialect,
+    scope: &mut MemoryScope,
+) -> Result<JsString, JsError> {
+    validate_tree_scoped(value, false, scope)?;
+    let lossless = stringify_json_scoped(value, JsonMode::Lossless, dialect, scope)
+        .map_err(|failure| failure.into_js_error())?;
+    let bytes = tag_lossless_numbers(&lossless, scope)?;
     let text = std::str::from_utf8(&bytes).expect("the JS JSON writer emits valid UTF-8");
     if text.encode_utf16().count() > MAX_TEXT_UNITS {
         return Err(range_error("text limit"));
     }
-    Ok(JsString::from_str(text))
+    JsString::try_from_str(text, scope).map_err(|failure| failure.into_js_error())
 }
 
-fn parse_quoted_key(text: &[u16], dialect: NumberDialect) -> Result<JsString, JsError> {
-    let parsed = parse_json_utf16_with(text, JsonMode::Standard, dialect)?;
+const NAN_MARKER: &[u8] = br#"{"$asterNumber":"NaN"}"#;
+const POSITIVE_INFINITY_MARKER: &[u8] = br#"{"$asterNumber":"Infinity"}"#;
+const NEGATIVE_INFINITY_MARKER: &[u8] = br#"{"$asterNumber":"-Infinity"}"#;
+const NEGATIVE_ZERO_MARKER: &[u8] = br#"{"$asterNumber":"-0"}"#;
+
+fn marker_at(bytes: &[u8], index: usize) -> Option<(usize, &'static [u8])> {
+    let boundary = |position: usize| {
+        bytes
+            .get(position)
+            .is_none_or(|byte| matches!(*byte, b',' | b']' | b'}' | b' ' | b'\t' | b'\n' | b'\r'))
+    };
+    for (token, marker) in [
+        (b"-Infinity".as_slice(), NEGATIVE_INFINITY_MARKER),
+        (b"Infinity".as_slice(), POSITIVE_INFINITY_MARKER),
+        (b"NaN".as_slice(), NAN_MARKER),
+        (b"-0".as_slice(), NEGATIVE_ZERO_MARKER),
+    ] {
+        if bytes[index..].starts_with(token) && boundary(index + token.len()) {
+            return Some((token.len(), marker));
+        }
+    }
+    None
+}
+
+fn tag_lossless_numbers(bytes: &[u8], scope: &mut MemoryScope) -> Result<Vec<u8>, JsError> {
+    let mut output_length = 0usize;
+    let mut index = 0usize;
+    let mut string = false;
+    let mut escaped = false;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if string {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                string = false;
+            }
+            output_length = output_length
+                .checked_add(1)
+                .ok_or_else(|| scope.allocation_failure().into_js_error())?;
+            index += 1;
+        } else if byte == b'"' {
+            string = true;
+            output_length += 1;
+            index += 1;
+        } else if let Some((consumed, marker)) = marker_at(bytes, index) {
+            output_length = output_length
+                .checked_add(marker.len())
+                .ok_or_else(|| scope.allocation_failure().into_js_error())?;
+            index += consumed;
+        } else {
+            output_length = output_length
+                .checked_add(1)
+                .ok_or_else(|| scope.allocation_failure().into_js_error())?;
+            index += 1;
+        }
+    }
+    scope
+        .try_grow(output_length)
+        .map_err(|failure| failure.into_js_error())?;
+    let mut output = Vec::new();
+    output
+        .try_reserve_exact(output_length)
+        .map_err(|_| scope.allocation_failure().into_js_error())?;
+    let mut index = 0usize;
+    let mut string = false;
+    let mut escaped = false;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if string {
+            output.push(byte);
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                string = false;
+            }
+            index += 1;
+        } else if byte == b'"' {
+            string = true;
+            output.push(byte);
+            index += 1;
+        } else if let Some((consumed, marker)) = marker_at(bytes, index) {
+            output.extend_from_slice(marker);
+            index += consumed;
+        } else {
+            output.push(byte);
+            index += 1;
+        }
+    }
+    Ok(output)
+}
+
+fn parse_quoted_key(
+    text: &[u16],
+    dialect: NumberDialect,
+    scope: &mut MemoryScope,
+) -> Result<JsString, JsError> {
+    let parsed = match parse_json_utf16_scoped(text, JsonMode::Standard, dialect, scope) {
+        Ok(value) => value,
+        Err(JsonFailure::Syntax(error)) => return Err(error),
+        Err(JsonFailure::Memory(failure)) => return Err(failure.into_js_error()),
+    };
     match &parsed {
-        JsValue::String(value) => Ok(value.clone()),
+        JsValue::String(value) => value
+            .try_clone_scoped(scope)
+            .map_err(|failure| failure.into_js_error()),
         _ => Err(JsError::new(
             "SyntaxError",
             JsString::from_str("Checkpoint object key"),
@@ -212,31 +303,39 @@ fn parse_quoted_key(text: &[u16], dialect: NumberDialect) -> Result<JsString, Js
     }
 }
 
-fn raw_number_is_nonfinite(text: &[u16], dialect: NumberDialect) -> bool {
-    let Some(ascii) = text
-        .iter()
-        .map(|unit| u8::try_from(*unit).ok())
-        .collect::<Option<Vec<_>>>()
-    else {
-        return true;
-    };
-    let Ok(literal) = std::str::from_utf8(&ascii) else {
-        return true;
-    };
-    let Some(normalized) = normalize_number_token(literal) else {
-        return true;
-    };
-    match parse_json_utf16_with(
-        &normalized.encode_utf16().collect::<Vec<_>>(),
-        JsonMode::Standard,
-        dialect,
-    ) {
-        Ok(JsValue::Number(value)) => !value.is_finite(),
-        _ => true,
+fn raw_number_is_nonfinite(
+    text: &[u16],
+    dialect: NumberDialect,
+    scope: &mut MemoryScope,
+) -> Result<bool, JsError> {
+    scope
+        .try_grow(text.len())
+        .map_err(|failure| failure.into_js_error())?;
+    let mut ascii = String::new();
+    ascii
+        .try_reserve_exact(text.len())
+        .map_err(|_| scope.allocation_failure().into_js_error())?;
+    for &unit in text {
+        let Ok(byte) = u8::try_from(unit) else {
+            return Ok(true);
+        };
+        ascii.push(char::from(byte));
     }
+    let Some(normalized) = normalize_number_token(&ascii, scope)? else {
+        return Ok(true);
+    };
+    let units =
+        JsString::try_from_str(&normalized, scope).map_err(|failure| failure.into_js_error())?;
+    Ok(
+        match parse_json_utf16_scoped(units.as_units(), JsonMode::Standard, dialect, scope) {
+            Ok(JsValue::Number(value)) => !value.is_finite(),
+            Ok(_) | Err(JsonFailure::Syntax(_)) => true,
+            Err(JsonFailure::Memory(failure)) => return Err(failure.into_js_error()),
+        },
+    )
 }
 
-fn normalize_number_token(value: &str) -> Option<String> {
+fn normalize_number_token(value: &str, scope: &mut MemoryScope) -> Result<Option<String>, JsError> {
     let bytes = value.as_bytes();
     let mut index = usize::from(bytes.first() == Some(&b'-'));
     let integer_start = index;
@@ -256,7 +355,7 @@ fn normalize_number_token(value: &str) -> Option<String> {
     };
     let fraction_end = index;
     if integer_start == integer_end && fraction_start.is_none_or(|start| start == fraction_end) {
-        return None;
+        return Ok(None);
     }
     if bytes
         .get(index)
@@ -274,15 +373,25 @@ fn normalize_number_token(value: &str) -> Option<String> {
             index += 1;
         }
         if index == start {
-            return None;
+            return Ok(None);
         }
     }
     if index != bytes.len() {
-        return None;
+        return Ok(None);
     }
     let integer = &value[integer_start..integer_end];
     let normalized_integer = integer.trim_start_matches('0');
+    let capacity = value
+        .len()
+        .checked_add(1)
+        .ok_or_else(|| scope.allocation_failure().into_js_error())?;
+    scope
+        .try_grow(capacity)
+        .map_err(|failure| failure.into_js_error())?;
     let mut normalized = String::new();
+    normalized
+        .try_reserve_exact(capacity)
+        .map_err(|_| scope.allocation_failure().into_js_error())?;
     if value.starts_with('-') {
         normalized.push('-');
     }
@@ -302,10 +411,10 @@ fn normalize_number_token(value: &str) -> Option<String> {
     if fraction_end < bytes.len() {
         normalized.push_str(&value[fraction_end..]);
     }
-    Some(normalized)
+    Ok(Some(normalized))
 }
 
-fn scan_text(text: &[u16], dialect: NumberDialect) -> Result<(), JsError> {
+fn scan_text(text: &[u16], dialect: NumberDialect, scope: &mut MemoryScope) -> Result<(), JsError> {
     let mut index = 0usize;
     let mut depth = 0isize;
     let mut frames: Vec<Option<HashSet<JsString>>> = Vec::new();
@@ -332,7 +441,13 @@ fn scan_text(text: &[u16], dialect: NumberDialect) -> Result<(), JsError> {
                 && text[next] == b':' as u16
                 && let Some(Some(keys)) = frames.last_mut()
             {
-                let key = parse_quoted_key(&text[start..=end], dialect)?;
+                let key = parse_quoted_key(&text[start..=end], dialect, scope)?;
+                let bytes = size_of::<(JsString, usize)>().saturating_add(16);
+                scope
+                    .try_grow(bytes)
+                    .map_err(|failure| failure.into_js_error())?;
+                keys.try_reserve(1)
+                    .map_err(|_| scope.allocation_failure().into_js_error())?;
                 if !keys.insert(key) {
                     return Err(type_error("duplicate state key"));
                 }
@@ -342,6 +457,12 @@ fn scan_text(text: &[u16], dialect: NumberDialect) -> Result<(), JsError> {
             if depth > MAX_DEPTH as isize {
                 return Err(range_error("depth limit"));
             }
+            scope
+                .try_grow(size_of::<Option<HashSet<JsString>>>())
+                .map_err(|failure| failure.into_js_error())?;
+            frames
+                .try_reserve(1)
+                .map_err(|_| scope.allocation_failure().into_js_error())?;
             frames.push((unit == b'{' as u16).then(HashSet::new));
         } else if unit == b'}' as u16 || unit == b']' as u16 {
             depth -= 1;
@@ -354,7 +475,7 @@ fn scan_text(text: &[u16], dialect: NumberDialect) -> Result<(), JsError> {
             {
                 end += 1;
             }
-            if raw_number_is_nonfinite(&text[start..end], dialect) {
+            if raw_number_is_nonfinite(&text[start..end], dialect, scope)? {
                 return Err(type_error("untagged nonfinite number"));
             }
             index = end - 1;
@@ -374,14 +495,70 @@ pub fn safe_checkpoint_parse_with(
     value: &JsValue,
     dialect: NumberDialect,
 ) -> Result<JsValue, JsError> {
+    let mut scope = MemoryScope::unaccounted(OomStyle::RangeErrorCapitalized);
+    safe_checkpoint_parse_scoped(value, dialect, &mut scope)
+}
+
+/// 지정한 수 방언으로 checkpoint JSON을 scoped fallible allocation해 읽는다.
+pub fn safe_checkpoint_parse_scoped(
+    value: &JsValue,
+    dialect: NumberDialect,
+    scope: &mut MemoryScope,
+) -> Result<JsValue, JsError> {
     let JsValue::String(text) = value else {
         return Err(range_error("text limit"));
     };
     if text.len_utf16() > MAX_TEXT_UNITS {
         return Err(range_error("text limit"));
     }
-    scan_text(text.as_units(), dialect)?;
-    let parsed = parse_json_utf16_with(text.as_units(), JsonMode::Standard, dialect)?;
-    validate_tree(&parsed, true)?;
-    Ok(decode_markers(&parsed))
+    scan_text(text.as_units(), dialect, scope)?;
+    let mut parsed =
+        match parse_json_utf16_scoped(text.as_units(), JsonMode::Standard, dialect, scope) {
+            Ok(value) => value,
+            Err(JsonFailure::Syntax(error)) => return Err(error),
+            Err(JsonFailure::Memory(failure)) => return Err(failure.into_js_error()),
+        };
+    validate_tree_scoped(&parsed, true, scope)?;
+    decode_markers_in_place(&mut parsed, scope)?;
+    Ok(parsed)
+}
+
+fn decode_markers_in_place(value: &mut JsValue, scope: &mut MemoryScope) -> Result<(), JsError> {
+    if let Some(marker) = marker_value(value) {
+        *value = JsValue::Number(marker.expect("validated checkpoint marker"));
+        return Ok(());
+    }
+    match value {
+        JsValue::Array(items) => {
+            for item in items {
+                decode_markers_in_place(item, scope)?;
+            }
+        }
+        JsValue::Object(object) => {
+            let bytes = object
+                .len()
+                .checked_mul(size_of::<JsString>())
+                .ok_or_else(|| scope.allocation_failure().into_js_error())?;
+            scope
+                .try_grow(bytes)
+                .map_err(|failure| failure.into_js_error())?;
+            let mut keys = Vec::new();
+            keys.try_reserve_exact(object.len())
+                .map_err(|_| scope.allocation_failure().into_js_error())?;
+            for (key, _) in object.iter() {
+                keys.push(
+                    key.try_clone_scoped(scope)
+                        .map_err(|failure| failure.into_js_error())?,
+                );
+            }
+            for key in keys {
+                let child = object
+                    .get_mut(&key)
+                    .expect("captured checkpoint key remains present");
+                decode_markers_in_place(child, scope)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }

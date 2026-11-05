@@ -15,15 +15,26 @@ import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.Objects;
 
 /** Native QuickJS/Rust JNI host, owned by one thread. No WebView or browser. */
 public final class BaroChartEngine implements AutoCloseable {
     static {System.loadLibrary("barochart");}
     /** 내부 코어 선택 훅. 공개 API 기본값은 항상 JAVASCRIPT다. */
     enum RuntimeBackend { JAVASCRIPT, RUST }
+    private static volatile EngineBackend defaultBackend = EngineBackend.JAVASCRIPT;
+    /** Selects the backend used by legacy constructors. */
+    public static void setDefaultBackend(@androidx.annotation.NonNull EngineBackend backend) { defaultBackend=Objects.requireNonNull(backend,"backend"); }
+    /** Returns the backend used by legacy constructors. */
+    @androidx.annotation.NonNull public static EngineBackend getDefaultBackend() { return defaultBackend; }
+    private static RuntimeBackend runtimeBackend(@androidx.annotation.NonNull EngineBackend backend) {
+        switch(Objects.requireNonNull(backend,"backend")) {case JAVASCRIPT:return RuntimeBackend.JAVASCRIPT;case RUST:return RuntimeBackend.RUST;default:throw new AssertionError(backend);}
+    }
+    private static EngineBackend publicBackend(RuntimeBackend backend) {return backend==RuntimeBackend.RUST?EngineBackend.RUST:EngineBackend.JAVASCRIPT;}
     private long handle;
     private final String sourceBundle;
     private final RuntimeBackend runtimeBackend;
+    private final EngineBackend backend;
     private final Thread owner=Thread.currentThread();
     private final java.util.Set<Runnable> observers=new java.util.LinkedHashSet<>();
     private final java.util.Set<Runnable> closeObservers=new java.util.LinkedHashSet<>();
@@ -128,7 +139,7 @@ public final class BaroChartEngine implements AutoCloseable {
      * @throws IOException if the bundled {@code aster-core.js} asset cannot be read
      * @throws JSONException if the core rejects the initialization
      */
-    public BaroChartEngine(Context context,int count) throws IOException,JSONException {this(context,count,null,RuntimeBackend.JAVASCRIPT);}
+    public BaroChartEngine(Context context,int count) throws IOException,JSONException {this(context,count,null,runtimeBackend(getDefaultBackend()));}
     /**
      * Creates an engine owned by the calling thread. Engines attached to a view must be created on the main thread.
      * @param context used to read the bundled core asset
@@ -137,10 +148,12 @@ public final class BaroChartEngine implements AutoCloseable {
      * @throws IOException if the bundled {@code aster-core.js} asset cannot be read
      * @throws JSONException if the core rejects the options
      */
-    public BaroChartEngine(Context context,int count,JSONObject options) throws IOException,JSONException {this(context,count,options,RuntimeBackend.JAVASCRIPT);}
+    public BaroChartEngine(Context context,int count,JSONObject options) throws IOException,JSONException {this(context,count,options,runtimeBackend(getDefaultBackend()));}
     /** 테스트와 같은-backend 격리 런타임이 쓰는 내부 생성자다. */
     BaroChartEngine(Context context,int count,JSONObject options,RuntimeBackend backend) throws IOException,JSONException {
         if(backend==null)throw new IllegalArgumentException("Runtime backend required");runtimeBackend=backend;
+        this.backend=publicBackend(backend);
+        if(backend==RuntimeBackend.RUST&&!BuildConfig.BAROCHART_WITH_RUST)throw new IllegalStateException("UnavailableError: rust backend is not included in this build");
         if(backend==RuntimeBackend.JAVASCRIPT&&BuildConfig.BAROCHART_WITH_QUICKJS){try(InputStream in=context.getAssets().open("aster-core.js")){ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] buffer=new byte[8192];int size;while((size=in.read(buffer))!=-1)out.write(buffer,0,size);sourceBundle=new String(out.toByteArray(),StandardCharsets.UTF_8);}}
         else sourceBundle=null;
         handle=createRuntime(sourceBundle,backend);
@@ -357,7 +370,9 @@ public final class BaroChartEngine implements AutoCloseable {
      * @return the counters as JSON
      * @throws JSONException if the metrics cannot be encoded
      */
-    public JSONObject runtimeMetrics() throws JSONException {check();long[] stats=memoryStats(handle);String scope=runtimeBackend==RuntimeBackend.RUST?"Rust engine accounted bytes for FFI-owned buffers; live handle counts include all engines of both backends and current isolated workers in this process":"QuickJS requested bytes including aligned allocator headers; live handle counts include all engines and current isolated workers in this process";return new JSONObject().put("requestedLiveBytes",stats[0]).put("requestedPeakBytes",stats[1]).put("processLiveNativeHandles",stats[2]).put("processNativeHandlesCreated",stats[3]).put("processNativeHandlesFreed",stats[4]).put("scope",scope);}
+    public JSONObject runtimeMetrics() throws JSONException {check();long[] stats=memoryStats(handle);String scope=runtimeBackend==RuntimeBackend.RUST?"Rust engine accounted requested bytes for owned payloads, call temporaries and FFI outputs; not allocator RSS; live handle counts include all engines of both backends and current isolated workers in this process":"QuickJS requested bytes including aligned allocator headers; live handle counts include all engines and current isolated workers in this process";return new JSONObject().put("requestedLiveBytes",stats[0]).put("requestedPeakBytes",stats[1]).put("processLiveNativeHandles",stats[2]).put("processNativeHandlesCreated",stats[3]).put("processNativeHandlesFreed",stats[4]).put("scope",scope);}
+    /** Returns this engine's immutable backend selection, even after close. */
+    @androidx.annotation.NonNull public EngineBackend backend() { return backend; }
     byte[] indicatorBytes(String id,String output,int offset,int count){check();if(id==null||output==null||id.length()>128||output.length()>128||offset<0||count<1||count>262144)throw new IllegalArgumentException("Indicator byte slice limits");BaroChartTrace.typedTransfer(handle,"nativeIndicatorBuffer");return indicatorSlice(handle,id,output,offset,count);}
     /**
      * Registers a listener run after each chart change. A {@code RuntimeException} it throws is recorded in {@link
@@ -1333,7 +1348,7 @@ public final class BaroChartEngine implements AutoCloseable {
     }
     /** 깨진 전송 본문은 노출하지 않고 고정 상태 문구만 반환한다. */
     private static String rustStatusMessage(int status){
-        switch(status){case 3:case 4:return "Error: Chart disposed";case 5:return "Rust core busy";case 6:return "TypeError: Invalid Rust core transport";default:return "Rust engine unavailable";}
+        switch(status){case 3:case 4:return "Error: Chart disposed";case 5:return "Rust core busy";case 6:return "TypeError: Invalid Rust core transport";case 7:return "InternalError: out of memory";case 8:return "RangeError: Out of memory";default:return "Rust engine unavailable";}
     }
     /**
      * Formats a time as year, month, day, hour, minute and second parts in a time zone, for the core's time zone
@@ -1369,9 +1384,13 @@ public final class BaroChartEngine implements AutoCloseable {
      * @return a new engine with no bars
      */
     @androidx.annotation.NonNull public static BaroChartEngine create(@androidx.annotation.NonNull Context context,@androidx.annotation.NonNull EngineOptions options){
-        return create(context,options,RuntimeBackend.JAVASCRIPT);
+        return create(context,options,getDefaultBackend());
     }
-    /** Package-private backend selection hook; public callers stay on JavaScript in M1. */
+    /** Creates an engine with an explicit backend. */
+    @androidx.annotation.NonNull public static BaroChartEngine create(@androidx.annotation.NonNull Context context,@androidx.annotation.NonNull EngineOptions options,@androidx.annotation.NonNull EngineBackend backend){
+        return typedCall(()->new BaroChartEngine(context,0,LowLevelJson.engineOptions(options),runtimeBackend(backend)));
+    }
+    /** Package-private backend selection hook retained for validation and same-backend workers. */
     @androidx.annotation.NonNull static BaroChartEngine create(@androidx.annotation.NonNull Context context,@androidx.annotation.NonNull EngineOptions options,RuntimeBackend backend){
         return typedCall(()->new BaroChartEngine(context,0,LowLevelJson.engineOptions(options),backend));
     }

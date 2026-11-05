@@ -28,6 +28,10 @@ typedef enum {
   BC_BUSY = 5,
   // 포인터·UTF-8·JSON·플래그 같은 전송 계약이 틀렸다.
   BC_INVALID = 6,
+  // 제한된 엔진의 requested-byte 한도 또는 allocation이 실패했다.
+  BC_OOM_LIMIT = 7,
+  // 무제한 엔진의 system allocation이 실패했다.
+  BC_OOM_SYSTEM = 8,
 } BcStatus;
 
 // C에서는 역참조하지 않는 단조 핸들 ID 타입이다.
@@ -74,6 +78,14 @@ typedef struct {
   // Rust 할당 용량인 `double` 원소 수다.
   size_t cap;
 } BcF64Buf;
+
+// 관찰형 typed write의 실제 target 길이와 복사 여부다.
+typedef struct {
+  // Core가 한 번 handout한 실제 `double` 원소 수다.
+  size_t actual_count;
+  // Host source가 유효하고 실제 길이와 정확히 같아 복사됐는지 나타낸다.
+  bool did_write;
+} BcF64WriteReceipt;
 
 #ifdef __cplusplus
 extern "C" {
@@ -132,6 +144,15 @@ BcStatus bc_engine_new(const BcHost *host,
                        BcEngine **engine_out,
                        BcBuf *error_out);
 
+// 요청 바이트 한도를 가진 빈 Rust 엔진을 만든다. 0은 무제한이다.
+//
+// # Safety
+// `bc_engine_new`과 같은 포인터·alias·host 수명 계약을 따른다.
+BcStatus bc_engine_new_with_limit(const BcHost *host,
+                                  uint64_t memory_limit,
+                                  BcEngine **engine_out,
+                                  BcBuf *error_out);
+
 // Rust 소유 `double` 버퍼를 해제한다. canonical empty는 no-op이다.
 //
 // # Safety
@@ -174,6 +195,36 @@ BcStatus bc_read_f64(BcEngine *engine,
                      size_t count,
                      BcBuf *error_out);
 
+// Rust 함수의 실제 숫자 배열 결과 전체를 소유 snapshot으로 돌려준다.
+//
+// 기존 fast read와 달리 host destination/count를 받거나 검증하지 않는다. Core 함수는 정확히 한 번
+// 실행하며, caller가 payload를 기록한 뒤 별도로 길이를 검증할 수 있다.
+//
+// # Safety
+// token/name/args는 `bc_read_f64`와 같은 계약을 따르고, `out`과 `error_out`은 비어 있는 writable
+// output slot이며 서로와 입력에 alias하지 않아야 한다.
+BcStatus bc_read_f64_snapshot(BcEngine *engine,
+                              const uint8_t *name,
+                              size_t name_len,
+                              const uint8_t *args,
+                              size_t args_len,
+                              BcF64Buf *out,
+                              BcBuf *error_out);
+
+// JSON/BCJSON 인자를 보존하며 실제 typed 결과 전체를 소유 snapshot으로 돌려준다.
+// `flags`는 `bc_call`과 같고, 숫자 결과는 JSON으로 펼치지 않는다.
+//
+// # Safety
+// token/name/args와 비어 있는 두 output slot은 `bc_read_f64_snapshot`의 계약을 따른다.
+BcStatus bc_read_f64_snapshot_with_flags(BcEngine *engine,
+                                         const uint8_t *name,
+                                         size_t name_len,
+                                         const uint8_t *args,
+                                         size_t args_len,
+                                         uint32_t flags,
+                                         BcF64Buf *out,
+                                         BcBuf *error_out);
+
 // 현재 live Rust 함수 표가 이름을 지원하는지 묻는 정적 메타데이터 조회다.
 // busy/poison gate를 취득하지 않고, stale·NULL·변조 token은 `false`다.
 //
@@ -197,6 +248,45 @@ BcStatus bc_write_f64(BcEngine *engine,
                       const double *src,
                       size_t count,
                       BcBuf *error_out);
+
+// Core typed target을 한 번 관찰한 뒤 host source가 정확할 때만 쓴다.
+//
+// `host_count`는 signed host 값 그대로 받는다. Core target handout과 선택적 `before_out` snapshot이
+// 먼저 일어나며, 이후 count가 `1...262144`가 아니거나 실제 길이와 다르거나 source가 유효하지 않으면
+// `BC_OK`와 `did_write=false`를 돌려준다. 따라서 host는 실제 Core 결과를 기록한 뒤 자체 protocol 오류를
+// 만들 수 있다. Core 오류는 host count 오류보다 먼저 반환된다.
+//
+// # Safety
+// token/name/args는 `bc_write_f64`와 같은 계약을 따른다. `receipt_out`은 writable slot이어야 한다.
+// `before_out`은 NULL이거나 비어 있는 writable `BcF64Buf` slot이어야 하고, `error_out`은 비어 있는
+// writable `BcBuf` slot이어야 한다. 출력들은 서로 alias하지 않아야 한다. `src`는 실제 target 길이와
+// 일치하는 유효 host count에서만 읽으며, 그때 정렬된 readable `double[host_count]`여야 한다.
+BcStatus bc_write_f64_observe(BcEngine *engine,
+                              const uint8_t *name,
+                              size_t name_len,
+                              const uint8_t *args,
+                              size_t args_len,
+                              uint32_t flags,
+                              const double *src,
+                              int64_t host_count,
+                              BcF64WriteReceipt *receipt_out,
+                              BcF64Buf *before_out,
+                              BcBuf *error_out);
+
+// 호스트 `double` 배열을 쓰면서 write 직전 target-owned 값을 소유 snapshot으로 돌려준다.
+//
+// # Safety
+// `bc_write_f64` 계약에 더해 `before_out`은 비어 있는 writable `BcF64Buf` slot이어야 하며
+// 다른 입출력과 alias하지 않아야 한다.
+BcStatus bc_write_f64_snapshot(BcEngine *engine,
+                               const uint8_t *name,
+                               size_t name_len,
+                               const uint8_t *args,
+                               size_t args_len,
+                               const double *src,
+                               size_t count,
+                               BcF64Buf *before_out,
+                               BcBuf *error_out);
 
 #ifdef __cplusplus
 }  // extern "C"

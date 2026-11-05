@@ -97,6 +97,8 @@ jobs:
           command -v rustup cargo || true
           rustup --version
           rustup toolchain install --no-self-update
+          rust_channel="$(python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]["channel"])')"
+          rustup component add --toolchain "${rust_channel}" rust-src
           rustup show active-toolchain
 
       - name: Check Rust formatting
@@ -118,15 +120,18 @@ jobs:
         run: node scripts/rust/cargo.mjs clippy --locked --workspace --all-targets -- -D warnings
 
       - name: Test the Rust workspace
-        run: node scripts/rust/cargo.mjs test --locked --workspace
+        run: node scripts/rust/cargo.mjs test --locked --workspace --no-fail-fast
 
       - name: Check banned patterns in ported Rust code
         run: node scripts/rust/check-bans.mjs
 
+      - name: Prepare checksum-locked WASM EH dependencies in the project cache
+        run: python3 scripts/rust/prepare-wasm-eh.py --download --json > "${RUNNER_TEMP}/wasm-eh-preparation.json"
+
       - name: Run the real WASM harness without toolchain skips
         env:
           REQUIRE_WASM: '1'
-        run: node --test test/rust-wasm-harness.test.mjs
+        run: node --test test/rust-wasm-harness.test.mjs test/rust-core-conformance.test.mjs test/rust-aggregate-wasm.test.mjs test/rust-api-regressions.test.mjs
 
       - name: Compare the JS kernel with V8 and bundled QuickJS on a seeded corpus
         # 같은 시드 고정 코퍼스의 ECMA(r)·Android 방언(q)을 Node(V8)·동봉 QuickJS와 각각 비교한다.

@@ -1322,6 +1322,21 @@ public final class BaroChartParamsJob {
 ///
 /// Show an engine with ``BaroChartUIView`` or ``BaroChartView``; a view borrows the engine and never closes it.
 public final class BaroChartEngine {
+    private static let defaultBackendLock = NSLock()
+    private static var storedDefaultBackend = BaroChartBackend.javaScript
+
+    /// The backend selected by legacy initializers. Set this on the main thread; reads are safe from constructors on other threads.
+    public static var defaultBackend: BaroChartBackend {
+        get { defaultBackendLock.lock(); defer {defaultBackendLock.unlock()}; return storedDefaultBackend }
+        set {
+            precondition(Thread.isMainThread, "BaroChartEngine.defaultBackend must be changed on the main thread")
+            defaultBackendLock.lock(); storedDefaultBackend = newValue; defaultBackendLock.unlock()
+        }
+    }
+
+    /// The backend selected for this engine. It never changes, including after `close()`.
+    public let backend: BaroChartBackend
+
     /// Opt-in async success replaces this context. Re-read it after completion;
     /// cached raw JSContext/JSValue objects from the retired VM are unsupported.
     public var context: JSContext {coreRuntime.javaScriptContext}
@@ -1332,6 +1347,12 @@ public final class BaroChartEngine {
     }
     /// 지금 런타임. 워크스페이스 복원이 설치한 런타임은 close·deinit에서 놓아 nil이 된다(이름은 정적 소유권 검사와 맞춰 그대로 둔다).
     fileprivate var contextBacking: BaroChartCoreRuntime?
+    /// Validation-only evidence of the live core runtime. Owner-thread and live-engine checks mirror engine call accessors.
+    func validationRuntimeBackend() throws -> BaroChartRuntimeBackend {
+        guard Thread.current === owner else {throw BaroChartLowLevelError.wrongThread}
+        guard !closed, let runtime = contextBacking else {throw BaroChartAsyncError.engineClosed}
+        return runtime.backend
+    }
     fileprivate var workspaceContextInstalled = false
     fileprivate var contextRuntime: BaroChartContextRuntime?
     fileprivate var activeWorkspace: BaroChartWorkspaceJob?
@@ -1364,8 +1385,13 @@ public final class BaroChartEngine {
     ///   - count: Number of deterministic demonstration bars (seed 42) to load at start; `0` starts empty.
     ///   - options: Core options dictionary (panels, series, theme), or `nil` for the labeled demonstration layout with price and volume panels.
     public convenience init(count: Int = 0, options: [String: Any]? = nil) throws {
-        guard let url = Bundle.module.url(forResource: "aster-core", withExtension: "js") else {throw BaroChartLowLevelError.invalidScene}
-        try self.init(bundleURL: url, count: count, options: options)
+        let selected = Self.defaultBackend
+        let source: String?
+        if selected == .javaScript {
+            guard let url = Bundle.module.url(forResource: "aster-core", withExtension: "js") else {throw BaroChartLowLevelError.invalidScene}
+            source = try String(contentsOf: url, encoding: .utf8)
+        } else { source = nil }
+        try self.init(coreBundleSource: source, count: count, options: options, backend: selected)
     }
     #endif
     /// Creates an engine from the core JavaScript bundle at `bundleURL`. The calling thread becomes the owner thread.
@@ -1375,21 +1401,39 @@ public final class BaroChartEngine {
     ///   - count: Number of deterministic demonstration bars (seed 42) to load at start; `0` starts empty.
     ///   - options: Core options dictionary (panels, series, theme), or `nil` for the labeled demonstration layout with price and volume panels.
     /// - Throws: ``BaroChartLowLevelError`` if the JavaScript context cannot be created or the bundle fails to load or initialize. Low-level API; prefer ``init(options:)``.
-    public init(bundleURL: URL, count: Int = 0, options: [String: Any]? = nil) throws {
-        guard let runtime = BaroChartRuntimeFactory.makeEngineRuntime() else { throw BaroChartLowLevelError.unavailableContext }
+    public convenience init(bundleURL: URL, count: Int = 0, options: [String: Any]? = nil) throws {
+        let selected = Self.defaultBackend
+        let source = selected == .javaScript ? try String(contentsOf: bundleURL, encoding: .utf8) : nil
+        try self.init(coreBundleSource: source, count: count, options: options, backend: selected)
+    }
+
+    private init(coreBundleSource source: String?, count: Int, options: [String: Any]?, backend: BaroChartBackend) throws {
+        guard let runtime = BaroChartRuntimeFactory.makeEngineRuntime(like: backend) else {
+#if canImport(BaroChartCoreRust)
+            throw BaroChartLowLevelError.unavailableContext
+#else
+            throw backend == .rust ? BaroChartLowLevelError.javaScript("UnavailableError: Rust backend is not included in this build.") : BaroChartLowLevelError.unavailableContext
+#endif
+        }
         self.contextBacking = runtime
-        self.bundleSource = try String(contentsOf: bundleURL, encoding: .utf8)
+        self.backend = backend
+        switch backend {
+        case .javaScript:
+            guard let source else {throw BaroChartLowLevelError.invalidScene}
+            self.bundleSource = source
+        case .rust:
+            self.bundleSource = ""
+        }
         // 스크립트 평가가 만드는 autorelease 임시 JSValue가 컨텍스트를 붙잡지 않도록 바로 비운다(call과 같은 이유)
         try autoreleasepool {
-            if let exception = runtime.evaluateBundle(bundleSource) { throw BaroChartLowLevelError.javaScript(exception.toString() ?? "Unknown JS error") }
+            if backend == .javaScript, let exception = runtime.evaluateBundle(bundleSource) { throw BaroChartLowLevelError.javaScript(exception.toString() ?? "Unknown JS error") }
         }
         _ = try call("nativeInit", [count, options as Any? ?? NSNull()])
     }
 
-    /// Internal backend selector for conformance tests and the later Rust rollout. Public creation stays JavaScript-backed.
-    init(options: [String: Any]? = nil, runtimeBackend: BaroChartRuntimeBackend) throws {
-        guard let runtime = BaroChartRuntimeFactory.makeEngineRuntime(like: runtimeBackend) else {throw BaroChartLowLevelError.unavailableContext}
-        contextBacking = runtime
+    /// Internal backend selector retained for conformance tests and same-backend workers.
+    convenience init(options: [String: Any]? = nil, runtimeBackend: BaroChartRuntimeBackend) throws {
+        let source: String?
         switch runtimeBackend {
         case .javaScript:
             #if SWIFT_PACKAGE
@@ -1397,23 +1441,10 @@ public final class BaroChartEngine {
             #else
             throw BaroChartLowLevelError.invalidScene
             #endif
-            bundleSource = try String(contentsOf: bundleURL, encoding: .utf8)
-            try autoreleasepool {
-                if let exception = runtime.evaluateBundle(bundleSource) {throw BaroChartLowLevelError.javaScript(exception.toString() ?? "Unknown JS error")}
-            }
-        case .rust:
-            bundleSource = ""
+            source = try String(contentsOf: bundleURL, encoding: .utf8)
+        case .rust: source = nil
         }
-        let outcome = runtime.perform("nativeInit", [0, options as Any? ?? NSNull()])
-        switch outcome {
-        case .returned: break
-        case .missing: throw BaroChartLowLevelError.javaScript("Missing function: nativeInit")
-        case .rejected(let error): throw error
-        case .threw(let error):
-            let name = error.forProperty("name")?.toString() ?? "Error"
-            let message = error.forProperty("message")?.toString() ?? error.toString() ?? "Unknown error"
-            throw BaroChartLowLevelError.javaScript("\(name): \(message)")
-        }
+        try self.init(coreBundleSource: source, count: 0, options: options, backend: runtimeBackend)
     }
     /// Calls a global function of the core bundle by name and returns its JavaScript result. Owner thread only; throws ``BaroChartLowLevelError`` for a wrong thread or a missing function, and ``BaroChartAsyncError`` for a closed engine. Advanced low-level API.
     @discardableResult public func call(_ name: String, _ arguments: [Any] = []) throws -> JSValue {

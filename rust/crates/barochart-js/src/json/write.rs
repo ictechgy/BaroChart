@@ -11,10 +11,12 @@
 //! - 재귀하지 않는다. 순회 상태를 힙 스택에 쌓으므로 깊이와 무관하게 스레드 스택을 일정하게 쓴다.
 //!   JS 엔진은 깊이 수천~수만에서 스택 오류를 내지만(엔진마다 다르다) 이 writer는 성공한다.
 
+use std::mem::size_of;
 use std::slice;
 
 use super::object::{JsObject, ObjectIter};
 use super::{JsValue, JsonMode};
+use crate::memory::{MemoryFailure, MemoryScope, OomStyle};
 use crate::num::{NumberDialect, number_to_string_with};
 use crate::string::JsString;
 
@@ -41,9 +43,27 @@ pub fn stringify_json(value: &JsValue, mode: JsonMode) -> Vec<u8> {
 /// - `dialect`: `Number::toString`의 방언
 /// - 반환: UTF-8 JSON 텍스트
 pub fn stringify_json_with(value: &JsValue, mode: JsonMode, dialect: NumberDialect) -> Vec<u8> {
+    let mut scope = MemoryScope::unaccounted(OomStyle::RangeErrorCapitalized);
+    stringify_json_scoped(value, mode, dialect, &mut scope)
+        .expect("unaccounted JSON serialization allocation failed")
+}
+
+/// `stringify_json_with`과 같은 결과를 내되 output과 반복 frame 성장을 scope에 예약한다.
+///
+/// - `value`: 쓸 값
+/// - `mode`: 문법
+/// - `dialect`: `Number::toString`의 방언
+/// - `scope`: 호출 수명 temporary memory account
+/// - 반환: UTF-8 JSON 텍스트 또는 allocation/account 실패
+pub fn stringify_json_scoped(
+    value: &JsValue,
+    mode: JsonMode,
+    dialect: NumberDialect,
+    scope: &mut MemoryScope,
+) -> Result<Vec<u8>, MemoryFailure> {
     let mut out = Vec::new();
-    write_tree(&mut out, Style { mode, dialect }, value);
-    out
+    write_tree(&mut out, Style { mode, dialect }, value, scope)?;
+    Ok(out)
 }
 
 /// 쓰기 방식: 문법과 숫자 방언
@@ -60,17 +80,32 @@ struct Style {
 /// - `object`: 쓸 객체
 /// - 반환: UTF-8 BCJSON 텍스트
 pub(crate) fn object_to_lossless(object: &JsObject) -> Vec<u8> {
-    let mut out = vec![b'{'];
-    let mut stack = vec![WriteFrame::Object {
-        entries: object.entries(),
-        first: true,
-    }];
+    let mut scope = MemoryScope::unaccounted(OomStyle::RangeErrorCapitalized);
+    object_to_lossless_scoped(object, &mut scope)
+        .expect("unaccounted JSON object serialization allocation failed")
+}
+
+fn object_to_lossless_scoped(
+    object: &JsObject,
+    scope: &mut MemoryScope,
+) -> Result<Vec<u8>, MemoryFailure> {
+    let mut out = Vec::new();
+    push_byte(&mut out, b'{', scope)?;
+    let mut stack = Vec::new();
+    push_frame(
+        &mut stack,
+        WriteFrame::Object {
+            entries: object.entries(),
+            first: true,
+        },
+        scope,
+    )?;
     let style = Style {
         mode: JsonMode::Lossless,
         dialect: NumberDialect::PLATFORM,
     };
-    drain_frames(&mut out, style, &mut stack);
-    out
+    drain_frames(&mut out, style, &mut stack, scope)?;
+    Ok(out)
 }
 
 /// 쓰고 있는 컨테이너 하나의 순회 상태
@@ -96,10 +131,15 @@ enum WriteFrame<'a> {
 /// - `out`: 출력
 /// - `style`: 문법과 숫자 방언
 /// - `root`: 쓸 값
-fn write_tree(out: &mut Vec<u8>, style: Style, root: &JsValue) {
+fn write_tree(
+    out: &mut Vec<u8>,
+    style: Style,
+    root: &JsValue,
+    scope: &mut MemoryScope,
+) -> Result<(), MemoryFailure> {
     let mut stack = Vec::new();
-    write_value(out, style, root, &mut stack);
-    drain_frames(out, style, &mut stack);
+    write_value(out, style, root, &mut stack, scope)?;
+    drain_frames(out, style, &mut stack, scope)
 }
 
 /// 스택이 빌 때까지 맨 위 컨테이너의 다음 원소·멤버를 쓰고, 끝나면 닫는다.
@@ -107,18 +147,23 @@ fn write_tree(out: &mut Vec<u8>, style: Style, root: &JsValue) {
 /// - `out`: 출력
 /// - `style`: 문법과 숫자 방언
 /// - `stack`: 쓰고 있는 컨테이너들(여는 괄호는 이미 썼다)
-fn drain_frames<'a>(out: &mut Vec<u8>, style: Style, stack: &mut Vec<WriteFrame<'a>>) {
+fn drain_frames<'a>(
+    out: &mut Vec<u8>,
+    style: Style,
+    stack: &mut Vec<WriteFrame<'a>>,
+    scope: &mut MemoryScope,
+) -> Result<(), MemoryFailure> {
     while let Some(frame) = stack.last_mut() {
         let next = match frame {
             WriteFrame::Array { items, first } => match items.next() {
                 Some(item) => {
                     if !std::mem::replace(first, false) {
-                        out.push(b',');
+                        push_byte(out, b',', scope)?;
                     }
                     Some(item)
                 }
                 None => {
-                    out.push(b']');
+                    push_byte(out, b']', scope)?;
                     None
                 }
             },
@@ -130,26 +175,27 @@ fn drain_frames<'a>(out: &mut Vec<u8>, style: Style, stack: &mut Vec<WriteFrame<
                 match member {
                     Some((key, value)) => {
                         if !std::mem::replace(first, false) {
-                            out.push(b',');
+                            push_byte(out, b',', scope)?;
                         }
-                        write_string(out, key);
-                        out.push(b':');
+                        write_string(out, key, scope)?;
+                        push_byte(out, b':', scope)?;
                         Some(value)
                     }
                     None => {
-                        out.push(b'}');
+                        push_byte(out, b'}', scope)?;
                         None
                     }
                 }
             }
         };
         match next {
-            Some(value) => write_value(out, style, value, stack),
+            Some(value) => write_value(out, style, value, stack, scope)?,
             None => {
                 stack.pop();
             }
         }
     }
+    Ok(())
 }
 
 /// 값 하나를 쓴다. 배열·객체는 여는 괄호만 쓰고 순회 상태를 스택에 쌓는다.
@@ -165,32 +211,46 @@ fn write_value<'a>(
     style: Style,
     value: &'a JsValue,
     stack: &mut Vec<WriteFrame<'a>>,
-) {
+    scope: &mut MemoryScope,
+) -> Result<(), MemoryFailure> {
     match value {
-        JsValue::Undefined => out.extend_from_slice(match style.mode {
-            JsonMode::Standard => b"null".as_slice(),
-            JsonMode::Lossless => b"undefined".as_slice(),
-        }),
-        JsValue::Null => out.extend_from_slice(b"null"),
-        JsValue::Bool(true) => out.extend_from_slice(b"true"),
-        JsValue::Bool(false) => out.extend_from_slice(b"false"),
-        JsValue::Number(number) => write_number(out, style, *number),
-        JsValue::String(text) => write_string(out, text),
+        JsValue::Undefined => extend_bytes(
+            out,
+            match style.mode {
+                JsonMode::Standard => b"null".as_slice(),
+                JsonMode::Lossless => b"undefined".as_slice(),
+            },
+            scope,
+        )?,
+        JsValue::Null => extend_bytes(out, b"null", scope)?,
+        JsValue::Bool(true) => extend_bytes(out, b"true", scope)?,
+        JsValue::Bool(false) => extend_bytes(out, b"false", scope)?,
+        JsValue::Number(number) => write_number(out, style, *number, scope)?,
+        JsValue::String(text) => write_string(out, text, scope)?,
         JsValue::Array(items) => {
-            out.push(b'[');
-            stack.push(WriteFrame::Array {
-                items: items.iter(),
-                first: true,
-            });
+            push_byte(out, b'[', scope)?;
+            push_frame(
+                stack,
+                WriteFrame::Array {
+                    items: items.iter(),
+                    first: true,
+                },
+                scope,
+            )?;
         }
         JsValue::Object(object) => {
-            out.push(b'{');
-            stack.push(WriteFrame::Object {
-                entries: object.entries(),
-                first: true,
-            });
+            push_byte(out, b'{', scope)?;
+            push_frame(
+                stack,
+                WriteFrame::Object {
+                    entries: object.entries(),
+                    first: true,
+                },
+                scope,
+            )?;
         }
     }
+    Ok(())
 }
 
 /// 수를 쓴다. Standard는 비유한 수를 `null`로, Lossless는 `NaN`·`Infinity`·`-Infinity`·`-0` 토큰으로 쓴다.
@@ -198,7 +258,12 @@ fn write_value<'a>(
 /// - `out`: 출력
 /// - `style`: 문법과 숫자 방언
 /// - `number`: 쓸 수
-fn write_number(out: &mut Vec<u8>, style: Style, number: f64) {
+fn write_number(
+    out: &mut Vec<u8>,
+    style: Style,
+    number: f64,
+    scope: &mut MemoryScope,
+) -> Result<(), MemoryFailure> {
     let token: &[u8] = match style.mode {
         JsonMode::Standard if !number.is_finite() => b"null",
         JsonMode::Lossless if number.is_nan() => b"NaN",
@@ -207,46 +272,57 @@ fn write_number(out: &mut Vec<u8>, style: Style, number: f64) {
         JsonMode::Lossless if number == 0.0 && number.is_sign_negative() => b"-0",
         _ => {
             // Number::toString은 -0을 "0"으로 쓴다(Standard의 -0 → 0)
-            out.extend_from_slice(number_to_string_with(number, style.dialect).as_bytes());
-            return;
+            return extend_bytes(
+                out,
+                number_to_string_with(number, style.dialect).as_bytes(),
+                scope,
+            );
         }
     };
-    out.extend_from_slice(token);
+    extend_bytes(out, token, scope)
 }
 
 /// 문자열을 따옴표로 감싸 `JSON.stringify` 규칙대로 이스케이프해 쓴다.
 ///
 /// - `out`: 출력
 /// - `text`: 쓸 문자열(단독 서로게이트는 소문자 `\udxxx`)
-fn write_string(out: &mut Vec<u8>, text: &JsString) {
-    out.push(b'"');
+fn write_string(
+    out: &mut Vec<u8>,
+    text: &JsString,
+    scope: &mut MemoryScope,
+) -> Result<(), MemoryFailure> {
+    push_byte(out, b'"', scope)?;
     for decoded in char::decode_utf16(text.as_units().iter().copied()) {
         match decoded {
-            Ok(character) => write_character(out, character),
-            Err(error) => write_unicode_escape(out, error.unpaired_surrogate()),
+            Ok(character) => write_character(out, character, scope)?,
+            Err(error) => write_unicode_escape(out, error.unpaired_surrogate(), scope)?,
         }
     }
-    out.push(b'"');
+    push_byte(out, b'"', scope)
 }
 
 /// 문자 하나를 쓴다. 따옴표·역슬래시·C0 제어 문자만 이스케이프하고 나머지는 원문 UTF-8이다.
 ///
 /// - `out`: 출력
 /// - `character`: 쓸 문자
-fn write_character(out: &mut Vec<u8>, character: char) {
+fn write_character(
+    out: &mut Vec<u8>,
+    character: char,
+    scope: &mut MemoryScope,
+) -> Result<(), MemoryFailure> {
     match character {
-        '"' => out.extend_from_slice(b"\\\""),
-        '\\' => out.extend_from_slice(b"\\\\"),
-        '\u{8}' => out.extend_from_slice(b"\\b"),
-        '\u{C}' => out.extend_from_slice(b"\\f"),
-        '\n' => out.extend_from_slice(b"\\n"),
-        '\r' => out.extend_from_slice(b"\\r"),
-        '\t' => out.extend_from_slice(b"\\t"),
+        '"' => extend_bytes(out, b"\\\"", scope),
+        '\\' => extend_bytes(out, b"\\\\", scope),
+        '\u{8}' => extend_bytes(out, b"\\b", scope),
+        '\u{C}' => extend_bytes(out, b"\\f", scope),
+        '\n' => extend_bytes(out, b"\\n", scope),
+        '\r' => extend_bytes(out, b"\\r", scope),
+        '\t' => extend_bytes(out, b"\\t", scope),
         // C0 제어 문자는 0x1F 이하라 u16으로 줄여도 값이 같다
-        '\u{0}'..='\u{1F}' => write_unicode_escape(out, character as u16),
+        '\u{0}'..='\u{1F}' => write_unicode_escape(out, character as u16, scope),
         _ => {
             let mut buffer = [0; 4];
-            out.extend_from_slice(character.encode_utf8(&mut buffer).as_bytes());
+            extend_bytes(out, character.encode_utf8(&mut buffer).as_bytes(), scope)
         }
     }
 }
@@ -255,9 +331,43 @@ fn write_character(out: &mut Vec<u8>, character: char) {
 ///
 /// - `out`: 출력
 /// - `unit`: UTF-16 코드 단위
-fn write_unicode_escape(out: &mut Vec<u8>, unit: u16) {
-    out.extend_from_slice(b"\\u");
-    for shift in [12, 8, 4, 0] {
-        out.push(HEX_DIGITS[usize::from((unit >> shift) & 0xF)]);
+fn write_unicode_escape(
+    out: &mut Vec<u8>,
+    unit: u16,
+    scope: &mut MemoryScope,
+) -> Result<(), MemoryFailure> {
+    let mut escape = [b'\\', b'u', 0, 0, 0, 0];
+    for (slot, shift) in escape[2..].iter_mut().zip([12, 8, 4, 0]) {
+        *slot = HEX_DIGITS[usize::from((unit >> shift) & 0xF)];
     }
+    extend_bytes(out, &escape, scope)
+}
+
+fn push_byte(out: &mut Vec<u8>, byte: u8, scope: &mut MemoryScope) -> Result<(), MemoryFailure> {
+    extend_bytes(out, &[byte], scope)
+}
+
+fn extend_bytes(
+    out: &mut Vec<u8>,
+    bytes: &[u8],
+    scope: &mut MemoryScope,
+) -> Result<(), MemoryFailure> {
+    scope.try_grow(bytes.len())?;
+    out.try_reserve(bytes.len())
+        .map_err(|_| scope.allocation_failure())?;
+    out.extend_from_slice(bytes);
+    Ok(())
+}
+
+fn push_frame<'a>(
+    stack: &mut Vec<WriteFrame<'a>>,
+    frame: WriteFrame<'a>,
+    scope: &mut MemoryScope,
+) -> Result<(), MemoryFailure> {
+    scope.try_grow(size_of::<WriteFrame<'a>>())?;
+    stack
+        .try_reserve(1)
+        .map_err(|_| scope.allocation_failure())?;
+    stack.push(frame);
+    Ok(())
 }

@@ -23,6 +23,14 @@ add_library(barochart SHARED ${BAROCHART_SOURCES})
 target_compile_options(barochart PRIVATE -O3 -Werror)
 target_link_libraries(barochart PRIVATE m)
 
+# JNI와 공통 C ABI만 공개한다. 내부 Rust/QuickJS 심볼의 외부 노출은 section GC를 막는다.
+set(BAROCHART_EXPORTS "${CMAKE_CURRENT_SOURCE_DIR}/barochart.map")
+set_property(TARGET barochart APPEND PROPERTY LINK_DEPENDS "${BAROCHART_EXPORTS}")
+target_link_options(barochart PRIVATE
+    "-Wl,--version-script=${BAROCHART_EXPORTS}"
+    "-Wl,--pack-dyn-relocs=android"
+    "-Wl,--icf=safe")
+
 if(WITH_QUICKJS)
     target_include_directories(barochart PRIVATE ../quickjs)
     target_compile_definitions(barochart PRIVATE

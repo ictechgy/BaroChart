@@ -3,7 +3,7 @@ import test from 'node:test';
 import {existsSync} from 'node:fs';
 import {join} from 'node:path';
 import {rustupBinDirectory} from '../scripts/rust/cargo.mjs';
-import {createWasmHarness, wasmTargetAvailable} from '../scripts/rust/wasm-harness.mjs';
+import {createWasmHarness, wasmTargetAvailable, wasmEHCachePrepared} from '../scripts/rust/wasm-harness.mjs';
 
 const cargoAvailable = existsSync(join(rustupBinDirectory(process.env), 'cargo'));
 const wasmAvailability = wasmTargetAvailable();
@@ -122,4 +122,21 @@ test('WASM owned result is freed even when fatal UTF-8 transport decoding fails'
   finally {globalThis.TextDecoder=Original}
   const after=(await harness.call('__bcAllocationStatsForTest',[])).value;
   assert.deepEqual(after,before,'decoding failure must release the result allocation');
+});
+
+test('WASM EH catches panic, keeps poison terminal, and releases the host exactly once', {
+  skip: requireWasm ? false : skipReason || (!wasmEHCachePrepared() && 'WASM EH cache is not prepared'),
+}, async t => {
+  const harness = await createWasmHarness({profile: 'debug', exceptionHandling: true});
+  t.after(() => harness.dispose());
+  assert.equal((await harness.call('nativeInit', [16, {}])).status, 0);
+  const panic = await harness.call('__bcPanicForTest', []);
+  assert.equal(panic.status, 4);
+  assert.deepEqual(panic.error, {name: 'Error', message: 'Chart disposed'});
+  assert.equal((await harness.call('nativeInit', [1, {}])).status, 4, 'panic must release busy and preserve poison');
+  assert.equal(harness.hostReleaseCount, 0);
+  await harness.dispose();
+  await harness.dispose();
+  assert.equal(harness.hostReleaseCount, 1);
+  assert.equal(harness.unexpectedReleaseCount, 0);
 });

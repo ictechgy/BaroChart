@@ -77,6 +77,13 @@ struct BaroChartTraceView {
     var sha256: String
 }
 
+/// A trace-local F64 view receipt when the Rust C ABI returns owned bytes instead of a JS object.
+struct BaroChartTraceF64Receipt {
+    let index: Int
+    let count: Int
+    let sha256: String
+}
+
 /// 부르기 직전에 쓴 호출 머리. 인자는 코어가 바꾸기 전에 쓴다.
 struct BaroChartTracePending {
     /// 함수 이름(멈춤 기록용)
@@ -142,6 +149,37 @@ final class BaroChartTraceWriter {
             stop(name, "argument: \(error)")
         }
         return nil
+    }
+
+    /// Logs a native F64 payload without fabricating a JSValue or copying it through Data.
+    func finish(_ pending: BaroChartTracePending, returnedFloat64 bytes: UnsafeRawPointer?, count: Int) -> BaroChartTraceF64Receipt? {
+        lock.lock();defer {lock.unlock()}
+        if stopped {return nil}
+        let (byteCount, overflow) = count.multipliedReportingOverflow(by: MemoryLayout<Double>.size)
+        guard count >= 0, !overflow, byteCount == 0 || bytes != nil else {
+            stop(pending.name, "result: invalid native Float64 payload length")
+            return nil
+        }
+        let digest = BaroChartTraceEncoder.sha256(bytes, byteCount)
+        guard write(pending.head + "\"ok\":F64(\(count),\(digest))}") else {return nil}
+        let receipt = BaroChartTraceF64Receipt(index: nextView, count: count, sha256: digest)
+        nextView += 1
+        return receipt
+    }
+
+    /// Emits a Rust host-write row for the native before-view represented by receipt.
+    func hostWrote(_ receipt: BaroChartTraceF64Receipt, from bytes: UnsafeRawPointer, count: Int) {
+        lock.lock();defer {lock.unlock()}
+        if stopped {return}
+        let (byteCount, overflow) = count.multipliedReportingOverflow(by: MemoryLayout<Double>.size)
+        guard count == receipt.count, count >= 0, !overflow else {
+            stop(nil, "write: native F64 snapshot length mismatch")
+            return
+        }
+        let digest = BaroChartTraceEncoder.sha256(bytes, byteCount)
+        if digest == receipt.sha256 {return}
+        let data = Data(bytes: bytes, count: byteCount).base64EncodedString()
+        guard write("{\"write\":{\"view\":\(receipt.index),\"sha256\":\"\(digest)\",\"data\":\"\(data)\"}}") else {return}
     }
 
     /// 정상 반환을 기록한다. 결과의 Float64Array는 나온 순서대로 뷰 순번을 받는다.
@@ -562,8 +600,7 @@ enum BaroChartTraceEncoder {
 
 /// 다른 런타임을 감싸 BCJSON 추적을 쓰는 런타임(테스트·디버그 전용). 모든 호출을 안쪽 런타임에 그대로 넘기고,
 /// 넘긴 호출과 결과(또는 코어 예외), 호스트가 Float64Array 뷰에 쓴 바이트만 기록한다. 함수가 없는 호출과 supports·번들 평가는 코어 호출이 아니라 쓰지 않는다.
-/// invoke·readFloat64는 프로토콜 기본 구현을 그대로 쓰므로 안쪽 런타임과 같은 오류 규칙으로 이 런타임의 perform을 거친다.
-/// M1의 Rust 런타임은 readFloat64·writeFloat64를 직접 구현하므로, 그때 이 기록기의 쓰기 기록 방식도 함께 정한다.
+/// JS typed transfers keep the JSC view path; known Rust F64 transfers use one native snapshot and the same BCJSON rows.
 final class BaroChartRecordingCoreRuntime: BaroChartCoreRuntime {
     /// 감싼 런타임
     let inner: BaroChartCoreRuntime
@@ -603,8 +640,69 @@ final class BaroChartRecordingCoreRuntime: BaroChartCoreRuntime {
         return outcome
     }
 
+    /// JS keeps the returned JSC view path. Rust writes the direct FFI payload into the host
+    /// destination, so hash that same payload and keep the trace's logical view sequence.
+    func readFloat64(_ name: String, _ arguments: [Any], into destination: UnsafeMutableRawPointer, count: Int) throws {
+        if inner.backend == .rust, inner.usesNativeFloat64Read(name) {
+            let pending = writer.begin(name, arguments)
+            var receivedCoreResult = false
+            do {
+                let handled = try inner.readFloat64Snapshot(name, arguments) {bytes, actualCount in
+                    receivedCoreResult = true
+                    if let pending {
+                        guard actualCount == 0 || bytes != nil else {
+                            throw BaroChartAsyncError.invalidProtocol("Missing native F64 snapshot bytes")
+                        }
+                        _ = writer.finish(pending, returnedFloat64: bytes, count: actualCount)
+                    }
+                    try BaroChartFloat64Transfer.copyRead(
+                        bytes,
+                        actualCount: actualCount,
+                        into: destination,
+                        hostCount: count
+                    )
+                }
+                guard handled else {throw BaroChartLowLevelError.javaScript("Error: Native F64 read snapshot unavailable")}
+                return
+            } catch {
+                let exception = inner.takeTypedException()
+                if !receivedCoreResult, let pending, let exception {
+                    writer.finish(pending, threw: exception.javaScriptValue, in: exception.javaScriptContext)
+                }
+                throw error
+            }
+        }
+        // Unknown Rust names and every JS read use the original perform + typed-array guard.
+        try invoke(name, arguments).withFloat64Bytes(count: count) {_ = memcpy(destination, $0, count * MemoryLayout<Double>.size)}
+    }
+
     /// 기본 쓰기 경로로 바이트를 옮긴 뒤, 직전 호출이 돌려준 뷰에 쓴 바이트를 write 줄로 남긴다.
     func writeFloat64(_ name: String, _ arguments: [Any], from source: UnsafeRawPointer, count: Int) throws {
+        if inner.backend == .rust, inner.usesNativeFloat64Write(name) {
+            let pending = writer.begin(name, arguments)
+            var receivedBefore = false
+            var beforeCount = 0
+            var receipt: BaroChartTraceF64Receipt?
+            do {
+                try inner.writeFloat64Snapshot(name, arguments, from: source, count: count) {bytes, actualCount in
+                    receivedBefore = true
+                    beforeCount = actualCount
+                    if let pending {
+                        receipt = writer.finish(pending, returnedFloat64: bytes, count: actualCount)
+                    }
+                }
+                guard receivedBefore else {throw BaroChartLowLevelError.javaScript("Error: Missing Rust F64 before snapshot")}
+                try BaroChartFloat64Transfer.validate(hostCount: count, actualCount: beforeCount)
+                if let receipt {writer.hostWrote(receipt, from: source, count: count)}
+                return
+            } catch {
+                let exception = inner.takeTypedException()
+                if !receivedBefore, let pending, let exception {
+                    writer.finish(pending, threw: exception.javaScriptValue, in: exception.javaScriptContext)
+                }
+                throw error
+            }
+        }
         let view = try writeFloat64View(name, arguments, from: source, count: count)
         writer.hostWrote(into: view.javaScriptValue, from: source, count: count)
     }

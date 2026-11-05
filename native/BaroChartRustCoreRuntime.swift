@@ -241,7 +241,7 @@ final class RustValueRealm {
             if (!asError) return result;
             const error = new ErrorValue(result.message);
             define(error, 'name', {value:result.name, enumerable:true, writable:true, configurable:true});
-            if (hasOwn(result, 'code')) define(error, 'code', {value:result.code, enumerable:true, writable:true, configurable:true});
+            if (hasOwn(result, 'code')) define(error, 'code', {value:result.code === null ? undefined : result.code, enumerable:true, writable:true, configurable:true});
             return error;
           };
         })()
@@ -266,6 +266,28 @@ final class RustValueRealm {
         }
         return BaroChartCoreValue(javaScriptValue: result, javaScriptContext: context)
     }
+
+    func materializeFloat64(_ bytes: UnsafeRawPointer?, count: Int) throws -> BaroChartCoreValue {
+        guard count >= 0, count <= Int.max / MemoryLayout<Double>.size else {
+            throw BaroChartLowLevelError.javaScript("RangeError: Out of memory")
+        }
+        context.exception = nil
+        var exception: JSValueRef?
+        guard let global = context.jsGlobalContextRef,
+              let array = JSObjectMakeTypedArray(global, kJSTypedArrayTypeFloat64Array, count, &exception),
+              exception == nil, let value = JSValue(jsValueRef: array, in: context) else {
+            context.exception = nil
+            throw BaroChartLowLevelError.javaScript("RangeError: Out of memory")
+        }
+        if count > 0 {
+            guard let bytes, let target = JSObjectGetTypedArrayBytesPtr(global, array, &exception), exception == nil else {
+                context.exception = nil
+                throw BaroChartLowLevelError.javaScript("RangeError: Out of memory")
+            }
+            memcpy(target, bytes, count * MemoryLayout<Double>.size)
+        }
+        return BaroChartCoreValue(javaScriptValue: value, javaScriptContext: context)
+    }
 }
 
 /// Stable retained callback context. The FFI may move an engine between threads sequentially.
@@ -285,6 +307,12 @@ enum BaroChartRustStatusDecoder {
             return .rejected(BaroChartAsyncError.busy)
         case 3, 4: // BC_CLOSED, BC_POISONED
             return .rejected(BaroChartLowLevelError.javaScript("Error: Chart disposed"))
+        case 6: // BC_INVALID
+            return .rejected(BaroChartLowLevelError.javaScript("TypeError: Invalid Rust core transport"))
+        case 7: // BC_OOM_LIMIT
+            return .rejected(BaroChartLowLevelError.javaScript("InternalError: out of memory"))
+        case 8: // BC_OOM_SYSTEM
+            return .rejected(BaroChartLowLevelError.javaScript("RangeError: Out of memory"))
         default:
             return .rejected(BaroChartLowLevelError.javaScript("Error: Invalid Rust call"))
         }
@@ -311,6 +339,7 @@ private func rustZoneOffset(_ context: UnsafeMutableRawPointer?, _ bytes: Unsafe
 final class BaroChartRustCoreRuntime: BaroChartCoreRuntime {
     let backend = BaroChartRuntimeBackend.rust
     private var engine: OpaquePointer?
+    private var typedTransferException: BaroChartCoreValue?
     private let unavailableContext = RustHostContext()
     var javaScriptContext: JSContext {preconditionFailure("JavaScript context is unavailable in the Rust backend")}
 
@@ -338,11 +367,33 @@ final class BaroChartRustCoreRuntime: BaroChartCoreRuntime {
         return bytes.withUnsafeBufferPointer {bc_supports(engine, $0.baseAddress, $0.count)}
     }
 
+    func usesNativeFloat64Read(_ name: String) -> Bool {
+        name == "nativeIndicatorBuffer" || name == "nativeAsyncBuffer"
+    }
+
+    func usesNativeFloat64Write(_ name: String) -> Bool {
+        name == "nativeAsyncTargetBuffer"
+    }
+
     func perform(_ name: String, _ arguments: [Any]) -> BaroChartCoreOutcome {
         guard let engine else {return BaroChartRustStatusDecoder.outcome(status: BC_CLOSED.rawValue, value: nil)}
         if let error = BaroChartArgumentDepth.rejection(for: arguments) {return .rejected(error)}
         guard supports(name) else {return .missing}
         guard let values = RustValueRealm.current() else {return .rejected(BaroChartLowLevelError.unavailableContext)}
+        if name == "nativeScenePacket" {return performPacket(arguments, in: values)}
+        if usesNativeFloat64Read(name) || name == "nativeAsyncTargetBuffer" {
+            do {
+                var result: BaroChartCoreValue?
+                _ = try nativeFloat64Snapshot(name, arguments, flags: UInt32(BC_FLAG_LOSSLESS)) { bytes, count in
+                    result = try values.materializeFloat64(bytes, count: count)
+                }
+                guard let result else {throw BaroChartLowLevelError.javaScript("Error: Missing Rust F64 response")}
+                return .returned(result)
+            } catch {
+                if let exception = takeTypedException() {return .threw(exception)}
+                return .rejected(error)
+            }
+        }
         do {
             let args = RustJSON.array(try arguments.map(RustJSON.from)).encoded(lossless: true)
             let nameBytes = Array(name.utf8), argBytes = Array(args.utf8)
@@ -354,7 +405,7 @@ final class BaroChartRustCoreRuntime: BaroChartCoreRuntime {
             switch status {
             case BC_BUSY, BC_CLOSED, BC_POISONED:
                 return BaroChartRustStatusDecoder.outcome(status: status.rawValue, value: nil)
-            case BC_INVALID:
+            case BC_INVALID, BC_OOM_LIMIT, BC_OOM_SYSTEM:
                 return BaroChartRustStatusDecoder.outcome(status: status.rawValue, value: nil)
             default:
                 break
@@ -366,6 +417,234 @@ final class BaroChartRustCoreRuntime: BaroChartCoreRuntime {
             let wrapped = try values.materialize(value, asError: status == BC_THROW || status == BC_UNAVAILABLE)
             return BaroChartRustStatusDecoder.outcome(status: status.rawValue, value: wrapped)
         } catch {return .rejected(error)}
+    }
+
+    private func performPacket(_ arguments: [Any], in realm: RustValueRealm) -> BaroChartCoreOutcome {
+        typedTransferException = nil
+        guard let engine else {return BaroChartRustStatusDecoder.outcome(status: BC_CLOSED.rawValue, value: nil)}
+        do {
+            let args = try floatArguments(arguments)
+            var metadata = BcBuf(ptr: nil, len: 0, cap: 0)
+            var numbers = BcF64Buf(ptr: nil, len: 0, cap: 0)
+            let status = args.withUnsafeBufferPointer {args in
+                bc_packet(engine, args.baseAddress, args.count, &metadata, &numbers)
+            }
+            defer {
+                if metadata.ptr != nil {bc_buf_free(metadata)}
+                if numbers.ptr != nil {bc_f64_buf_free(numbers)}
+            }
+            if status == BC_CLOSED || status == BC_POISONED || status == BC_BUSY || status == BC_INVALID {
+                return BaroChartRustStatusDecoder.outcome(status: status.rawValue, value: nil)
+            }
+            try checkFloatStatus(status, metadata)
+            guard let pointer = metadata.ptr else {throw BaroChartLowLevelError.javaScript("Error: Missing Rust packet metadata")}
+            let text = String(decoding: UnsafeBufferPointer(start: pointer, count: metadata.len), as: UTF8.self)
+            let typed = try realm.materializeFloat64(numbers.ptr.map(UnsafeRawPointer.init), count: numbers.len)
+            let result = try realm.materialize(.object([("metadata", .string(text)), ("numbers", .null)]))
+            result.javaScriptValue.setValue(typed.javaScriptValue, forProperty: "numbers")
+            guard realm.context.exception == nil else {
+                realm.context.exception = nil
+                throw BaroChartLowLevelError.javaScript("Error: Invalid Rust packet value")
+            }
+            return .returned(result)
+        } catch {
+            if let exception = takeTypedException() {return .threw(exception)}
+            return .rejected(error)
+        }
+    }
+
+    func readFloat64(_ name: String, _ arguments: [Any], into destination: UnsafeMutableRawPointer, count: Int) throws {
+        guard usesNativeFloat64Read(name) else {
+            try invoke(name, arguments).withFloat64Bytes(count: count) {_ = memcpy(destination, $0, count * MemoryLayout<Double>.size)}
+            return
+        }
+        let handled = try nativeFloat64Snapshot(name, arguments, flags: 0) {bytes, actualCount in
+            try BaroChartFloat64Transfer.copyRead(
+                bytes,
+                actualCount: actualCount,
+                into: destination,
+                hostCount: count
+            )
+        }
+        guard handled else {
+            throw BaroChartLowLevelError.javaScript("Error: Native F64 read snapshot unavailable")
+        }
+    }
+
+    func readFloat64Snapshot(
+        _ name: String,
+        _ arguments: [Any],
+        consume: (UnsafeRawPointer?, Int) throws -> Void
+    ) throws -> Bool {
+        guard usesNativeFloat64Read(name) else {return false}
+        return try nativeFloat64Snapshot(name, arguments, flags: 0, consume: consume)
+    }
+
+    private func nativeFloat64Snapshot(
+        _ name: String,
+        _ arguments: [Any],
+        flags: UInt32,
+        consume: (UnsafeRawPointer?, Int) throws -> Void
+    ) throws -> Bool {
+        typedTransferException = nil
+        guard let engine else {throw BaroChartAsyncError.engineClosed}
+        let arguments = try floatArguments(arguments, lossless: flags != 0)
+        let name = Array(name.utf8)
+        var output = BcF64Buf(ptr: nil, len: 0, cap: 0)
+        var error = BcBuf(ptr: nil, len: 0, cap: 0)
+        let status = name.withUnsafeBufferPointer {name in
+            arguments.withUnsafeBufferPointer {arguments in
+                bc_read_f64_snapshot_with_flags(engine, name.baseAddress, name.count, arguments.baseAddress, arguments.count,
+                                                flags, &output, &error)
+            }
+        }
+        defer {
+            if output.ptr != nil {bc_f64_buf_free(output)}
+            if error.ptr != nil {bc_buf_free(error)}
+        }
+        try checkFloatStatus(status, error)
+        guard output.ptr != nil || output.len == 0 else {
+            throw BaroChartLowLevelError.javaScript("Error: Invalid Rust F64 snapshot")
+        }
+        try consume(output.ptr.map(UnsafeRawPointer.init), output.len)
+        return true
+    }
+
+    /// source 바이트를 C ABI로 target의 검증된 F64 slice에 복사한다.
+    func writeFloat64(_ name: String, _ arguments: [Any], from source: UnsafeRawPointer, count: Int) throws {
+        guard usesNativeFloat64Write(name) else {
+            _ = try writeFloat64View(name, arguments, from: source, count: count)
+            return
+        }
+        try observedWriteFloat64(
+            name,
+            arguments,
+            from: source,
+            count: count,
+            captureBefore: false,
+            before: {_, _ in}
+        )
+    }
+
+    func writeFloat64Snapshot(
+        _ name: String,
+        _ arguments: [Any],
+        from source: UnsafeRawPointer,
+        count: Int,
+        before: (UnsafeRawPointer?, Int) -> Void
+    ) throws {
+        guard usesNativeFloat64Write(name) else {
+            _ = try writeFloat64View(name, arguments, from: source, count: count)
+            return
+        }
+        try observedWriteFloat64(
+            name,
+            arguments,
+            from: source,
+            count: count,
+            captureBefore: true,
+            before: before
+        )
+    }
+
+    private func observedWriteFloat64(
+        _ name: String,
+        _ arguments: [Any],
+        from source: UnsafeRawPointer,
+        count: Int,
+        captureBefore: Bool,
+        before: (UnsafeRawPointer?, Int) -> Void
+    ) throws {
+        typedTransferException = nil
+        guard let engine else {throw BaroChartAsyncError.engineClosed}
+        let arguments = try floatArguments(arguments)
+        let name = Array(name.utf8)
+        var beforeBuffer = BcF64Buf(ptr: nil, len: 0, cap: 0)
+        var receipt = BcF64WriteReceipt(actual_count: 0, did_write: false)
+        var error = BcBuf(ptr: nil, len: 0, cap: 0)
+        let observe: (UnsafeMutablePointer<BcF64Buf>?) -> BcStatus = {beforeOutput in
+            name.withUnsafeBufferPointer {name in
+                arguments.withUnsafeBufferPointer {arguments in
+                    bc_write_f64_observe(
+                        engine,
+                        name.baseAddress,
+                        name.count,
+                        arguments.baseAddress,
+                        arguments.count,
+                        0,
+                        source.assumingMemoryBound(to: Double.self),
+                        Int64(count),
+                        &receipt,
+                        beforeOutput,
+                        &error
+                    )
+                }
+            }
+        }
+        let status: BcStatus
+        if !captureBefore {status = observe(nil)}
+        else {status = observe(&beforeBuffer)}
+        defer {
+            if beforeBuffer.ptr != nil {bc_f64_buf_free(beforeBuffer)}
+            if error.ptr != nil {bc_buf_free(error)}
+        }
+        try checkFloatStatus(status, error)
+        if captureBefore {
+            guard beforeBuffer.ptr != nil || beforeBuffer.len == 0 else {
+                throw BaroChartLowLevelError.javaScript("Error: Invalid Rust F64 before snapshot")
+            }
+            before(beforeBuffer.ptr.map(UnsafeRawPointer.init), beforeBuffer.len)
+        }
+        try BaroChartFloat64Transfer.validate(hostCount: count, actualCount: receipt.actual_count)
+        guard receipt.did_write else {
+            throw BaroChartAsyncError.invalidProtocol("Unavailable typed bytes")
+        }
+    }
+
+    private func floatArguments(_ arguments: [Any], lossless: Bool = false) throws -> [UInt8] {
+        if let error = BaroChartArgumentDepth.rejection(for: arguments) {throw error}
+        return Array(RustJSON.array(try arguments.map(RustJSON.from)).encoded(lossless: lossless).utf8)
+    }
+
+    private func checkFloatStatus(_ status: BcStatus, _ error: BcBuf) throws {
+        if status == BC_OK {return}
+        if status == BC_BUSY {throw BaroChartAsyncError.busy}
+        if status == BC_CLOSED || status == BC_POISONED {throw BaroChartAsyncError.engineClosed}
+        if status == BC_OOM_LIMIT {
+            try throwTypedTransferException(name: "InternalError", message: "out of memory")
+        }
+        if status == BC_OOM_SYSTEM {
+            try throwTypedTransferException(name: "RangeError", message: "Out of memory")
+        }
+        guard (status == BC_THROW || status == BC_UNAVAILABLE), let pointer = error.ptr,
+              let realm = RustValueRealm.current() else {
+            throw BaroChartLowLevelError.javaScript("Error: Invalid Rust Float64 transfer")
+        }
+        let text = String(decoding: UnsafeBufferPointer(start: pointer, count: error.len), as: UTF8.self)
+        var parser = RustJSONParser(text)
+        let exception = try realm.materialize(parser.parse(), asError: true)
+        typedTransferException = exception
+        if exception.forProperty("name")?.toString() == "IngestionError",
+           let code = exception.forProperty("code")?.toString(), !code.isEmpty, code.utf16.count <= 64,
+           let message = exception.forProperty("message")?.toString(), message.utf16.count <= 256 {
+            throw BaroChartIngestionError(code: code, message: message)
+        }
+        throw BaroChartLowLevelError.javaScript(exception.toString() ?? "Unknown JS error")
+    }
+
+    private func throwTypedTransferException(name: String, message: String) throws -> Never {
+        let value = RustJSON.object([
+            ("name", .string(name)),
+            ("message", .string(message)),
+            ("code", .undefined),
+        ])
+        typedTransferException = try RustValueRealm.current()?.materialize(value, asError: true)
+        throw BaroChartLowLevelError.javaScript("\(name): \(message)")
+    }
+
+    func takeTypedException() -> BaroChartCoreValue? {
+        defer {typedTransferException = nil}
+        return typedTransferException
     }
 
     func takeException() -> BaroChartCoreValue? {nil}

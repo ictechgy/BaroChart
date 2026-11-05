@@ -4,13 +4,16 @@
 //! 먼저 두고, 나머지 문자열 키를 삽입 순서로 둔다. `'01'`, `'-1'`, `'1.5'`, `'4294967295'`는 일반 키다.
 //! `{...a}`, `JSON.stringify`, `Object.keys`, 검증 반복문이 모두 이 순서를 따르므로 바이트 동등성의 바탕이다.
 //!
-//! 구현: 인덱스 키는 `BTreeMap`(수 순서), 일반 키는 삽입 순서 `Vec`에 둔다. 일반 키가 많아지면 해시 색인을 만들어
-//! 키가 많은 입력에서도 조회·중복 키 처리가 제곱 시간이 되지 않게 한다. 색인은 위치만 바꿀 뿐 결과 순서에 영향이 없다.
+//! 구현: 인덱스 키는 수 순서의 연속 `Vec`, 일반 키는 삽입 순서 `Vec`에 둔다. 일반 키가 많아지면 해시 색인을 만든다.
+//! Untrusted parser는 별도 builder에서 두 종류를 해시 조회하며 모은 뒤 인덱스 키를 한 번 정렬하므로, 내림차순 wide
+//! 입력도 제곱 시간이 되지 않는다. 색인은 위치만 바꿀 뿐 결과 순서에 영향이 없다.
 
-use std::collections::{BTreeMap, HashMap, btree_map};
+use std::collections::HashMap;
+use std::mem::size_of;
 use std::{fmt, slice};
 
 use super::value::JsValue;
+use crate::memory::{MemoryFailure, MemoryScope};
 use crate::string::JsString;
 
 /// 가장 큰 배열 인덱스(2^32 - 2). 2^32 - 1(`'4294967295'`)은 일반 키다.
@@ -29,8 +32,8 @@ const LINEAR_LOOKUP_LIMIT: usize = 8;
 /// 지운 뒤 다시 넣은 일반 키는 끝에 붙는다(JS `delete` 뒤 대입과 같다). `undefined`를 담은 키도 자기 키라 자리를 지킨다.
 #[derive(Clone, Default)]
 pub struct JsObject {
-    /// 배열 인덱스 키: 인덱스 → (원래 키, 값). 수 오름차순으로 순회한다
-    indexed: BTreeMap<u32, (JsString, JsValue)>,
+    /// 배열 인덱스 키: `(인덱스, 원래 키, 값)`. 인덱스 오름차순이다.
+    indexed: Vec<(u32, JsString, JsValue)>,
     /// 일반 키: 삽입 순서
     named: Vec<(JsString, JsValue)>,
     /// 일반 키 → `named` 위치. 일반 키가 `LINEAR_LOOKUP_LIMIT`개를 넘을 때만 만든다
@@ -48,16 +51,73 @@ impl JsObject {
         Self::default()
     }
 
+    /// 소유 entry를 fallible builder로 모아 JS 자기 키 순서의 객체를 만든다.
+    /// 새 컨테이너와 색인 allocation은 `scope`가 보유하므로 결과를 쓰는 동안 scope를 유지해야 한다.
+    /// key/value payload의 기존 소유권은 이동하며 같은 키의 마지막 값만 남는다.
+    pub fn try_from_entries_scoped(
+        entries: impl IntoIterator<Item = (JsString, JsValue)>,
+        scope: &mut MemoryScope,
+    ) -> Result<Self, MemoryFailure> {
+        let mut builder = JsObjectBuilder::new();
+        for (key, value) in entries {
+            builder.insert(key, value, scope)?;
+        }
+        Ok(builder.finish())
+    }
+
+    /// 연속 인덱스 키를 갖는 typed-array JSON 객체를 중간 entry 배열 없이 만든다.
+    pub fn try_from_indexed_values_scoped(
+        values: impl IntoIterator<Item = JsValue>,
+        scope: &mut MemoryScope,
+    ) -> Result<Self, MemoryFailure> {
+        let mut builder = JsObjectBuilder::new();
+        for (index, value) in values.into_iter().enumerate() {
+            let key = JsString::try_from_str(&index.to_string(), scope)?;
+            builder.insert(key, value, scope)?;
+        }
+        Ok(builder.finish())
+    }
+
+    pub(crate) fn from_builder_parts(
+        indexed: Vec<(u32, JsString, JsValue)>,
+        named: Vec<(JsString, JsValue)>,
+        named_lookup: HashMap<JsString, usize>,
+    ) -> Self {
+        Self {
+            indexed,
+            lookup: (named.len() > LINEAR_LOOKUP_LIMIT).then(|| Box::new(named_lookup)),
+            named,
+        }
+    }
+
     /// 자기 키의 값을 찾는다(JS `Object.hasOwn(o, key) ? o[key] : 없음`).
     ///
     /// - `key`: 찾을 키. `'1'`과 `'01'`은 다른 키다
     /// - 반환: 값, 키가 없으면 `None`
     pub fn get(&self, key: &JsString) -> Option<&JsValue> {
         match array_index(key) {
-            Some(index) => self.indexed.get(&index).map(|(_, value)| value),
+            Some(index) => self
+                .indexed
+                .binary_search_by_key(&index, |(index, _, _)| *index)
+                .ok()
+                .map(|position| &self.indexed[position].2),
             None => self
                 .named_position(key)
                 .map(|position| &self.named[position].1),
+        }
+    }
+
+    /// 키와 순서를 바꾸지 않고 자기 key의 값만 배타적으로 빌린다.
+    pub fn get_mut(&mut self, key: &JsString) -> Option<&mut JsValue> {
+        match array_index(key) {
+            Some(index) => self
+                .indexed
+                .binary_search_by_key(&index, |(index, _, _)| *index)
+                .ok()
+                .map(|position| &mut self.indexed[position].2),
+            None => self
+                .named_position(key)
+                .map(|position| &mut self.named[position].1),
         }
     }
 
@@ -67,11 +127,12 @@ impl JsObject {
     /// - `value`: 넣을 값(`undefined`도 자기 키로 남는다)
     pub fn insert(&mut self, key: JsString, value: JsValue) {
         if let Some(index) = array_index(&key) {
-            match self.indexed.entry(index) {
-                btree_map::Entry::Occupied(mut slot) => slot.get_mut().1 = value,
-                btree_map::Entry::Vacant(slot) => {
-                    slot.insert((key, value));
-                }
+            match self
+                .indexed
+                .binary_search_by_key(&index, |(index, _, _)| *index)
+            {
+                Ok(position) => self.indexed[position].2 = value,
+                Err(position) => self.indexed.insert(position, (index, key, value)),
             }
             return;
         }
@@ -87,7 +148,11 @@ impl JsObject {
     /// - 반환: 지운 값, 키가 없었으면 `None`
     pub fn remove(&mut self, key: &JsString) -> Option<JsValue> {
         if let Some(index) = array_index(key) {
-            return self.indexed.remove(&index).map(|(_, value)| value);
+            let position = self
+                .indexed
+                .binary_search_by_key(&index, |(index, _, _)| *index)
+                .ok()?;
+            return Some(self.indexed.remove(position).2);
         }
         let position = self.named_position(key)?;
         let (_, value) = self.named.remove(position);
@@ -121,7 +186,7 @@ impl JsObject {
     /// `iter`의 구체 타입. writer와 복제가 순회 상태를 스택에 담으려고 쓴다.
     pub(crate) fn entries(&self) -> ObjectIter<'_> {
         ObjectIter {
-            indexed: self.indexed.values(),
+            indexed: self.indexed.iter(),
             named: self.named.iter(),
         }
     }
@@ -129,8 +194,8 @@ impl JsObject {
     /// 값만 순회한다(키 순서와 무관한 내부 검사용).
     pub(crate) fn values(&self) -> impl Iterator<Item = &JsValue> {
         self.indexed
-            .values()
-            .map(|(_, value)| value)
+            .iter()
+            .map(|(_, _, value)| value)
             .chain(self.named.iter().map(|(_, value)| value))
     }
 
@@ -145,7 +210,7 @@ impl JsObject {
             }
             return Some(value);
         }
-        self.indexed.pop_last().map(|(_, (_, value))| value)
+        self.indexed.pop().map(|(_, _, value)| value)
     }
 
     /// 일반 키의 `named` 위치를 찾는다. 색인이 있으면 해시로, 없으면 처음부터 훑는다.
@@ -180,6 +245,92 @@ impl JsObject {
     }
 }
 
+/// Untrusted parser가 wide object를 amortized O(n)으로 모으고 numeric key를 한 번 정렬한다.
+pub(crate) struct JsObjectBuilder {
+    indexed: Vec<(u32, JsString, JsValue)>,
+    indexed_lookup: HashMap<u32, usize>,
+    named: Vec<(JsString, JsValue)>,
+    named_lookup: HashMap<JsString, usize>,
+}
+
+impl JsObjectBuilder {
+    pub(crate) fn new() -> Self {
+        Self {
+            indexed: Vec::new(),
+            indexed_lookup: HashMap::new(),
+            named: Vec::new(),
+            named_lookup: HashMap::new(),
+        }
+    }
+
+    pub(crate) fn insert(
+        &mut self,
+        key: JsString,
+        value: JsValue,
+        scope: &mut MemoryScope,
+    ) -> Result<(), MemoryFailure> {
+        if let Some(index) = array_index(&key) {
+            if let Some(position) = self.indexed_lookup.get(&index).copied() {
+                self.indexed[position].2 = value;
+                return Ok(());
+            }
+            reserve_vec(&mut self.indexed, 1, scope)?;
+            reserve_hash(&mut self.indexed_lookup, 1, scope)?;
+            let position = self.indexed.len();
+            self.indexed.push((index, key, value));
+            self.indexed_lookup.insert(index, position);
+            return Ok(());
+        }
+        if let Some(position) = self.named_lookup.get(&key).copied() {
+            self.named[position].1 = value;
+            return Ok(());
+        }
+        reserve_vec(&mut self.named, 1, scope)?;
+        reserve_hash(&mut self.named_lookup, 1, scope)?;
+        let lookup_key = key.try_clone_scoped(scope)?;
+        let position = self.named.len();
+        self.named.push((key, value));
+        self.named_lookup.insert(lookup_key, position);
+        Ok(())
+    }
+
+    pub(crate) fn finish(mut self) -> JsObject {
+        self.indexed.sort_unstable_by_key(|(index, _, _)| *index);
+        JsObject::from_builder_parts(self.indexed, self.named, self.named_lookup)
+    }
+}
+
+fn reserve_vec<T>(
+    values: &mut Vec<T>,
+    additional: usize,
+    scope: &mut MemoryScope,
+) -> Result<(), MemoryFailure> {
+    let bytes = additional
+        .checked_mul(size_of::<T>())
+        .ok_or_else(|| scope.allocation_failure())?;
+    scope.try_grow(bytes)?;
+    values
+        .try_reserve(additional)
+        .map_err(|_| scope.allocation_failure())
+}
+
+fn reserve_hash<K, V>(
+    values: &mut HashMap<K, V>,
+    additional: usize,
+    scope: &mut MemoryScope,
+) -> Result<(), MemoryFailure>
+where
+    K: Eq + std::hash::Hash,
+{
+    let bytes = additional
+        .checked_mul(size_of::<(K, V)>().saturating_add(16))
+        .ok_or_else(|| scope.allocation_failure())?;
+    scope.try_grow(bytes)?;
+    values
+        .try_reserve(additional)
+        .map_err(|_| scope.allocation_failure())
+}
+
 /// 무손실 JSON 텍스트로 보인다(진단용, `JsValue`의 Debug와 같은 형식).
 impl fmt::Debug for JsObject {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -192,7 +343,7 @@ impl fmt::Debug for JsObject {
 /// `JsObject::iter`의 순회자: 인덱스 키를 먼저, 그다음 일반 키를 삽입 순서로 낸다.
 pub(crate) struct ObjectIter<'a> {
     /// 배열 인덱스 키(수 오름차순)
-    indexed: btree_map::Values<'a, u32, (JsString, JsValue)>,
+    indexed: slice::Iter<'a, (u32, JsString, JsValue)>,
     /// 일반 키(삽입 순서)
     named: slice::Iter<'a, (JsString, JsValue)>,
 }
@@ -202,7 +353,7 @@ impl<'a> Iterator for ObjectIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.indexed.next() {
-            Some((key, value)) => Some((key, value)),
+            Some((_, key, value)) => Some((key, value)),
             None => self.named.next().map(|(key, value)| (key, value)),
         }
     }
@@ -212,7 +363,7 @@ impl<'a> Iterator for ObjectIter<'a> {
 ///
 /// - `key`: 살펴볼 키
 /// - 반환: 인덱스, 일반 키면 `None`
-fn array_index(key: &JsString) -> Option<u32> {
+pub(crate) fn array_index(key: &JsString) -> Option<u32> {
     let units = key.as_units();
     let (&first, rest) = units.split_first()?;
     if units.len() > MAX_ARRAY_INDEX_DIGITS || (first == u16::from(b'0') && !rest.is_empty()) {

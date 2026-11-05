@@ -24,16 +24,33 @@ export function wasmTargetAvailable() {
     : {available: false, reason: 'rustup toolchain 1.98.1 does not have wasm32-unknown-unknown installed'};
 }
 
-function runCargo(args, targetDirectory) {
+function runCargo(args, targetDirectory, environment = {}) {
   const result = spawnSync(NODE, ['scripts/rust/cargo.mjs', ...args], {
     cwd: ROOT,
-    env: {...process.env, CARGO_TARGET_DIR: targetDirectory},
+    env: {...process.env, ...environment, CARGO_INCREMENTAL: '0', CARGO_TARGET_DIR: targetDirectory},
     encoding: 'utf8',
     maxBuffer: 16 * 1024 * 1024,
   });
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`cargo wrapper failed (${result.status ?? result.signal}):\n${result.stderr || result.stdout}`);
   return result.stdout;
+}
+
+/** Reports whether the explicit, repository-local EH preparation has completed. */
+export function wasmEHCachePrepared() {
+  return existsSync(join(ROOT, 'artifacts/rust-wasm/stdlib-cache/cargo-home/config.toml'))
+    && existsSync(join(ROOT, 'artifacts/rust-wasm/eh-toolchain/bin/rustc-with-sysroot'));
+}
+
+function exceptionHandlingEnvironment() {
+  const result = spawnSync(process.env.PYTHON || 'python3', ['scripts/rust/prepare-wasm-eh.py', '--offline', '--json'], {
+    cwd: ROOT, encoding: 'utf8', maxBuffer: 1024 * 1024,
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(`WASM EH preparation failed:\n${result.stderr || result.stdout}`);
+  const {environment} = JSON.parse(result.stdout);
+  assert.ok(environment && typeof environment.RUSTC === 'string' && environment.RUSTC_BOOTSTRAP === '1', 'Invalid WASM EH environment');
+  return environment;
 }
 
 function inRange(pointer, length, memoryBytes) {
@@ -63,13 +80,17 @@ function offsetSeconds(name, epochMilliseconds) {
 }
 
 /** Builds the local wasm32 cdylib and returns an owner for its Rust engine. */
-export async function createWasmHarness({targetDirectory = join(ROOT, 'artifacts/rust-wasm/harness-target'), profile = 'release'} = {}) {
+export async function createWasmHarness({targetDirectory, profile = 'release', prebuiltPath = null, exceptionHandling = false} = {}) {
   assert.ok(profile === 'release' || profile === 'debug', 'WASM profile must be release or debug');
-  const targetDir = resolve(ROOT, targetDirectory);
-  runCargo(['build', '--offline', '--locked', ...(profile === 'release' ? ['--release'] : []), '-j2', '-p', 'barochart-wasm', '--target', 'wasm32-unknown-unknown'], targetDir);
-  const wasmPath = join(targetDir, `wasm32-unknown-unknown/${profile === 'release' ? 'release' : 'debug'}/barochart_wasm.wasm`);
+  assert.ok(!(prebuiltPath && exceptionHandling), 'EH verification must build the current source');
+  const targetDir = resolve(ROOT, targetDirectory ?? join(ROOT, 'artifacts/rust-wasm', exceptionHandling ? 'eh-stdlib-target' : 'harness-target'));
+  if (!prebuiltPath) runCargo([
+    'build', '--offline', '--locked', ...(exceptionHandling ? ['-Zbuild-std=std,panic_unwind'] : []),
+    ...(profile === 'release' ? ['--release'] : []), '-j2', '-p', 'barochart-wasm', '--target', 'wasm32-unknown-unknown',
+  ], targetDir, exceptionHandling ? exceptionHandlingEnvironment() : {});
+  const wasmPath = prebuiltPath ? resolve(ROOT, prebuiltPath) : join(targetDir, `wasm32-unknown-unknown/${profile === 'release' ? 'release' : 'debug'}/barochart_wasm.wasm`);
   const wasmBytes = await readFile(wasmPath);
-  // WASM panic=unwind propagation requires exception-handling support; this harness does not claim that boundary until verified separately.
+  // The explicit EH mode rebuilds std; the normal precompiled std does not provide panic recovery.
   const module = await WebAssembly.compile(wasmBytes);
   const releaseCounts = new Map();
   const hostContexts = new Set();

@@ -5,6 +5,11 @@ import Foundation
 /// Calls from another thread throw `.wrongThread` instead of crashing. Each method converts its
 /// value types to the low-level dictionary API, so behavior is shared with that API.
 extension BaroChartEngine {
+    /// Creates an engine with an explicit backend and initial layout. Call on the owner thread.
+    public convenience init(options: BaroChartEngineOptions, backend: BaroChartBackend) throws {
+        do { try self.init(options: options.lowLevel, runtimeBackend: backend) } catch { throw BaroChartError.wrap(error) }
+    }
+
     /// Creates an engine with an explicit initial layout and no bars. Call on the owner thread.
     ///
     /// Prefer this over the low-level `init()`, which builds a labeled demonstration chart.

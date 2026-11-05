@@ -1,5 +1,8 @@
 import Foundation
 
+/// Core implementation used by a chart engine.
+public enum BaroChartBackend: Equatable, Sendable { case javaScript, rust }
+
 // Value types for the BaroChart typed API. Raw values match the chart core vocabulary exactly;
 // `Tests/BaroChartTests/TypesParityTests.swift` fails if the core gains or renames an entry.
 // Each type converts itself to the low-level dictionary the engine bridge already accepts, so

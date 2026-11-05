@@ -1,4 +1,6 @@
 import BaroChart
+import Darwin
+import Foundation
 import SwiftUI
 
 /// 샘플 화면: 상단 동작 버튼, 상태 문구, 오류 배너, 차트
@@ -38,7 +40,12 @@ struct ChartScreen: View {
         .task {
             guard DeviceBenchmark.isRequested else { return }
             model.isStreaming = false
-            benchmark = DeviceBenchmark.run()
+            let report = DeviceBenchmark.run()
+            benchmark = report
+            FileHandle.standardOutput.write(Data("BAROCHART_DEVICE_BENCHMARK \(report)\n".utf8))
+            if ProcessInfo.processInfo.arguments.contains("-barochart-benchmark-exit") {
+                exit(0)
+            }
         }
     }
 

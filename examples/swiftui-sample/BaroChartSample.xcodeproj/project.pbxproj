@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0363DA908EF2E0FD9992EA67 /* BaroChart in Frameworks */ = {isa = PBXBuildFile; productRef = 68067461FBFFBA493FA5ACF8 /* BaroChart */; };
 		12C7D1D4FD38F4820CA10421 /* SampleUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C36FCCEDF76676751C0AEF38 /* SampleUITests.swift */; };
 		20A1D540E915F66D2AE93B89 /* DeviceBenchmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F3991F6D75BB6FAFE2D5012 /* DeviceBenchmark.swift */; };
 		37D17182094C92621D4CC98A /* ChartModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5714DC5DE8EA08DA72DBD99 /* ChartModel.swift */; };
@@ -14,11 +15,19 @@
 		5B17C885112C7A0767467AAD /* PerformanceUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01361A03C1724BB08641A8C1 /* PerformanceUITests.swift */; };
 		9B6618B582920DF9C10CC2B9 /* ChartScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BF4B2F7EB756BED818AA447 /* ChartScreen.swift */; };
 		C15DE41192742D7739A21CFE /* AccessibilityUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 127C65D1C03A095F40351B3B /* AccessibilityUITests.swift */; };
+		E9AE391F4B8E92A5A37DB13B /* SoakTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2629B8465CFC6411293417B /* SoakTests.swift */; };
 		F5AA4B74352F4812FE761FCE /* BaroChart in Frameworks */ = {isa = PBXBuildFile; productRef = FF1AF09104094FE7F1CDB478 /* BaroChart */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
 		082240EE80749A4A80E70F28 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 5227BAA74B3853BC6392CAE3 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A84BC6327C5F5EB4EA0DD1A8;
+			remoteInfo = BaroChartSample;
+		};
+		4026133EBFE81713976F2D82 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 5227BAA74B3853BC6392CAE3 /* Project object */;
 			proxyType = 1;
@@ -31,16 +40,26 @@
 		01361A03C1724BB08641A8C1 /* PerformanceUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceUITests.swift; sourceTree = "<group>"; };
 		127C65D1C03A095F40351B3B /* AccessibilityUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityUITests.swift; sourceTree = "<group>"; };
 		3F3991F6D75BB6FAFE2D5012 /* DeviceBenchmark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceBenchmark.swift; sourceTree = "<group>"; };
-		67F383684798A225722E91C3 /* BaroChart-review-20261023 */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "BaroChart-review-20261023"; path = ../..; sourceTree = SOURCE_ROOT; };
 		6BF4B2F7EB756BED818AA447 /* ChartScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChartScreen.swift; sourceTree = "<group>"; };
 		ACEF118284325BBBFCDB1A90 /* SampleApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SampleApp.swift; sourceTree = "<group>"; };
 		B121708F528FDD171BE1B501 /* BaroChartSampleUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = BaroChartSampleUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C36FCCEDF76676751C0AEF38 /* SampleUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SampleUITests.swift; sourceTree = "<group>"; };
+		CA3BED6DC9AC855DA5A51691 /* BaroChartDeviceTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = BaroChartDeviceTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		D2629B8465CFC6411293417B /* SoakTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoakTests.swift; sourceTree = "<group>"; };
+		D96BD190C806E0708405B9E4 /* BaroChart-rust-indicators */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "BaroChart-rust-indicators"; path = ../..; sourceTree = SOURCE_ROOT; };
 		DB6E31702391A35A7C6226FD /* BaroChartSample.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = BaroChartSample.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F5714DC5DE8EA08DA72DBD99 /* ChartModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChartModel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		943E6E8E81677C98A92EC635 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0363DA908EF2E0FD9992EA67 /* BaroChart in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		C5EFEDEE3C704E4C232221BF /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -62,6 +81,15 @@
 			path = UITests;
 			sourceTree = "<group>";
 		};
+		88CD109E12C202D69FBAE3B7 /* BaroChartTests */ = {
+			isa = PBXGroup;
+			children = (
+				D2629B8465CFC6411293417B /* SoakTests.swift */,
+			);
+			name = BaroChartTests;
+			path = ../../Tests/BaroChartTests;
+			sourceTree = "<group>";
+		};
 		8A6DF6B49D4CF5F3817EA9FC /* Sources */ = {
 			isa = PBXGroup;
 			children = (
@@ -76,6 +104,7 @@
 		A62EB4E16DAC5BEE70E1092D = {
 			isa = PBXGroup;
 			children = (
+				88CD109E12C202D69FBAE3B7 /* BaroChartTests */,
 				CD833D44B9C1233E55CC1A09 /* Packages */,
 				8A6DF6B49D4CF5F3817EA9FC /* Sources */,
 				5D29EF0391C8F093D4B4EF29 /* UITests */,
@@ -86,7 +115,7 @@
 		CD833D44B9C1233E55CC1A09 /* Packages */ = {
 			isa = PBXGroup;
 			children = (
-				67F383684798A225722E91C3 /* BaroChart-review-20261023 */,
+				D96BD190C806E0708405B9E4 /* BaroChart-rust-indicators */,
 			);
 			name = Packages;
 			sourceTree = "<group>";
@@ -94,6 +123,7 @@
 		CDAC57922DB8759072F98CF2 /* Products */ = {
 			isa = PBXGroup;
 			children = (
+				CA3BED6DC9AC855DA5A51691 /* BaroChartDeviceTests.xctest */,
 				DB6E31702391A35A7C6226FD /* BaroChartSample.app */,
 				B121708F528FDD171BE1B501 /* BaroChartSampleUITests.xctest */,
 			);
@@ -103,6 +133,26 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		5A2DD2B12FF38480E4EF84F0 /* BaroChartDeviceTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0A451769654910880A91C79E /* Build configuration list for PBXNativeTarget "BaroChartDeviceTests" */;
+			buildPhases = (
+				9A3C731212A2FA1A941442B9 /* Sources */,
+				943E6E8E81677C98A92EC635 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				132D4D7F12512BADDD4E1FCD /* PBXTargetDependency */,
+			);
+			name = BaroChartDeviceTests;
+			packageProductDependencies = (
+				68067461FBFFBA493FA5ACF8 /* BaroChart */,
+			);
+			productName = BaroChartDeviceTests;
+			productReference = CA3BED6DC9AC855DA5A51691 /* BaroChartDeviceTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		9C8EF65DC3D9066526D78076 /* BaroChartSampleUITests */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = C40968099FE3FD0AF2BB82E3 /* Build configuration list for PBXNativeTarget "BaroChartSampleUITests" */;
@@ -173,6 +223,7 @@
 			targets = (
 				A84BC6327C5F5EB4EA0DD1A8 /* BaroChartSample */,
 				9C8EF65DC3D9066526D78076 /* BaroChartSampleUITests */,
+				5A2DD2B12FF38480E4EF84F0 /* BaroChartDeviceTests */,
 			);
 		};
 /* End PBXProject section */
@@ -185,6 +236,14 @@
 				C15DE41192742D7739A21CFE /* AccessibilityUITests.swift in Sources */,
 				5B17C885112C7A0767467AAD /* PerformanceUITests.swift in Sources */,
 				12C7D1D4FD38F4820CA10421 /* SampleUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9A3C731212A2FA1A941442B9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E9AE391F4B8E92A5A37DB13B /* SoakTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -202,6 +261,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		132D4D7F12512BADDD4E1FCD /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A84BC6327C5F5EB4EA0DD1A8 /* BaroChartSample */;
+			targetProxy = 4026133EBFE81713976F2D82 /* PBXContainerItemProxy */;
+		};
 		37BB83C716B712828E8CAAE8 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = A84BC6327C5F5EB4EA0DD1A8 /* BaroChartSample */;
@@ -291,6 +355,23 @@
 			};
 			name = Debug;
 		};
+		4F55CCA70976E679AE8E0B01 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = kr.coden.barochart.sample.devicetests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/BaroChartSample.app/BaroChartSample";
+			};
+			name = Debug;
+		};
 		7F8D9542D6DF8F587C097EBC /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -365,6 +446,23 @@
 			};
 			name = Release;
 		};
+		A53F4420DB40BFC917494A40 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = kr.coden.barochart.sample.devicetests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/BaroChartSample.app/BaroChartSample";
+			};
+			name = Release;
+		};
 		B09A235F69B70D5DD5BA194A /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -408,6 +506,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		0A451769654910880A91C79E /* Build configuration list for PBXNativeTarget "BaroChartDeviceTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4F55CCA70976E679AE8E0B01 /* Debug */,
+				A53F4420DB40BFC917494A40 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		0FAAE805010584D18C7B65AA /* Build configuration list for PBXProject "BaroChartSample" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -445,6 +552,10 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		68067461FBFFBA493FA5ACF8 /* BaroChart */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = BaroChart;
+		};
 		FF1AF09104094FE7F1CDB478 /* BaroChart */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = BaroChart;

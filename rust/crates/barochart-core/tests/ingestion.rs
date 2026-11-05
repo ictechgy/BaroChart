@@ -820,3 +820,141 @@ impl JsValueTestExt for JsValue {
         }
     }
 }
+
+#[test]
+fn model_async_lease_without_configured_session_blocks_reconfiguration_until_released_once() {
+    let data = ModelDataState::new(StoreOptions::default(), vec![]).unwrap();
+    let mut owner = IngestionOwner::new(data, NumberDialect::PLATFORM);
+    let mut lease = owner.acquire_async_lease().unwrap();
+    assert_eq!(
+        owner.configure(&policy("s", &[])).unwrap_err().code(),
+        "BUSY"
+    );
+    assert!(owner.release_async_lease(&mut lease));
+    assert!(!owner.release_async_lease(&mut lease));
+    owner.configure(&policy("s", &[])).unwrap();
+    let before = owner.epoch().unwrap();
+    let mut lease = owner.acquire_async_lease().unwrap();
+    assert_eq!(owner.epoch().unwrap(), before + 1.0);
+    assert!(owner.release_async_lease(&mut lease));
+    assert_eq!(owner.epoch().unwrap(), before + 2.0);
+    assert!(!owner.release_async_lease(&mut lease));
+    assert_eq!(owner.epoch().unwrap(), before + 2.0);
+}
+
+#[test]
+fn model_async_lease_cleanup_survives_session_disposal_and_cannot_release_another_owner() {
+    let mut owner = IngestionOwner::new(
+        ModelDataState::new(StoreOptions::default(), vec![]).unwrap(),
+        NumberDialect::PLATFORM,
+    );
+    let mut other = IngestionOwner::new(
+        ModelDataState::new(StoreOptions::default(), vec![]).unwrap(),
+        NumberDialect::PLATFORM,
+    );
+    owner.configure(&policy("s", &[])).unwrap();
+    let mut lease = owner.acquire_async_lease().unwrap();
+    assert!(!other.release_async_lease(&mut lease));
+    assert_eq!(
+        owner.configure(&policy("s", &[])).unwrap_err().code(),
+        "BUSY"
+    );
+    owner.native_release_data_ingestion();
+    assert!(owner.release_async_lease(&mut lease));
+    assert!(!owner.release_async_lease(&mut lease));
+    assert_eq!(
+        owner.configure(&policy("s", &[])).unwrap_err().code(),
+        "CLOSED"
+    );
+}
+
+#[test]
+fn async_lease_validation_binds_optional_session_epoch_and_closed_state() {
+    let mut owner = IngestionOwner::new(
+        ModelDataState::new(StoreOptions::default(), vec![]).unwrap(),
+        NumberDialect::PLATFORM,
+    );
+    let mut lease = owner.acquire_async_lease().unwrap();
+    assert!(owner.validate_async_lease(&lease));
+    owner.release_async_lease(&mut lease);
+    assert!(!owner.validate_async_lease(&lease));
+    owner.configure(&policy("s", &[])).unwrap();
+    let mut lease = owner.acquire_async_lease().unwrap();
+    assert!(owner.validate_async_lease(&lease));
+    assert!(owner.pause().is_err());
+    assert!(owner.validate_async_lease(&lease));
+    owner.native_release_data_ingestion();
+    assert!(!owner.validate_async_lease(&lease));
+    assert!(owner.release_async_lease(&mut lease));
+    assert!(!owner.validate_async_lease(&lease));
+}
+
+#[test]
+fn workspace_ingestion_shape_validation_matches_actual_js_without_allocating_store_columns() {
+    use barochart_core::ingestion::IngestionStoreShape;
+    use barochart_js::json::parse_json;
+    let field = |value: &JsValue, name: &str| {
+        let JsValue::Object(value) = value else {
+            panic!("object")
+        };
+        value.get(&JsString::from_str(name)).unwrap().clone()
+    };
+    let number = |value: JsValue| {
+        let JsValue::Number(value) = value else {
+            panic!("number")
+        };
+        value
+    };
+    let string = |value: JsValue| {
+        let JsValue::String(ref value) = value else {
+            panic!("string")
+        };
+        value.to_string_lossy()
+    };
+    for line in
+        include_str!("../../../../test/fixtures/rust-core-vectors/workspace-ingestion.leaf.jsonl")
+            .lines()
+            .skip(1)
+    {
+        let row = parse_json(line.as_bytes(), JsonMode::Standard).unwrap();
+        let shape = field(&row, "shape");
+        let shape = IngestionStoreShape {
+            length: number(field(&shape, "length")) as usize,
+            capacity: number(field(&shape, "capacity")) as usize,
+            max_bars: number(field(&shape, "maxBars")) as usize,
+            version: number(field(&shape, "version")),
+        };
+        let actual = IngestionOwner::validate_workspace_restore_document(
+            shape,
+            &field(&row, "text"),
+            NumberDialect::Ecma,
+        );
+        let JsValue::Object(record) = &row else {
+            unreachable!()
+        };
+        if let Some(expected) = record.get(&JsString::from_str("error")) {
+            let error = actual.err().unwrap_or_else(|| panic!("expected error"));
+            assert_eq!(error.name, string(field(expected, "name")));
+            assert_eq!(
+                error.message.to_string_lossy(),
+                string(field(expected, "message"))
+            );
+            let code = field(expected, "code");
+            assert_eq!(
+                error.code,
+                if matches!(code, JsValue::Null) {
+                    None
+                } else {
+                    Some(string(code))
+                }
+            );
+        } else {
+            let value = actual.unwrap_or_else(|e| panic!("{e:?}"));
+            assert_eq!(
+                value.text.to_string_lossy(),
+                string(field(&row, "canonical"))
+            );
+            assert_eq!(value.capacity, number(field(&row, "capacity")) as usize);
+        }
+    }
+}

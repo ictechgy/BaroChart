@@ -3,7 +3,7 @@ import XCTest
 
 /// 타입 엔진 API를 실제 JavaScriptCore에서 실행한다. 모든 실패는 BaroChartError로만 나와야 한다.
 @MainActor
-final class TypedEngineTests: XCTestCase {
+final class TypedEngineTests: BackendSelectedTestCase {
     private static let start = 1_700_000_000_000.0
     /// 1분봉 count개(종가 102부터 1씩 증가). 앞 4개는 README 예제와 같다.
     private func bars(_ count: Int = 4) -> [BaroChartBar] {

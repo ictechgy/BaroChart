@@ -16,7 +16,7 @@ test('native manifest matches the actual bundle census, Rust table and command a
   assert.deepEqual(manifest.functions.map(row => row.name).sort(), names);
   assert.equal(manifest.bundleSha256, createHash('sha256').update(text).digest('hex'));
   const rust = await readFile(new URL('../rust/crates/barochart-bridge/src/manifest.rs', import.meta.url), 'utf8');
-  const entries = [...rust.matchAll(/name:\s*"([^"]+)",\s*status:\s*FunctionStatus::(\w+),\s*handler:\s*(Some\((\w+)\)|None)/g)].map(([, name, status, , handler]) => ({name, status: status.toLowerCase(), handler: handler ?? null}));
+  const entries = [...rust.matchAll(/name:\s*"([^"]+)",\s*status:\s*FunctionStatus::(\w+),\s*handler:\s*(Some\(([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\)|None)/g)].map(([, name, status, , handler]) => ({name, status: status.toLowerCase(), handler: handler ?? null}));
   assert.deepEqual(entries, manifest.functions.map(({name, status, handler}) => ({name, status, handler})).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   const api = await readFile(new URL('../src/core/api.mjs', import.meta.url), 'utf8');
   const arity = api.match(/const arity=\{([^}]+)\}/)[1];
@@ -63,5 +63,13 @@ test('native data/store and ingestion sequences match the actual bundle in one s
 }, async () => {
   const scenarios=(await readScenarios()).filter(scenario=>['data-store','ingestion'].includes(scenario.suite));
   assert.equal(scenarios.length,2);
+  for(const scenario of scenarios){const result=await runScenario(scenario);assert.equal(result.equal,true,JSON.stringify(result.results.filter(value=>!value.equal)));}
+});
+
+test('legacy receiver guards and raw model patches match the actual bundle', {
+  skip: process.env.REQUIRE_WASM === '1' ? false : !availability.available && availability.reason,
+}, async()=>{
+  const scenarios=(await readScenarios()).filter(scenario=>scenario.suite==='legacy-scoped');
+  assert.equal(scenarios.length,1);
   for(const scenario of scenarios){const result=await runScenario(scenario);assert.equal(result.equal,true,JSON.stringify(result.results.filter(value=>!value.equal)));}
 });

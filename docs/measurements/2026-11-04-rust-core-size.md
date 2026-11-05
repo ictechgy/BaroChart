@@ -1,36 +1,32 @@
-# Rust 데이터·수집 단계 크기 측정 — 2026-11-04
+# Rust 네이티브 코어 크기 측정 — 2026-11-04
 
-현재 코드의 linked 크기다. 소스 집합 SHA-256은 `35efddd84ea0b2e7301b8c6868dbc57aca707f00670cb9060375932ec74591bb`이며, 프로필·도구 버전·재현 명령·개별 SHA는 [기계 보고서](rust-core-size.json)에 있다. 전체 차트 이식과 실기기 성능 측정은 후속 단계다. 이전 M1b 수치는 해당 커밋의 보고서에 보존된다.
+검토 후 수정한 전체 코어를 다시 빌드한 결과다. 소유자가 승인한 5 MiB 예산을 두 ABI 모두 충족한다. 실기기 게이트가 남아 있어 JavaScript 기본값은 유지한다.
 
-## Android linked `.so`
+소스 SHA-256: `67512c06b9c639de4e284a3d61bd345779b5d4c3da2818a8244899a1f81fc583`. 프로필4개·ABI2개·구성3개의 바이트·SHA·도구·명령은 [기계 보고서](rust-core-size.json)에 있다.
 
-| ABI | Rust profile | JS-only | Rust-only | dual | dual − JS | budget remaining |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| arm64-v8a | `opt-s-panic-unwind` | 1,055,616 | 1,723,624 | 2,766,568 | 1,710,952 | 379,160 |
-| arm64-v8a | `opt-3-panic-unwind` | 1,055,616 | 1,579,896 | 2,618,760 | 1,563,144 | 526,968 |
-| arm64-v8a | `opt-s-panic-abort` | 1,055,616 | 1,678,552 | 2,721,496 | 1,665,880 | 424,232 |
-| arm64-v8a | `opt-3-panic-abort` | 1,055,616 | 1,540,104 | 2,578,968 | 1,523,352 | 566,760 |
-| x86_64 | `opt-s-panic-unwind` | 1,115,400 | 1,766,832 | 2,872,768 | 1,757,368 | 272,960 |
-| x86_64 | `opt-3-panic-unwind` | 1,115,400 | 1,660,000 | 2,761,872 | 1,646,472 | 383,856 |
-| x86_64 | `opt-s-panic-abort` | 1,115,400 | 1,720,256 | 2,826,192 | 1,710,792 | 319,536 |
-| x86_64 | `opt-3-panic-abort` | 1,115,400 | 1,621,056 | 2,722,944 | 1,607,544 | 422,784 |
+## Android 배포 크기
 
-두 ABI의 shipping `s`/unwind dual은 3,145,728 bytes 예산 안에 있다. Rust-linked 16개와 JS baseline 2개의 PT_LOAD 16 KiB 정렬을 검사했다. `panic=abort` 프로필은 catch_unwind/poison 경계를 충족하지 않아 비교용이다.
+출하 프로필은 `opt-level=s`, `panic=unwind`, fat LTO다. SDK 합계는 ABI별 `.so + classes.jar + JS 코어 자산(포함 시)` AAR 엔트리 바이트다. APK 압축·R8·설치 크기는 별도다.
 
-## iOS link contribution
+| ABI | JS 전용 SDK | Rust 전용 SDK | 두 백엔드 SDK | 두 백엔드 .so |
+| --- | ---: | ---: | ---: | ---: |
+| arm64-v8a | 1,722,945 | 2,888,701 | 4,425,570 | 3,637,056 |
+| x86_64 | 1,780,505 | 3,468,253 | 5,065,898 | 4,277,384 |
 
-동일한 `-Os -dead_strip`로 만든 unsigned arm64 최소 executable 두 개의 차이다. 실제 IPA·설치 크기·App Store thinning이나 시스템 프레임워크 크기는 측정하지 않는다.
+최초3 MiB 예산은 전체 코어 실측에서 초과했다. 2026-11-04 소유자는 듀얼 유지와 **5,242,880 B(5 MiB)/ABI**를 승인했다. 현재 듀얼 여유는 arm64 817310 B, x86_64 176982 B다. 시작500ms·팬16.7ms 기준은 변경하지 않았다.
 
-| Binary | File bytes | `__TEXT` bytes |
+JNI와 공통 C ABI만 공개하고 Android 재배치 압축과 safe ICF를 적용했다. 모든 측정 `.so`의 PT_LOAD 16 KiB 정렬을 확인했다. `panic=abort`는 비교용이며 출하 후보가 아니다.
+
+## iOS 링크 기여분
+
+동일한 `-Os -dead_strip` unsigned arm64 최소 실행 파일의 차이다. Swift SDK 전체·IPA·설치 크기와 구분한다.
+
+| 항목 | 파일 바이트 증가 | __TEXT 증가 |
 | --- | ---: | ---: |
-| baseline | 32,944 | 32,768 |
-| Rust referenced | 771,832 | 557,056 |
-| delta | 738,888 | 524,288 |
+| Rust 참조 | 3,413,304 | 2,621,440 |
 
-정적 archive 자체는 20,820,896 bytes이며 executable 기여분과 다르다.
+## 남은 검증
 
-## 후속 이식 시나리오
+[설계 §5.5](../superpowers/specs/2026-11-02-rust-core-design.md#55-산출물과-크기)의 산출물·예산 결정은 반영됐다. 예산 상향은 임계값만 바꾼 결정이며, 이 보고서의 바이너리는 후속 검토 수정을 포함한 현재 소스로 새로 빌드했다. 실기기 성능·soak·접근성 수동 검증은 별도다.
 
-2.5 MiB 설계 prior는 실제 측정값과 독립적인 시나리오이며, 전체 이식의 상한이나 확률 구간이 아니다. 이 시나리오의 dual 합은 arm64 3,677,056 bytes, x86_64 3,736,840 bytes로 예산을 넘는다. 실제 최종 값은 구현·링크 후 측정해야 한다.
-
-물리 `.rs` 11,323줄을 분모로 한 bytes/LOC 예측은 진단용으로만 남겼다. std/allocator/FFI 고정 비용과 실제 dead-strip 때문에 성장 법칙이나 artifact 결정 근거로 사용하지 않는다.
+이전 부분 이식 수치와 LOC 외삽을 전체 코어의 상한이나 배포 결정 근거로 사용하지 않는다.

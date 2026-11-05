@@ -8,7 +8,7 @@ import XCTest
 /// 이음새 리팩터링 전에 기록한 골든과 지금 코드가 기록한 추적이 바이트까지 같아야 한다. 골든 비교에는 새 프로세스에서
 /// 기록한 추적을 쓴다. 작업 등록 번호처럼 프로세스 전체에서 늘어나는 상태가 앞서 돈 테스트에 따라 달라지지 않게 하려고서다.
 @MainActor
-final class TraceRecorderTests: XCTestCase {
+final class TraceRecorderTests: BackendSelectedTestCase {
     /// 자식 프로세스가 추적을 쓸 디렉터리를 알려 주는 환경 변수
     private static let childOutputVariable = "BAROCHART_TRACE_SCENARIO_OUTPUT"
     /// 1이면 골든을 새로 기록한다(테스트는 실패로 끝나 다시 돌리게 한다)

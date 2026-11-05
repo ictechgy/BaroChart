@@ -1,0 +1,36 @@
+#!/usr/bin/env node
+import {createHash} from 'node:crypto';
+import {readFileSync,writeFileSync} from 'node:fs';
+import {dirname,join,resolve} from 'node:path';
+import {fileURLToPath} from 'node:url';
+
+import {BarStore,FIELDS,seededColumns} from '../../../src/core/data.mjs';
+import {ChartModel} from '../../../src/core/model.mjs';
+import {ChartAPI} from '../../../src/core/api.mjs';
+import {NativeParamsCapture} from '../../../src/core/native-params-source.mjs';
+import {NativeParamsTarget} from '../../../src/core/native-params-target.mjs';
+import {safeCheckpointStringify} from '../../../src/core/checkpoint-validation.mjs';
+
+const root=resolve(dirname(fileURLToPath(import.meta.url)),'../../..');
+const fixture=join(root,'test/fixtures/rust-core-vectors/native-params-jobs.leaf.jsonl');
+const sources=['src/core/native-params-source.mjs','src/core/native-params-target.mjs','src/core/native-params-import.mjs','src/core/native-checkpoints.mjs','src/core/indicators.mjs'];
+const sha=value=>createHash('sha256').update(value).digest('hex');
+const bitsBuffer=new ArrayBuffer(8),bitsView=new DataView(bitsBuffer);
+function bits(value){bitsView.setFloat64(0,value,false);return bitsView.getBigUint64(0,false).toString(16).padStart(16,'0');}
+function encode(value,seen=new Set()){
+ if(typeof value==='number')return{$f64:bits(value)};if(value===undefined)return{$undefined:true};if(value===null||typeof value==='string'||typeof value==='boolean')return value;
+ if(ArrayBuffer.isView(value)||Array.isArray(value))return Array.from(value,item=>encode(item,seen));if(typeof value==='object'){if(seen.has(value))throw new TypeError('cyclic');seen.add(value);const result={$object:Object.entries(value).map(([key,item])=>[key,encode(item,seen)])};seen.delete(value);return result;}throw new TypeError('unsupported');
+}
+function encodeRow(row){const out={kind:row.kind,id:row.id};for(const[k,v]of Object.entries(row))if(!['kind','id'].includes(k))out[k]=encode(v);return out;}
+function fixtureModel(length=8){const store=new BarStore();store.setColumns(seededColumns(length,42));const model=new ChartModel({store});const api=new ChartAPI(model);api.addIndicator('ema','ema',{period:3});api.addSeries({id:'ema-line',type:'line',panel:'price',indicator:'ema'});return{model,api};}
+function progress(target,chunk){const rows=[];target.start();for(let i=0;i<1000;i++){const row=target.step(chunk);rows.push(row);if(row.complete)return rows;}throw new Error('guard');}
+function outputState(model){const e=model.indicators.entries.get('ema');return{params:{...e.params},revision:e.revision,dirty:e.dirty,dirtyTo:e.dirtyTo??null,invalidated:e.invalidated,length:e.length,computedFrom:e.computedFrom??null,computedUntil:e.computedUntil??null,checkpointKeys:[...e.checkpoints.keys()],arrays:e.arrays.map(a=>Array.from(a.subarray(0,model.store.length))),series:model.series.map(s=>({id:s.id,revision:s.revision??null,dirtyFrom:s.dirtyFrom,hasIndex:!!s.rangeIndex}))};}
+function changedCase(){const{model,api}=fixtureModel(),revision=7,registration=1,capture=new NativeParamsCapture(api,'ema',{period:5},{revision,registration,maxBytes:805306368});let target;
+ try{const admission=[];while(true){const row=capture.step(8,revision);admission.push(row);if(row.complete)break;}target=new NativeParamsTarget(capture.metadataJSON);for(let slot=0;slot<6;slot++){const source=model.store.columns[FIELDS[slot]].subarray(0,model.store.length);target.target(slot,0,source.length).set(capture.buffer(slot,0,source.length,revision));}const steps=progress(target,2),descriptor=target.descriptor(),descriptorText=safeCheckpointStringify(descriptor),outputs=descriptor.outputs.map((_,slot)=>Array.from(target.outputBuffer(slot,0,descriptor.capacity))),checkpoints=Array.from({length:descriptor.checkpointCount},(_,ordinal)=>target.checkpoint(ordinal));capture.receive(descriptorText,revision);for(let slot=0;slot<outputs.length;slot++)capture.resultBuffer(slot,0,outputs[slot].length,revision).set(outputs[slot]);for(const row of checkpoints)capture.checkpoint(row.index,row.text,revision);const validation=[];while(true){const row=capture.validate(4,revision);validation.push(row);if(row.complete)break;}capture.prepare(revision);const published=capture.publish(revision);return{kind:'case',id:'changed',admission,metadata:JSON.parse(capture.metadataJSON),steps,descriptor,outputs,checkpoints,validation,published,state:outputState(model)};}
+ finally{capture.dispose();target?.dispose();model.dispose();}}
+function noopCase(){const{model,api}=fixtureModel(),capture=new NativeParamsCapture(api,'ema',{period:3},{revision:9,registration:2});try{const step=capture.step(8,9),prepared=capture.prepare(9),published=capture.publish(9);return{kind:'case',id:'noop',step,prepared,published,state:outputState(model)};}finally{capture.dispose();model.dispose();}}
+function errorOf(action){try{action();return null;}catch(error){return{name:error.name,message:error.message,code:error.code??null};}}
+function failuresCase(){const{model,api}=fixtureModel(),capture=new NativeParamsCapture(api,'ema',{period:5},{revision:11,registration:3});let target;try{while(!capture.step(8,11).complete){}target=new NativeParamsTarget(capture.metadataJSON);return{kind:'case',id:'failures',targetIncomplete:errorOf(()=>target.start()),targetOrder:errorOf(()=>target.target(0,1,1)),sourceOrder:errorOf(()=>capture.buffer(0,1,1,11)),sourceState:outputState(model)};}finally{capture.dispose();target?.dispose();model.dispose();}}
+function configuredAdmissionCase(){const{model,api}=fixtureModel();api.configureDataIngestion({streamId:'feed',generation:1,firstSequence:0,maxQueuedEvents:8,maxQueuedBytes:392,maxBatchEvents:8});const capture=new NativeParamsCapture(api,'ema',{period:5},{revision:12,registration:4});try{const steps=[];while(true){const row=capture.step(8,12);steps.push(row);if(row.complete)break;}return{kind:'case',id:'configured-admission',steps,stats:api.dataIngestionStats()};}finally{capture.dispose();model.dispose();}}
+export function generateNativeParamsJobsOracle(){const header={kind:'header',schema:'barochart.rust-core.native-params-jobs-leaf',version:1,oracleCommit:'8457612bda98c764bc1a9e7e794dafcf9316a47e',sourceSHA256:Object.fromEntries(sources.map(path=>[path,sha(readFileSync(join(root,path)))])),node:process.version,v8:process.versions.v8,platform:`${process.platform}-${process.arch}`,icu:process.versions.icu,tzdata:process.versions.tz,seed:42,dialect:'ECMA-262/V8',encoding:'f64 bits; objects ordered entries'};return[JSON.stringify(header),...[changedCase(),noopCase(),failuresCase(),configuredAdmissionCase()].map(row=>JSON.stringify(encodeRow(row)))].join('\n')+'\n';}
+if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){const mode=process.argv[2];if(process.argv.length>3||mode&&!['--check','--write'].includes(mode))throw new Error('Usage: node test/fixtures/rust-core-vectors/generate-native-params-jobs.mjs [--check|--write]');const output=generateNativeParamsJobsOracle();if(mode==='--check'){if(readFileSync(fixture,'utf8')!==output)throw new Error('native-params-jobs.leaf.jsonl is stale');console.log('native params jobs oracle fresh: 4 cases');}else if(mode==='--write'){writeFileSync(fixture,output);console.log('native params jobs oracle wrote: 4 cases');}else process.stdout.write(output);}
