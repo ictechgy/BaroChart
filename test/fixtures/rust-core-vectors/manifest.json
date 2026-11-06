@@ -2,7 +2,7 @@
   "schema": "aster.rust-native-manifest",
   "version": 1,
   "oracleCommit": "87598ca492e6a7273b60b629c0cf9f2456268853",
-  "bundleSha256": "16eb77f70d75cb1c8663f5def04dad7ee10183421bcdd49015d40a6b27a96072",
+  "bundleSha256": "704888d3f9f283d34a1f0300d0b87e756e588c2493225197f7978ff624081479",
   "node": "v22.20.0",
   "v8": "12.4.254.21-node.33",
   "icu": "77.1",

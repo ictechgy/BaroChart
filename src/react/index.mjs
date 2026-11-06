@@ -12,12 +12,17 @@ const useCommitEffect=typeof window==='undefined'?useEffect:useLayoutEffect;
 const defaultModel=()=>{const model=new ChartModel();model.addSeries({id:'price',type:'candles',panel:'price'});return model;};
 const asError=error=>error instanceof Error?error:new Error(String(error));
 const interactionKeys=['pointer','wheelZoom','keyboardShortcuts','hitTolerancePx'];
+const fingerprintFailure=Symbol('fingerprint failure');
 // Descriptor fingerprint: do not evaluate accessor-backed values during render
 // or repeatedly report the same rejected props from an onError-driven render.
-function interactionKey(value){
- if(!value||typeof value!=='object')return[typeof value,value];
- const key=[Object.getPrototypeOf(value)];for(const name of Reflect.ownKeys(value)){const d=Object.getOwnPropertyDescriptor(value,name);key.push(name,d.value,d.get,d.set);}return key;
+function descriptorFingerprint(value){
+ if(!value||typeof value!=='object')return{key:[typeof value,value]};
+ try{const key=[Object.getPrototypeOf(value)];for(const name of Reflect.ownKeys(value)){const d=Object.getOwnPropertyDescriptor(value,name);key.push(name,d.value,d.get,d.set,d.enumerable,d.configurable,d.writable);}return{key};}
+ catch(error){return{key:[fingerprintFailure,value],error};}
 }
+function interactionKey(value){return descriptorFingerprint(value).key;}
+function readInteraction(props){try{return{value:props.options?.interaction};}catch(error){return{key:[fingerprintFailure,props.options],error};}}
+const sameKey=(left,right)=>!!left&&!!right&&left.length===right.length&&left.every((value,index)=>Object.is(value,right[index]));
 const themeKeys=['background','grid','text','up','down','crosshair','font'];
 
 /** Renderer ownership follows React; borrowed models remain owned by the caller. */
@@ -39,34 +44,43 @@ export const AsterChart=forwardRef(function AsterChart(props,ref){
     }
    }catch(error){report(error);}
   }else{record.dataKey=undefined;record.dataRevision=undefined;}
-  const values=[...themeKeys.map(key=>p.theme?.[key]),p.theme!==undefined,Object.keys(p.theme??{}).sort().join('\0'),p.theme!=null&&['object','function'].includes(typeof p.theme)?Object.getPrototypeOf(p.theme):typeof p.theme];
-  if(values.some((value,index)=>!Object.is(value,record.themeValues?.[index]))){
-   record.themeValues=values;
-   try{if(p.theme!==undefined){optionRecord(p.theme,themeKeys,'Theme');record.chart.api.setTheme(Object.fromEntries(Object.entries(p.theme).filter(([,value])=>value!==undefined)));}}catch(error){report(error);}
+  if(p.theme===undefined)record.themeKey=undefined;
+  else {const fingerprint=descriptorFingerprint(p.theme);
+   if(!sameKey(fingerprint.key,record.themeKey)){
+    record.themeKey=fingerprint.key;
+    if(Object.hasOwn(fingerprint,'error'))report(fingerprint.error);
+    else try{optionRecord(p.theme,themeKeys,'Theme');record.chart.api.setTheme(Object.fromEntries(Object.entries(p.theme).filter(([,value])=>value!==undefined)));}catch(error){report(error);}
+   }
   }
-  const interaction=p.options?.interaction;
-  if(interaction===undefined){record.inputKey=undefined;record.inputValues=undefined;}
-  else {const key=interactionKey(interaction);
-   if(!record.inputKey||key.length!==record.inputKey.length||key.some((value,index)=>!Object.is(value,record.inputKey[index]))){
-    record.inputKey=key;
-    try{const next=interactionOptions(interaction),values=interactionKeys.map(key=>next[key]);
-     if(!record.inputValues||values.some((value,index)=>!Object.is(value,record.inputValues[index]))){record.chart.setInteractionOptions(next);record.inputValues=values;}
-    }catch(error){report(error);}
+  const interactionState=readInteraction(p);
+  if(Object.hasOwn(interactionState,'error')){
+   if(!sameKey(interactionState.key,record.inputKey)){record.inputKey=interactionState.key;record.inputValues=undefined;report(interactionState.error);}
+  }else {const interaction=interactionState.value;
+   if(interaction===undefined){record.inputKey=undefined;record.inputValues=undefined;}
+   else {const fingerprint=descriptorFingerprint(interaction),key=fingerprint.key;
+    if(!sameKey(key,record.inputKey)){
+     record.inputKey=key;
+     if(Object.hasOwn(fingerprint,'error'))report(fingerprint.error);
+     else try{const next=interactionOptions(interaction),values=interactionKeys.map(key=>next[key]);
+      if(!record.inputValues||values.some((value,index)=>!Object.is(value,record.inputValues[index]))){record.chart.setInteractionOptions(next);record.inputValues=values;}
+     }catch(error){report(error);}
+    }
    }
   }
   if(p.tool===undefined)record.tool=undefined;
   else if(!Object.is(p.tool,record.tool)){record.tool=p.tool;try{record.chart.api.setTool(p.tool);}catch(error){report(error);}}
   if(p.text===undefined)record.text=undefined;
   else if(!Object.is(p.text,record.text)){record.text=p.text;try{record.chart.api.setText(p.text);}catch(error){report(error);}}
-  if(p.drawingTarget!==undefined){const target=p.drawingTarget,key=target===null?[null]:[target?.panel,target?.axisId,target?.seriesId,Object.keys(target??{}).sort().join('\0'),target!=null&&['object','function'].includes(typeof target)?Object.getPrototypeOf(target):typeof target];
-   if(!record.targetKey||key.some((value,index)=>!Object.is(value,record.targetKey[index]))||key.length!==record.targetKey.length){record.targetKey=key;try{record.chart.api.setDrawingTarget(target);}catch(error){report(error);}}
+  if(p.drawingTarget!==undefined){const target=p.drawingTarget,fingerprint=descriptorFingerprint(target),key=fingerprint.key;
+   if(!sameKey(key,record.targetKey)){record.targetKey=key;if(Object.hasOwn(fingerprint,'error'))report(fingerprint.error);else try{record.chart.api.setDrawingTarget(target);}catch(error){report(error);}}
   }else record.targetKey=undefined;
-  if(p.visibleRange!==undefined){const range=p.visibleRange,from=range?.[0],to=range?.[1];
-   if(record.rangeSet!==true||record.rangeNull!==(range===null)||!Object.is(from,record.from)||!Object.is(to,record.to)){
-    record.rangeSet=true;record.rangeNull=range===null;record.from=from;record.to=to;
-    try{if(range===null)record.chart.api.fit();else record.chart.api.setVisibleRange(from,to);}catch(error){report(error);}
+  if(p.visibleRange!==undefined){const range=p.visibleRange,fingerprint=descriptorFingerprint(range),key=fingerprint.key;
+   if(!sameKey(key,record.rangeKey)){
+    record.rangeKey=key;
+    if(Object.hasOwn(fingerprint,'error'))report(fingerprint.error);
+    else try{if(range===null)record.chart.api.fit();else record.chart.api.setVisibleRange(range?.[0],range?.[1]);}catch(error){report(error);}
    }
-  }else record.rangeSet=false;
+  }else record.rangeKey=undefined;
  }
  useEffect(()=>{
   let closed=false,attempted,disposeAttempt=()=>{};
@@ -100,7 +114,7 @@ export const AsterChart=forwardRef(function AsterChart(props,ref){
   };
   const retry=()=>{
    if(closed||active.current)return;
-   const key=interactionKey(committed.current.options?.interaction);
+   const interactionState=readInteraction(committed.current),key=Object.hasOwn(interactionState,'error')?interactionState.key:interactionKey(interactionState.value);
    if(attempted&&key.length===attempted.length&&key.every((value,index)=>Object.is(value,attempted[index])))return;
    // Record before application callbacks, including an onError-driven rerender.
    attempted=key;disposeAttempt();disposeAttempt=initialize();

@@ -1438,10 +1438,10 @@ public final class BaroChartEngine {
         case .javaScript:
             #if SWIFT_PACKAGE
             guard let bundleURL = Bundle.module.url(forResource: "aster-core", withExtension: "js") else {throw BaroChartLowLevelError.invalidScene}
+            source = try String(contentsOf: bundleURL, encoding: .utf8)
             #else
             throw BaroChartLowLevelError.invalidScene
             #endif
-            source = try String(contentsOf: bundleURL, encoding: .utf8)
         case .rust: source = nil
         }
         try self.init(coreBundleSource: source, count: 0, options: options, backend: runtimeBackend)

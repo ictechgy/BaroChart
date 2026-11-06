@@ -697,11 +697,22 @@ impl SeriesCaches {
                     .map_err(|failure| failure.into_js_error())?;
                 entry.index_identity = Arc::new(());
             } else {
-                entry
+                let index = entry
                     .index
                     .as_mut()
-                    .expect("dirty series cache has an index")
-                    .update_range(values, start, computed_until)?;
+                    .expect("dirty series cache has an index");
+                let start = if start_value < computed_until as f64 {
+                    if start_value < 0.0 || start_value.fract() != 0.0 {
+                        return Err(match index {
+                            CachedIndex::Flat(_) => range_error("Index update bounds"),
+                            CachedIndex::Block(_) => range_error("Block update bounds"),
+                        });
+                    }
+                    start
+                } else {
+                    computed_until
+                };
+                index.update_range(values, start, computed_until)?;
             }
             *revision_cache = Some(revision);
             *dirty_from = f64::INFINITY;

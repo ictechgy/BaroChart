@@ -343,14 +343,32 @@ pub fn drawing_hit_test(
                         <= body_tolerance
             }
             DrawingType::Ellipse => {
-                let radius_x = (b.x - a.x).abs() / 2.0;
-                let radius_y = (b.y - a.y).abs() / 2.0;
+                let difference_x = b.x - a.x;
+                let difference_y = b.y - a.y;
+                let sum_x = a.x + b.x;
+                let sum_y = a.y + b.y;
+                let radius_x = if difference_x.is_finite() {
+                    difference_x.abs() / 2.0
+                } else {
+                    (a.x / 2.0 - b.x / 2.0).abs()
+                };
+                let radius_y = if difference_y.is_finite() {
+                    difference_y.abs() / 2.0
+                } else {
+                    (a.y / 2.0 - b.y / 2.0).abs()
+                };
                 if radius_x != 0.0 && radius_y != 0.0 {
-                    let normalized = js_hypot(
-                        (x - (a.x + b.x) / 2.0) / radius_x,
-                        (y - (a.y + b.y) / 2.0) / radius_y,
-                    );
-                    ((normalized - 1.0).abs() * js_min(&[radius_x, radius_y])) <= body_tolerance
+                    let center_x = if sum_x.is_finite() {
+                        sum_x / 2.0
+                    } else {
+                        a.x / 2.0 + b.x / 2.0
+                    };
+                    let center_y = if sum_y.is_finite() {
+                        sum_y / 2.0
+                    } else {
+                        a.y / 2.0 + b.y / 2.0
+                    };
+                    ellipse_distance(x, y, center_x, center_y, radius_x, radius_y) <= body_tolerance
                 } else if radius_x != 0.0 || radius_y != 0.0 {
                     segment_distance(x, y, a, b) <= body_tolerance
                 } else {
@@ -458,6 +476,116 @@ fn text_metrics(
     crate::labels::label_metrics_scoped(&JsValue::String(font.clone()), dialect, scope)
 }
 
+fn ellipse_distance(
+    x: f64,
+    y: f64,
+    center_x: f64,
+    center_y: f64,
+    radius_x: f64,
+    radius_y: f64,
+) -> f64 {
+    let offset_x = (x - center_x).abs();
+    let offset_y = (y - center_y).abs();
+    let x_major = radius_x >= radius_y;
+    let major_radius = if x_major { radius_x } else { radius_y };
+    let minor_radius = if x_major { radius_y } else { radius_x };
+    let major_point = if x_major { offset_x } else { offset_y };
+    let minor_point = if x_major { offset_y } else { offset_x };
+
+    // An interior point on the major axis can be closest to either of two
+    // symmetric off-axis points, rather than to the major endpoint.
+    if minor_point == 0.0 {
+        let threshold = major_radius - minor_radius * (minor_radius / major_radius);
+        if major_point < threshold {
+            let ratio = major_point / threshold;
+            let closest_major = major_radius * ratio;
+            let closest_minor = minor_radius * js_max(&[0.0, 1.0 - ratio * ratio]).sqrt();
+            return js_hypot(major_point - closest_major, closest_minor);
+        }
+        return (major_point - major_radius).abs();
+    }
+    if major_point == 0.0 {
+        return (minor_point - minor_radius).abs();
+    }
+
+    let normalized_major = major_point / major_radius;
+    let normalized_minor = minor_point / minor_radius;
+    let aspect = major_radius / minor_radius;
+    let aspect_squared = js_min(&[aspect * aspect, f64::MAX]);
+    let normalized_length = js_hypot(normalized_major, normalized_minor);
+    if normalized_length == 1.0 {
+        return 0.0;
+    }
+
+    let mut low = 0.0;
+    let mut high;
+    if normalized_length < 1.0 {
+        // In minor-radius-squared units the unique Lagrange multiplier lies in
+        // (normalized_minor - 1, 0) for every interior off-axis point.
+        low = normalized_minor - 1.0;
+        high = 0.0;
+        for _ in 0..64 {
+            let middle = (low + high) / 2.0;
+            let major_term = normalized_major / (1.0 + middle / aspect_squared);
+            let minor_term = normalized_minor / (1.0 + middle);
+            if js_hypot(major_term, minor_term) > 1.0 {
+                low = middle;
+            } else {
+                high = middle;
+            }
+        }
+        let multiplier = (low + high) / 2.0;
+        return js_hypot(
+            major_point - major_point / (1.0 + multiplier / aspect_squared),
+            minor_point - minor_point / (1.0 + multiplier),
+        );
+    }
+
+    if normalized_major < 1.0 {
+        // At this finite upper bound the minor term alone fills the remaining
+        // unit-circle component; the major term only shrinks as s increases.
+        high = normalized_minor / (1.0 - normalized_major * normalized_major).sqrt() - 1.0;
+        for _ in 0..64 {
+            let middle = (low + high) / 2.0;
+            let major_term = normalized_major / (1.0 + middle / aspect_squared);
+            let minor_term = normalized_minor / (1.0 + middle);
+            if js_hypot(major_term, minor_term) > 1.0 {
+                low = middle;
+            } else {
+                high = middle;
+            }
+        }
+        let multiplier = (low + high) / 2.0;
+        return js_hypot(
+            major_point - major_point / (1.0 + multiplier / aspect_squared),
+            minor_point - minor_point / (1.0 + multiplier),
+        );
+    }
+
+    // Exterior points at or beyond the major endpoint use a major-radius
+    // scaled multiplier, avoiding overflow at very high aspect ratios.
+    let scaled_minor = normalized_minor / aspect_squared;
+    high = js_hypot(normalized_major, scaled_minor);
+    if !high.is_finite() {
+        return f64::INFINITY;
+    }
+    for _ in 0..64 {
+        let middle = (low + high) / 2.0;
+        let major_term = normalized_major / (1.0 + middle);
+        let minor_term = normalized_minor / (1.0 + aspect_squared * middle);
+        if js_hypot(major_term, minor_term) > 1.0 {
+            low = middle;
+        } else {
+            high = middle;
+        }
+    }
+    let multiplier = (low + high) / 2.0;
+    js_hypot(
+        major_point - major_point / (1.0 + multiplier),
+        minor_point - minor_point / (1.0 + aspect_squared * multiplier),
+    )
+}
+
 fn segment_distance(
     x: f64,
     y: f64,
@@ -509,6 +637,244 @@ fn geometry_lines_hit(commands: &[JsValue], x: f64, y: f64, tolerance: f64) -> b
         }
     }
     false
+}
+
+#[cfg(test)]
+mod hit_tests {
+    use super::*;
+    use std::f64::consts::PI;
+
+    use barochart_js::json::{JsonMode, parse_json};
+
+    use crate::data::{Bar, ModelDataState, StoreOptions};
+    use crate::indicator_engine::{IndicatorEngine, IndicatorEngineOptions};
+    use crate::model_state::ModelContext;
+    use crate::series_cache::SeriesCaches;
+    use crate::{Host, HostError};
+
+    struct NoZones;
+
+    impl Host for NoZones {
+        fn zone_resolve(&self, _: &JsString) -> Result<JsString, HostError> {
+            Err(HostError)
+        }
+
+        fn zone_offset_seconds(&self, _: &JsString, _: f64) -> Result<i32, HostError> {
+            Err(HostError)
+        }
+
+        fn log(&self, _: i32, _: &str) {}
+    }
+
+    fn parse(source: &str) -> JsValue {
+        parse_json(source.as_bytes(), JsonMode::Standard).unwrap()
+    }
+
+    fn bar(index: usize) -> Bar {
+        let price = 100.0 + index as f64;
+        Bar {
+            time: 1_700_000_000_000.0 + index as f64 * 60_000.0,
+            open: price,
+            high: price + 2.0,
+            low: price - 2.0,
+            close: price,
+            volume: 100.0,
+        }
+    }
+
+    fn drawing_value(a: crate::layout::ScreenPrice, b: crate::layout::ScreenPrice) -> JsValue {
+        parse(&format!(
+            r#"{{"type":"ellipse","panel":"price","points":[{{"time":{},"price":{}}},{{"time":{},"price":{}}}],"style":{{"width":1.5}}}}"#,
+            a.time, a.price, b.time, b.price
+        ))
+    }
+
+    // This is independent from the production Lagrange-multiplier solver. A
+    // sampled distance is an upper bound, and half the maximum intervening arc
+    // length bounds how much smaller the continuous minimum can be.
+    fn sampled_distance_interval(
+        center_x: f64,
+        center_y: f64,
+        radius_x: f64,
+        radius_y: f64,
+        x: f64,
+        y: f64,
+    ) -> (f64, f64) {
+        const SAMPLES: usize = 1 << 18;
+        let mut upper = f64::INFINITY;
+        for index in 0..SAMPLES {
+            let angle = 2.0 * PI * index as f64 / SAMPLES as f64;
+            let (sine, cosine) = angle.sin_cos();
+            upper = js_min(&[
+                upper,
+                js_hypot(
+                    x - (center_x + radius_x * cosine),
+                    y - (center_y + radius_y * sine),
+                ),
+            ]);
+        }
+        let gap = js_max(&[radius_x, radius_y]) * PI / SAMPLES as f64;
+        (js_max(&[upper - gap, 0.0]), upper)
+    }
+
+    #[test]
+    fn high_aspect_ellipse_hit_path_uses_euclidean_outline_distance() {
+        let data =
+            ModelDataState::new(StoreOptions::default(), (0..100).map(bar).collect()).unwrap();
+        let mut model = ModelState::new(data.store(), &JsValue::Undefined).unwrap();
+        model
+            .add_series(
+                &parse(r#"{"id":"bars","type":"candles","panel":"price"}"#),
+                &ModelContext::plain(data.store()),
+            )
+            .unwrap();
+        let mut indicators = IndicatorEngine::new(IndicatorEngineOptions::default()).unwrap();
+        let mut series_caches = SeriesCaches::new();
+        let layout = crate::layout::create_layout(
+            &mut model,
+            data.store(),
+            &mut indicators,
+            &NoZones,
+            &mut series_caches,
+            1_200.0,
+            700.0,
+        )
+        .unwrap();
+        let panel = &layout.panels[0];
+        let center_x = (panel.left + panel.right) / 2.0;
+        let center_y = (panel.top + panel.bottom) / 2.0;
+
+        for horizontal in [true, false] {
+            let radius_x = if horizontal {
+                (panel.right - panel.left) * 0.4
+            } else {
+                4.0
+            };
+            let radius_y = if horizontal {
+                4.0
+            } else {
+                (panel.bottom - panel.top) * 0.4
+            };
+            let screen_a = (center_x - radius_x, center_y - radius_y);
+            let screen_b = (center_x + radius_x, center_y + radius_y);
+            let panel_id = &panel.id;
+            let a = layout
+                .from_screen(
+                    model.view,
+                    data.store(),
+                    screen_a.0,
+                    screen_a.1,
+                    panel_id,
+                    None,
+                )
+                .unwrap();
+            let b = layout
+                .from_screen(
+                    model.view,
+                    data.store(),
+                    screen_b.0,
+                    screen_b.1,
+                    panel_id,
+                    None,
+                )
+                .unwrap();
+            let mut drawings = DrawingStore::with_defaults(NumberDialect::PLATFORM);
+            let id = drawings.add(&drawing_value(a, b)).unwrap();
+            drawings.select(None).unwrap();
+            let drawing = &drawings.items()[0];
+            let projected_a = layout.to_screen(
+                model.view,
+                data.store(),
+                drawing.points[0].time,
+                drawing.points[0].price,
+                panel_id,
+                None,
+            );
+            let projected_b = layout.to_screen(
+                model.view,
+                data.store(),
+                drawing.points[1].time,
+                drawing.points[1].price,
+                panel_id,
+                None,
+            );
+            let actual_center_x = (projected_a.x + projected_b.x) / 2.0;
+            let actual_center_y = (projected_a.y + projected_b.y) / 2.0;
+            let actual_radius_x = (projected_b.x - projected_a.x).abs() / 2.0;
+            let actual_radius_y = (projected_b.y - projected_a.y).abs() / 2.0;
+            let (far_x, far_y, near_x, near_y) = if horizontal {
+                (
+                    actual_center_x + actual_radius_x * 0.9,
+                    actual_center_y,
+                    actual_center_x + actual_radius_x * 0.9,
+                    actual_center_y + actual_radius_y * 0.4,
+                )
+            } else {
+                (
+                    actual_center_x,
+                    actual_center_y + actual_radius_y * 0.9,
+                    actual_center_x + actual_radius_x * 0.4,
+                    actual_center_y + actual_radius_y * 0.9,
+                )
+            };
+            let far_interval = sampled_distance_interval(
+                actual_center_x,
+                actual_center_y,
+                actual_radius_x,
+                actual_radius_y,
+                far_x,
+                far_y,
+            );
+            let near_interval = sampled_distance_interval(
+                actual_center_x,
+                actual_center_y,
+                actual_radius_x,
+                actual_radius_y,
+                near_x,
+                near_y,
+            );
+            assert!(far_interval.0 > 1.0, "far interval: {far_interval:?}");
+            assert!(near_interval.1 < 1.0, "near interval: {near_interval:?}");
+
+            let mut bounds_cache = DrawingHitTestCache::new();
+            let mut geometry_cache = DrawingGeometryCache::new(32);
+            assert_eq!(
+                drawing_hit_test(
+                    &drawings,
+                    &model,
+                    &layout,
+                    model.view,
+                    data.store(),
+                    &mut bounds_cache,
+                    &mut geometry_cache,
+                    far_x,
+                    far_y,
+                    1.0,
+                    NumberDialect::PLATFORM,
+                )
+                .unwrap(),
+                None
+            );
+            assert_eq!(
+                drawing_hit_test(
+                    &drawings,
+                    &model,
+                    &layout,
+                    model.view,
+                    data.store(),
+                    &mut bounds_cache,
+                    &mut geometry_cache,
+                    near_x,
+                    near_y,
+                    1.0,
+                    NumberDialect::PLATFORM,
+                )
+                .unwrap()
+                .map(|hit| hit.id),
+                Some(id)
+            );
+        }
+    }
 }
 
 #[cfg(test)]

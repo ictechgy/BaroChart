@@ -719,6 +719,146 @@ fn unbound_indicator_insertions_do_not_invalidate_bound_entry_identity() {
     assert!(matches!(field(&frame, "drawings"), JsValue::Null));
 }
 
+#[test]
+fn resolver_static_state_mutation_invalidates_the_next_frame_base() {
+    for mutation in ["series", "theme", "view"] {
+        let mut chart = frame_chart();
+        let mut cache = NativeFrameCache::new();
+        let mut no_op = |_: &mut NativeChart, _: &layout::Layout| Ok(None);
+        let initial = cache
+            .frame(NativeFrameInput {
+                chart: &mut chart,
+                host: &NoZones,
+                width: 640.0,
+                height: 360.0,
+                force_base: false,
+                resolve_crosshair: &mut no_op,
+            })
+            .unwrap();
+        assert!(initial.base_changed, "initial {mutation}");
+
+        let mut mutate = |chart: &mut NativeChart, _: &layout::Layout| {
+            match mutation {
+                "series" => chart.model_mut().series[0].dirty_from = 1.0,
+                "theme" => chart
+                    .set_theme_legacy(&object(&[("grid", text("#123456"))]))
+                    .unwrap(),
+                "view" => chart.model_mut().view.from += 1.0,
+                _ => unreachable!(),
+            }
+            Ok(None)
+        };
+        let reused = cache
+            .frame(NativeFrameInput {
+                chart: &mut chart,
+                host: &NoZones,
+                width: 640.0,
+                height: 360.0,
+                force_base: false,
+                resolve_crosshair: &mut mutate,
+            })
+            .unwrap();
+        assert!(!reused.base_changed, "resolver reuse {mutation}");
+
+        let rebuilt = cache
+            .frame(NativeFrameInput {
+                chart: &mut chart,
+                host: &NoZones,
+                width: 640.0,
+                height: 360.0,
+                force_base: false,
+                resolve_crosshair: &mut no_op,
+            })
+            .unwrap();
+        assert!(rebuilt.base_changed, "resolver mutation {mutation}");
+
+        let stable = cache
+            .frame(NativeFrameInput {
+                chart: &mut chart,
+                host: &NoZones,
+                width: 640.0,
+                height: 360.0,
+                force_base: false,
+                resolve_crosshair: &mut no_op,
+            })
+            .unwrap();
+        assert!(!stable.base_changed, "stable rebuild {mutation}");
+    }
+}
+
+#[test]
+fn resolver_drawing_mutations_invalidate_the_next_drawing_layer() {
+    for force_base in [false, true] {
+        for mutation in ["remove", "select"] {
+            let mut chart = frame_chart();
+            let mut cache = NativeFrameCache::new();
+            let mut no_op = |_: &mut NativeChart, _: &layout::Layout| Ok(None);
+            let initial = cache
+                .frame(NativeFrameInput {
+                    chart: &mut chart,
+                    host: &NoZones,
+                    width: 640.0,
+                    height: 360.0,
+                    force_base: false,
+                    resolve_crosshair: &mut no_op,
+                })
+                .unwrap();
+            let initial_count = initial.drawings.commands().len();
+            assert!(initial_count > 0);
+            let mut mutate = |chart: &mut NativeChart, _: &layout::Layout| {
+                let id = JsString::from_str("d");
+                match mutation {
+                    "remove" => {
+                        assert!(chart.drawings_mut().remove(&id)?);
+                    }
+                    "select" => chart.drawings_mut().select(Some(&id))?,
+                    _ => unreachable!(),
+                }
+                Ok(None)
+            };
+            let during = cache
+                .frame(NativeFrameInput {
+                    chart: &mut chart,
+                    host: &NoZones,
+                    width: 640.0,
+                    height: 360.0,
+                    force_base,
+                    resolve_crosshair: &mut mutate,
+                })
+                .unwrap();
+            assert_eq!(during.drawings.commands().len(), initial_count);
+            let next = cache
+                .frame(NativeFrameInput {
+                    chart: &mut chart,
+                    host: &NoZones,
+                    width: 640.0,
+                    height: 360.0,
+                    force_base: false,
+                    resolve_crosshair: &mut no_op,
+                })
+                .unwrap();
+            assert!(!next.base_changed);
+            assert!(next.drawings_changed, "{mutation}, force_base={force_base}");
+            if mutation == "remove" {
+                assert!(next.drawings.commands().is_empty());
+            } else {
+                assert!(next.drawings.commands().len() > initial_count);
+            }
+            let stable = cache
+                .frame(NativeFrameInput {
+                    chart: &mut chart,
+                    host: &NoZones,
+                    width: 640.0,
+                    height: 360.0,
+                    force_base: false,
+                    resolve_crosshair: &mut no_op,
+                })
+                .unwrap();
+            assert!(!stable.drawings_changed);
+        }
+    }
+}
+
 fn render(
     cache: &mut NativeFrameCache,
     chart: &mut NativeChart,

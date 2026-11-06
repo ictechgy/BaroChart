@@ -1098,8 +1098,7 @@ impl ModelState {
         self.panels_memory = staged.panels_memory;
         self.axes = staged.axes;
         self.axes_memory = staged.axes_memory;
-        self.series_memory = staged.series_memory;
-        self.containers_identity = Arc::new(());
+        self.containers_identity = staged.containers_identity;
         drop(previous_record_memory);
         drop(staged.theme);
         drop(staged_theme_memory);
@@ -1129,10 +1128,12 @@ impl ModelState {
         self.topology_memory = staged.topology_memory;
         self.axis_width = staged.axis_width;
         self.precision = staged.precision;
-        self.rotate_containers_identity();
-        self.theme_identity = Arc::new(());
-        self.theme_value_identities = theme_value_reference_identities(&self.theme);
-        self.publish_view_replacement(staged.view, staged.follow);
+        self.containers_identity = staged.containers_identity;
+        self.theme_identity = staged.theme_identity;
+        self.theme_value_identities = staged.theme_value_identities;
+        self.view = staged.view;
+        self.follow = staged.follow;
+        self.view_identity = staged.view_identity;
     }
 
     fn rotate_containers_identity(&mut self) {
@@ -3375,7 +3376,9 @@ mod native_ui_tests {
     use super::{ModelContext, ModelState};
     use crate::data::{Bar, ModelDataState, StoreOptions};
     use barochart_js::json::{JsObject, JsValue};
+    use barochart_js::memory::{MemoryAccount, MemoryContext, OomStyle};
     use barochart_js::string::JsString;
+    use std::sync::Arc;
 
     fn text(value: &str) -> JsValue {
         JsValue::String(JsString::from_str(value))
@@ -3390,7 +3393,73 @@ mod native_ui_tests {
     }
 
     #[test]
-    fn native_ui_publish_preserves_external_value_allocation() {
+    fn web_layout_publish_preserves_live_series_capacity_accounting() {
+        let account = MemoryAccount::new(0, OomStyle::RangeErrorCapitalized);
+        let data = ModelDataState::new_with_memory(
+            StoreOptions::default(),
+            Vec::new(),
+            MemoryContext::accounted(&account),
+        )
+        .unwrap();
+        let store = data.store();
+        let mut model = ModelState::new(store, &JsValue::Object(JsObject::new())).unwrap();
+        for index in 0..256 {
+            model
+                .add_series(
+                    &object(&[
+                        ("id", text(&format!("series-{index}"))),
+                        ("type", text("line")),
+                        ("panel", text("price")),
+                    ]),
+                    &ModelContext::plain(store),
+                )
+                .unwrap();
+        }
+        for index in 1..256 {
+            model.remove_series(&text(&format!("series-{index}")));
+        }
+        assert_eq!(model.series.len(), 1);
+        assert_eq!(model.series.capacity(), 256);
+
+        let panels = JsValue::Array(
+            model
+                .panels
+                .iter()
+                .map(|panel| panel.to_js_value())
+                .collect(),
+        );
+        let axes = JsValue::Array(model.axes.iter().map(|axis| axis.to_js_value()).collect());
+        let series = vec![model.series[0].to_js_value()];
+        let live_series_bytes = model.series_memory.requested_bytes();
+        let live_model_bytes = model.accounted_bytes();
+        let live_account_bytes = account.snapshot().requested_live_bytes;
+        let stage = model
+            .stage_web_layout(
+                store,
+                &panels,
+                &axes,
+                &series,
+                &[],
+                &ModelContext::plain(store),
+            )
+            .unwrap();
+        let staged_containers_identity = Arc::clone(&stage.model.containers_identity);
+
+        model.publish_web_layout(stage);
+
+        assert_eq!(model.series.len(), 1);
+        assert_eq!(model.series.capacity(), 256);
+        assert_eq!(model.series_memory.requested_bytes(), live_series_bytes);
+        assert_eq!(model.accounted_bytes(), live_model_bytes);
+        assert_eq!(account.snapshot().requested_live_bytes, live_account_bytes);
+        assert!(Arc::ptr_eq(
+            &model.containers_identity,
+            &staged_containers_identity
+        ));
+    }
+
+    #[test]
+    fn native_ui_publish_preserves_live_values_and_uses_staged_identities() {
         let bars = (0..3)
             .map(|index| Bar {
                 time: index as f64 + 1.0,
@@ -3416,6 +3485,7 @@ mod native_ui_tests {
             )
             .unwrap();
         let pointer = model.series[0].values.as_ref().unwrap().as_ptr();
+        let values_reference_identity = Arc::clone(&model.values_reference_identity);
         let panels = JsValue::Array(
             model
                 .panels
@@ -3440,7 +3510,38 @@ mod native_ui_tests {
                 &ModelContext::plain(store),
             )
             .unwrap();
+        let containers_identity = Arc::clone(&stage.model.containers_identity);
+        let theme_identity = Arc::clone(&stage.model.theme_identity);
+        let theme_value_identities = stage.model.theme_value_identities.clone();
+        let view_identity = Arc::clone(&stage.model.view_identity);
+        assert!(!Arc::ptr_eq(
+            &values_reference_identity,
+            &stage.model.values_reference_identity
+        ));
+
         model.publish_native_ui(stage);
+
         assert_eq!(model.series[0].values.as_ref().unwrap().as_ptr(), pointer);
+        assert!(Arc::ptr_eq(
+            &model.values_reference_identity,
+            &values_reference_identity
+        ));
+        assert!(Arc::ptr_eq(
+            &model.containers_identity,
+            &containers_identity
+        ));
+        assert!(Arc::ptr_eq(&model.theme_identity, &theme_identity));
+        assert!(Arc::ptr_eq(&model.view_identity, &view_identity));
+        for (published, staged) in model
+            .theme_value_identities
+            .iter()
+            .zip(&theme_value_identities)
+        {
+            match (published, staged) {
+                (Some(published), Some(staged)) => assert!(Arc::ptr_eq(published, staged)),
+                (None, None) => {}
+                _ => panic!("theme value identity presence changed during publication"),
+            }
+        }
     }
 }

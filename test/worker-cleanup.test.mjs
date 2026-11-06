@@ -8,6 +8,7 @@ function transport({post,handlerError}={}){
   constructor(url,options){this.url=url;this.options=options;this.terminations=0;this.posts=0;workers.push(this);}
   set onerror(value){if(handlerError)throw handlerError;this.errorHandler=value;}
   set onmessage(value){this.messageHandler=value;}
+  set onmessageerror(value){this.messageErrorHandler=value;}
   postMessage(request){this.posts++;post?.(this,request);}
   terminate(){this.terminations++;}
   complete(packet={ok:true}){this.messageHandler({data:{packet}});}
@@ -65,8 +66,35 @@ test('late replies after timeout or abort cannot deliver or terminate twice',asy
   const c=new AbortController(),pending=runChartWorker({}, {signal:c.signal});c.abort();await assert.rejects(pending,e=>e.name==='AbortError');f.workers[1].complete();assert.equal(f.workers[1].terminations,1);
  }finally{f.restore();}
 });
+test('malformed chart worker envelopes reject immediately and terminate',async()=>{
+ const f=transport();try{
+  for(const payload of [null,{}, {unknown:true}]){
+   const pending=runChartWorker({}, {timeoutMs:1000});pending.catch(()=>{});const worker=f.workers.at(-1);
+   worker.messageHandler({data:payload});
+   await assert.rejects(Promise.race([pending,pause(30).then(()=>{throw new Error('unsettled transport');})]),/response protocol/);
+   assert.equal(worker.terminations,1);
+  }
+ }finally{f.restore();}
+});
+test('chart worker messageerror rejects immediately and terminates',async()=>{
+ const f=transport();try{
+  const pending=runChartWorker({}, {timeoutMs:1000}),worker=f.workers[0];pending.catch(()=>{});
+  worker.messageErrorHandler({message:'deserialization failed'});
+  await assert.rejects(Promise.race([pending,pause(30).then(()=>{throw new Error('unsettled transport');})]),/message/);
+  assert.equal(worker.terminations,1);
+ }finally{f.restore();}
+});
 test('custom URL, progress isolation and success retain transport behavior',async()=>{
  const url=new URL('https://example.invalid/chart-worker.js'),f=transport();try{
   const pending=runChartWorker({x:1},{workerURL:url,onProgress(){throw new Error('observer');}}),w=f.workers[0];assert.equal(w.url,url);assert.deepEqual(w.options,{type:'module'});w.messageHandler({data:{progress:{phase:'compute',done:1,total:1}}});w.complete({ok:2});assert.deepEqual(await pending,{ok:2});assert.equal(w.terminations,1);
+ }finally{f.restore();}
+});
+
+test('an empty worker error message is still a terminal error reply',async()=>{
+ const f=transport();try{
+  const pending=runChartWorker({}, {timeoutMs:1000});pending.catch(()=>{});const worker=f.workers.at(-1);
+  worker.messageHandler({data:{error:''}});
+  await assert.rejects(pending,error=>error.name==='Error'&&error.message==='');
+  assert.equal(worker.terminations,1);
  }finally{f.restore();}
 });

@@ -2,6 +2,7 @@
 import {CacheAllocationError} from './cache-budget.mjs';
 
 const WEBGL_FRAME_INSTANCE_LIMIT=200000,WEBGL_PACKED_BYTE_LIMIT=16777216,COLOR_CACHE_LIMIT=256;
+const WEBGL_CONTEXT_UNAVAILABLE='WebGL2 context unavailable';
 // CPU packing and the matching GPU allocation both retain the grown capacity.
 // The 200k instance budget and fixed 16 MiB power-of-two ceiling bound
 // tessellation independently of document limits, preventing hundreds of MiB
@@ -39,26 +40,47 @@ in vec2 uv;uniform sampler2D image;out vec4 pixel;
 void main(){pixel=texture(image,uv);}`;
 
 function shader(gl, type, source) {
- const s=gl.createShader(type);gl.shaderSource(s,source);gl.compileShader(s);
- if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){const error=gl.getShaderInfoLog(s);gl.deleteShader(s);throw new Error(error);}return s;
+ const s=gl.createShader(type);if(s===null||s===undefined)throw new Error('WebGL2 shader unavailable');
+ try{gl.shaderSource(s,source);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){const error=gl.getShaderInfoLog(s);throw new Error(error||'WebGL2 shader compilation failed');}return s;}
+ catch(error){gl.deleteShader(s);throw error;}
+}
+function requiredHandle(handle,name){if(handle===null||handle===undefined)throw new Error(`WebGL2 ${name} unavailable`);return handle;}
+function safeDelete(gl,method,handle){if(!gl||handle===null||handle===undefined)return;try{gl[method](handle);}catch{} }
+function disposeRenderer(renderer,loseContext=true){
+ if(renderer._resourcesReleased)return;
+ renderer.disposed=true;
+ const canvas=renderer.canvas,listener=renderer.lost,listenerAttached=renderer._lostListenerAttached;
+ renderer.lost=null;renderer._lostListenerAttached=false;
+ if(canvas&&listener&&listenerAttached)try{canvas.removeEventListener('webglcontextlost',listener);}catch{}
+ renderer.releaseLayers();
+ const gl=renderer.gl;
+ for(const [key,method] of [['buffer','deleteBuffer'],['vao','deleteVertexArray'],['texture','deleteTexture'],['program','deleteProgram'],['copyProgram','deleteProgram']]){const handle=renderer[key];renderer[key]=null;safeDelete(gl,method,handle);}
+ if(loseContext&&!renderer.contextLost&&gl)try{gl.getExtension('WEBGL_lose_context')?.loseContext();}catch{}
+ renderer.packed=null;renderer.glyphs?.clear();renderer.colors?.clear();
+ if(renderer.atlas)renderer.atlas.width=renderer.atlas.height=0;if(renderer.colorCanvas)renderer.colorCanvas.width=renderer.colorCanvas.height=0;
+ renderer.atlas=null;renderer.colorCanvas=null;renderer.atlasContext=null;renderer.colorContext=null;renderer._resourcesReleased=true;
 }
 // Only display coordinates are packed as Float32. This renderer never reads or
 // uploads timestamp/price columns, indicator outputs or persisted anchors.
 export class WebGLRenderer {
  constructor(canvas, onLost = null) {
-  const gl=this.gl=canvas.getContext('webgl2',{alpha:false,antialias:true,premultipliedAlpha:false,preserveDrawingBuffer:false});
-  if(!gl)throw new Error('WebGL2 unavailable');this.kind='webgl2';this.canvas=canvas;this.disposed=false;this.layers=null;
-  const supported=gl.getInternalformatParameter(gl.RENDERBUFFER,gl.RGBA8,gl.SAMPLES);this.layerSamples=Math.max(0,...Array.from(supported).filter(n=>n<=gl.getParameter(gl.SAMPLES)));
-  this.lost=e=>{e.preventDefault();onLost?.('WebGL2 context lost');};canvas.addEventListener('webglcontextlost',this.lost);
-  this.program=gl.createProgram();let v,f;
-  try{v=shader(gl,gl.VERTEX_SHADER,VERTEX);f=shader(gl,gl.FRAGMENT_SHADER,FRAGMENT);gl.attachShader(this.program,v);gl.attachShader(this.program,f);gl.linkProgram(this.program);if(!gl.getProgramParameter(this.program,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(this.program));}
-  catch(e){this.dispose();throw e;}finally{if(v)gl.deleteShader(v);if(f)gl.deleteShader(f);}
-  this.vao=gl.createVertexArray();this.buffer=gl.createBuffer();gl.bindVertexArray(this.vao);gl.bindBuffer(gl.ARRAY_BUFFER,this.buffer);
-  for(let i=0;i<4;i++){gl.enableVertexAttribArray(i);gl.vertexAttribPointer(i,4,gl.FLOAT,false,64,i*16);gl.vertexAttribDivisor(i,1);}
-  this.viewportUniform=gl.getUniformLocation(this.program,'viewport');this.texture=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,this.texture);
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
-  this.atlas=document.createElement('canvas');this.atlas.width=this.atlas.height=2048;this.atlasContext=this.atlas.getContext('2d');this.glyphs=new Map();this.colors=new Map();this.colorCanvas=document.createElement('canvas');this.colorCanvas.width=this.colorCanvas.height=1;this.colorContext=this.colorCanvas.getContext('2d',{willReadFrequently:true});
-  this.packed=new Float32Array(4096*16);this.capacityBytes=0;this.resetAtlas(1);
+  this.canvas=canvas;this.kind='webgl2';this.gl=null;this.disposed=false;this.contextLost=false;this.layers=null;this.program=null;this.vao=null;this.buffer=null;this.texture=null;this.copyProgram=null;this.atlas=null;this.atlasContext=null;this.colorCanvas=null;this.colorContext=null;this.lost=null;this._lostListenerAttached=false;this._resourcesReleased=false;
+  try{
+   const gl=requiredHandle(canvas?.getContext?.('webgl2',{alpha:false,antialias:true,premultipliedAlpha:false,preserveDrawingBuffer:false}),'context');this.gl=gl;
+   const supported=gl.getInternalformatParameter?.(gl.RENDERBUFFER,gl.RGBA8,gl.SAMPLES)??[],maxSamples=Number(gl.getParameter?.(gl.SAMPLES));this.layerSamples=Math.max(0,...Array.from(supported).filter(n=>n<=(Number.isFinite(maxSamples)?maxSamples:0)));
+   this.program=requiredHandle(gl.createProgram(),'program');let v,f;
+   try{v=shader(gl,gl.VERTEX_SHADER,VERTEX);f=shader(gl,gl.FRAGMENT_SHADER,FRAGMENT);gl.attachShader(this.program,v);gl.attachShader(this.program,f);gl.linkProgram(this.program);if(!gl.getProgramParameter(this.program,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(this.program)||'WebGL2 program link failed');}
+   finally{if(v!==null&&v!==undefined)safeDelete(gl,'deleteShader',v);if(f!==null&&f!==undefined)safeDelete(gl,'deleteShader',f);}
+   this.vao=requiredHandle(gl.createVertexArray(),'vertex array');this.buffer=requiredHandle(gl.createBuffer(),'buffer');gl.bindVertexArray(this.vao);gl.bindBuffer(gl.ARRAY_BUFFER,this.buffer);
+   for(let i=0;i<4;i++){gl.enableVertexAttribArray(i);gl.vertexAttribPointer(i,4,gl.FLOAT,false,64,i*16);gl.vertexAttribDivisor(i,1);}
+   this.viewportUniform=requiredHandle(gl.getUniformLocation(this.program,'viewport'),'viewport uniform');this.texture=requiredHandle(gl.createTexture(),'texture');gl.bindTexture(gl.TEXTURE_2D,this.texture);
+   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+   this.atlas=requiredHandle(globalThis.document?.createElement?.('canvas'),'glyph atlas');this.atlas.width=this.atlas.height=2048;this.atlasContext=requiredHandle(this.atlas.getContext('2d'),'glyph atlas 2D context');this.glyphs=new Map();this.colors=new Map();this.colorCanvas=requiredHandle(globalThis.document?.createElement?.('canvas'),'color canvas');this.colorCanvas.width=this.colorCanvas.height=1;this.colorContext=requiredHandle(this.colorCanvas.getContext('2d',{willReadFrequently:true}),'color 2D context');
+   this.packed=new Float32Array(4096*16);this.capacityBytes=0;this.resetAtlas(1);
+   if(gl.isContextLost?.())throw new Error(WEBGL_CONTEXT_UNAVAILABLE);
+   this.lost=e=>{if(this.disposed||this.contextLost)return;this.contextLost=true;onLost?.('WebGL2 context lost');};
+   this._lostListenerAttached=true;try{canvas.addEventListener('webglcontextlost',this.lost);}catch(error){this._lostListenerAttached=false;throw error;}
+  }catch(error){disposeRenderer(this,false);throw error;}
  }
  resetAtlas(dpr){this.glyphs.clear();this.atlasContext.clearRect(0,0,2048,2048);this.atlasX=1;this.atlasY=1;this.rowHeight=0;this.atlasDpr=dpr;this.atlasDirty=true;}
  color(css){
@@ -93,7 +115,7 @@ export class WebGLRenderer {
   const nx=-dy/length*width/2,ny=dx/length*width/2;this.quad(x+nx,y+ny,a+nx,b+ny,x-nx,y-ny,a-nx,b-ny,color);return phase+length;
  }
  render(scene,dpr=1,{target=null,clear=true}={}){
-  if(this.disposed||this.gl.isContextLost())return;
+  if(this.disposed||this.contextLost||this.gl?.isContextLost?.())throw new Error(WEBGL_CONTEXT_UNAVAILABLE);
   const gl=this.gl;this.count=0;this.runs=[];this.metrics={instances:0,drawCalls:0,screenBufferBytes:0,glyphs:0};if(dpr!==this.atlasDpr)this.resetAtlas(dpr);
   // Preload before drawing; no atlas coordinates change during a frame.
   for(const c of scene.commands)if(c.op==='text')for(const char of c.text)this.glyph(char,c.font??'12px monospace');
@@ -122,26 +144,26 @@ export class WebGLRenderer {
    for(let i=0;i<4;i++)gl.vertexAttribPointer(i,4,gl.FLOAT,false,64,r.start*64+i*16);gl.drawArraysInstanced(gl.TRIANGLE_STRIP,0,4,r.end-r.start);this.metrics.drawCalls++;
   }gl.disable(gl.SCISSOR_TEST);this.metrics.instances=this.count;this.metrics.screenBufferBytes=this.count*64;this.metrics.glyphs=this.glyphs.size;
  }
- releaseLayers(){if(!this.layers)return;const gl=this.gl;for(const target of [this.layers.base,this.layers.stable]){gl.deleteFramebuffer(target.framebuffer);gl.deleteTexture(target.texture);}if(this.layers.scratch){gl.deleteFramebuffer(this.layers.scratch.framebuffer);gl.deleteRenderbuffer(this.layers.scratch.renderbuffer);}this.layers=null;}
+ releaseLayers(){const layers=this.layers;if(!layers)return;this.layers=null;const gl=this.gl;for(const target of [layers.base,layers.stable])if(target){const framebuffer=target.framebuffer,texture=target.texture;target.framebuffer=null;target.texture=null;safeDelete(gl,'deleteFramebuffer',framebuffer);safeDelete(gl,'deleteTexture',texture);}if(layers.scratch){const framebuffer=layers.scratch.framebuffer,renderbuffer=layers.scratch.renderbuffer;layers.scratch.framebuffer=null;layers.scratch.renderbuffer=null;safeDelete(gl,'deleteFramebuffer',framebuffer);safeDelete(gl,'deleteRenderbuffer',renderbuffer);}}
  layerTarget(width,height){
   const gl=this.gl,texture=gl.createTexture(),framebuffer=gl.createFramebuffer();
-  if(!texture||!framebuffer){if(texture)gl.deleteTexture(texture);if(framebuffer)gl.deleteFramebuffer(framebuffer);throw new CacheAllocationError('Layer framebuffer allocation');}
+  if(texture===null||texture===undefined||framebuffer===null||framebuffer===undefined){safeDelete(gl,'deleteTexture',texture);safeDelete(gl,'deleteFramebuffer',framebuffer);throw new CacheAllocationError('Layer framebuffer allocation');}
   try{gl.bindTexture(gl.TEXTURE_2D,texture);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,width,height,0,gl.RGBA,gl.UNSIGNED_BYTE,null);gl.bindFramebuffer(gl.FRAMEBUFFER,framebuffer);gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,texture,0);if(gl.checkFramebufferStatus(gl.FRAMEBUFFER)!==gl.FRAMEBUFFER_COMPLETE)throw new CacheAllocationError('Layer framebuffer unavailable');return {texture,framebuffer};}
   catch(error){gl.deleteTexture(texture);gl.deleteFramebuffer(framebuffer);throw error;}
  }
  blitLayer(source,target,width,height){const gl=this.gl;gl.disable(gl.SCISSOR_TEST);gl.bindFramebuffer(gl.READ_FRAMEBUFFER,source);gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER,target);gl.blitFramebuffer(0,0,width,height,0,0,width,height,gl.COLOR_BUFFER_BIT,gl.NEAREST);}
  multisampleTarget(width,height){
-  const gl=this.gl,renderbuffer=gl.createRenderbuffer(),framebuffer=gl.createFramebuffer();if(!renderbuffer||!framebuffer){if(renderbuffer)gl.deleteRenderbuffer(renderbuffer);if(framebuffer)gl.deleteFramebuffer(framebuffer);throw new CacheAllocationError('Multisample layer allocation');}
+  const gl=this.gl,renderbuffer=gl.createRenderbuffer(),framebuffer=gl.createFramebuffer();if(renderbuffer===null||renderbuffer===undefined||framebuffer===null||framebuffer===undefined){safeDelete(gl,'deleteRenderbuffer',renderbuffer);safeDelete(gl,'deleteFramebuffer',framebuffer);throw new CacheAllocationError('Multisample layer allocation');}
   try{gl.bindRenderbuffer(gl.RENDERBUFFER,renderbuffer);gl.renderbufferStorageMultisample(gl.RENDERBUFFER,this.layerSamples,gl.RGBA8,width,height);const samples=gl.getRenderbufferParameter(gl.RENDERBUFFER,gl.RENDERBUFFER_SAMPLES);gl.bindFramebuffer(gl.FRAMEBUFFER,framebuffer);gl.framebufferRenderbuffer(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.RENDERBUFFER,renderbuffer);if(gl.checkFramebufferStatus(gl.FRAMEBUFFER)!==gl.FRAMEBUFFER_COMPLETE)throw new CacheAllocationError('Multisample layer unavailable');return {renderbuffer,framebuffer,samples};}
   catch(error){gl.deleteRenderbuffer(renderbuffer);gl.deleteFramebuffer(framebuffer);throw error;}
  }
  presentTexture(texture,target,width,height){
   const gl=this.gl;
-  if(!this.copyProgram){const program=gl.createProgram();let v,f;try{v=shader(gl,gl.VERTEX_SHADER,COPY_VERTEX);f=shader(gl,gl.FRAGMENT_SHADER,COPY_FRAGMENT);gl.attachShader(program,v);gl.attachShader(program,f);gl.linkProgram(program);if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(program));this.copyProgram=program;}catch(error){gl.deleteProgram(program);throw error;}finally{if(v)gl.deleteShader(v);if(f)gl.deleteShader(f);}}
+  if(this.copyProgram===null||this.copyProgram===undefined){const program=requiredHandle(gl.createProgram(),'copy program');let v,f;try{v=shader(gl,gl.VERTEX_SHADER,COPY_VERTEX);f=shader(gl,gl.FRAGMENT_SHADER,COPY_FRAGMENT);gl.attachShader(program,v);gl.attachShader(program,f);gl.linkProgram(program);if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(program)||'WebGL2 copy program link failed');this.copyProgram=program;}catch(error){safeDelete(gl,'deleteProgram',program);throw error;}finally{if(v!==null&&v!==undefined)safeDelete(gl,'deleteShader',v);if(f!==null&&f!==undefined)safeDelete(gl,'deleteShader',f);}}
   gl.bindFramebuffer(gl.FRAMEBUFFER,target);gl.viewport(0,0,width,height);gl.disable(gl.SCISSOR_TEST);gl.disable(gl.BLEND);gl.useProgram(this.copyProgram);gl.bindVertexArray(null);gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,texture);gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
  }
  renderLayers(frame,dpr){
-  if(this.disposed||this.gl.isContextLost())throw new Error('Layer WebGL context unavailable');
+  if(this.disposed||this.contextLost||this.gl?.isContextLost?.())throw new Error(WEBGL_CONTEXT_UNAVAILABLE);
   const w=this.canvas.width,h=this.canvas.height;let allocated=false;
   if(!this.layers||this.layers.width!==w||this.layers.height!==h){
    this.releaseLayers();const base=this.layerTarget(w,h);let stable,scratch;
@@ -158,5 +180,5 @@ export class WebGLRenderer {
   this.presentTexture(this.layers.stable.texture,null,w,h);texturePresents++;submit(frame.hover,null,false);this.metrics=metrics;
   return {baseRedrawn:baseChanged,drawingsRedrawn:drawingsChanged,cachedPixelBytes:w*h*4*(2+(this.layers.scratch?.samples??0)),hoverCommands:frame.hover.commands.length,framebufferBlits,texturePresents,msaaSamples:this.layers.scratch?.samples??0};
  }
- dispose(){if(this.disposed)return;this.disposed=true;this.canvas?.removeEventListener('webglcontextlost',this.lost);const gl=this.gl;if(gl){this.releaseLayers();if(this.buffer)gl.deleteBuffer(this.buffer);if(this.vao)gl.deleteVertexArray(this.vao);if(this.texture)gl.deleteTexture(this.texture);if(this.program)gl.deleteProgram(this.program);if(this.copyProgram)gl.deleteProgram(this.copyProgram);gl.getExtension('WEBGL_lose_context')?.loseContext();}this.packed=null;this.glyphs?.clear();this.colors?.clear();if(this.atlas)this.atlas.width=this.atlas.height=0;if(this.colorCanvas)this.colorCanvas.width=this.colorCanvas.height=0;this.atlasContext=null;this.colorContext=null;}
+ dispose(){disposeRenderer(this);}
 }
