@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {existsSync} from 'node:fs';
 import {BarStore,ChartModel,ChartAPI,InteractionController,seededColumns,FIELDS} from '../src/core/index.mjs';
+import {NativeWorkspacePrepared} from '../src/core/native-workspace-target.mjs';
 import {saveWorkspace} from '../src/core/workspace.mjs';
 import {captureJavaScriptMigration,importJavaScriptMigration} from '../src/web/wasm/javascript-migration.mjs';
 import {createWasmHarness} from '../scripts/rust/wasm-harness.mjs';
@@ -86,6 +87,49 @@ test('portable input rejects accessors before reading them and snapshots every a
  await assert.rejects(importJavaScriptMigration(accessor),/own data property/i);assert.equal(reads,0);assert.equal(capture.check(),true);
  let descriptors=0;const proxy=new Proxy({metadataJSON:capture.metadataJSON,columns:capture.columns,header:capture.header,uiChunks:capture.uiChunks,description:capture.description},{getOwnPropertyDescriptor(target,key){descriptors++;return Reflect.getOwnPropertyDescriptor(target,key);}}),candidate=await importJavaScriptMigration(proxy);t.after(()=>candidate.dispose());
  assert.equal(descriptors,5);assert.equal(candidate.model.store.length,f.model.store.length);
+});
+
+test('portable input rejects mismatched column lengths before allocating any owned columns',async t=>{
+ const f=fixture(t),capture=await captureJavaScriptMigration({api:f.api,input:f.input,size:SIZE,document:f.document,binding:BINDING,revision:151});t.after(()=>capture.dispose());
+ const sourceFor=columns=>({metadataJSON:capture.metadataJSON,header:capture.header,uiChunks:capture.uiChunks,columns,description:capture.description});
+ const NativeFloat64Array=globalThis.Float64Array;let copies=0;
+ function CountingFloat64Array(...args){copies++;return new NativeFloat64Array(...args);}
+ CountingFloat64Array.prototype=NativeFloat64Array.prototype;globalThis.Float64Array=CountingFloat64Array;
+ try{for(const key of ['time','volume']){const columns={...capture.columns,[key]:capture.columns[key].subarray(0,capture.columns[key].length-1)};await assert.rejects(importJavaScriptMigration(sourceFor(columns)),/column lengths/i);}assert.equal(copies,0);}finally{globalThis.Float64Array=NativeFloat64Array;}
+});
+
+test('portable input bounds metadata and aggregate column bytes before copying',async t=>{
+ const f=fixture(t),capture=await captureJavaScriptMigration({api:f.api,input:f.input,size:SIZE,document:f.document,binding:BINDING,revision:153});t.after(()=>capture.dispose());
+ for(const source of [null,[],{}]){
+  const metadata=JSON.parse(capture.metadataJSON);metadata.source=source;const metadataJSON=JSON.stringify(metadata);
+  await assert.rejects(importJavaScriptMigration({...capture,metadataJSON,description:{...capture.description,workspaceMetadata:metadataJSON}}),/source/i);
+ }
+ for(const length of [-1,4194305]){
+  const metadata=JSON.parse(capture.metadataJSON);metadata.source.length=length;const metadataJSON=JSON.stringify(metadata);
+  await assert.rejects(importJavaScriptMigration({...capture,metadataJSON,description:{...capture.description,workspaceMetadata:metadataJSON}}),/length/i);
+ }
+ const metadata=JSON.parse(capture.metadataJSON);metadata.maxBytes=1;const metadataJSON=JSON.stringify(metadata);
+ await assert.rejects(importJavaScriptMigration({...capture,metadataJSON,description:{...capture.description,workspaceMetadata:metadataJSON}}),/byte/i);
+});
+
+test('portable input uses intrinsic typed-array dimensions without reading shadowed accessors',async t=>{
+ const f=fixture(t),capture=await captureJavaScriptMigration({api:f.api,input:f.input,size:SIZE,document:f.document,binding:BINDING,revision:155});t.after(()=>capture.dispose());let reads=0;
+ for(const key of FIELDS){const values=capture.columns[key];Object.defineProperties(values,{length:{configurable:true,get(){reads++;return 0;}},buffer:{configurable:true,get(){reads++;return new ArrayBuffer(0);}},byteOffset:{configurable:true,get(){reads++;return 0;}}});}
+ const candidate=await importJavaScriptMigration(capture);t.after(()=>candidate.dispose());
+ assert.equal(reads,0);for(const key of FIELDS)assert.deepEqual(candidate.model.store.columns[key],f.store.columns[key].subarray(0,f.store.length));
+});
+
+test('portable input copies a bounded resizable view',async t=>{
+ if(typeof ArrayBuffer!=='function'||!new ArrayBuffer(8,{maxByteLength:16}).resizable)return t.skip('Resizable ArrayBuffer unsupported');
+ const f=fixture(t),capture=await captureJavaScriptMigration({api:f.api,input:f.input,size:SIZE,document:f.document,binding:BINDING,revision:157});t.after(()=>capture.dispose());
+ const resized=new ArrayBuffer(capture.columns.time.byteLength,{maxByteLength:capture.columns.time.byteLength*2}),time=new Float64Array(resized);time.set(capture.columns.time);
+ const candidate=await importJavaScriptMigration({...capture,columns:{...capture.columns,time}});t.after(()=>candidate.dispose());resized.resize(resized.maxByteLength);assert.deepEqual(candidate.model.store.columns.time,f.store.columns.time);
+});
+
+test('portable input preserves signed zero and NaN payload bits in its owned columns',async t=>{
+ const f=fixture(t),capture=await captureJavaScriptMigration({api:f.api,input:f.input,size:SIZE,document:f.document,binding:BINDING,revision:159});t.after(()=>capture.dispose());const open=new Float64Array(capture.columns.open);open[0]=-0;new DataView(open.buffer).setBigUint64(8,0x7ff8000000001234n,true);
+ const start=NativeWorkspacePrepared.prototype.start;let observed=false;NativeWorkspacePrepared.prototype.start=function(...args){const values=this.columns.open;assert.ok(Object.is(values[0],-0));assert.equal(new DataView(values.buffer,values.byteOffset,values.byteLength).getBigUint64(8,true),0x7ff8000000001234n);observed=true;return start.apply(this,args);};
+ try{await assert.rejects(importJavaScriptMigration({...capture,columns:{...capture.columns,open}}),/envelope/i);assert.equal(observed,true);}finally{NativeWorkspacePrepared.prototype.start=start;}
 });
 
 test('tampered symbol or ingestion UI fails in the isolated candidate without changing its source',async t=>{

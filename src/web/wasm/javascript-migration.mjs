@@ -10,6 +10,8 @@ import {requirePortableFactory} from '../../core/indicators.mjs';
 import {safeCheckpointParse,safeCheckpointStringify} from '../../core/checkpoint-validation.mjs';
 
 const DEFAULT_CHUNK=16384,DEFAULT_STEP=4096,MAX_CHUNK=262144,MAX_STEP=65536;
+const MAX_MIGRATION_BARS=4194304,TYPED_ARRAY_BYTES=8;
+const typedArrayPrototype=Object.getPrototypeOf(Float64Array.prototype),typedArrayLength=Object.getOwnPropertyDescriptor(typedArrayPrototype,'length').get,typedArrayBuffer=Object.getOwnPropertyDescriptor(typedArrayPrototype,'buffer').get,typedArrayOffset=Object.getOwnPropertyDescriptor(typedArrayPrototype,'byteOffset').get,typedArrayTag=Object.getOwnPropertyDescriptor(typedArrayPrototype,Symbol.toStringTag).get,typedArraySet=Object.getOwnPropertyDescriptor(typedArrayPrototype,'set').value;
 let migrationSerial=0;
 
 export class JavaScriptBackendRequiredError extends Error {
@@ -24,7 +26,13 @@ function checkSignal(signal){if(signal?.aborted)throw aborted(signal);}
 function portableError(error){if(error instanceof UnsupportedIndicatorError){const match=String(error.message).match(/module:\s*([^;]+)/);return new JavaScriptBackendRequiredError(match?.[1],error);}return error;}
 function clone(value,label){try{return structuredClone(value);}catch(error){throw new TypeError(`${label} must be cloneable`,{cause:error});}}
 function same(a,b){if(Object.is(a,b))return true;if(!a||!b||typeof a!=='object'||typeof b!=='object'||Array.isArray(a)!==Array.isArray(b))return false;const keys=Object.keys(a);return keys.length===Object.keys(b).length&&keys.every(key=>Object.hasOwn(b,key)&&same(a[key],b[key]));}
-function ownFloat64(value,label){if(!(value instanceof Float64Array))throw new TypeError(`${label} Float64Array required`);return new Float64Array(value);}
+function float64Info(value,label,expectedLength){
+ if(!value||typeof value!=='object')throw new TypeError(`${label} Float64Array required`);
+ let length,buffer,offset;try{if(typedArrayTag.call(value)!=='Float64Array')throw new TypeError(`${label} Float64Array required`);length=typedArrayLength.call(value);buffer=typedArrayBuffer.call(value);offset=typedArrayOffset.call(value);}catch(error){if(error instanceof TypeError&&error.message===`${label} Float64Array required`)throw error;throw new TypeError(`${label} Float64Array required`,{cause:error});}
+ if(length!==expectedLength)throw new TypeError('Portable workspace column lengths');
+ return {buffer,offset,length};
+}
+function ownFloat64(info,expectedLength){const owned=new Float64Array(expectedLength),fixed=new Float64Array(info.buffer,info.offset,expectedLength);typedArraySet.call(owned,fixed);return owned;}
 function ownData(record,key,label){if(!record||typeof record!=='object')throw new TypeError(`${label} object required`);const descriptor=Object.getOwnPropertyDescriptor(record,key);if(!descriptor||!Object.hasOwn(descriptor,'value'))throw new TypeError(`${label} own data property required`);return descriptor.value;}
 function safePoint(api,input){
  if(!(api instanceof ChartAPI)||!(input instanceof InteractionController)||api.controller!==input)throw new TypeError('Actual JavaScript ChartAPI/controller required');
@@ -73,13 +81,16 @@ function validatePortableSource(source){
  if(!source||typeof source!=='object')throw new TypeError('Portable migration source required');
  const metadataJSON=ownData(source,'metadataJSON','Portable migration source'),header=ownData(source,'header','Portable migration source'),chunkSource=ownData(source,'uiChunks','Portable migration source'),columnSource=ownData(source,'columns','Portable migration source'),descriptionSource=ownData(source,'description','Portable migration source');
  if(typeof metadataJSON!=='string'||typeof header!=='string'||!Array.isArray(chunkSource)||!columnSource||typeof columnSource!=='object'||!descriptionSource||typeof descriptionSource!=='object')throw new TypeError('Portable migration source required');
+ const columnRefs=Object.fromEntries(FIELDS.map(key=>[key,ownData(columnSource,key,'Portable migration columns')]));
  const metadata=safeCheckpointParse(metadataJSON);if(metadata?.schema!=='aster.native-workspace-target'||metadata.version!==1)throw new TypeError('Portable workspace metadata');
  const descriptionKeys=['schema','version','registration','workspaceTicket','workspaceRegistration','sourceRevision','workspaceMetadata','header'],descriptionOwnKeys=Reflect.ownKeys(descriptionSource);if(descriptionOwnKeys.length!==descriptionKeys.length||descriptionOwnKeys.some(key=>typeof key!=='string'||!descriptionKeys.includes(key)))throw new TypeError('Portable UI migration description');
  const description=Object.fromEntries(descriptionKeys.map(key=>[key,ownData(descriptionSource,key,'Portable UI migration description')]));
  if(description.schema!=='aster.web-ui-migration'||description.version!==1||description.workspaceMetadata!==metadataJSON||description.header!==header)throw new TypeError('Portable UI migration description');
  for(const key of ['registration','workspaceTicket','workspaceRegistration','sourceRevision'])integer(description[key],1,Number.MAX_SAFE_INTEGER,'Portable migration identity');
- const columns=Object.fromEntries(FIELDS.map(key=>[key,ownFloat64(ownData(columnSource,key,'Portable migration columns'),`Migration ${key}`)]));
- if(columns.time.length!==metadata.source.length||FIELDS.some(key=>columns[key].length!==columns.time.length))throw new TypeError('Portable workspace column lengths');
+ const metadataSource=metadata?.source;if(!metadataSource||typeof metadataSource!=='object'||Array.isArray(metadataSource))throw new TypeError('Portable workspace source');
+ const sourceLength=integer(metadataSource.length,0,MAX_MIGRATION_BARS,'Portable workspace source length'),maxBytes=integer(metadata?.maxBytes,1,NATIVE_WORKSPACE_RESTORE_BYTES,'Portable workspace byte limit'),columnInfo={};
+ let columnBytes=0;for(const key of FIELDS){const info=float64Info(columnRefs[key],`Migration ${key}`,sourceLength);columnBytes+=sourceLength*TYPED_ARRAY_BYTES;if(columnBytes>maxBytes)throw new RangeError('Portable workspace column byte limit');columnInfo[key]=info;}
+ const columns=Object.fromEntries(FIELDS.map(key=>[key,ownFloat64(columnInfo[key],sourceLength)]));
  const length=ownData(chunkSource,'length','Portable migration chunks'),chunkKeys=Reflect.ownKeys(chunkSource);integer(length,0,10001,'Migration UI chunk count');if(chunkKeys.length!==length+1||chunkKeys.some(key=>key!=='length'&&(!/^(0|[1-9]\d*)$/.test(String(key))||Number(key)>=length)))throw new TypeError('Portable migration dense chunk array');
  const uiChunks=Array.from({length},(_,index)=>{const text=ownData(chunkSource,String(index),'Portable migration chunk');if(typeof text!=='string'||text.length>262144)throw new RangeError(`Migration UI chunk ${index}`);return text;});
  return {metadata,metadataJSON,header,description:Object.freeze(description),columns,uiChunks:Object.freeze(uiChunks)};

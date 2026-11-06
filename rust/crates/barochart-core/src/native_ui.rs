@@ -19,6 +19,7 @@ use crate::contracts::{
     AXIS_KEYS, PANEL_KEYS, RESOURCE_LIMITS, SERIES_KEYS, THEME_KEYS, identifier, option_record,
     portable_style_scoped,
 };
+use crate::crosshair_snap::crosshair_snap_options;
 use crate::drawing_types::Drawing;
 use crate::drawing_validation::canonical_drawing_scoped;
 use crate::drawings::{DrawingFrame, DrawingSnapshot, DrawingSnapshotList, DrawingStore};
@@ -1455,7 +1456,20 @@ pub enum NativeUiFinishMode {
     },
     Prepare,
     /// Workspace candidate가 data/indicator를 준비한 뒤 source UI를 exact 복원한다.
-    Migration,
+    Migration {
+        canonical_symbol: Option<JsValue>,
+        _symbol_memory: MemoryGroup,
+    },
+}
+
+impl NativeUiFinishMode {
+    /// Workspace 복원이 만든 canonical symbol과 그 account lease를 UI 게시까지 보존한다.
+    pub fn migration(canonical_symbol: Option<JsValue>, symbol_memory: MemoryGroup) -> Self {
+        Self::Migration {
+            canonical_symbol,
+            _symbol_memory: symbol_memory,
+        }
+    }
 }
 
 fn retain_finish_mode(
@@ -1481,7 +1495,25 @@ fn retain_finish_mode(
             })
         }
         NativeUiFinishMode::Prepare => Ok(NativeUiFinishMode::Prepare),
-        NativeUiFinishMode::Migration => Ok(NativeUiFinishMode::Migration),
+        NativeUiFinishMode::Migration {
+            canonical_symbol, ..
+        } => {
+            let canonical_symbol = canonical_symbol
+                .as_ref()
+                .map(|value| {
+                    value
+                        .try_clone_scoped(scope)
+                        .map_err(|failure| failure.into_js_error())
+                })
+                .transpose()?;
+            let symbol_memory = scope
+                .split_persistent(canonical_symbol.as_ref().map_or(0, js_value_heap_bytes))
+                .map_err(|failure| failure.into_js_error())?;
+            Ok(NativeUiFinishMode::migration(
+                canonical_symbol,
+                symbol_memory,
+            ))
+        }
     }
 }
 
@@ -1644,7 +1676,7 @@ fn parse_ui(
                 return Err(ordinary_error("Prepare stale: request/input binding"));
             }
         }
-        NativeUiFinishMode::Async { .. } | NativeUiFinishMode::Migration => {
+        NativeUiFinishMode::Async { .. } | NativeUiFinishMode::Migration { .. } => {
             if field(value, "preparedInput").is_some() {
                 return Err(type_error("Async unsupported preparation signature"));
             }
@@ -1802,14 +1834,29 @@ fn parse_ui(
         })
         .transpose()?;
     let undefined = JsValue::Undefined;
-    let drawing_magnet = field(value, "drawingMagnet")
+    let migration = matches!(mode, NativeUiFinishMode::Migration { .. });
+    let drawing_magnet_value = field(value, "drawingMagnet");
+    let crosshair_snap_value = field(value, "crosshairSnap");
+    if migration {
+        let (Some(drawing_magnet), Some(crosshair_snap)) =
+            (drawing_magnet_value, crosshair_snap_value)
+        else {
+            return Err(type_error("Backend migration controller state"));
+        };
+        let probe = OwnedInteractionState::new_with_memory(
+            core.owner.data().store().memory_context().clone(),
+        )?;
+        probe.prepare_set_drawing_magnet(drawing_magnet)?;
+        crosshair_snap_options(&core.model, crosshair_snap)?;
+    }
+    let drawing_magnet = drawing_magnet_value
         .map(|value| {
             value
                 .try_clone_scoped(scope)
                 .map_err(|failure| failure.into_js_error())
         })
         .transpose()?;
-    let crosshair_snap = field(value, "crosshairSnap")
+    let crosshair_snap = crosshair_snap_value
         .map(|value| {
             value
                 .try_clone_scoped(scope)
@@ -1824,16 +1871,26 @@ fn parse_ui(
         .unwrap_or(&undefined)
         .try_clone_scoped(scope)
         .map_err(|failure| failure.into_js_error())?;
-    let symbol = field(value, "symbol")
-        .map(|value| {
+    let symbol = match field(value, "symbol") {
+        None | Some(JsValue::Undefined | JsValue::Null) => JsValue::Null,
+        Some(value) => {
             value
                 .try_clone_scoped(scope)
                 .map_err(|failure| failure.into_js_error())
-        })
-        .transpose()?
-        .unwrap_or(JsValue::Null);
+        }?,
+    };
     if js_truthy(&symbol) {
         validate_symbol_shape(&symbol)?;
+    }
+    if let NativeUiFinishMode::Migration {
+        canonical_symbol, ..
+    } = mode
+    {
+        let null_symbol = JsValue::Null;
+        let canonical_symbol = canonical_symbol.as_ref().unwrap_or(&null_symbol);
+        if !deep_same(&symbol, canonical_symbol) {
+            return Err(ordinary_error("Backend migration symbol changed"));
+        }
     }
     let ingestion = match field(value, "dataIngestion") {
         None | Some(JsValue::Undefined) => None,
@@ -2054,7 +2111,7 @@ fn build_publication(
 ) -> Result<PreparedPublication, JsError> {
     let memory_context = core.owner.data().store().memory_context().clone();
     let host_state = prepare_pending_host_state(&parsed, &memory_context)?;
-    if matches!(mode, NativeUiFinishMode::Migration) {
+    if matches!(mode, NativeUiFinishMode::Migration { .. }) {
         let mut compare_scope = memory_context.scope();
         let current = match core.owner.save_scoped(&mut compare_scope) {
             Ok(value) => Some(value),
@@ -2117,7 +2174,7 @@ fn apply_view_effect(
     prepared_view: VisibleRange,
     source_follow: bool,
 ) {
-    if matches!(mode, NativeUiFinishMode::Migration) {
+    if matches!(mode, NativeUiFinishMode::Migration { .. }) {
         return;
     }
     if matches!(mode, NativeUiFinishMode::Prepare) {
@@ -2900,7 +2957,7 @@ impl NativeUiImport {
         let redo = DrawingSnapshotList::try_from_vec(redo, redo_memory)?;
         store.install_native_ui_history(items, undo, redo, selected, serial)?;
         let host_state = prepare_pending_host_state(parsed, &context)?;
-        if matches!(self.mode, Some(NativeUiFinishMode::Migration)) {
+        if matches!(self.mode, Some(NativeUiFinishMode::Migration { .. })) {
             let mut compare_scope = context.scope();
             let current = match self
                 .core

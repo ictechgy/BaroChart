@@ -20,6 +20,31 @@ class Actor {
  async close(){this.closed++;}
 }
 
+const waitTurn=()=>new Promise(resolve=>setImmediate(resolve));
+const bounded=(promise,ms=50)=>{let timer;return Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('operation did not settle')),ms);})]).finally(()=>clearTimeout(timer));};
+const deferred=()=>{let resolve;const promise=new Promise(yes=>{resolve=yes;});return{promise,resolve};};
+const PREPARE_HEADER=JSON.stringify({schema:'aster.async.ui',protocol:1,state:{drawings:{frameCounts:[0],undoCount:0,redoCount:0}}});
+
+function enableSuccessfulPrepare(source){
+ const original=source.call.bind(source);let uiComplete=false;
+ source.call=async(name,args=[])=>{
+  if(name==='nativePrepareBegin')return {ticket:7,metadataJSON:'{"schema":"aster.prepare"}',buffers:[],checkpoints:[]};
+  if(name==='nativeAsyncUIBegin')return PREPARE_HEADER;
+  if(name==='nativeAsyncUINext'){if(uiComplete)throw new Error('unexpected prepare UI read');uiComplete=true;return JSON.stringify({complete:true});}
+  if(name==='nativeAsyncUICheck'||name==='nativeAsyncRelease')return true;
+  return original(name,args);
+ };
+ const candidate=new Actor();candidate.generation='prepared-actor';candidate.state.view.from=42;
+ const candidateCall=candidate.call.bind(candidate);
+ candidate.call=async(name,args=[])=>{
+  if(['nativePrepareCreate','nativeAsyncStart','nativeAsyncUIImportBegin','nativeAsyncUIImportEnd','nativeAsyncFinish'].includes(name))return true;
+  if(name==='nativeAsyncStep')return {phase:'ready',done:1,total:1,complete:true};
+  return candidateCall(name,args);
+ };
+ candidate.writeF64=async()=>true;
+ return candidate;
+}
+
 test('session serializes a mutation and its authoritative state before the next mutation',async()=>{
  const actor=new Actor(),session=await openRustSession(actor,{count:10});actor.calls=[];
  await Promise.all([session.command('pan',[1]),session.command('pan',[2])]);
@@ -127,4 +152,68 @@ test('a mutation admitted before a candidate job keeps its call order',async()=>
  const session=await openRustSession(new Actor());
  const earlier=session.command('pan',[1]),later=session.prepareData({kind:'invalid'});
  await assert.rejects(later);await earlier;assert.equal(session.snapshot().view.from,1);await session.close();
+});
+
+test('an already-aborted candidate job rejects before calling view.flush',async()=>{
+ const actor=new Actor(),session=await openRustSession(actor),controller=new AbortController(),view={flushCalls:0,flush(){this.flushCalls++;return new Promise(()=>{});}};
+ session.claimView(view);controller.abort();const pending=session.prepareData({kind:'seeded',count:1},{signal:controller.signal,timeoutMs:100});
+ assert.equal(view.flushCalls,0);await assert.rejects(pending,error=>error.name==='AbortError'&&error.code==='ABORTED');assert.equal(session.activeJob,null);await session.close();
+});
+
+test('abort during a pending flush releases job and view ownership, ignores late flush, and permits fresh promotion',async()=>{
+ const source=new Actor(),candidate=enableSuccessfulPrepare(source),session=await openRustSession(source,{createActor:async()=>candidate}),gate=deferred(),controller=new AbortController();
+ const view={flushCalls:0,pauses:0,resumes:0,flush(){this.flushCalls++;return this.flushCalls===1?gate.promise:Promise.resolve();},pausePresentation(){this.pauses++;},resumePresentation(){this.resumes++;},promotionSize(){return{width:1,height:1};},stagePresentation(){return{commit(){},discard(){}};}};
+ session.claimView(view);const pending=session.prepareData({kind:'seeded',count:1},{signal:controller.signal,timeoutMs:1000});await waitTurn();assert.equal(view.flushCalls,1);controller.abort();
+ await assert.rejects(bounded(pending),error=>error.name==='AbortError'&&error.code==='ABORTED');assert.equal(session.activeJob,null);assert.equal(view.pauses,0);assert.equal(source.calls.some(([name])=>name==='nativePrepareBegin'),false);
+ gate.resolve();await waitTurn();assert.equal(view.pauses,0);assert.equal(source.calls.some(([name])=>name==='nativePrepareBegin'),false);assert.equal(session.generation,'test-actor');
+ const result=await session.prepareData({kind:'seeded',count:1},{timeoutMs:1000});assert.equal(result.status,'committed');assert.equal(session.generation,'prepared-actor');assert.equal(session.snapshot().view.from,42);assert.equal(source.closed,1);assert.equal(view.pauses,1);assert.equal(view.resumes,1);await session.close();
+});
+
+test('candidate timeout covers a never-resolving flush and late resolution cannot start the candidate',async()=>{
+ const actor=new Actor(),session=await openRustSession(actor),gate=deferred();let pauses=0;
+ session.claimView({flush:()=>gate.promise,pausePresentation(){pauses++;},resumePresentation(){pauses--;}});
+ const pending=session.prepareData({kind:'seeded',count:1},{timeoutMs:20});
+ await assert.rejects(bounded(pending),error=>error.name==='TimeoutError'&&error.code==='TIMEOUT');assert.equal(session.activeJob,null);assert.equal(pauses,0);
+ gate.resolve();await waitTurn();assert.equal(actor.calls.some(([name])=>name==='nativePrepareBegin'),false);assert.equal(pauses,0);await session.close();
+});
+
+test('candidate admission passes only its remaining deadline budget to the coordinator',async t=>{
+ const actor=new Actor(),originalCall=actor.call.bind(actor);actor.call=async(name,args)=>name==='nativePrepareBegin'?new Promise(()=>{}):originalCall(name,args);
+ const session=await openRustSession(actor),gate=deferred(),controller=new AbortController(),realSetTimeout=globalThis.setTimeout,delays=[];
+ session.claimView({flush:()=>gate.promise,pausePresentation(){},resumePresentation(){}});
+ globalThis.setTimeout=(handler,delay,...args)=>{delays.push(delay);return realSetTimeout(handler,delay,...args);};t.after(()=>{globalThis.setTimeout=realSetTimeout;});
+ const pending=session.prepareData({kind:'seeded',count:1},{signal:controller.signal,timeoutMs:1000});
+ try{
+  await new Promise(resolve=>realSetTimeout(resolve,25));gate.resolve();await waitTurn();await waitTurn();
+  assert.ok(delays.length>=2,`expected admission and coordinator deadlines, got ${delays}`);assert.ok(delays[1]<delays[0]-10,`expected remaining timeout budget, got ${delays}`);
+ }finally{controller.abort();await assert.rejects(pending,error=>error.name==='AbortError');await session.close();}
+ assert.equal(session.activeJob,null);
+});
+
+test('abort and timeout also release a candidate waiting at the session queue barrier',async()=>{
+ for(const mode of ['abort','timeout']){
+  const actor=new Actor(),originalCall=actor.call.bind(actor),mutationGate=deferred(),entered=deferred();
+  actor.call=async(name,args)=>{if(name==='nativeCommand'){entered.resolve();await mutationGate.promise;}return originalCall(name,args);};
+  const session=await openRustSession(actor),controller=new AbortController();let pauses=0,resumes=0;
+  session.claimView({async flush(){},pausePresentation(){pauses++;},resumePresentation(){resumes++;}});
+  const earlier=session.command('pan',[1]);await entered.promise;
+  const pending=session.prepareData({kind:'seeded',count:1},{signal:controller.signal,timeoutMs:mode==='timeout'?20:1000});await waitTurn();assert.equal(pauses,1);
+  if(mode==='abort')controller.abort();
+  await assert.rejects(bounded(pending),error=>error.name===(mode==='abort'?'AbortError':'TimeoutError'));
+  assert.equal(session.activeJob,null);assert.equal(pauses,1);assert.equal(resumes,1);assert.equal(actor.calls.some(([name])=>name==='nativePrepareBegin'),false);
+  mutationGate.resolve();await earlier;await waitTurn();assert.equal(actor.calls.some(([name])=>name==='nativePrepareBegin'),false);await session.close();
+ }
+});
+
+test('migration admission abort and timeout cover nativeSaveWorkspace and ignore its late result',async()=>{
+ for(const operation of ['recreate','capture'])for(const mode of ['abort','timeout']){
+  const actor=new Actor(),originalCall=actor.call.bind(actor),workspace=deferred(),entered=deferred();let targetCreates=0;
+  actor.call=async(name,args=[])=>{if(name==='nativeSaveWorkspace'){actor.calls.push([name]);entered.resolve();return workspace.promise;}return originalCall(name,args);};
+  const session=await openRustSession(actor,{createActor:async()=>{targetCreates++;return new Actor();}}),controller=new AbortController(),options={signal:controller.signal,timeoutMs:mode==='timeout'?20:1000};
+  const pending=operation==='recreate'?session.recreate(options):session.withMigrationCapture({}, {...options,consume:async()=>({}),activate:async()=>({})});
+  await entered.promise;if(mode==='abort')controller.abort();
+  await assert.rejects(bounded(pending),error=>error.name===(mode==='abort'?'AbortError':'TimeoutError')&&error.code===(mode==='abort'?'ABORTED':'TIMEOUT'));
+  assert.equal(session.activeJob,null);workspace.resolve('{}');await waitTurn();await waitTurn();
+  assert.equal(actor.calls.some(([name])=>name==='web.migrationSourceBegin'),false);assert.equal(targetCreates,0);await session.close();
+ }
 });

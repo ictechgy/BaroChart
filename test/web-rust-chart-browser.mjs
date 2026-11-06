@@ -52,12 +52,41 @@ try{
    const migratedGeneration=session.generation;
    await session.prepareData({kind:'seeded',count:12000,seed:7,visibleBars:200});await chart.flush();
    if(session.generation===migratedGeneration||session.snapshot().data.length!==12000||JSON.stringify(await session.query('web.drawingsState'))!==JSON.stringify(originalDrawings))throw new Error('Full preparation did not atomically promote the prepared Worker');
+   const admissionBaseline={generation:session.generation,data:JSON.stringify(session.snapshot().data),view:JSON.stringify(session.snapshot().view),drawings:JSON.stringify(await session.query('web.drawingsState')),canvas:chart.canvas,storedBars:chart.lastScene.stats.storedBars};
+   const NativeWorker=globalThis.Worker;let candidateWorkers=0;
+   function CountingWorker(...args){candidateWorkers++;return new NativeWorker(...args);}
+   CountingWorker.prototype=NativeWorker.prototype;Object.setPrototypeOf(CountingWorker,NativeWorker);globalThis.Worker=CountingWorker;
+   const assertAdmissionBaseline=async label=>{const snapshot=session.snapshot();if(session.generation!==admissionBaseline.generation||JSON.stringify(snapshot.data)!==admissionBaseline.data||JSON.stringify(snapshot.view)!==admissionBaseline.view||JSON.stringify(await session.query('web.drawingsState'))!==admissionBaseline.drawings||chart.canvas!==admissionBaseline.canvas||chart.lastScene.stats.storedBars!==admissionBaseline.storedBars)throw new Error(label+' changed live source/data/view');};
+   const cancelDuringFlush=async(mode,count)=>{
+    const controller=new AbortController(),previousFlush=chart.flush;let enterFlush,releaseFlush,released=false;
+    const entered=new Promise(resolve=>{enterFlush=resolve;}),gate=new Promise(resolve=>{releaseFlush=resolve;}),workersBefore=candidateWorkers;
+    chart.flush=()=>{enterFlush();return gate;};
+    const pending=session.prepareData({kind:'seeded',count,seed:count,visibleBars:200},{signal:controller.signal,timeoutMs:mode==='abort'?1000:50});
+    try{
+     await Promise.race([entered,new Promise((_,reject)=>setTimeout(()=>reject(new Error(mode+' flush admission did not start')),250))]);
+     if(mode==='abort')controller.abort();
+     const outcome=await Promise.race([pending.then(value=>({value}),error=>({error,beforeRelease:!released})),new Promise(resolve=>setTimeout(()=>resolve({hung:true}),500))]);
+     if(outcome.hung)throw new Error(mode+' candidate did not settle before flush release');
+     if(!outcome.error||outcome.error.name!==(mode==='abort'?'AbortError':'TimeoutError')||outcome.error.code!==(mode==='abort'?'ABORTED':'TIMEOUT')||!outcome.beforeRelease)throw new Error(mode+' candidate returned the wrong pre-flush outcome');
+     if(session.activeJob!==null||candidateWorkers!==workersBefore)throw new Error(mode+' candidate retained ownership or started a Worker');
+     await assertAdmissionBaseline(mode+' cancellation');
+    }finally{released=true;releaseFlush();chart.flush=previousFlush;}
+    await Promise.resolve();await new Promise(resolve=>setTimeout(resolve,0));
+    if(session.activeJob!==null||candidateWorkers!==workersBefore)throw new Error(mode+' late flush started a candidate');
+    await assertAdmissionBaseline(mode+' late flush');
+   };
+   try{
+    await cancelDuringFlush('abort',12001);await cancelDuringFlush('timeout',12002);
+    const beforeFresh=session.generation,workersBeforeFresh=candidateWorkers;
+    await session.prepareData({kind:'seeded',count:12000,seed:11,visibleBars:200},{timeoutMs:5000});await chart.flush();
+    if(session.generation===beforeFresh||candidateWorkers!==workersBeforeFresh+1||session.snapshot().data.length!==12000||JSON.stringify(await session.query('web.drawingsState'))!==admissionBaseline.drawings)throw new Error('Fresh prepare did not promote after cancelled flush admissions');
+   }finally{globalThis.Worker=NativeWorker;}
    await chart.destroy();
    if(session.closed)throw new Error('View destruction closed session');
    chart=await createRustChart(document.getElementById('chart'),session,{renderer:'canvas',dpr:()=>1});await chart.flush();
    await session.close();
    if(!chart.disposed||document.getElementById('chart').querySelector('canvas'))throw new Error('Session close did not retire attached view');
-   return {passed:true,backend:session.backend,storedBars:12000,drawingTools:true,undoRedo:true,rendererStatePreserved:true,rendererFailureRollback:true,concurrentRendererReplacement:true,paramsTwoWorkers:true,workspaceUiWorkerPromotion:true,fullPrepareWorkerPromotion:true,sessionViewLifetime:true,webgl,userAgent:navigator.userAgent};
+   return {passed:true,backend:session.backend,storedBars:12000,drawingTools:true,undoRedo:true,rendererStatePreserved:true,rendererFailureRollback:true,concurrentRendererReplacement:true,paramsTwoWorkers:true,workspaceUiWorkerPromotion:true,fullPrepareWorkerPromotion:true,candidateAdmissionCancellation:true,candidateAdmissionTimeout:true,candidateAdmissionLateFlush:true,candidateAdmissionRecovery:true,sessionViewLifetime:true,webgl,userAgent:navigator.userAgent};
   }finally{await chart?.destroy();await session.close();}
  })()`);
  assert.equal(result.passed,true);

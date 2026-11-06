@@ -146,7 +146,7 @@
     "check:quickjs:checkpoints": "node scripts/test-quickjs-cloud.mjs --checkpoint",
     "check:quickjs:target": "node scripts/test-quickjs-cloud.mjs --target",
     "check:quickjs:source": "node scripts/test-quickjs-cloud.mjs --source",
-    "test:wasm:browser": "node test/web-rust-chart-browser.mjs && node test/web-backend-switch-browser.mjs && node test/web-layout-history-switch-browser.mjs && node test/web-rust-demo-browser.mjs && node test/web-rust-widgets-browser.mjs && node test/web-rust-tools-browser.mjs && node test/web-wasm-workspace-browser.mjs",
+    "test:wasm:browser": "node test/web-rust-chart-browser.mjs && node test/web-backend-switch-browser.mjs && node test/web-layout-history-switch-browser.mjs && node test/web-rust-demo-browser.mjs && node test/web-rust-widgets-browser.mjs && node test/web-rust-tools-browser.mjs && node test/web-wasm-workspace-browser.mjs && node test/web-wasm-actor-browser.mjs",
     "test:wasm:package": "node scripts/test-wasm-package-consumers.mjs",
     "bench:wasm": "node benchmarks/web-rust-wasm.mjs"
   },
