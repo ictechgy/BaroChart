@@ -6,6 +6,12 @@ const INGESTION_KINDS=['append','update','correction'],INGESTION_BYTES=49,INGEST
 const ingestionPolicyKeys=['streamId','generation','firstSequence','maxQueuedEvents','maxQueuedBytes','maxBatchEvents','maxStoredBars','maxStoreBytes'];
 const ingestionCounterKeys=['accepted','applied','cancelled','rejectedPackets','rejectedEvents','failedDrains','peakPendingEvents','peakPendingBytes','lastAppliedSequence','lastCancelledSequence'];
 const ingestionModelLeases=new WeakMap();
+function ingestionErrorMessage(error){
+ if(typeof error==='string')return error.slice(0,256);
+ try{const message=error?.message;if(typeof message==='string')return message.slice(0,256);}catch{}
+ return 'Invalid ingestion input';
+}
+function isIngestionError(error){try{return error instanceof IngestionError;}catch{return false;}}
 export function assertDataIngestionIdle(model){if(ingestionModelLeases.get(model))throw new IngestionError('BUSY','Model has an active async ingestion fence');}
 export function acquireDataIngestionLease(model){
  const releaseSession=model.dataIngestion?.acquireLease();ingestionModelLeases.set(model,(ingestionModelLeases.get(model)??0)+1);let released=false;
@@ -70,7 +76,7 @@ export class DataIngestion {
    this.store=this.model.store;this.sourceVersion=this.store.version;
   }
  }
- rejection(error,count=0){if(!this.closed){if(this.counters.rejectedPackets<Number.MAX_SAFE_INTEGER)this.counters.rejectedPackets++;this.counters.rejectedEvents=Math.min(Number.MAX_SAFE_INTEGER,this.counters.rejectedEvents+count);}throw error instanceof IngestionError?error:new IngestionError('INVALID_INPUT',String(error.message).slice(0,256),error);}
+ rejection(error,count=0){if(!this.closed){if(this.counters.rejectedPackets<Number.MAX_SAFE_INTEGER)this.counters.rejectedPackets++;this.counters.rejectedEvents=Math.min(Number.MAX_SAFE_INTEGER,this.counters.rejectedEvents+count);}throw isIngestionError(error)?error:new IngestionError('INVALID_INPUT',ingestionErrorMessage(error),error);}
  enqueue(packet,ownerGuard=null){
   if(ownerGuard!==null&&typeof ownerGuard!=='function')throw new TypeError('Owner guard callback required');ownerGuard?.();let ownerFailed=false;const guard=()=>{if(!ownerGuard)return;try{ownerGuard();}catch(error){ownerFailed=true;throw error;}};
   let events=[];try{

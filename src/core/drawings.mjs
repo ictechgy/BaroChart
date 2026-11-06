@@ -48,6 +48,40 @@ function segmentDistance(x, y, a, b) {
   const dx = b.x - a.x, dy = b.y - a.y, t = Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / (dx * dx + dy * dy || 1)));
   return Math.hypot(x - a.x - t * dx, y - a.y - t * dy);
 }
+function ellipseDistance(x,y,centerX,centerY,radiusX,radiusY) {
+  const offsetX=Math.abs(x-centerX),offsetY=Math.abs(y-centerY),xMajor=radiusX>=radiusY;
+  const majorRadius=xMajor?radiusX:radiusY,minorRadius=xMajor?radiusY:radiusX,majorPoint=xMajor?offsetX:offsetY,minorPoint=xMajor?offsetY:offsetX;
+  // The major axis needs a separate branch: an interior point can be closest
+  // to either of two symmetric off-axis points rather than to the endpoint.
+  if(minorPoint===0){const threshold=majorRadius-minorRadius*(minorRadius/majorRadius);if(majorPoint<threshold){const ratio=majorPoint/threshold,closestMajor=majorRadius*ratio,closestMinor=minorRadius*Math.sqrt(Math.max(0,1-ratio*ratio));return Math.hypot(majorPoint-closestMajor,closestMinor);}return Math.abs(majorPoint-majorRadius);}
+  if(majorPoint===0)return Math.abs(minorPoint-minorRadius);
+  const normalizedMajor=majorPoint/majorRadius,normalizedMinor=minorPoint/minorRadius,aspect=majorRadius/minorRadius,aspectSquared=Math.min(aspect*aspect,Number.MAX_VALUE),normalizedLength=Math.hypot(normalizedMajor,normalizedMinor);
+  if(normalizedLength===1)return 0;
+  let low=0,high;
+  if(normalizedLength<1){
+    // In minor-radius-squared units the unique Lagrange multiplier is in
+    // (normalizedMinor - 1, 0) for every strictly interior off-axis point.
+    low=normalizedMinor-1;high=0;
+    for(let i=0;i<64;i++){const middle=(low+high)/2,majorTerm=normalizedMajor/(1+middle/aspectSquared),minorTerm=normalizedMinor/(1+middle);if(Math.hypot(majorTerm,minorTerm)>1)low=middle;else high=middle;}
+    const multiplier=(low+high)/2;
+    return Math.hypot(majorPoint-majorPoint/(1+multiplier/aspectSquared),minorPoint-minorPoint/(1+multiplier));
+  }
+  if(normalizedMajor<1){
+    // This finite upper bound makes the minor term alone fill the remaining
+    // unit-circle component; the major term can only shrink as s increases.
+    high=normalizedMinor/Math.sqrt(1-normalizedMajor*normalizedMajor)-1;
+    for(let i=0;i<64;i++){const middle=(low+high)/2,majorTerm=normalizedMajor/(1+middle/aspectSquared),minorTerm=normalizedMinor/(1+middle);if(Math.hypot(majorTerm,minorTerm)>1)low=middle;else high=middle;}
+    const multiplier=(low+high)/2;
+    return Math.hypot(majorPoint-majorPoint/(1+multiplier/aspectSquared),minorPoint-minorPoint/(1+multiplier));
+  }
+  // For exterior points at or beyond the major endpoint, scale the multiplier
+  // by the major radius. This avoids overflow for very high aspect ratios.
+  const scaledMinor=normalizedMinor/aspectSquared;high=Math.hypot(normalizedMajor,scaledMinor);
+  if(!Number.isFinite(high))return Infinity;
+  for(let i=0;i<64;i++){const middle=(low+high)/2,majorTerm=normalizedMajor/(1+middle),minorTerm=normalizedMinor/(1+aspectSquared*middle);if(Math.hypot(majorTerm,minorTerm)>1)low=middle;else high=middle;}
+  const multiplier=(low+high)/2;
+  return Math.hypot(majorPoint-majorPoint/(1+multiplier),minorPoint-minorPoint/(1+aspectSquared*multiplier));
+}
 function extendedSegment(a,b,p,ray=false) {
  const dx=b.x-a.x,dy=b.y-a.y;if(!dx&&!dy)return [];
  let lo=ray?0:-Infinity,hi=Infinity;
@@ -119,8 +153,8 @@ export function drawingHitTest(store, layout, x, y, tolerance = 8) {
     else if (!['rectangle','ellipse'].includes(d.type)) {for(const c of drawingGeometry(d,layout))if(c.op==='lines'){for(let i=0;i<c.coords.length;i+=4)if(segmentDistance(x,y,{x:c.coords[i],y:c.coords[i+1]},{x:c.coords[i+2],y:c.coords[i+3]})<=bodyTolerance){hit=true;break;}if(hit)break;}}
     else if (d.type === 'rectangle') {const l = Math.min(a.x, b.x), r = Math.max(a.x, b.x), t = Math.min(a.y, b.y), z = Math.max(a.y, b.y); hit = x >= l - bodyTolerance && x <= r + bodyTolerance && y >= t - bodyTolerance && y <= z + bodyTolerance && Math.min(Math.abs(x - l), Math.abs(x - r), Math.abs(y - t), Math.abs(y - z)) <= bodyTolerance;}
     else {
-      const rx = Math.abs(b.x - a.x) / 2, ry = Math.abs(b.y - a.y) / 2;
-      if (rx && ry) hit = Math.abs(Math.hypot((x - (a.x + b.x) / 2) / rx, (y - (a.y + b.y) / 2) / ry) - 1) * Math.min(rx, ry) <= bodyTolerance;
+      const differenceX=b.x-a.x,differenceY=b.y-a.y,sumX=a.x+b.x,sumY=a.y+b.y,rx=Number.isFinite(differenceX)?Math.abs(differenceX)/2:Math.abs(a.x/2-b.x/2),ry=Number.isFinite(differenceY)?Math.abs(differenceY)/2:Math.abs(a.y/2-b.y/2),centerX=Number.isFinite(sumX)?sumX/2:a.x/2+b.x/2,centerY=Number.isFinite(sumY)?sumY/2:a.y/2+b.y/2;
+      if (rx && ry) hit = ellipseDistance(x,y,centerX,centerY,rx,ry) <= bodyTolerance;
       // One collapsed radius still draws an axis-aligned stroke. A point with
       // both radii zero has no outline; only its existing selected handles hit.
       else if (rx || ry) hit = segmentDistance(x, y, a, b) <= bodyTolerance;

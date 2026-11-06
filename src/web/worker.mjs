@@ -2,6 +2,21 @@ import {modelRequest,configurationKey,hydrateModel,installRecomputed,requestOpti
 import {UnsupportedIndicatorError} from '../core/indicator-modules.mjs';
 import {acquireDataIngestionLease,dataIngestionBatchLimits} from '../core/ingestion.mjs';
 const aborted=()=>new DOMException('Calculation cancelled','AbortError');
+const record=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
+function chartWorkerEnvelope(data){
+ if(!record(data))throw new TypeError('Calculation worker response protocol');
+ const keys=['progress','error','packet'].filter(key=>Object.hasOwn(data,key));
+ if(keys.length!==1)throw new TypeError('Calculation worker response protocol');
+ const key=keys[0],value=data[key];
+ if(key==='progress'&&!record(value)||key==='error'&&(typeof value!=='string'||value.length>256)||key==='packet'&&!record(value))throw new TypeError('Calculation worker response protocol');
+ return {key,value};
+}
+function workerMessageError(event){
+ let detail='';
+ try{if(typeof event?.message==='string'&&event.message)detail=`: ${event.message.slice(0,256)}`;}catch{}
+ const message=`Calculation worker message failed${detail}`;
+ return new Error(message);
+}
 async function operationDeadline(options,work){
  const timeoutMs=options.timeoutMs===undefined?30000:options.timeoutMs;
  if(typeof timeoutMs!=='number'||!Number.isFinite(timeoutMs)||timeoutMs<=0||timeoutMs>120000)throw new RangeError('Calculation timeout must be positive and at most 120000ms');
@@ -39,6 +54,7 @@ export function runChartWorker(request,{signal,onProgress=()=>{},timeoutMs=30000
    if(settled)return;settled=true;clearTimeout(timeout);
    // Cleanup failure must neither skip termination nor hide the operation error.
    try{if(listenerAttempted)signal.removeEventListener('abort',cancel);}catch(cleanup){error??=cleanup;}
+   try{if(worker)worker.onmessageerror=null;}catch(cleanup){error??=cleanup;}
    try{worker?.terminate();}catch(cleanup){error??=cleanup;}
    error?reject(error):resolve(packet);
   };
@@ -50,8 +66,9 @@ export function runChartWorker(request,{signal,onProgress=()=>{},timeoutMs=30000
    timeout=setTimeout(()=>finish(timeoutError),timeoutMs);
    if(signal){listenerAttempted=true;signal.addEventListener('abort',cancel,{once:true});if(signal.aborted)cancel();}
    if(settled)return;
-   worker.onerror=e=>finish(new Error(e.message||'Worker failed'));
-   worker.onmessage=({data})=>{if(settled)return;if(data.progress){try{onProgress(data.progress);}catch{}return;}if(data.error){const error=data.errorName==='UnsupportedIndicatorError'&&data.errorCode==='UNSUPPORTED_INDICATOR_MODULE'?new UnsupportedIndicatorError(''):new Error(data.error);if(error instanceof UnsupportedIndicatorError)error.message=String(data.error).slice(0,256);finish(error);}else if(data.packet)finish(null,data.packet);};
+   worker.onerror=e=>{try{finish(new Error(typeof e?.message==='string'&&e.message?e.message.slice(0,256):'Worker failed'));}catch(error){finish(error);}};
+   worker.onmessageerror=e=>finish(workerMessageError(e));
+   worker.onmessage=event=>{if(settled)return;try{const {key,value}=chartWorkerEnvelope(event?.data);if(key==='progress'){try{onProgress(value);}catch{}return;}if(key==='error'){const error=event.data.errorName==='UnsupportedIndicatorError'&&event.data.errorCode==='UNSUPPORTED_INDICATOR_MODULE'?new UnsupportedIndicatorError(''):new Error(value);if(error instanceof UnsupportedIndicatorError)error.message=String(value).slice(0,256);finish(error);}else finish(null,value);}catch(error){finish(error);}};
    worker.postMessage(request);
   }catch(error){finish(error);}
  });

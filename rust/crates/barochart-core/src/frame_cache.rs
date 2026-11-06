@@ -751,6 +751,11 @@ impl NativeFrameCache {
                 Arc::clone(self.layout.as_ref().expect("valid frame key has layout")),
             )
         };
+        let key = if base_changed {
+            Some(FrameStaticKey::capture(chart, width, height, &self.memory)?)
+        } else {
+            None
+        };
         let drawings_changed = base_changed
             || self
                 .drawing_key
@@ -764,6 +769,11 @@ impl NativeFrameCache {
         } else {
             Arc::clone(self.drawings.as_ref().expect("valid drawing key has layer"))
         };
+        let drawing_key = if drawings_changed {
+            Some(DrawingStaticKey::capture(chart, &self.memory)?)
+        } else {
+            None
+        };
         let resolved = resolve_crosshair(chart, &layout)?;
         let hover = FrameLayer::from_owned_commands(
             Arc::clone(base.metadata()),
@@ -773,16 +783,19 @@ impl NativeFrameCache {
             base.commands().len() + drawings.commands().len() + hover.commands().len();
         let stats =
             stats_with_command_count(base.metadata().base_stats(), command_count, &self.memory)?;
-        // JS commits only after every builder/resolver succeeds and recaptures state after lazy
-        // indicator/range work performed by the base build.
-        let key = FrameStaticKey::capture(chart, width, height, &self.memory)?;
-        let drawing_key = DrawingStaticKey::capture(chart, &self.memory)?;
+        // JS commits only after every builder/resolver succeeds. A rebuilt base captures lazy
+        // indicator/range work immediately after that build; a reused base keeps its prior key so
+        // resolver mutation invalidates the next frame instead of relabeling stale base commands.
         self.base = Some(base);
         self.drawings = Some(drawings);
         self.hover = Some(hover);
         self.layout = Some(layout);
-        self.key = Some(key);
-        self.drawing_key = Some(drawing_key);
+        if let Some(key) = key {
+            self.key = Some(key);
+        }
+        if let Some(drawing_key) = drawing_key {
+            self.drawing_key = Some(drawing_key);
+        }
         self.stats = Some(stats);
         Ok(self.borrowed(base_changed, drawings_changed))
     }

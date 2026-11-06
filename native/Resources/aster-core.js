@@ -306,12 +306,13 @@ class BarStore {
     Object.assign(this,{length,capacity,columns,index});this.changed(0,event.kind,{added:event.added});
   }
   prepend(bars) {
-    if (!Array.isArray(bars)) throw new TypeError('Prepend bars required'); if (!bars.length) return;
-    sizeLimit(bars.length+this.length,this.maxBars,'Bar count');
-    if (this.length && bars[bars.length - 1].time >= this.columns.time[0]) throw new RangeError('Prepend must precede existing history without overlap');
-    let previous = -Infinity; for (const bar of bars) {validateBar(bar, previous); previous = bar.time;}
-    const n = bars.length, columns = Object.fromEntries(FIELDS.map(k => [k, new Float64Array(n + this.length)]));
-    for (let i = 0; i < n; i++) for (const k of FIELDS) columns[k][i] = bars[i][k];
+    if (!Array.isArray(bars)) throw new TypeError('Prepend bars required'); const n=bars.length; if (!n) return;
+    sizeLimit(n+this.length,this.maxBars,'Bar count');
+    if(this.length&&bars[n-1].time>=this.columns.time[0])throw new RangeError('Prepend must precede existing history without overlap');
+    const columns=Object.fromEntries(FIELDS.map(k=>[k,new Float64Array(n+this.length)])),scratch={};let previous=-Infinity;
+    for(let i=0;i<n;i++){readBar(bars[i],scratch);validateBar(scratch,previous);previous=scratch.time;for(const k of FIELDS)columns[k][i]=scratch[k];}
+    if(bars.length!==n)throw new RangeError('OHLCV array length changed during snapshot');
+    if(this.length&&columns.time[n-1]>=this.columns.time[0])throw new RangeError('Prepend must precede existing history without overlap');
     for (const k of FIELDS) columns[k].set(this.columns[k].subarray(0, this.length), n);
     this.setColumns(columns, n + this.length, {kind: 'prepend', added: n});
   }
@@ -1578,6 +1579,40 @@ function segmentDistance(x, y, a, b) {
   const dx = b.x - a.x, dy = b.y - a.y, t = Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / (dx * dx + dy * dy || 1)));
   return Math.hypot(x - a.x - t * dx, y - a.y - t * dy);
 }
+function ellipseDistance(x,y,centerX,centerY,radiusX,radiusY) {
+  const offsetX=Math.abs(x-centerX),offsetY=Math.abs(y-centerY),xMajor=radiusX>=radiusY;
+  const majorRadius=xMajor?radiusX:radiusY,minorRadius=xMajor?radiusY:radiusX,majorPoint=xMajor?offsetX:offsetY,minorPoint=xMajor?offsetY:offsetX;
+  // The major axis needs a separate branch: an interior point can be closest
+  // to either of two symmetric off-axis points rather than to the endpoint.
+  if(minorPoint===0){const threshold=majorRadius-minorRadius*(minorRadius/majorRadius);if(majorPoint<threshold){const ratio=majorPoint/threshold,closestMajor=majorRadius*ratio,closestMinor=minorRadius*Math.sqrt(Math.max(0,1-ratio*ratio));return Math.hypot(majorPoint-closestMajor,closestMinor);}return Math.abs(majorPoint-majorRadius);}
+  if(majorPoint===0)return Math.abs(minorPoint-minorRadius);
+  const normalizedMajor=majorPoint/majorRadius,normalizedMinor=minorPoint/minorRadius,aspect=majorRadius/minorRadius,aspectSquared=Math.min(aspect*aspect,Number.MAX_VALUE),normalizedLength=Math.hypot(normalizedMajor,normalizedMinor);
+  if(normalizedLength===1)return 0;
+  let low=0,high;
+  if(normalizedLength<1){
+    // In minor-radius-squared units the unique Lagrange multiplier is in
+    // (normalizedMinor - 1, 0) for every strictly interior off-axis point.
+    low=normalizedMinor-1;high=0;
+    for(let i=0;i<64;i++){const middle=(low+high)/2,majorTerm=normalizedMajor/(1+middle/aspectSquared),minorTerm=normalizedMinor/(1+middle);if(Math.hypot(majorTerm,minorTerm)>1)low=middle;else high=middle;}
+    const multiplier=(low+high)/2;
+    return Math.hypot(majorPoint-majorPoint/(1+multiplier/aspectSquared),minorPoint-minorPoint/(1+multiplier));
+  }
+  if(normalizedMajor<1){
+    // This finite upper bound makes the minor term alone fill the remaining
+    // unit-circle component; the major term can only shrink as s increases.
+    high=normalizedMinor/Math.sqrt(1-normalizedMajor*normalizedMajor)-1;
+    for(let i=0;i<64;i++){const middle=(low+high)/2,majorTerm=normalizedMajor/(1+middle/aspectSquared),minorTerm=normalizedMinor/(1+middle);if(Math.hypot(majorTerm,minorTerm)>1)low=middle;else high=middle;}
+    const multiplier=(low+high)/2;
+    return Math.hypot(majorPoint-majorPoint/(1+multiplier/aspectSquared),minorPoint-minorPoint/(1+multiplier));
+  }
+  // For exterior points at or beyond the major endpoint, scale the multiplier
+  // by the major radius. This avoids overflow for very high aspect ratios.
+  const scaledMinor=normalizedMinor/aspectSquared;high=Math.hypot(normalizedMajor,scaledMinor);
+  if(!Number.isFinite(high))return Infinity;
+  for(let i=0;i<64;i++){const middle=(low+high)/2,majorTerm=normalizedMajor/(1+middle),minorTerm=normalizedMinor/(1+aspectSquared*middle);if(Math.hypot(majorTerm,minorTerm)>1)low=middle;else high=middle;}
+  const multiplier=(low+high)/2;
+  return Math.hypot(majorPoint-majorPoint/(1+multiplier),minorPoint-minorPoint/(1+aspectSquared*multiplier));
+}
 function extendedSegment(a,b,p,ray=false) {
  const dx=b.x-a.x,dy=b.y-a.y;if(!dx&&!dy)return [];
  let lo=ray?0:-Infinity,hi=Infinity;
@@ -1649,8 +1684,8 @@ function drawingHitTest(store, layout, x, y, tolerance = 8) {
     else if (!['rectangle','ellipse'].includes(d.type)) {for(const c of drawingGeometry(d,layout))if(c.op==='lines'){for(let i=0;i<c.coords.length;i+=4)if(segmentDistance(x,y,{x:c.coords[i],y:c.coords[i+1]},{x:c.coords[i+2],y:c.coords[i+3]})<=bodyTolerance){hit=true;break;}if(hit)break;}}
     else if (d.type === 'rectangle') {const l = Math.min(a.x, b.x), r = Math.max(a.x, b.x), t = Math.min(a.y, b.y), z = Math.max(a.y, b.y); hit = x >= l - bodyTolerance && x <= r + bodyTolerance && y >= t - bodyTolerance && y <= z + bodyTolerance && Math.min(Math.abs(x - l), Math.abs(x - r), Math.abs(y - t), Math.abs(y - z)) <= bodyTolerance;}
     else {
-      const rx = Math.abs(b.x - a.x) / 2, ry = Math.abs(b.y - a.y) / 2;
-      if (rx && ry) hit = Math.abs(Math.hypot((x - (a.x + b.x) / 2) / rx, (y - (a.y + b.y) / 2) / ry) - 1) * Math.min(rx, ry) <= bodyTolerance;
+      const differenceX=b.x-a.x,differenceY=b.y-a.y,sumX=a.x+b.x,sumY=a.y+b.y,rx=Number.isFinite(differenceX)?Math.abs(differenceX)/2:Math.abs(a.x/2-b.x/2),ry=Number.isFinite(differenceY)?Math.abs(differenceY)/2:Math.abs(a.y/2-b.y/2),centerX=Number.isFinite(sumX)?sumX/2:a.x/2+b.x/2,centerY=Number.isFinite(sumY)?sumY/2:a.y/2+b.y/2;
+      if (rx && ry) hit = ellipseDistance(x,y,centerX,centerY,rx,ry) <= bodyTolerance;
       // One collapsed radius still draws an axis-aligned stroke. A point with
       // both radii zero has no outline; only its existing selected handles hit.
       else if (rx || ry) hit = segmentDistance(x, y, a, b) <= bodyTolerance;
@@ -1846,10 +1881,17 @@ function indicatorOwnerGuard(model,owner,snapshot,checkBindings=true,allowTransa
 function managedArraySnapshot(value,label,max,record){
   const refs=strictArrayValues(value,label,max);return {array:value,refs,records:refs.map(record)};
 }
-function managedArrayGuard(snapshot,label,max,record){
-  const refs=strictArrayValues(snapshot.array,label,max);if(refs.length!==snapshot.refs.length||refs.some((value,index)=>value!==snapshot.refs[index]))throw staleError(label+' owner changed');
-  if(record&&refs.some((value,index)=>{const next=record(value),before=snapshot.records[index];return Object.keys(before).some(key=>next[key]!==before[key]);}))throw staleError(label+' owner changed');
+function managedArrayGuard(snapshot,label,max,record,errorLabel=label){
+  const refs=strictArrayValues(snapshot.array,label,max);if(refs.length!==snapshot.refs.length||refs.some((value,index)=>value!==snapshot.refs[index]))throw staleError(errorLabel+' owner changed');
+  if(record&&refs.some((value,index)=>{const next=record(value),before=snapshot.records[index];return Object.keys(before).some(key=>next[key]!==before[key]);}))throw staleError(errorLabel+' owner changed');
 }
+function managedOwnerGuard(model,key,snapshot,label,max,record){
+  if(ownData(model,key,label+' owner')!==snapshot.array)throw staleError(label+' owner changed');
+  managedArrayGuard(snapshot,label+' owner',max,record,label);
+}
+function indicatorEngineSnapshot(model){const store=ownData(model,'store','Chart'),engine=ownData(model,'indicators','Chart'),entries=ownData(engine,'entries','Indicator engine');return {store,version:store.version,engine,entries};}
+function indicatorBindingSnapshot(snapshot,id){const entry=id===undefined||id===null?undefined:Map.prototype.get.call(snapshot.entries,id);return {...snapshot,id,entry,definition:entry?ownData(entry,'def','Indicator entry'):undefined,params:entry?ownData(entry,'params','Indicator entry'):undefined,name:entry?ownData(entry,'name','Indicator entry'):undefined};}
+function indicatorBindingGuard(model,snapshot,id){const engine=ownData(model,'indicators','Chart');if(ownData(model,'store','Chart')!==snapshot.store||snapshot.store.version!==snapshot.version||engine!==snapshot.engine||ownData(engine,'entries','Indicator engine')!==snapshot.entries||Map.prototype.get.call(snapshot.entries,snapshot.id)!==snapshot.entry||id!==snapshot.id||snapshot.entry&&(ownData(snapshot.entry,'def','Indicator entry')!==snapshot.definition||ownData(snapshot.entry,'params','Indicator entry')!==snapshot.params||ownData(snapshot.entry,'name','Indicator entry')!==snapshot.name))throw staleError('Series indicator owner changed');}
 function drawingFrameSnapshot(value,label){return managedArraySnapshot(value,label,RESOURCE_LIMITS.maxDrawings,drawing=>({ref:drawing,panel:ownData(drawing,'panel','Drawing')}));}
 function drawingFrameGuard(snapshot,label){managedArrayGuard(snapshot,label,RESOURCE_LIMITS.maxDrawings,drawing=>({ref:drawing,panel:ownData(drawing,'panel','Drawing')}));}
 function drawingHistorySnapshot(drawings){
@@ -1909,7 +1951,7 @@ class ChartModel {
     panels.forEach(p => this.addPanel(p));if(!Array.isArray(axes))throw new TypeError('Axes array required');axes.forEach(a=>this.addAxis(a));this.indicators=new IndicatorEngine(store);try{this.drawings=new DrawingStore(); this.unsubscribe = store._subscribeInternal(({kind, from, added, appended}) => {if(kind==='compact')return;if (kind === 'prepend' && store.length > added) {this.view.from += added; this.view.to += added;} else if (kind === 'reset') this.fit(); if ((kind === 'append'||kind==='batch'&&appended>0||kind==='prepend'&&added>0&&store.length===added) && this.follow) {const span = this.view.to - this.view.from; this.view.to = store.length + this.forwardOffset() - .5; this.view.from = this.view.to - span;} for (const s of this.series) s.dirtyFrom = Math.min(s.dirtyFrom ?? Infinity, from);});registerStoreOwner(this,store,'model');}catch(error){try{this.indicators.dispose();}catch{}throw error;}
   }
   // 패널·축 레코드는 허용 목록(PANEL_KEYS·AXIS_KEYS) 순서로 담아 inspect()와 작업공간 문서의 키 순서를 입력 키 순서와 무관하게 고정한다
-  addPanel(options,{ownerGuard=null}={}) {optionRecord(options,PANEL_KEYS,'Panel');identifier(options.id,'Panel id');if(this.panels.length>=RESOURCE_LIMITS.maxPanels)throw new RangeError('Panel limit');if (!options?.id || this.panels.some(p => p.id === options.id) || !Number.isFinite(options.weight ?? 1) || (options.weight ?? 1) <= 0) throw new Error('Unique panel id and positive weight'); const p = orderedRecord({weight: 1, scale: 'linear', inverted: false, padding: .08, ...options},PANEL_KEYS); this.validatePanel(p);if(this.drawings?.transaction)throw new Error('Panel layout change during drawing transaction');runOwnerGuard(ownerGuard); this.panels.push(p); return p.id;}
+  addPanel(options,{ownerGuard=null}={}) {const snapshot=managedArraySnapshot(this.panels,'Panel owner',RESOURCE_LIMITS.maxPanels,panel=>({ref:panel,id:ownData(panel,'id','Panel')}));optionRecord(options,PANEL_KEYS,'Panel');identifier(options.id,'Panel id');if(this.panels.length>=RESOURCE_LIMITS.maxPanels)throw new RangeError('Panel limit');if (!options?.id || this.panels.some(p => p.id === options.id) || !Number.isFinite(options.weight ?? 1) || (options.weight ?? 1) <= 0) throw new Error('Unique panel id and positive weight'); const p = orderedRecord({weight: 1, scale: 'linear', inverted: false, padding: .08, ...options},PANEL_KEYS); this.validatePanel(p);if(this.drawings?.transaction)throw new Error('Panel layout change during drawing transaction');managedOwnerGuard(this,'panels',snapshot,'Panel',RESOURCE_LIMITS.maxPanels,panel=>({ref:panel,id:ownData(panel,'id','Panel')}));if(this.panels.some(panel=>panel.id===p.id))throw new Error('Unique panel id and positive weight');runOwnerGuard(ownerGuard);managedOwnerGuard(this,'panels',snapshot,'Panel',RESOURCE_LIMITS.maxPanels,panel=>({ref:panel,id:ownData(panel,'id','Panel')})); this.panels.push(p); return p.id;}
   validatePanel(p) {if(p.axisVisible!==undefined&&typeof p.axisVisible!=='boolean'||p.axisSide!==undefined&&!['left','right'].includes(p.axisSide))throw new TypeError('Panel axis visibility/side');if(typeof p.inverted!=='boolean'||p.label!==undefined&&typeof p.label!=='string'||p.formatter!==undefined&&typeof p.formatter!=='function'||p.range&&(!Array.isArray(p.range)||p.range.length!==2))throw new TypeError('Panel label, inverted, formatter or range');if(p.label!==undefined)boundedText(p.label,256,'Panel label');if (!Number.isFinite(p.weight) || p.weight <= 0 || p.base !== undefined && !Number.isFinite(p.base) || !['linear', 'log', 'percent'].includes(p.scale) || !Number.isFinite(p.padding) || p.padding < 0 || p.padding > 1 || p.precision !== undefined && (!Number.isInteger(p.precision) || p.precision < 0 || p.precision > 18) || (p.range && (!Number.isFinite(p.range[0]) || !Number.isFinite(p.range[1]) || p.range[0] >= p.range[1] || p.scale === 'log' && p.range[0] <= 0)) || p.scale === 'percent' && p.base === 0) throw new RangeError('Panel scale/range');}
   drawingProjectionChange(previous,next,keys){return keys.some(key=>Array.isArray(previous[key])&&Array.isArray(next[key])?previous[key].length!==next[key].length||previous[key].some((v,i)=>!Object.is(v,next[key][i])):!Object.is(previous[key],next[key]));}
   drawingMarginsChange(panels=this.panels,axes=this.axes){const before=axisStripWidths(this.panels,this.axes,this.axisWidth),after=axisStripWidths(panels,axes,this.axisWidth);return before.some((value,index)=>value!==after[index]);}
@@ -1994,7 +2036,7 @@ class ChartModel {
     if(a.scale==='percent'&&(!Number.isFinite(a.base)||a.base===0))throw new RangeError('Independent percent axis requires an explicit nonzero base');
     return true;
   }
-  addAxis(options,{ownerGuard=null}={}) {optionRecord(options,AXIS_KEYS,'Axis');if(this.axes.length>=RESOURCE_LIMITS.maxAxes)throw new RangeError('Axis limit');if(this.axes.some(a=>a.id===options.id))throw new Error('Duplicate axis');const a=orderedRecord({side:'right',scale:'linear',inverted:false,padding:.08,visible:true,tickFormat:'fixed',...options},AXIS_KEYS);this.validateAxis(a);if(this.drawings?.transaction&&this.drawingMarginsChange(this.panels,[...this.axes,a]))throw new Error('Axis layout change during drawing transaction');runOwnerGuard(ownerGuard);this.axes.push(a);return a.id;}
+  addAxis(options,{ownerGuard=null}={}) {const snapshot=managedArraySnapshot(this.axes,'Axis owner',RESOURCE_LIMITS.maxAxes,axisRecord),panelSnapshot=managedArraySnapshot(this.panels,'Panel owner',RESOURCE_LIMITS.maxPanels,panel=>({ref:panel,id:ownData(panel,'id','Panel')}));optionRecord(options,AXIS_KEYS,'Axis');if(this.axes.length>=RESOURCE_LIMITS.maxAxes)throw new RangeError('Axis limit');if(this.axes.some(a=>a.id===options.id))throw new Error('Duplicate axis');const a=orderedRecord({side:'right',scale:'linear',inverted:false,padding:.08,visible:true,tickFormat:'fixed',...options},AXIS_KEYS);this.validateAxis(a);if(this.drawings?.transaction&&this.drawingMarginsChange(this.panels,[...this.axes,a]))throw new Error('Axis layout change during drawing transaction');managedOwnerGuard(this,'panels',panelSnapshot,'Panel',RESOURCE_LIMITS.maxPanels,panel=>({ref:panel,id:ownData(panel,'id','Panel')}));managedOwnerGuard(this,'axes',snapshot,'Axis',RESOURCE_LIMITS.maxAxes,axisRecord);if(this.axes.some(axis=>axis.id===a.id))throw new Error('Duplicate axis');runOwnerGuard(ownerGuard);managedOwnerGuard(this,'panels',panelSnapshot,'Panel',RESOURCE_LIMITS.maxPanels,panel=>({ref:panel,id:ownData(panel,'id','Panel')}));managedOwnerGuard(this,'axes',snapshot,'Axis',RESOURCE_LIMITS.maxAxes,axisRecord);this.axes.push(a);return a.id;}
   setAxis(id,patch,{ownerGuard=null}={}) {optionRecord(patch,AXIS_KEYS.filter(k=>k!=='id'&&k!=='panel'),'Axis patch');const i=this.axes.findIndex(a=>a.id===id);if(i<0)throw new Error('Missing axis');const previous=this.axes[i],a=orderedRecord({...previous,...patch},AXIS_KEYS);this.validateAxis(a);if(this.drawings?.transaction&&(this.drawingMarginsChange(this.panels,this.axes.map((axis,j)=>j===i?a:axis))||this.drawingProjectionChange(previous,a,['scale','inverted','padding','range','base','width','side','visible'])&&[...this.drawings.items,...this.drawings.transaction].some(d=>d.axisId===id)))throw new Error('Axis projection change during drawing transaction');runOwnerGuard(ownerGuard);this.axes[i]=a;}
   removeAxis(id,{ownerGuard=null,controller=null}={}) {
     const disposedDescriptor=Object.getOwnPropertyDescriptor(this,'disposed');if(disposedDescriptor&&!Object.hasOwn(disposedDescriptor,'value'))throw new TypeError('Chart disposed own data slot required');if(disposedDescriptor?.value)throw new Error('Chart disposed');identifier(id,'Axis id');
@@ -2038,7 +2080,7 @@ class ChartModel {
     // inspect()와 작업공간에 같은 순서가 나오도록 허용 목록(SERIES_KEYS) 순서로 담는다. 런타임 캐시 dirtyFrom은 뒤에 붙는다
     return orderedRecord({color:'#7898ff',width:['candles','ohlc'].includes(options.type)?1:1.5,...options,offset,dirtyFrom:0},SERIES_KEYS);
   }
-  addSeries(options,{ownerGuard=null}={}){if(this.series.length>=RESOURCE_LIMITS.maxSeries)throw new RangeError('Series limit');if(this.series.some(s=>s.id===options?.id))throw new Error('Duplicate series');const validated=this.normalizedSeries(options);runOwnerGuard(ownerGuard);this.series.push(validated);return validated.id;}
+  addSeries(options,{ownerGuard=null}={}){const snapshot=managedArraySnapshot(this.series,'Series owner',RESOURCE_LIMITS.maxSeries,seriesRecord),panelSnapshot=managedArraySnapshot(this.panels,'Panel owner',RESOURCE_LIMITS.maxPanels,panel=>({ref:panel,id:ownData(panel,'id','Panel')})),axisSnapshot=managedArraySnapshot(this.axes,'Axis owner',RESOURCE_LIMITS.maxAxes,axisRecord),indicatorEngine=indicatorEngineSnapshot(this);if(this.series.length>=RESOURCE_LIMITS.maxSeries)throw new RangeError('Series limit');if(this.series.some(s=>s.id===options?.id))throw new Error('Duplicate series');optionRecord(options,SERIES_KEYS,'Series');identifier(options.id,'Series id');identifier(options.panel,'Series panel');const indicatorId=options?.indicator,indicatorSnapshot=indicatorBindingSnapshot(indicatorEngine,indicatorId);const validated=this.normalizedSeries(options);indicatorBindingGuard(this,indicatorSnapshot,validated.indicator);managedOwnerGuard(this,'panels',panelSnapshot,'Panel',RESOURCE_LIMITS.maxPanels,panel=>({ref:panel,id:ownData(panel,'id','Panel')}));managedOwnerGuard(this,'axes',axisSnapshot,'Axis',RESOURCE_LIMITS.maxAxes,axisRecord);managedOwnerGuard(this,'series',snapshot,'Series',RESOURCE_LIMITS.maxSeries,seriesRecord);if(this.series.some(series=>series.id===validated.id))throw new Error('Duplicate series');runOwnerGuard(ownerGuard);indicatorBindingGuard(this,indicatorSnapshot,validated.indicator);managedOwnerGuard(this,'panels',panelSnapshot,'Panel',RESOURCE_LIMITS.maxPanels,panel=>({ref:panel,id:ownData(panel,'id','Panel')}));managedOwnerGuard(this,'axes',axisSnapshot,'Axis',RESOURCE_LIMITS.maxAxes,axisRecord);managedOwnerGuard(this,'series',snapshot,'Series',RESOURCE_LIMITS.maxSeries,seriesRecord);this.series.push(validated);return validated.id;}
   removeSeries(id) {this.series = this.series.filter(s => s.id !== id);}
   setSeriesValues(id, values) {if(this.disposed)throw new Error('Chart disposed');const s = this.series.find(s => s.id === id); if (!s || !(values instanceof Float64Array) || values.length !== this.store.length) throw new TypeError('Aligned values and existing series required'); if(['candles','ohlc'].includes(s.type)||s.indicator)throw new TypeError('External values require a general non-indicator series');s.values = values; s.dirtyFrom = 0;this.seriesValueRevisions.set(s,(this.seriesValueRevisions.get(s)??0)+1);this.seriesValuesRevision=(this.seriesValuesRevision??0)+1;}
   seriesData(s) {
@@ -2727,6 +2769,12 @@ const INGESTION_KINDS=['append','update','correction'],INGESTION_BYTES=49,INGEST
 const ingestionPolicyKeys=['streamId','generation','firstSequence','maxQueuedEvents','maxQueuedBytes','maxBatchEvents','maxStoredBars','maxStoreBytes'];
 const ingestionCounterKeys=['accepted','applied','cancelled','rejectedPackets','rejectedEvents','failedDrains','peakPendingEvents','peakPendingBytes','lastAppliedSequence','lastCancelledSequence'];
 const ingestionModelLeases=new WeakMap();
+function ingestionErrorMessage(error){
+ if(typeof error==='string')return error.slice(0,256);
+ try{const message=error?.message;if(typeof message==='string')return message.slice(0,256);}catch{}
+ return 'Invalid ingestion input';
+}
+function isIngestionError(error){try{return error instanceof IngestionError;}catch{return false;}}
 function assertDataIngestionIdle(model){if(ingestionModelLeases.get(model))throw new IngestionError('BUSY','Model has an active async ingestion fence');}
 function acquireDataIngestionLease(model){
  const releaseSession=model.dataIngestion?.acquireLease();ingestionModelLeases.set(model,(ingestionModelLeases.get(model)??0)+1);let released=false;
@@ -2791,7 +2839,7 @@ class DataIngestion {
    this.store=this.model.store;this.sourceVersion=this.store.version;
   }
  }
- rejection(error,count=0){if(!this.closed){if(this.counters.rejectedPackets<Number.MAX_SAFE_INTEGER)this.counters.rejectedPackets++;this.counters.rejectedEvents=Math.min(Number.MAX_SAFE_INTEGER,this.counters.rejectedEvents+count);}throw error instanceof IngestionError?error:new IngestionError('INVALID_INPUT',String(error.message).slice(0,256),error);}
+ rejection(error,count=0){if(!this.closed){if(this.counters.rejectedPackets<Number.MAX_SAFE_INTEGER)this.counters.rejectedPackets++;this.counters.rejectedEvents=Math.min(Number.MAX_SAFE_INTEGER,this.counters.rejectedEvents+count);}throw isIngestionError(error)?error:new IngestionError('INVALID_INPUT',ingestionErrorMessage(error),error);}
  enqueue(packet,ownerGuard=null){
   if(ownerGuard!==null&&typeof ownerGuard!=='function')throw new TypeError('Owner guard callback required');ownerGuard?.();let ownerFailed=false;const guard=()=>{if(!ownerGuard)return;try{ownerGuard();}catch(error){ownerFailed=true;throw error;}};
   let events=[];try{
@@ -3622,9 +3670,9 @@ function validateWorkspaceDocument(doc){
  if(c.symbol!==null){workspaceRecord(c.symbol,[...workspaceSymbolKeys,...workspaceSymbolOptionalKeys],workspaceSymbolKeys);for(const k of ['id','exchange','timezone','currency','volumeUnit',...workspaceSymbolOptionalKeys.filter(key=>Object.hasOwn(c.symbol,key))])boundedText(c.symbol[k],128,'Workspace symbol');validateSymbol(c.symbol);if(c.symbol.currency!==doc.dataset.priceUnit||c.symbol.adjustment!==doc.dataset.adjustment)throw new TypeError('Workspace symbol dataset units/adjustment');}else if(c.formatters==='symbol')throw new TypeError('Workspace symbol formatter metadata');
  if(!Array.isArray(doc.indicators)||doc.indicators.length>128||!Array.isArray(doc.series)||doc.series.length>256)throw new RangeError('Workspace study/series limit');
  const definitions=new Map();for(const e of doc.indicators){workspaceRecord(e,['id','name','params','module','outputs','plotOffsets'],['id','name','params','outputs','plotOffsets']);identifier(e.id,'Workspace indicator id');identifier(e.name,'Workspace indicator name');if(definitions.has(e.id))throw new TypeError('Duplicate workspace indicator');validateIndicatorParams(e.params);validateIndicatorModuleBinding(e.name,e.module);if(!Array.isArray(e.outputs)||!e.outputs.length||e.outputs.length>32||new Set(e.outputs).size!==e.outputs.length)throw new TypeError('Workspace output schema');for(const output of e.outputs)identifier(output,'Workspace output');workspaceRecord(e.plotOffsets,e.outputs,[]);for(const offset of Object.values(e.plotOffsets))if(!Number.isInteger(offset)||Math.abs(offset)>10000)throw new TypeError('Workspace output offset');definitions.set(e.id,e);}
- // Validate layout against an allocation-free facade. No indicator calculation,
+ // Validate layout against a metadata-only facade. No indicator calculation,
  // BarStore subscriptions or source-array copies are needed for metadata parsing.
- const facade=Object.create(ChartModel.prototype);Object.assign(facade,{panels:[],axes:[],series:[],axisWidth:c.axisWidth,store:{length:source.length},indicators:{get(id){const e=definitions.get(id);if(!e)throw new Error('Missing workspace indicator');return {outputs:Object.fromEntries(e.outputs.map(k=>[k,null])),plotOffsets:e.plotOffsets};}}});
+ const facade=Object.create(ChartModel.prototype);Object.assign(facade,{panels:[],axes:[],series:[],axisWidth:c.axisWidth,store:{length:source.length,version:0},indicators:{entries:new Map([...definitions].map(([id,e])=>[id,{name:e.name,params:e.params,def:e}])),get(id){const e=definitions.get(id);if(!e)throw new Error('Missing workspace indicator');return {outputs:Object.fromEntries(e.outputs.map(k=>[k,null])),plotOffsets:e.plotOffsets};}}});
  for(const p of c.panels){workspaceRecord(p,PANEL_KEYS.filter(k=>k!=='formatter'),['id']);facade.addPanel(p);}for(const a of c.axes){workspaceRecord(a,AXIS_KEYS.filter(k=>k!=='formatter'),['id','panel']);facade.addAxis(a);}
  for(const s of doc.series){workspaceRecord(s,SERIES_KEYS.filter(k=>k!=='values'),['id','type','panel']);portableStyle(s,['color','fill','upColor','downColor'],true);facade.addSeries(s);}
  const drawings=workspaceRecord(doc.drawings,['schema','version','drawings']);if(drawings.schema!=='aster.drawings'||![1,2,3,4].includes(drawings.version)||!Array.isArray(drawings.drawings))throw new TypeError('Workspace drawing schema');const validator=new DrawingStore();if(drawings.drawings.length>validator.maxDrawings)throw new RangeError('Workspace drawing count');const ids=new Set();for(const d of drawings.drawings){validateDrawing(d);validateDrawingDocumentVersion(d,drawings.version);facade.validateDrawingBinding(d);if(d.style)portableStyle(d.style,['color','fill'],true);if(ids.has(d.id))throw new TypeError('Duplicate drawing ids');ids.add(d.id);}validator.budget(drawings.drawings);
@@ -3788,7 +3836,7 @@ const NATIVE_WORKSPACE_RESTORE_BYTES=805306368;
 function nativeTargetInteger(n,min,max,label){if(!Number.isSafeInteger(n)||n<min||n>max)throw new RangeError('Native workspace '+label);return n;}
 function nativeTargetEqual(a,b){if(Object.is(a,b))return true;if(!a||!b||typeof a!=='object'||typeof b!=='object'||Array.isArray(a)!==Array.isArray(b))return false;const keys=Object.keys(a);return keys.length===Object.keys(b).length&&keys.every(k=>Object.hasOwn(b,k)&&nativeTargetEqual(a[k],b[k]));}
 function nativeTargetPick(value,keys){const out={};for(const k of keys){const d=Object.getOwnPropertyDescriptor(value,k);if(d){if(!Object.hasOwn(d,'value'))throw new TypeError('Native workspace target accessor');if(d.value!==undefined)out[k]=d.value;}}return out;}
-function nativeTargetNormalized(doc){const definitions=new Map(doc.indicators.map(e=>[e.id,e])),facade=Object.create(ChartModel.prototype);Object.assign(facade,{panels:[],axes:[],series:[],axisWidth:doc.chart.axisWidth,store:{length:doc.source.length},indicators:{get(id){const e=definitions.get(id);if(!e)throw new Error('Native workspace indicator binding');return {outputs:Object.fromEntries(e.outputs.map(k=>[k,null])),plotOffsets:e.plotOffsets};}}});for(const p of doc.chart.panels)facade.addPanel(p);for(const a of doc.chart.axes)facade.addAxis(a);for(const item of doc.series)facade.addSeries(item);return {...doc,drawings:{...doc.drawings,version:drawingDocumentVersion(doc.drawings.drawings)},chart:{...doc.chart,panels:facade.panels.map(p=>nativeTargetPick(p,PANEL_KEYS.filter(k=>k!=='formatter'))),axes:facade.axes.map(a=>nativeTargetPick(a,AXIS_KEYS.filter(k=>k!=='formatter')))},series:facade.series.map(e=>nativeTargetPick(e,SERIES_KEYS.filter(k=>k!=='values')))};}
+function nativeTargetNormalized(doc){const definitions=new Map(doc.indicators.map(e=>[e.id,e])),facade=Object.create(ChartModel.prototype);Object.assign(facade,{panels:[],axes:[],series:[],axisWidth:doc.chart.axisWidth,store:{length:doc.source.length,version:0},indicators:{entries:new Map([...definitions].map(([id,e])=>[id,{name:e.name,params:e.params,def:e}])),get(id){const e=definitions.get(id);if(!e)throw new Error('Native workspace indicator binding');return {outputs:Object.fromEntries(e.outputs.map(k=>[k,null])),plotOffsets:e.plotOffsets};}}});for(const p of doc.chart.panels)facade.addPanel(p);for(const a of doc.chart.axes)facade.addAxis(a);for(const item of doc.series)facade.addSeries(item);return {...doc,drawings:{...doc.drawings,version:drawingDocumentVersion(doc.drawings.drawings)},chart:{...doc.chart,panels:facade.panels.map(p=>nativeTargetPick(p,PANEL_KEYS.filter(k=>k!=='formatter'))),axes:facade.axes.map(a=>nativeTargetPick(a,AXIS_KEYS.filter(k=>k!=='formatter')))},series:facade.series.map(e=>nativeTargetPick(e,SERIES_KEYS.filter(k=>k!=='values')))};}
 function nativeTargetSpec(text){
  if(typeof text!=='string'||text.length>8388608)throw new RangeError('Native workspace target metadata');const m=safeCheckpointParse(text);optionRecord(m,['schema','version','document','datasetBinding','source','size','retainedBytes','maxBytes','dataIngestion'],'Native workspace target');if(m.schema!=='aster.native-workspace-target'||m.version!==1)throw new TypeError('Native workspace target protocol');
  const doc=readWorkspaceDocument(m.document);if(!workspaceBindingSame(doc.dataset,workspaceBinding(m.datasetBinding)))throw new TypeError('Native workspace target dataset binding');

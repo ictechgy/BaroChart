@@ -93,7 +93,7 @@ function cleaned(context, owned = true, subscriptions = owned ? 0 : 2) {
   equal(context.chart.listeners.length, 0, 'chart input listeners removed'); equal(context.chart.lastScene, null, 'scene released');
   equal(context.chart.layerSurfaces, null, 'raster surfaces released');
   if (context.chart.renderer) {equal(context.chart.renderer.disposed, true, 'WebGL renderer disposed'); equal(context.chart.renderer.packed, null, 'GPU packed buffer released');
-    equal(context.chart.renderer.atlas.width, 0, 'glyph atlas pixel width released'); equal(context.chart.renderer.colorCanvas.width, 0, 'GPU color canvas pixels released');}
+    equal(context.chart.renderer.atlas, null, 'glyph atlas reference released'); equal(context.chart.renderer.colorCanvas, null, 'GPU color canvas reference released');}
   equal(context.model.store.listeners.size, subscriptions, 'store subscriptions returned to ownership baseline');
   equal(Boolean(context.model.disposed), owned, 'model ownership respected');
 }

@@ -152,12 +152,13 @@ export class BarStore {
     Object.assign(this,{length,capacity,columns,index});this.changed(0,event.kind,{added:event.added});
   }
   prepend(bars) {
-    if (!Array.isArray(bars)) throw new TypeError('Prepend bars required'); if (!bars.length) return;
-    sizeLimit(bars.length+this.length,this.maxBars,'Bar count');
-    if (this.length && bars[bars.length - 1].time >= this.columns.time[0]) throw new RangeError('Prepend must precede existing history without overlap');
-    let previous = -Infinity; for (const bar of bars) {validateBar(bar, previous); previous = bar.time;}
-    const n = bars.length, columns = Object.fromEntries(FIELDS.map(k => [k, new Float64Array(n + this.length)]));
-    for (let i = 0; i < n; i++) for (const k of FIELDS) columns[k][i] = bars[i][k];
+    if (!Array.isArray(bars)) throw new TypeError('Prepend bars required'); const n=bars.length; if (!n) return;
+    sizeLimit(n+this.length,this.maxBars,'Bar count');
+    if(this.length&&bars[n-1].time>=this.columns.time[0])throw new RangeError('Prepend must precede existing history without overlap');
+    const columns=Object.fromEntries(FIELDS.map(k=>[k,new Float64Array(n+this.length)])),scratch={};let previous=-Infinity;
+    for(let i=0;i<n;i++){readBar(bars[i],scratch);validateBar(scratch,previous);previous=scratch.time;for(const k of FIELDS)columns[k][i]=scratch[k];}
+    if(bars.length!==n)throw new RangeError('OHLCV array length changed during snapshot');
+    if(this.length&&columns.time[n-1]>=this.columns.time[0])throw new RangeError('Prepend must precede existing history without overlap');
     for (const k of FIELDS) columns[k].set(this.columns[k].subarray(0, this.length), n);
     this.setColumns(columns, n + this.length, {kind: 'prepend', added: n});
   }

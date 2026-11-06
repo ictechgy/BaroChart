@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {BarStore,ChartModel,ChartAPI} from '../src/core/index.mjs';
+import {BarStore,ChartModel,ChartAPI,IngestionError} from '../src/core/index.mjs';
 const bar=(time,close=10,volume=1)=>({time,open:close,high:close,low:close,close,volume});
 const fixture=()=>{const model=new ChartModel({store:new BarStore([bar(1)])});return {model,api:new ChartAPI(model)};};
 test('owned ingestion preserves ordered packet accounting through commit and observer enqueue',()=>{
@@ -26,6 +26,30 @@ test('rejection and failed drain retain ownership without silently losing histor
   api.cancelDataEvents();api.resumeDataIngestion();
   assert.throws(()=>api.enqueueDataEvents({streamId:'B',generation:0,firstSequence:1,events:[{kind:'update',bar:bar(1)}]}),e=>e.code==='STREAM_MISMATCH');
   assert.equal(api.dataIngestionStats().nextSequence,1);
+ }finally{model.dispose();}
+});
+test('hostile packet failures stay bounded ingestion errors and do not poison the session',()=>{
+ const {model,api}=fixture();try{
+  api.configureDataIngestion({streamId:'A',generation:0});
+  const hostileMessage=new Error('untrusted');Object.defineProperty(hostileMessage,'message',{configurable:true,get(){throw undefined;}});
+  const failures=[
+   {thrown:null,message:'Invalid ingestion input'},
+   {thrown:undefined,message:'Invalid ingestion input'},
+   {thrown:'bad packet',message:'bad packet'},
+   {thrown:hostileMessage,message:'Invalid ingestion input'},
+  ];
+  for(const [index,{thrown,message}] of failures.entries()){
+   const packet=new Proxy({}, {ownKeys(){throw thrown;}});let observed;
+   assert.throws(()=>api.enqueueDataEvents(packet),error=>{observed=error;return error instanceof IngestionError&&error.code==='INVALID_INPUT';});
+   assert.equal(observed.message,message);assert.equal(observed.cause,thrown);
+   const rejected=api.dataIngestionStats();assert.equal(rejected.rejectedPackets,index+1);assert.equal(rejected.rejectedEvents,0);assert.equal(rejected.accepted,index);
+   api.enqueueDataEvents({streamId:'A',generation:0,firstSequence:index,events:[{kind:'update',bar:bar(1,20+index)}]});
+  }
+  const original=new IngestionError('SOURCE_CHANGED','owned error');const packet=new Proxy({}, {ownKeys(){throw original;}});
+  assert.throws(()=>api.enqueueDataEvents(packet),error=>error===original);
+  const afterOriginal=api.dataIngestionStats();assert.equal(afterOriginal.rejectedPackets,5);assert.equal(afterOriginal.rejectedEvents,0);assert.equal(afterOriginal.accepted,4);assert.equal(afterOriginal.pendingEvents,4);
+  api.enqueueDataEvents({streamId:'A',generation:0,firstSequence:4,events:[{kind:'update',bar:bar(1,99)}]});
+  assert.equal(api.dataIngestionStats().accepted,5);assert.equal(api.drainDataEvents().events,5);assert.equal(model.store.at(0).close,99);
  }finally{model.dispose();}
 });
 test('ingestion document restores owned pending values and strict cursor atomically',()=>{

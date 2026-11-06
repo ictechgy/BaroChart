@@ -3,6 +3,18 @@ const CALCULATION_JOB_BYTES=256*1024*1024,CALCULATION_TOTAL_BYTES=512*1024*1024;
 let calculationActiveJobs=0,calculationReservedBytes=0,calculationNextId=0;
 export function calculationJobStats(){return {activeJobs:calculationActiveJobs,reservedBytes:calculationReservedBytes};}
 function calculationError(name,message){const error=new Error(message);error.name=name;return error;}
+const record=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
+function dedicatedWorkerEnvelope(request,packet){
+ const schemaKind=request?.kind==='indicator-params'?'params':request?.kind;
+ if(!record(packet)||typeof packet.schema!=='string'||packet.version!==1||packet.jobId!==request?.jobId||packet.kind!==request?.kind||!['result','error'].some(suffix=>packet.schema===`aster.${schemaKind}-${suffix}`))throw new TypeError('Calculation worker response protocol');
+ return packet;
+}
+function workerMessageError(event){
+ let detail='';
+ try{if(typeof event?.message==='string'&&event.message)detail=`: ${event.message.slice(0,256)}`;}catch{}
+ const message=`Calculation Worker message failed${detail}`;
+ return new Error(message);
+}
 export async function runCalculationJob(options,work){
  const signal=options.signal;if(signal!==undefined&&(!signal||typeof signal.addEventListener!=='function'||typeof signal.removeEventListener!=='function'||typeof signal.aborted!=='boolean'))throw new TypeError('Calculation AbortSignal required');if(signal?.aborted)throw calculationError('AbortError','Calculation cancelled');
  const timeout=options.timeoutMs??30000;if(!Number.isFinite(timeout)||timeout<=0||timeout>120000)throw new RangeError('Calculation timeout: 0..120000ms');
@@ -31,16 +43,17 @@ export async function runCalculationJob(options,work){
 }
 export function runDedicatedCalculationWorker(request,url,options,context,transfer){
  return new Promise((resolve,reject)=>{
-  let worker,done=false,unstop=()=>{},termination;
-  const finish=(error,packet)=>{if(done)return;done=true;unstop();try{if(worker){worker.onmessage=null;worker.onerror=null;}}catch(failure){error??=failure;}error?reject(error):resolve(packet);};
-  context.cleanup(async()=>{unstop();if(worker){let failure;try{worker.onmessage=null;worker.onerror=null;}catch(error){failure=error;}try{termination??=worker.terminate();await termination;}catch(error){failure??=error;}finally{worker=null;}if(failure)throw failure;}});
+  let worker,done=false,unstop=()=>{},termination,messageErrorInstalled=false;
+  const finish=(error,packet)=>{if(done)return;done=true;unstop();try{if(worker){worker.onmessage=null;worker.onerror=null;if(messageErrorInstalled)worker.onmessageerror=null;}}catch(failure){error??=failure;}error?reject(error):resolve(packet);};
+  context.cleanup(async()=>{unstop();if(worker){let failure;try{worker.onmessage=null;worker.onerror=null;if(messageErrorInstalled)worker.onmessageerror=null;}catch(error){failure=error;}try{termination??=worker.terminate();await termination;}catch(error){failure??=error;}finally{worker=null;}if(failure)throw failure;}});
   try{
    context.check();const factory=options.workerFactory;if(factory!==undefined&&typeof factory!=='function')throw new TypeError('Worker factory required');
    worker=factory?factory(url):new Worker(url,{type:'module'});context.check();context.current();
    if(!worker||typeof worker.postMessage!=='function'||typeof worker.terminate!=='function')throw new TypeError('Dedicated Worker interface required');
    unstop=context.onStop(error=>finish(error));if(done)return;
    worker.onerror=event=>finish(new Error(typeof event?.message==='string'?event.message.slice(0,256):'Calculation Worker failed'));
-   worker.onmessage=event=>{if(done)return;try{context.check();context.current();finish(null,event.data);}catch(error){finish(error);}};
+   if('onmessageerror' in worker||Object.isExtensible(worker)){worker.onmessageerror=event=>finish(workerMessageError(event));messageErrorInstalled=true;}
+   worker.onmessage=event=>{if(done)return;try{context.check();context.current();finish(null,dedicatedWorkerEnvelope(request,event?.data));}catch(error){finish(error);}};
    worker.postMessage(request,transfer);context.check();context.current();
   }catch(error){finish(error);}
  });
