@@ -61,7 +61,9 @@ fn check_ingestion_safe_point(chart: &NativeChart) -> Result<(), JsError> {
     Ok(())
 }
 
-fn workspace_core(restored: RestoredWorkspace) -> Result<(NativePreparedCore, JsValue), JsError> {
+fn workspace_core(
+    restored: RestoredWorkspace,
+) -> Result<(NativePreparedCore, JsValue, NativeUiFinishMode), JsError> {
     let RestoredWorkspace {
         data,
         model,
@@ -71,7 +73,7 @@ fn workspace_core(restored: RestoredWorkspace) -> Result<(NativePreparedCore, Js
         symbol,
         ingestion_document,
         ingestion_memory,
-        memory,
+        memory: mut symbol_memory,
         plan,
         ..
     } = restored;
@@ -89,7 +91,9 @@ fn workspace_core(restored: RestoredWorkspace) -> Result<(NativePreparedCore, Js
             ));
         }
     }
-    drop((drawings, symbol, ingestion_memory, memory));
+    let (_, canonical_symbol) = workspace_symbol_parts(symbol, &mut symbol_memory)?;
+    let mode = NativeUiFinishMode::migration(canonical_symbol, symbol_memory);
+    drop((drawings, ingestion_memory));
     Ok((
         NativePreparedCore {
             owner,
@@ -99,6 +103,7 @@ fn workspace_core(restored: RestoredWorkspace) -> Result<(NativePreparedCore, Js
             prepared_input: JsValue::Undefined,
         },
         plan.to_value(),
+        mode,
     ))
 }
 
@@ -430,7 +435,7 @@ impl NativeRuntime {
                 return Err(error);
             }
         };
-        let (core, _plan) = workspace_core(restored)?;
+        let (core, _plan, mode) = workspace_core(restored)?;
         let memory = core.owner.data().store().memory_context().clone();
         let mut import = Box::new(NativeUiImport::new_pending(
             &header,
@@ -444,7 +449,7 @@ impl NativeRuntime {
             revision,
             &metadata,
         )?;
-        import.install_core(core, NativeUiFinishMode::Migration)?;
+        import.install_core(core, mode)?;
         self.web_migration_target = Some(WebMigrationTargetState::Importing {
             ticket,
             registration,

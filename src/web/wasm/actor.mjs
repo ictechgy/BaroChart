@@ -51,17 +51,23 @@ function cloneError(value, fallback = 'Rust WASM actor request failed') {
   });
 }
 
+function normalizeFloat64(value, label) {
+  if (value instanceof Float64Array) return value;
+  if (value instanceof ArrayBuffer && value.byteLength % Float64Array.BYTES_PER_ELEMENT === 0) return new Float64Array(value.slice(0));
+  if (ArrayBuffer.isView(value) && value.byteLength % Float64Array.BYTES_PER_ELEMENT === 0) return new Float64Array(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
+  throw new RustActorProtocolError(`Rust WASM actor returned ${label}`, {name: 'RustActorProtocolError', code: 'BAD_RESULT', quarantine: true});
+}
+
 function normalizeValue(method, value) {
-  if (method === 'readF64' && !(value instanceof Float64Array)) {
-    if (value instanceof ArrayBuffer) return new Float64Array(value.slice(0));
-    if (ArrayBuffer.isView(value)) return new Float64Array(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
-    throw new RustActorProtocolError('Rust WASM actor returned a non-Float64Array read result', {name: 'RustActorProtocolError', code: 'BAD_RESULT'});
+  if (method === 'readF64') {
+    return normalizeFloat64(value, 'a non-Float64Array read result');
   }
-  if (method === 'packet' && value && !(value.numbers instanceof Float64Array)) {
-    if (value.numbers instanceof ArrayBuffer) return {...value, numbers: new Float64Array(value.numbers.slice(0))};
-    if (ArrayBuffer.isView(value.numbers)) return {...value, numbers: new Float64Array(value.numbers.buffer.slice(value.numbers.byteOffset, value.numbers.byteOffset + value.numbers.byteLength))};
-    throw new RustActorProtocolError('Rust WASM actor returned a malformed packet', {name: 'RustActorProtocolError', code: 'BAD_RESULT'});
+  if (method === 'packet') {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new RustActorProtocolError('Rust WASM actor returned a malformed packet', {name: 'RustActorProtocolError', code: 'BAD_RESULT', quarantine: true});
+    const numbers = normalizeFloat64(value.numbers, 'a malformed packet');
+    return numbers === value.numbers ? value : {...value, numbers};
   }
+  if (method === 'writeF64' && typeof value !== 'boolean') throw new RustActorProtocolError('Rust WASM actor returned a non-boolean write receipt', {name: 'RustActorProtocolError', code: 'BAD_RESULT', quarantine: true});
   return value;
 }
 

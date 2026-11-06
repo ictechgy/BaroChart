@@ -158,7 +158,7 @@ export function instantiateRustRuntime(module,{host=globalThis,requiredOperation
     capabilitiesJson(){ensureOpen();return withScope(scope=>{const out=alloc(scope,12),status=exportCall('bc_web_capabilities',engine,out),text=decodeUtf8(readOwned(scope,out),'capabilities');if(status!==STATUS.OK)throw errorFrom(status,text);return validateCapabilities(decodeLossless(text,'capabilities'),requiredOperations);});},
     memoryStats(){ensureOpen();return withScope(scope=>{const out=alloc(scope,12),status=exportCall('bc_web_memory_stats',engine,out),text=decodeUtf8(readOwned(scope,out),'memory stats');if(status!==STATUS.OK)throw errorFrom(status,text);return {...decodeLossless(text,'memory stats'),linearMemoryBytes:memory().buffer.byteLength};});},
     resynchronize(){if(closed)throw new RustWasmCallError('Rust WASM session is closed',{name:'RustWasmClosedError',code:'CLOSED',status:STATUS.CLOSED});if(!quarantined)return true;throw new RustWasmCallError('Quarantined WASM session must be recreated',{name:'RustWasmQuarantinedError',code:'QUARANTINED',status:STATUS.POISONED});},
-    close(){if(closed)return;closed=true;let primary=disposeEngine();const remaining=[...allocations.values()];if(remaining.length){try{finishScope(remaining,primary);}catch(error){primary=error;}}if(primary)throw primary;},
+    close(){if(closed)return;if(inFlight)throw new RustWasmCallError('Rust WASM call is already active',{name:'RustWasmBusyError',code:'BUSY',status:STATUS.BUSY});closed=true;let primary=disposeEngine();const remaining=[...allocations.values()];if(remaining.length){try{finishScope(remaining,primary);}catch(error){primary=error;}}if(primary)throw primary;},
   };
   return runtime;
 }

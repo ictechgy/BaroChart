@@ -8,7 +8,7 @@ import {rustupBinDirectory} from '../scripts/rust/cargo.mjs';
 const target=wasmTargetAvailable(),requireWasm=process.env.REQUIRE_WASM==='1';
 const skip=requireWasm?false:(!existsSync(join(rustupBinDirectory(process.env),'cargo'))?'rustup cargo is unavailable':!target.available?target.reason:false);
 const REVISION=7,REGISTRATION=1,MAX_BYTES=805306368,CHUNK=16384;
-const PREBUILT='artifacts/rust-wasm/harness-target/wasm32-unknown-unknown/release/barochart_wasm.wasm';let built=false;
+const PREBUILT=process.env.BAROCHART_WASM_PREBUILT??'artifacts/rust-wasm/harness-target/wasm32-unknown-unknown/release/barochart_wasm.wasm';let built=Boolean(process.env.BAROCHART_WASM_PREBUILT);
 async function harness(){if(built)return createWasmHarness({prebuiltPath:PREBUILT});const value=await createWasmHarness();built=true;return value;}
 const value=async(h,name,args=[])=>{const result=await h.call(name,args);assert.equal(result.status,0,`${name}: ${JSON.stringify(result.error)}`);return result.value;};
 const floats=bytes=>{assert.equal(bytes.byteLength%8,0);const output=new Float64Array(bytes.byteLength/8),view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);for(let at=0;at<output.length;at++)output[at]=view.getFloat64(at*8,true);return output;};
@@ -29,12 +29,13 @@ async function decorate(source){
 async function fixture(t,count=8){
  const source=await harness(),target=await harness();t.after(async()=>{await source.dispose();await target.dispose();});
  await value(source,'nativeInit',[count,{series:[]}]);await decorate(source);
+ await value(source,'nativeCommand',['setSymbol',[{id:'BTC',exchange:'DEMO',timezone:'UTC',currency:'USD',volumeUnit:'BTC',priceDecimals:2,tickSize:.01,adjustment:'raw'}]]);
  const binding={key:'web-migration',revision:'r1',adjustmentVersion:'a1',priceUnit:'USD',adjustment:'raw'};
  const document=await value(source,'nativeSaveWorkspace',[binding]);
  return{source,target,binding,document,count};
 }
 
-async function prepare(f,{mutateDescription,workspaceOnly=false}={}){
+async function prepare(f,{mutateDescription,mutateHeader,workspaceOnly=false}={}){
  const begin=await value(f.source,'web.migrationSourceBegin',[f.document,f.binding,REVISION,MAX_BYTES,REGISTRATION]);
  const ticket=begin.ticket;let plan;do{plan=await value(f.source,'web.migrationSourceStep',[ticket,64,REVISION]);}while(!plan.complete);
  const ui=await value(f.source,'web.migrationSourceUiBegin',[ticket,REVISION]),chunks=[];let chunk;
@@ -43,8 +44,10 @@ async function prepare(f,{mutateDescription,workspaceOnly=false}={}){
  for(let slot=0;slot<6;slot++)for(let at=0;at<f.count;at+=CHUNK){const count=Math.min(CHUNK,f.count-at),read=f.source.webCall('nativeAsyncBuffer',[ticket,slot,at,count]);assert.equal(read.status,0);const written=f.target.webWriteF64('nativeAsyncTargetBuffer',[slot,at,count],floats(read.value));assert.deepEqual({status:written.status,didWrite:written.didWrite},{status:0,didWrite:1});}
  await value(f.target,'web.migrationTargetStart');let progress;do{progress=JSON.parse(await value(f.target,'web.migrationTargetStep',[64]));}while(!progress.complete);
  if(workspaceOnly)return{ticket,ui,chunks};
- const description=mutateDescription?mutateDescription(structuredClone(ui.description)):ui.description;
- const beginUi=await f.target.call('web.migrationTargetUiBegin',[description,ui.header]);
+ let header=ui.header,description=structuredClone(ui.description);
+ if(mutateHeader){header=JSON.stringify(mutateHeader(JSON.parse(header)));description.header=header;}
+ if(mutateDescription)description=mutateDescription(description);
+ const beginUi=await f.target.call('web.migrationTargetUiBegin',[description,header]);
  if(beginUi.status!==0)return{ticket,ui,chunks,beginUi};
  for(const row of chunks)await value(f.target,'web.migrationTargetUiChunk',[row]);
  return{ticket,ui,chunks};
@@ -103,4 +106,34 @@ test('tampered target proof fails before publication and the source remains usab
  const f=await fixture(t),migration=await prepare(f,{mutateDescription(value){value.workspaceMetadata+='x';return value;}});assert.notEqual(migration.beginUi.status,0);
  assert.equal((await value(f.source,'web.presentationState')).data.length,8);
  assert.equal((await value(f.source,'web.drawingsState')).items.length,1);
+});
+
+test('migration rejects each missing or invalid controller field before target publication',{skip},async t=>{
+ const cases=[
+  ['missing drawingMagnet',state=>{delete state.drawingMagnet;}],
+  ['missing crosshairSnap',state=>{delete state.crosshairSnap;}],
+  ['missing both controls',state=>{delete state.drawingMagnet;delete state.crosshairSnap;}],
+  ['invalid drawingMagnet',state=>{state.drawingMagnet={mode:'invalid'};}],
+  ['invalid crosshairSnap',state=>{state.crosshairSnap={mode:'invalid'};}],
+ ];
+ for(const [label,mutate] of cases){
+  const f=await fixture(t),migration=await prepare(f,{mutateHeader(header){mutate(header.state);return header;}});
+  assert.ok(migration.beginUi&&migration.beginUi.status!==0,`${label}: tampered migration was accepted`);
+  assert.notEqual((await f.target.call('web.presentationState')).status,0,`${label}: target must stay unpublished`);
+  assert.equal((await value(f.source,'web.presentationState')).data.length,8,`${label}: source remains usable`);
+  assert.equal(await value(f.source,'nativeSaveWorkspace',[f.binding]),f.document,`${label}: source workspace remains usable`);
+ }
+});
+
+test('migration rejects workspace/UI symbol currency or adjustment mismatch before target publication',{skip},async t=>{
+ for(const [label,mutate] of [
+  ['currency',symbol=>{symbol.currency='EUR';}],
+  ['adjustment',symbol=>{symbol.adjustment='split';}],
+ ]){
+  const f=await fixture(t),migration=await prepare(f,{mutateHeader(header){mutate(header.state.symbol);return header;}});
+  assert.ok(migration.beginUi&&migration.beginUi.status!==0,`${label}: tampered migration was accepted`);
+  assert.notEqual((await f.target.call('web.presentationState')).status,0,`${label}: target must stay unpublished`);
+  assert.equal((await value(f.source,'web.configuration')).symbol.currency,'USD',`${label}: source remains usable`);
+  assert.equal(await value(f.source,'nativeSaveWorkspace',[f.binding]),f.document,`${label}: source workspace remains usable`);
+ }
 });

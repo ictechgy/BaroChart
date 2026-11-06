@@ -7,7 +7,7 @@ const capabilities = {schema:'barochart.web-wasm.capabilities',version:1,abi:1,t
 
 class FakeWorker {
   static instances=[];
-  constructor() { this.listeners=new Map(); this.messages=[]; this.terminated=false; this.terminateCount=0; this.hang=false; this.hangInit=false; this.wrongType=false; this.malformed=false; FakeWorker.instances.push(this); }
+  constructor() { this.listeners=new Map(); this.messages=[]; this.responses={}; this.terminated=false; this.terminateCount=0; this.hang=false; this.hangInit=false; this.wrongType=false; this.malformed=false; FakeWorker.instances.push(this); }
   addEventListener(type,handler) { const set=this.listeners.get(type)??new Set();set.add(handler);this.listeners.set(type,set); }
   removeEventListener(type,handler) { this.listeners.get(type)?.delete(handler); }
   emit(type,data) { for(const handler of this.listeners.get(type)??[])handler({data,message:data}); }
@@ -18,7 +18,8 @@ class FakeWorker {
     else if(message.type==='rpc'&&!this.hang) queueMicrotask(()=>{
       let value;
       if(this.wrongType) { this.emit('message',{protocol:1,generation:message.generation,id:message.id,type:'ready',capabilities}); return; }
-      if(message.method==='call') value={name:message.name,args:message.args};
+      if(Object.hasOwn(this.responses,message.method)) value=this.responses[message.method];
+      else if(message.method==='call') value={name:message.name,args:message.args};
       else if(message.method==='readF64') value=this.malformed?{not:'float64'}:new Float64Array([1.5,-0]);
       else if(message.method==='writeF64') value=true;
       else if(message.method==='packet') value={metadata:{ok:true},numbers:new Float64Array([2.5])};
@@ -85,6 +86,36 @@ test('wrong response type rejects its own request instead of leaving it pending'
 test('malformed Float64 result rejects promptly and quarantines the actor',withFake(async()=>{
   const actor=await createRustActor({module,timeoutMs:100});const worker=FakeWorker.instances[0];worker.malformed=true;
   await assert.rejects(actor.readF64('nativeIndicatorBuffer',[]),error=>error instanceof RustActorProtocolError&&error.code==='BAD_RESULT');assert.equal(actor.quarantined,true);assert.equal(worker.terminated,true);
+}));
+
+test('falsy and malformed packet replies reject promptly and quarantine without replay',withFake(async()=>{
+ for(const value of [null,undefined,false,0]){
+  const actor=await createRustActor({module,timeoutMs:100}),worker=FakeWorker.instances.at(-1);worker.responses.packet=value;
+  await assert.rejects(actor.packet([]),error=>error instanceof RustActorProtocolError&&error.code==='BAD_RESULT');
+  assert.equal(actor.quarantined,true);assert.equal(worker.terminated,true);assert.equal(worker.messages.filter(item=>item.message.method==='packet').length,1);
+ }
+ const actor=await createRustActor({module,timeoutMs:100}),worker=FakeWorker.instances.at(-1);worker.responses.packet={metadata:{},numbers:'not-f64'};
+ await assert.rejects(actor.packet([]),error=>error instanceof RustActorProtocolError&&error.code==='BAD_RESULT');assert.equal(actor.quarantined,true);
+}));
+
+test('write receipts require booleans while both true and false remain valid',withFake(async()=>{
+ const actor=await createRustActor({module,timeoutMs:100}),worker=FakeWorker.instances.at(-1);
+ assert.equal(await actor.writeF64('nativePrepare',[],new Float64Array()),true);
+ worker.responses.writeF64=false;assert.equal(await actor.writeF64('nativePrepare',[],new Float64Array()),false);assert.equal(actor.quarantined,false);await actor.close();
+ for(const value of [null,undefined,0,1,'not-boolean',{}]){
+  const malformed=await createRustActor({module,timeoutMs:100}),malformedWorker=FakeWorker.instances.at(-1);malformedWorker.responses.writeF64=value;
+  await assert.rejects(malformed.writeF64('nativePrepare',[],new Float64Array()),error=>error instanceof RustActorProtocolError&&error.code==='BAD_RESULT');
+  assert.equal(malformed.quarantined,true);assert.equal(malformedWorker.terminated,true);assert.equal(malformedWorker.messages.filter(item=>item.message.method==='writeF64').length,1);
+ }
+}));
+
+test('a malformed reply settles its request and quarantined siblings exactly once',withFake(async()=>{
+ const actor=await createRustActor({module,timeoutMs:100}),worker=FakeWorker.instances.at(-1);worker.hang=true;let packetSettles=0,siblingSettles=0;
+ const packet=actor.packet([]).catch(error=>{packetSettles++;throw error;}),sibling=actor.call('nativeInit',[]).catch(error=>{siblingSettles++;throw error;});
+ worker.emit('message',{protocol:1,generation:actor.generation,id:2,type:'result',value:null});
+ const results=await Promise.allSettled([packet,sibling]);assert.deepEqual(results.map(result=>result.status),['rejected','rejected']);
+ worker.emit('message',{protocol:1,generation:actor.generation,id:2,type:'result',value:null});await Promise.resolve();
+ assert.equal(packetSettles,1);assert.equal(siblingSettles,1);assert.equal(actor.quarantined,true);assert.equal(worker.terminateCount,1);
 }));
 
 test('aborting initialization terminates the worker and does not leave a late actor',async()=>{

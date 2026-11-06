@@ -75,11 +75,15 @@ fn byte_overlap(first: *const u8, first_len: usize, second: *const u8, second_le
 
 unsafe fn web_f64_input<'a>(data: *const f64, count: u32) -> Option<&'a [f64]> {
     let count = count as usize;
+    if count > MAX_TRANSFER {
+        return None;
+    }
     if count == 0 {
         return Some(&[]);
     }
     let byte_len = count.checked_mul(size_of::<f64>())?;
-    if data.is_null()
+    if byte_len > isize::MAX as usize
+        || data.is_null()
         || !data.addr().is_multiple_of(align_of::<f64>())
         || !wasm_memory_range(data.addr(), byte_len, align_of::<f64>())
     {

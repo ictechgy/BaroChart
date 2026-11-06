@@ -89,6 +89,17 @@ test('WASM web write rejects an invalid source pointer and leaves didWrite at ze
   assert.equal(result, 6);
 });
 
+test('WASM web write rejects input above the advertised transfer bound before core dispatch', {skip}, async t => {
+  const harness = await createWasmHarness({targetDirectory: 'artifacts/rust-wasm/harness-target'});
+  t.after(() => harness.dispose());
+  const limit = harness.webCapabilities().value.maxTransfer;
+  const atLimit = harness.webWriteF64('__bounded_transfer_probe__', [], new Float64Array(limit));
+  assert.equal(atLimit.status, 2, 'an in-bound request reaches the unavailable core operation');
+  const oversized = harness.webWriteF64('__bounded_transfer_probe__', [], new Float64Array(limit + 1));
+  assert.deepEqual(oversized, {status: 6, didWrite: 0, error: undefined});
+  assert.equal((await harness.call('nativeInit', [0, null])).status, 0, 'rejection leaves the engine usable');
+});
+
 test('WASM web write rejects source aliases into name and args without touching input or core', {skip}, async t => {
   const harness = await createWasmHarness({targetDirectory: 'artifacts/rust-wasm/harness-target'});
   t.after(() => harness.dispose());

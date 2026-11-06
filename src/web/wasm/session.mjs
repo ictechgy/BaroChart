@@ -1,7 +1,7 @@
 import {runRustParamsJob} from './params-job.mjs';
-import {runRustPrepareJob} from './prepare-job.mjs';
-import {runRustMigrationJob} from './migration-job.mjs';
-import {runRustCaptureJob} from './capture-job.mjs';
+import {runRustPrepareJob,RustPrepareJobAbortError,RustPrepareJobTimeoutError} from './prepare-job.mjs';
+import {runRustMigrationJob,RustMigrationJobAbortError,RustMigrationJobTimeoutError} from './migration-job.mjs';
+import {runRustCaptureJob,RustCaptureJobAbortError,RustCaptureJobTimeoutError} from './capture-job.mjs';
 
 const READ_COMMANDS=new Set(['dataAt','crosshairSnapshot','crosshairValues','indicatorValues','indicatorValueAt','saveStudies','positionMetrics','saveDrawings','saveDataIngestion','dataIngestionStats','inspect']);
 const WEB_QUERIES=new Set(['web.capabilities','web.presentationState','web.configuration','web.drawingsState','web.indicatorCatalog','web.layoutCapture','web.layoutReferences']);
@@ -9,6 +9,8 @@ const INTERACTIONS=new Set(['nativePointer','nativeWheel','nativeKey','nativeToo
 const PARAMS_OPERATIONS=['Begin','Step','Check','Receive','ArmWrite','Checkpoint','Validate','Prepare','Publish','Status','Abort'].map(suffix=>'web.paramsSource'+suffix);
 const MIGRATION_OPERATIONS=[...['Begin','Step','UiBegin','UiNext','Check','Finish','Abort'].map(suffix=>'web.migrationSource'+suffix),...['Create','Start','Step','UiBegin','UiChunk','UiFinish','Abort'].map(suffix=>'web.migrationTarget'+suffix)];
 const CORE_OPERATIONS=['nativeInit','nativeCommand','nativeScenePacket','nativeSaveWorkspace','nativePrepareBegin','nativePrepareCreate','nativeAsyncBuffer','nativeAsyncTargetBuffer','nativeAsyncStart','nativeAsyncStep','nativeAsyncUIBegin','nativeAsyncUINext','nativeAsyncUICheck','nativeAsyncUIImportBegin','nativeAsyncUIImportChunk','nativeAsyncUIImportEnd','nativeAsyncFinish','nativeAsyncRelease','nativeParamsTargetCreate','nativeParamsTargetStart','nativeParamsTargetStep','nativeParamsTargetDescriptor','nativeParamsTargetCheckpoint','nativeWorkspaceTargetCreate','nativeWorkspaceTargetFinish'];
+const DEFAULT_JOB_TIMEOUT_MS=30_000;
+const now=()=>globalThis.performance?.now?.()??Date.now();
 function checkActorCapabilities(actor){if(CORE_OPERATIONS.some(name=>!actor.initialCapabilities?.implemented?.includes(name)))throw new RustSessionError('Required Rust actor job protocol is unavailable',{code:'CAPABILITY_MISMATCH'});}
 function checkCapabilities(capabilities){
  if(capabilities?.schema!=='aster.web-wasm.capabilities'||capabilities.version!==1||[...WEB_QUERIES,'web.applyLayoutFrame',...PARAMS_OPERATIONS,...MIGRATION_OPERATIONS].some(name=>!capabilities.implemented?.includes(name))||!capabilities.typedReads?.includes('web.dataColumn')||!Number.isSafeInteger(capabilities.maxTransfer)||capabilities.maxTransfer<1||capabilities.maxTransfer>262144)throw new RustSessionError('Required Rust web protocol is unavailable',{code:'CAPABILITY_MISMATCH'});
@@ -175,12 +177,18 @@ export class RustSession {
    return snapshot;
   });
  }
- async #candidateJob(kind,run,options={},activate=null){
+ async #candidateJob(kind,run,options={},activate=null,{AbortError,TimeoutError,timeoutLabel},beforeRun=null){
   this.#check(true);if(this.#job)throw new RustSessionError('A Rust session job is already active',{code:'JOB_BUSY'});
   const signal=options.signal;
   if(signal!==undefined&&(!signal||typeof signal.addEventListener!=='function'||typeof signal.removeEventListener!=='function'||typeof signal.aborted!=='boolean'))throw new TypeError('AbortSignal required');
-  const controller=new AbortController(),cancel=()=>controller.abort(signal?.reason);
+  const timeoutMs=options.timeoutMs??DEFAULT_JOB_TIMEOUT_MS;if(!Number.isFinite(timeoutMs)||timeoutMs<=0)throw new RangeError(timeoutLabel);
+  const started=now(),deadline=started+timeoutMs,controller=new AbortController(),cancel=()=>controller.abort(signal?.reason);
+  let admissionFailure=null,rejectAdmission,admitting=true;
+  const admissionCancellation=new Promise((_,reject)=>{rejectAdmission=reject;});void admissionCancellation.catch(()=>{});
+  const failAdmission=error=>{if(admissionFailure)return;admissionFailure=error;rejectAdmission(error);};
+  const onJobAbort=()=>{if(admitting)failAdmission(new AbortError(controller.signal.reason,{phase:'admission'}));};controller.signal.addEventListener('abort',onJobAbort,{once:true});
   if(signal?.aborted)cancel();else signal?.addEventListener('abort',cancel,{once:true});
+  const timer=setTimeout(()=>{const error=new TimeoutError(undefined,{phase:'admission'});failAdmission(error);controller.abort(error);},timeoutMs);
   const job={kind,controller,accepted:false,safePoint:false};this.#job=job;const view=this.#view;let paused=false;
   const port={
    call:(name,args)=>this.#protocol('call',name,args),readF64:(name,args)=>this.#protocol('readF64',name,args),
@@ -189,22 +197,26 @@ export class RustSession {
    revision:()=>this.#revision+1,
   };
   try{
-   await view?.flush?.();
+   const admit=action=>{if(admissionFailure)throw admissionFailure;return Promise.race([Promise.resolve().then(action),admissionCancellation]);};
+   await admit(()=>view?.flush?.());
    job.safePoint=true;if(view?.pausePresentation){view.pausePresentation();paused=true;}
-   await this.#enqueue(()=>this.#check());
-   const result=await run(port,{...options,signal:controller.signal,activate:activate??(async candidate=>{const snapshot=await this.#promoteActor(candidate.actor,job);candidate.handoff();return snapshot;})});
+   await admit(()=>this.#enqueue(()=>this.#check()));
+   const admission=beforeRun?await admit(()=>beforeRun(port)):undefined;
+   const remaining=deadline-now();if(remaining<=0)throw new TimeoutError(undefined,{phase:'admission'});
+   admitting=false;clearTimeout(timer);
+   const result=await run(port,{...options,timeoutMs:remaining,signal:controller.signal,activate:activate??(async candidate=>{const snapshot=await this.#promoteActor(candidate.actor,job);candidate.handoff();return snapshot;})},admission);
    if(activate)return result;
    return {status:'committed',generation:this.generation,snapshot:this.snapshot()};
   }catch(error){this.#fatal(error);throw error;}
-  finally{signal?.removeEventListener('abort',cancel);if(this.#job===job)this.#job=null;if(paused)view.resumePresentation?.();}
+  finally{admitting=false;clearTimeout(timer);controller.signal.removeEventListener('abort',onJobAbort);signal?.removeEventListener('abort',cancel);if(this.#job===job)this.#job=null;if(paused)view.resumePresentation?.();}
  }
- async prepareData(input,options={}){return this.#candidateJob('prepare',(port,settings)=>runRustPrepareJob(port,input,settings),options);}
+ async prepareData(input,options={}){return this.#candidateJob('prepare',(port,settings)=>runRustPrepareJob(port,input,settings),options,null,{AbortError:RustPrepareJobAbortError,TimeoutError:RustPrepareJobTimeoutError,timeoutLabel:'Rust prepare timeout'});}
  async recreate({binding={key:'barochart-web',revision:'1',adjustmentVersion:'raw-v1',priceUnit:'USD',adjustment:'raw'},...options}={}){
-  return this.#candidateJob('migration',async(port,settings)=>{const document=await port.call('nativeSaveWorkspace',[binding]);return runRustMigrationJob(port,document,binding,settings);},options);
+  return this.#candidateJob('migration',(port,settings,document)=>runRustMigrationJob(port,document,binding,settings),options,null,{AbortError:RustMigrationJobAbortError,TimeoutError:RustMigrationJobTimeoutError,timeoutLabel:'Rust migration timeout'},port=>port.call('nativeSaveWorkspace',[binding]));
  }
  async withMigrationCapture(binding,{consume,activate,...options}={}){
   if(typeof consume!=='function'||typeof activate!=='function')throw new TypeError('Migration consume and activation callbacks required');
-  return this.#candidateJob('migration',async(port,settings)=>{const document=await port.call('nativeSaveWorkspace',[binding]);return runRustCaptureJob(port,document,binding,{...settings,consume});},options,activate);
+  return this.#candidateJob('migration',(port,settings,document)=>runRustCaptureJob(port,document,binding,{...settings,consume}),options,activate,{AbortError:RustCaptureJobAbortError,TimeoutError:RustCaptureJobTimeoutError,timeoutLabel:'Rust capture timeout'},port=>port.call('nativeSaveWorkspace',[binding]));
  }
  claimView(view){this.#check();if(!view||this.#view)throw new RustSessionError('Rust session already has an attached view',{code:'VIEW_ATTACHED'});this.#view=view;}
  releaseView(view){if(this.#view===view)this.#view=null;}

@@ -1,7 +1,7 @@
 {
   "schema": "barochart.web-rust-wasm-performance",
   "version": 1,
-  "timestamp": "2026-11-05T19:10:14.677Z",
+  "timestamp": "2026-11-06T03:38:54.103Z",
   "status": "measured",
   "defaultBackend": "javascript",
   "decision": "No default backend change is inferred from this measurement.",
@@ -42,21 +42,21 @@
     "order": "Cold count/backend launch order and warm count/backend construction/renderer order rotate across repeats."
   },
   "asset": {
-    "rawBytes": 3320094,
-    "gzipBytes": 1044284,
-    "brotliBytes": 782677,
-    "sha256": "821bdc23f661c333d7e6feaf4ad92e9655ac6c090fc26863a697f6ef9481521b",
-    "manifestSourceSha256": "9a6d7e594fecc33efde7a25dc9716e65e15d601b230e83da896e07ae050090b7"
+    "rawBytes": 3324243,
+    "gzipBytes": 1045181,
+    "brotliBytes": 783178,
+    "sha256": "be3bb10e73d67905383bcb764cf01d35e148e950003eed8b3418355c81b4190b",
+    "manifestSourceSha256": "eb01ce6390b38c116c987568d25d0ff94f3ac65ca21ee8f7dd9712bbda874af1"
   },
   "coldStartup": [
     {
       "backend": "javascript",
       "count": 10000,
-      "totalMs": 55.5,
-      "importMs": 36,
-      "generationMs": 1.4000000357627869,
-      "prepareMs": 7.699999988079071,
-      "firstFrameMs": 10.300000011920929,
+      "totalMs": 115.5,
+      "importMs": 71.30000001192093,
+      "generationMs": 2.899999976158142,
+      "prepareMs": 9,
+      "firstFrameMs": 32.10000002384186,
       "fetchAndArrayBufferMs": null,
       "compileMs": null,
       "actorInitMs": null,
@@ -82,504 +82,504 @@
     {
       "backend": "rust-wasm",
       "count": 10000,
-      "totalMs": 97.09999996423721,
-      "importMs": 25.69999998807907,
-      "generationMs": 3.100000023841858,
-      "fetchAndArrayBufferMs": 3.600000023841858,
-      "compileMs": 1.899999976158142,
-      "actorInitMs": 10.699999988079071,
-      "configureMs": 3.800000011920929,
-      "prepareMs": 39.60000002384186,
-      "firstFrameMs": 8.399999976158142,
-      "wasmBytes": 3320094,
-      "workers": {
-        "created": 2,
-        "terminatedAfterClose": 2
-      },
-      "validation": {
-        "validated": true,
-        "rawLastScalars": 6,
-        "representativeIndicatorPoints": 9,
-        "sceneStoredBars": 10000,
-        "referenceModelsCreated": 1,
-        "referenceModelsDisposed": 1
-      },
-      "repeat": 0,
-      "order": [
-        "javascript",
-        "rust-wasm"
-      ]
-    },
-    {
-      "backend": "rust-wasm",
-      "count": 100000,
-      "totalMs": 135.29999995231628,
-      "importMs": 27.399999976158142,
-      "generationMs": 5.900000035762787,
-      "fetchAndArrayBufferMs": 3.399999976158142,
-      "compileMs": 1.800000011920929,
-      "actorInitMs": 12,
-      "configureMs": 3.800000011920929,
-      "prepareMs": 72.39999997615814,
-      "firstFrameMs": 8.099999964237213,
-      "wasmBytes": 3320094,
-      "workers": {
-        "created": 2,
-        "terminatedAfterClose": 2
-      },
-      "validation": {
-        "validated": true,
-        "rawLastScalars": 6,
-        "representativeIndicatorPoints": 9,
-        "sceneStoredBars": 100000,
-        "referenceModelsCreated": 1,
-        "referenceModelsDisposed": 1
-      },
-      "repeat": 0,
-      "order": [
-        "rust-wasm",
-        "javascript"
-      ]
-    },
-    {
-      "backend": "javascript",
-      "count": 100000,
-      "totalMs": 79.39999997615814,
-      "importMs": 34.59999996423721,
-      "generationMs": 4.700000047683716,
-      "prepareMs": 27.399999976158142,
-      "firstFrameMs": 12.5,
-      "fetchAndArrayBufferMs": null,
-      "compileMs": null,
-      "actorInitMs": null,
-      "configureMs": null,
-      "workers": {
-        "created": 0,
-        "terminatedAfterClose": 0
-      },
-      "validation": {
-        "validated": true,
-        "rawLastScalars": 6,
-        "representativeIndicatorPoints": 9,
-        "sceneStoredBars": 100000,
-        "referenceModelsCreated": 1,
-        "referenceModelsDisposed": 1
-      },
-      "repeat": 0,
-      "order": [
-        "rust-wasm",
-        "javascript"
-      ]
-    },
-    {
-      "backend": "javascript",
-      "count": 1000000,
-      "totalMs": 239.89999997615814,
-      "importMs": 34.40000003576279,
-      "generationMs": 24.700000047683716,
-      "prepareMs": 162.5,
-      "firstFrameMs": 18.099999964237213,
-      "fetchAndArrayBufferMs": null,
-      "compileMs": null,
-      "actorInitMs": null,
-      "configureMs": null,
-      "workers": {
-        "created": 0,
-        "terminatedAfterClose": 0
-      },
-      "validation": {
-        "validated": true,
-        "rawLastScalars": 6,
-        "representativeIndicatorPoints": 9,
-        "sceneStoredBars": 1000000,
-        "referenceModelsCreated": 1,
-        "referenceModelsDisposed": 1
-      },
-      "repeat": 0,
-      "order": [
-        "javascript",
-        "rust-wasm"
-      ]
-    },
-    {
-      "backend": "rust-wasm",
-      "count": 1000000,
-      "totalMs": 507.2000000476837,
-      "importMs": 29.100000023841858,
-      "generationMs": 26.69999998807907,
-      "fetchAndArrayBufferMs": 3.899999976158142,
-      "compileMs": 1.800000011920929,
-      "actorInitMs": 10,
-      "configureMs": 3.300000011920929,
-      "prepareMs": 424.10000002384186,
-      "firstFrameMs": 8,
-      "wasmBytes": 3320094,
-      "workers": {
-        "created": 2,
-        "terminatedAfterClose": 2
-      },
-      "validation": {
-        "validated": true,
-        "rawLastScalars": 6,
-        "representativeIndicatorPoints": 9,
-        "sceneStoredBars": 1000000,
-        "referenceModelsCreated": 1,
-        "referenceModelsDisposed": 1
-      },
-      "repeat": 0,
-      "order": [
-        "javascript",
-        "rust-wasm"
-      ]
-    },
-    {
-      "backend": "rust-wasm",
-      "count": 1000000,
-      "totalMs": 499.5999999642372,
-      "importMs": 22.600000023841858,
-      "generationMs": 25.19999998807907,
-      "fetchAndArrayBufferMs": 5.899999976158142,
-      "compileMs": 1.699999988079071,
-      "actorInitMs": 10.100000023841858,
-      "configureMs": 3.899999976158142,
-      "prepareMs": 421.80000001192093,
-      "firstFrameMs": 8,
-      "wasmBytes": 3320094,
-      "workers": {
-        "created": 2,
-        "terminatedAfterClose": 2
-      },
-      "validation": {
-        "validated": true,
-        "rawLastScalars": 6,
-        "representativeIndicatorPoints": 9,
-        "sceneStoredBars": 1000000,
-        "referenceModelsCreated": 1,
-        "referenceModelsDisposed": 1
-      },
-      "repeat": 1,
-      "order": [
-        "rust-wasm",
-        "javascript"
-      ]
-    },
-    {
-      "backend": "javascript",
-      "count": 1000000,
-      "totalMs": 241.10000002384186,
-      "importMs": 37.59999996423721,
-      "generationMs": 25.400000035762787,
-      "prepareMs": 159.29999995231628,
-      "firstFrameMs": 18.5,
-      "fetchAndArrayBufferMs": null,
-      "compileMs": null,
-      "actorInitMs": null,
-      "configureMs": null,
-      "workers": {
-        "created": 0,
-        "terminatedAfterClose": 0
-      },
-      "validation": {
-        "validated": true,
-        "rawLastScalars": 6,
-        "representativeIndicatorPoints": 9,
-        "sceneStoredBars": 1000000,
-        "referenceModelsCreated": 1,
-        "referenceModelsDisposed": 1
-      },
-      "repeat": 1,
-      "order": [
-        "rust-wasm",
-        "javascript"
-      ]
-    },
-    {
-      "backend": "javascript",
-      "count": 100000,
-      "totalMs": 76,
-      "importMs": 31.400000035762787,
-      "generationMs": 4.599999964237213,
-      "prepareMs": 27,
-      "firstFrameMs": 12.900000035762787,
-      "fetchAndArrayBufferMs": null,
-      "compileMs": null,
-      "actorInitMs": null,
-      "configureMs": null,
-      "workers": {
-        "created": 0,
-        "terminatedAfterClose": 0
-      },
-      "validation": {
-        "validated": true,
-        "rawLastScalars": 6,
-        "representativeIndicatorPoints": 9,
-        "sceneStoredBars": 100000,
-        "referenceModelsCreated": 1,
-        "referenceModelsDisposed": 1
-      },
-      "repeat": 1,
-      "order": [
-        "javascript",
-        "rust-wasm"
-      ]
-    },
-    {
-      "backend": "rust-wasm",
-      "count": 100000,
-      "totalMs": 135.19999998807907,
-      "importMs": 28.700000047683716,
-      "generationMs": 6.099999964237213,
-      "fetchAndArrayBufferMs": 3.300000011920929,
-      "compileMs": 1.7999999523162842,
-      "actorInitMs": 10.700000047683716,
-      "configureMs": 3.799999952316284,
-      "prepareMs": 71.70000004768372,
-      "firstFrameMs": 8.800000011920929,
-      "wasmBytes": 3320094,
-      "workers": {
-        "created": 2,
-        "terminatedAfterClose": 2
-      },
-      "validation": {
-        "validated": true,
-        "rawLastScalars": 6,
-        "representativeIndicatorPoints": 9,
-        "sceneStoredBars": 100000,
-        "referenceModelsCreated": 1,
-        "referenceModelsDisposed": 1
-      },
-      "repeat": 1,
-      "order": [
-        "javascript",
-        "rust-wasm"
-      ]
-    },
-    {
-      "backend": "rust-wasm",
-      "count": 10000,
-      "totalMs": 100.70000004768372,
-      "importMs": 30.19999998807907,
-      "generationMs": 1.199999988079071,
-      "fetchAndArrayBufferMs": 6.100000023841858,
-      "compileMs": 1.9000000357627869,
-      "actorInitMs": 10.399999976158142,
-      "configureMs": 3.800000011920929,
-      "prepareMs": 38.30000001192093,
-      "firstFrameMs": 8.5,
-      "wasmBytes": 3320094,
-      "workers": {
-        "created": 2,
-        "terminatedAfterClose": 2
-      },
-      "validation": {
-        "validated": true,
-        "rawLastScalars": 6,
-        "representativeIndicatorPoints": 9,
-        "sceneStoredBars": 10000,
-        "referenceModelsCreated": 1,
-        "referenceModelsDisposed": 1
-      },
-      "repeat": 1,
-      "order": [
-        "rust-wasm",
-        "javascript"
-      ]
-    },
-    {
-      "backend": "javascript",
-      "count": 10000,
-      "totalMs": 51,
-      "importMs": 30.5,
-      "generationMs": 1.199999988079071,
-      "prepareMs": 8.200000047683716,
-      "firstFrameMs": 10.800000011920929,
-      "fetchAndArrayBufferMs": null,
-      "compileMs": null,
-      "actorInitMs": null,
-      "configureMs": null,
-      "workers": {
-        "created": 0,
-        "terminatedAfterClose": 0
-      },
-      "validation": {
-        "validated": true,
-        "rawLastScalars": 6,
-        "representativeIndicatorPoints": 9,
-        "sceneStoredBars": 10000,
-        "referenceModelsCreated": 1,
-        "referenceModelsDisposed": 1
-      },
-      "repeat": 1,
-      "order": [
-        "rust-wasm",
-        "javascript"
-      ]
-    },
-    {
-      "backend": "javascript",
-      "count": 100000,
-      "totalMs": 83.60000002384186,
-      "importMs": 40,
-      "generationMs": 4.899999976158142,
-      "prepareMs": 26.399999976158142,
-      "firstFrameMs": 12.100000023841858,
-      "fetchAndArrayBufferMs": null,
-      "compileMs": null,
-      "actorInitMs": null,
-      "configureMs": null,
-      "workers": {
-        "created": 0,
-        "terminatedAfterClose": 0
-      },
-      "validation": {
-        "validated": true,
-        "rawLastScalars": 6,
-        "representativeIndicatorPoints": 9,
-        "sceneStoredBars": 100000,
-        "referenceModelsCreated": 1,
-        "referenceModelsDisposed": 1
-      },
-      "repeat": 2,
-      "order": [
-        "javascript",
-        "rust-wasm"
-      ]
-    },
-    {
-      "backend": "rust-wasm",
-      "count": 100000,
-      "totalMs": 128.89999997615814,
-      "importMs": 20.600000023841858,
-      "generationMs": 5.5,
-      "fetchAndArrayBufferMs": 3.799999952316284,
-      "compileMs": 2.300000011920929,
-      "actorInitMs": 13.300000011920929,
-      "configureMs": 3.899999976158142,
-      "prepareMs": 70.5,
-      "firstFrameMs": 8.399999976158142,
-      "wasmBytes": 3320094,
-      "workers": {
-        "created": 2,
-        "terminatedAfterClose": 2
-      },
-      "validation": {
-        "validated": true,
-        "rawLastScalars": 6,
-        "representativeIndicatorPoints": 9,
-        "sceneStoredBars": 100000,
-        "referenceModelsCreated": 1,
-        "referenceModelsDisposed": 1
-      },
-      "repeat": 2,
-      "order": [
-        "javascript",
-        "rust-wasm"
-      ]
-    },
-    {
-      "backend": "rust-wasm",
-      "count": 10000,
-      "totalMs": 98.79999995231628,
-      "importMs": 28,
-      "generationMs": 2.300000011920929,
-      "fetchAndArrayBufferMs": 4.5,
-      "compileMs": 1.800000011920929,
-      "actorInitMs": 10.599999964237213,
-      "configureMs": 4.099999964237213,
-      "prepareMs": 38.700000047683716,
-      "firstFrameMs": 8.299999952316284,
-      "wasmBytes": 3320094,
-      "workers": {
-        "created": 2,
-        "terminatedAfterClose": 2
-      },
-      "validation": {
-        "validated": true,
-        "rawLastScalars": 6,
-        "representativeIndicatorPoints": 9,
-        "sceneStoredBars": 10000,
-        "referenceModelsCreated": 1,
-        "referenceModelsDisposed": 1
-      },
-      "repeat": 2,
-      "order": [
-        "rust-wasm",
-        "javascript"
-      ]
-    },
-    {
-      "backend": "javascript",
-      "count": 10000,
-      "totalMs": 50.10000002384186,
-      "importMs": 30.100000023841858,
-      "generationMs": 1.2000000476837158,
-      "prepareMs": 7.699999988079071,
-      "firstFrameMs": 10.800000011920929,
-      "fetchAndArrayBufferMs": null,
-      "compileMs": null,
-      "actorInitMs": null,
-      "configureMs": null,
-      "workers": {
-        "created": 0,
-        "terminatedAfterClose": 0
-      },
-      "validation": {
-        "validated": true,
-        "rawLastScalars": 6,
-        "representativeIndicatorPoints": 9,
-        "sceneStoredBars": 10000,
-        "referenceModelsCreated": 1,
-        "referenceModelsDisposed": 1
-      },
-      "repeat": 2,
-      "order": [
-        "rust-wasm",
-        "javascript"
-      ]
-    },
-    {
-      "backend": "javascript",
-      "count": 1000000,
-      "totalMs": 238.29999995231628,
-      "importMs": 34.30000001192093,
-      "generationMs": 24.69999998807907,
-      "prepareMs": 161.19999998807907,
-      "firstFrameMs": 17.899999976158142,
-      "fetchAndArrayBufferMs": null,
-      "compileMs": null,
-      "actorInitMs": null,
-      "configureMs": null,
-      "workers": {
-        "created": 0,
-        "terminatedAfterClose": 0
-      },
-      "validation": {
-        "validated": true,
-        "rawLastScalars": 6,
-        "representativeIndicatorPoints": 9,
-        "sceneStoredBars": 1000000,
-        "referenceModelsCreated": 1,
-        "referenceModelsDisposed": 1
-      },
-      "repeat": 2,
-      "order": [
-        "javascript",
-        "rust-wasm"
-      ]
-    },
-    {
-      "backend": "rust-wasm",
-      "count": 1000000,
-      "totalMs": 514.5,
-      "importMs": 33.59999996423721,
-      "generationMs": 25.5,
-      "fetchAndArrayBufferMs": 4.700000047683716,
-      "compileMs": 1.899999976158142,
-      "actorInitMs": 10.400000035762787,
-      "configureMs": 3.599999964237213,
-      "prepareMs": 425.9000000357628,
+      "totalMs": 104.69999998807907,
+      "importMs": 30.400000035762787,
+      "generationMs": 3.699999988079071,
+      "fetchAndArrayBufferMs": 4.300000011920929,
+      "compileMs": 2,
+      "actorInitMs": 11.699999988079071,
+      "configureMs": 4.300000011920929,
+      "prepareMs": 39.30000001192093,
       "firstFrameMs": 8.599999964237213,
-      "wasmBytes": 3320094,
+      "wasmBytes": 3324243,
+      "workers": {
+        "created": 2,
+        "terminatedAfterClose": 2
+      },
+      "validation": {
+        "validated": true,
+        "rawLastScalars": 6,
+        "representativeIndicatorPoints": 9,
+        "sceneStoredBars": 10000,
+        "referenceModelsCreated": 1,
+        "referenceModelsDisposed": 1
+      },
+      "repeat": 0,
+      "order": [
+        "javascript",
+        "rust-wasm"
+      ]
+    },
+    {
+      "backend": "rust-wasm",
+      "count": 100000,
+      "totalMs": 135.89999997615814,
+      "importMs": 27.69999998807907,
+      "generationMs": 5,
+      "fetchAndArrayBufferMs": 4.899999976158142,
+      "compileMs": 1.600000023841858,
+      "actorInitMs": 12.100000023841858,
+      "configureMs": 3.800000011920929,
+      "prepareMs": 71.69999998807907,
+      "firstFrameMs": 8.5,
+      "wasmBytes": 3324243,
+      "workers": {
+        "created": 2,
+        "terminatedAfterClose": 2
+      },
+      "validation": {
+        "validated": true,
+        "rawLastScalars": 6,
+        "representativeIndicatorPoints": 9,
+        "sceneStoredBars": 100000,
+        "referenceModelsCreated": 1,
+        "referenceModelsDisposed": 1
+      },
+      "repeat": 0,
+      "order": [
+        "rust-wasm",
+        "javascript"
+      ]
+    },
+    {
+      "backend": "javascript",
+      "count": 100000,
+      "totalMs": 77.30000001192093,
+      "importMs": 32.39999997615814,
+      "generationMs": 5,
+      "prepareMs": 27,
+      "firstFrameMs": 12.699999988079071,
+      "fetchAndArrayBufferMs": null,
+      "compileMs": null,
+      "actorInitMs": null,
+      "configureMs": null,
+      "workers": {
+        "created": 0,
+        "terminatedAfterClose": 0
+      },
+      "validation": {
+        "validated": true,
+        "rawLastScalars": 6,
+        "representativeIndicatorPoints": 9,
+        "sceneStoredBars": 100000,
+        "referenceModelsCreated": 1,
+        "referenceModelsDisposed": 1
+      },
+      "repeat": 0,
+      "order": [
+        "rust-wasm",
+        "javascript"
+      ]
+    },
+    {
+      "backend": "javascript",
+      "count": 1000000,
+      "totalMs": 240.80000001192093,
+      "importMs": 32.5,
+      "generationMs": 25,
+      "prepareMs": 164.9000000357628,
+      "firstFrameMs": 18.100000023841858,
+      "fetchAndArrayBufferMs": null,
+      "compileMs": null,
+      "actorInitMs": null,
+      "configureMs": null,
+      "workers": {
+        "created": 0,
+        "terminatedAfterClose": 0
+      },
+      "validation": {
+        "validated": true,
+        "rawLastScalars": 6,
+        "representativeIndicatorPoints": 9,
+        "sceneStoredBars": 1000000,
+        "referenceModelsCreated": 1,
+        "referenceModelsDisposed": 1
+      },
+      "repeat": 0,
+      "order": [
+        "javascript",
+        "rust-wasm"
+      ]
+    },
+    {
+      "backend": "rust-wasm",
+      "count": 1000000,
+      "totalMs": 512.3999999761581,
+      "importMs": 29.600000023841858,
+      "generationMs": 25.30000001192093,
+      "fetchAndArrayBufferMs": 5.599999964237213,
+      "compileMs": 1.7999999523162842,
+      "actorInitMs": 10.100000023841858,
+      "configureMs": 3.5,
+      "prepareMs": 427.69999998807907,
+      "firstFrameMs": 8.5,
+      "wasmBytes": 3324243,
+      "workers": {
+        "created": 2,
+        "terminatedAfterClose": 2
+      },
+      "validation": {
+        "validated": true,
+        "rawLastScalars": 6,
+        "representativeIndicatorPoints": 9,
+        "sceneStoredBars": 1000000,
+        "referenceModelsCreated": 1,
+        "referenceModelsDisposed": 1
+      },
+      "repeat": 0,
+      "order": [
+        "javascript",
+        "rust-wasm"
+      ]
+    },
+    {
+      "backend": "rust-wasm",
+      "count": 1000000,
+      "totalMs": 521.5999999642372,
+      "importMs": 30.69999998807907,
+      "generationMs": 25.5,
+      "fetchAndArrayBufferMs": 5.5,
+      "compileMs": 1.9000000357627869,
+      "actorInitMs": 10.599999964237213,
+      "configureMs": 4.200000047683716,
+      "prepareMs": 434.69999998807907,
+      "firstFrameMs": 8.099999964237213,
+      "wasmBytes": 3324243,
+      "workers": {
+        "created": 2,
+        "terminatedAfterClose": 2
+      },
+      "validation": {
+        "validated": true,
+        "rawLastScalars": 6,
+        "representativeIndicatorPoints": 9,
+        "sceneStoredBars": 1000000,
+        "referenceModelsCreated": 1,
+        "referenceModelsDisposed": 1
+      },
+      "repeat": 1,
+      "order": [
+        "rust-wasm",
+        "javascript"
+      ]
+    },
+    {
+      "backend": "javascript",
+      "count": 1000000,
+      "totalMs": 237.89999997615814,
+      "importMs": 36.80000001192093,
+      "generationMs": 25.100000023841858,
+      "prepareMs": 157.5999999642372,
+      "firstFrameMs": 18.19999998807907,
+      "fetchAndArrayBufferMs": null,
+      "compileMs": null,
+      "actorInitMs": null,
+      "configureMs": null,
+      "workers": {
+        "created": 0,
+        "terminatedAfterClose": 0
+      },
+      "validation": {
+        "validated": true,
+        "rawLastScalars": 6,
+        "representativeIndicatorPoints": 9,
+        "sceneStoredBars": 1000000,
+        "referenceModelsCreated": 1,
+        "referenceModelsDisposed": 1
+      },
+      "repeat": 1,
+      "order": [
+        "rust-wasm",
+        "javascript"
+      ]
+    },
+    {
+      "backend": "javascript",
+      "count": 100000,
+      "totalMs": 88.89999997615814,
+      "importMs": 42.80000001192093,
+      "generationMs": 5.199999988079071,
+      "prepareMs": 27.80000001192093,
+      "firstFrameMs": 13,
+      "fetchAndArrayBufferMs": null,
+      "compileMs": null,
+      "actorInitMs": null,
+      "configureMs": null,
+      "workers": {
+        "created": 0,
+        "terminatedAfterClose": 0
+      },
+      "validation": {
+        "validated": true,
+        "rawLastScalars": 6,
+        "representativeIndicatorPoints": 9,
+        "sceneStoredBars": 100000,
+        "referenceModelsCreated": 1,
+        "referenceModelsDisposed": 1
+      },
+      "repeat": 1,
+      "order": [
+        "javascript",
+        "rust-wasm"
+      ]
+    },
+    {
+      "backend": "rust-wasm",
+      "count": 100000,
+      "totalMs": 140.5,
+      "importMs": 34.5,
+      "generationMs": 5,
+      "fetchAndArrayBufferMs": 5.600000023841858,
+      "compileMs": 1.5999999642372131,
+      "actorInitMs": 10.699999988079071,
+      "configureMs": 4,
+      "prepareMs": 70.30000001192093,
+      "firstFrameMs": 8.199999988079071,
+      "wasmBytes": 3324243,
+      "workers": {
+        "created": 2,
+        "terminatedAfterClose": 2
+      },
+      "validation": {
+        "validated": true,
+        "rawLastScalars": 6,
+        "representativeIndicatorPoints": 9,
+        "sceneStoredBars": 100000,
+        "referenceModelsCreated": 1,
+        "referenceModelsDisposed": 1
+      },
+      "repeat": 1,
+      "order": [
+        "javascript",
+        "rust-wasm"
+      ]
+    },
+    {
+      "backend": "rust-wasm",
+      "count": 10000,
+      "totalMs": 101.59999996423721,
+      "importMs": 19.700000047683716,
+      "generationMs": 1.2999999523162842,
+      "fetchAndArrayBufferMs": 2.400000035762787,
+      "compileMs": 6.100000023841858,
+      "actorInitMs": 18.299999952316284,
+      "configureMs": 3.900000035762787,
+      "prepareMs": 40.69999998807907,
+      "firstFrameMs": 8.899999976158142,
+      "wasmBytes": 3324243,
+      "workers": {
+        "created": 2,
+        "terminatedAfterClose": 2
+      },
+      "validation": {
+        "validated": true,
+        "rawLastScalars": 6,
+        "representativeIndicatorPoints": 9,
+        "sceneStoredBars": 10000,
+        "referenceModelsCreated": 1,
+        "referenceModelsDisposed": 1
+      },
+      "repeat": 1,
+      "order": [
+        "rust-wasm",
+        "javascript"
+      ]
+    },
+    {
+      "backend": "javascript",
+      "count": 10000,
+      "totalMs": 62.5,
+      "importMs": 39.5,
+      "generationMs": 1.100000023841858,
+      "prepareMs": 8.899999976158142,
+      "firstFrameMs": 12.799999952316284,
+      "fetchAndArrayBufferMs": null,
+      "compileMs": null,
+      "actorInitMs": null,
+      "configureMs": null,
+      "workers": {
+        "created": 0,
+        "terminatedAfterClose": 0
+      },
+      "validation": {
+        "validated": true,
+        "rawLastScalars": 6,
+        "representativeIndicatorPoints": 9,
+        "sceneStoredBars": 10000,
+        "referenceModelsCreated": 1,
+        "referenceModelsDisposed": 1
+      },
+      "repeat": 1,
+      "order": [
+        "rust-wasm",
+        "javascript"
+      ]
+    },
+    {
+      "backend": "javascript",
+      "count": 100000,
+      "totalMs": 83.89999997615814,
+      "importMs": 36.90000003576279,
+      "generationMs": 4.800000011920929,
+      "prepareMs": 29,
+      "firstFrameMs": 13.099999964237213,
+      "fetchAndArrayBufferMs": null,
+      "compileMs": null,
+      "actorInitMs": null,
+      "configureMs": null,
+      "workers": {
+        "created": 0,
+        "terminatedAfterClose": 0
+      },
+      "validation": {
+        "validated": true,
+        "rawLastScalars": 6,
+        "representativeIndicatorPoints": 9,
+        "sceneStoredBars": 100000,
+        "referenceModelsCreated": 1,
+        "referenceModelsDisposed": 1
+      },
+      "repeat": 2,
+      "order": [
+        "javascript",
+        "rust-wasm"
+      ]
+    },
+    {
+      "backend": "rust-wasm",
+      "count": 100000,
+      "totalMs": 138.80000001192093,
+      "importMs": 22.399999976158142,
+      "generationMs": 8.400000035762787,
+      "fetchAndArrayBufferMs": 10.099999964237213,
+      "compileMs": 2.200000047683716,
+      "actorInitMs": 10.699999988079071,
+      "configureMs": 3.899999976158142,
+      "prepareMs": 72.30000001192093,
+      "firstFrameMs": 8.399999976158142,
+      "wasmBytes": 3324243,
+      "workers": {
+        "created": 2,
+        "terminatedAfterClose": 2
+      },
+      "validation": {
+        "validated": true,
+        "rawLastScalars": 6,
+        "representativeIndicatorPoints": 9,
+        "sceneStoredBars": 100000,
+        "referenceModelsCreated": 1,
+        "referenceModelsDisposed": 1
+      },
+      "repeat": 2,
+      "order": [
+        "javascript",
+        "rust-wasm"
+      ]
+    },
+    {
+      "backend": "rust-wasm",
+      "count": 10000,
+      "totalMs": 101.90000003576279,
+      "importMs": 30.69999998807907,
+      "generationMs": 2.300000011920929,
+      "fetchAndArrayBufferMs": 4.199999988079071,
+      "compileMs": 2,
+      "actorInitMs": 10.600000023841858,
+      "configureMs": 3.5,
+      "prepareMs": 39.80000001192093,
+      "firstFrameMs": 8.5,
+      "wasmBytes": 3324243,
+      "workers": {
+        "created": 2,
+        "terminatedAfterClose": 2
+      },
+      "validation": {
+        "validated": true,
+        "rawLastScalars": 6,
+        "representativeIndicatorPoints": 9,
+        "sceneStoredBars": 10000,
+        "referenceModelsCreated": 1,
+        "referenceModelsDisposed": 1
+      },
+      "repeat": 2,
+      "order": [
+        "rust-wasm",
+        "javascript"
+      ]
+    },
+    {
+      "backend": "javascript",
+      "count": 10000,
+      "totalMs": 56.09999996423721,
+      "importMs": 26.100000023841858,
+      "generationMs": 1.300000011920929,
+      "prepareMs": 8.199999988079071,
+      "firstFrameMs": 20.19999998807907,
+      "fetchAndArrayBufferMs": null,
+      "compileMs": null,
+      "actorInitMs": null,
+      "configureMs": null,
+      "workers": {
+        "created": 0,
+        "terminatedAfterClose": 0
+      },
+      "validation": {
+        "validated": true,
+        "rawLastScalars": 6,
+        "representativeIndicatorPoints": 9,
+        "sceneStoredBars": 10000,
+        "referenceModelsCreated": 1,
+        "referenceModelsDisposed": 1
+      },
+      "repeat": 2,
+      "order": [
+        "rust-wasm",
+        "javascript"
+      ]
+    },
+    {
+      "backend": "javascript",
+      "count": 1000000,
+      "totalMs": 224,
+      "importMs": 22,
+      "generationMs": 25,
+      "prepareMs": 158.5,
+      "firstFrameMs": 18.30000001192093,
+      "fetchAndArrayBufferMs": null,
+      "compileMs": null,
+      "actorInitMs": null,
+      "configureMs": null,
+      "workers": {
+        "created": 0,
+        "terminatedAfterClose": 0
+      },
+      "validation": {
+        "validated": true,
+        "rawLastScalars": 6,
+        "representativeIndicatorPoints": 9,
+        "sceneStoredBars": 1000000,
+        "referenceModelsCreated": 1,
+        "referenceModelsDisposed": 1
+      },
+      "repeat": 2,
+      "order": [
+        "javascript",
+        "rust-wasm"
+      ]
+    },
+    {
+      "backend": "rust-wasm",
+      "count": 1000000,
+      "totalMs": 500.30000001192093,
+      "importMs": 18.399999976158142,
+      "generationMs": 26.5,
+      "fetchAndArrayBufferMs": 3.699999988079071,
+      "compileMs": 1.7000000476837158,
+      "actorInitMs": 12,
+      "configureMs": 3.699999988079071,
+      "prepareMs": 425.5,
+      "firstFrameMs": 8.399999976158142,
+      "wasmBytes": 3324243,
       "workers": {
         "created": 2,
         "terminatedAfterClose": 2
@@ -600,13 +600,13 @@
     }
   ],
   "imports": {
-    "javascriptHostMs": 29.799999952316284,
+    "javascriptHostMs": 33.59999996423721,
     "rustWasmHostMs": 10.800000011920929
   },
   "wasmLoad": {
-    "fetchAndArrayBufferMs": 2.699999988079071,
-    "compileMs": 1.5999999642372131,
-    "bytes": 3320094,
+    "fetchAndArrayBufferMs": 2.800000011920929,
+    "compileMs": 1.699999988079071,
+    "bytes": 3324243,
     "mime": "application/wasm"
   },
   "rows": [
@@ -617,171 +617,171 @@
       "repeat": 0,
       "count": 10000,
       "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 6.5,
-      "samples": 100,
-      "warmup": 10,
-      "completionMetric": "synchronous scene build + renderer submission",
-      "completionMs": {
-        "p50": 0.19999998807907104,
-        "p95": 0.3999999761581421,
-        "p99": 0.5,
-        "min": 0.09999996423721313,
-        "max": 0.6000000238418579
-      },
-      "inputToRenderEventMs": {
-        "p50": 15.800000011920929,
-        "p95": 18,
-        "p99": 20.600000023841858,
-        "min": 11.099999964237213,
-        "max": 23
-      },
-      "renderStats": {
-        "storedBars": 10000,
-        "visibleSourceBars": 201,
-        "renderedCandleBuckets": 201,
-        "commandCount": 43
-      },
-      "longTasks": [],
-      "workers": {
-        "created": 0,
-        "terminated": 0
-      }
-    },
-    {
-      "backend": "rust-wasm",
-      "renderer": "canvas",
-      "available": true,
-      "repeat": 0,
-      "count": 10000,
-      "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 18.900000035762787,
-      "samples": 100,
-      "warmup": 10,
-      "completionMetric": "Worker packet RPC + decode + renderer submission",
-      "completionMs": {
-        "p50": 0.800000011920929,
-        "p95": 1.300000011920929,
-        "p99": 1.5,
-        "min": 0.5,
-        "max": 1.7999999523162842
-      },
-      "inputToRenderEventMs": {
-        "p50": 20.600000023841858,
-        "p95": 23,
-        "p99": 25.19999998807907,
-        "min": 12.400000035762787,
-        "max": 26.5
-      },
-      "renderStats": {
-        "storedBars": 10000,
-        "visibleSourceBars": 201,
-        "renderedCandleBuckets": 201,
-        "commandCount": 43
-      },
-      "longTasks": [],
-      "workers": {
-        "created": 0,
-        "terminated": 0
-      }
-    },
-    {
-      "backend": "javascript",
-      "renderer": "webgl2",
-      "available": true,
-      "repeat": 0,
-      "count": 10000,
-      "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 21.5,
-      "samples": 100,
-      "warmup": 10,
-      "completionMetric": "synchronous scene build + renderer submission",
-      "completionMs": {
-        "p50": 0.2999999523162842,
-        "p95": 0.40000003576278687,
-        "p99": 0.5,
-        "min": 0.09999996423721313,
-        "max": 0.8999999761581421
-      },
-      "inputToRenderEventMs": {
-        "p50": 18.100000023841858,
-        "p95": 19.5,
-        "p99": 20.600000023841858,
-        "min": 12.399999976158142,
-        "max": 21.099999964237213
-      },
-      "renderStats": {
-        "storedBars": 10000,
-        "visibleSourceBars": 201,
-        "renderedCandleBuckets": 201,
-        "commandCount": 43
-      },
-      "longTasks": [],
-      "workers": {
-        "created": 0,
-        "terminated": 0
-      }
-    },
-    {
-      "backend": "rust-wasm",
-      "renderer": "webgl2",
-      "available": true,
-      "repeat": 0,
-      "count": 10000,
-      "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 47.89999997615814,
-      "samples": 100,
-      "warmup": 10,
-      "completionMetric": "Worker packet RPC + decode + renderer submission",
-      "completionMs": {
-        "p50": 0.7000000476837158,
-        "p95": 0.8999999761581421,
-        "p99": 1,
-        "min": 0.5999999642372131,
-        "max": 1
-      },
-      "inputToRenderEventMs": {
-        "p50": 18.399999976158142,
-        "p95": 23,
-        "p99": 24.600000023841858,
-        "min": 12.600000023841858,
-        "max": 26.19999998807907
-      },
-      "renderStats": {
-        "storedBars": 10000,
-        "visibleSourceBars": 201,
-        "renderedCandleBuckets": 201,
-        "commandCount": 43
-      },
-      "longTasks": [],
-      "workers": {
-        "created": 0,
-        "terminated": 0
-      }
-    },
-    {
-      "backend": "javascript",
-      "renderer": "canvas",
-      "available": true,
-      "repeat": 0,
-      "count": 100000,
-      "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 19.80000001192093,
+      "firstFrameMs": 7.599999964237213,
       "samples": 100,
       "warmup": 10,
       "completionMetric": "synchronous scene build + renderer submission",
       "completionMs": {
         "p50": 0.19999998807907104,
         "p95": 0.30000001192092896,
-        "p99": 0.40000003576278687,
-        "min": 0.09999996423721313,
-        "max": 0.699999988079071
+        "p99": 0.5,
+        "min": 0,
+        "max": 0.5
       },
       "inputToRenderEventMs": {
-        "p50": 18.5,
-        "p95": 19.30000001192093,
-        "p99": 21.200000047683716,
-        "min": 13.199999988079071,
-        "max": 21.399999976158142
+        "p50": 16.5,
+        "p95": 22.5,
+        "p99": 24.30000001192093,
+        "min": 8.900000035762787,
+        "max": 24.80000001192093
+      },
+      "renderStats": {
+        "storedBars": 10000,
+        "visibleSourceBars": 201,
+        "renderedCandleBuckets": 201,
+        "commandCount": 43
+      },
+      "longTasks": [],
+      "workers": {
+        "created": 0,
+        "terminated": 0
+      }
+    },
+    {
+      "backend": "rust-wasm",
+      "renderer": "canvas",
+      "available": true,
+      "repeat": 0,
+      "count": 10000,
+      "runKind": "warm-compiled-matrix",
+      "firstFrameMs": 12.400000035762787,
+      "samples": 100,
+      "warmup": 10,
+      "completionMetric": "Worker packet RPC + decode + renderer submission",
+      "completionMs": {
+        "p50": 0.800000011920929,
+        "p95": 1.399999976158142,
+        "p99": 1.5999999642372131,
+        "min": 0.5999999642372131,
+        "max": 1.7000000476837158
+      },
+      "inputToRenderEventMs": {
+        "p50": 18.69999998807907,
+        "p95": 23.80000001192093,
+        "p99": 25.80000001192093,
+        "min": 11.699999988079071,
+        "max": 26.69999998807907
+      },
+      "renderStats": {
+        "storedBars": 10000,
+        "visibleSourceBars": 201,
+        "renderedCandleBuckets": 201,
+        "commandCount": 43
+      },
+      "longTasks": [],
+      "workers": {
+        "created": 0,
+        "terminated": 0
+      }
+    },
+    {
+      "backend": "javascript",
+      "renderer": "webgl2",
+      "available": true,
+      "repeat": 0,
+      "count": 10000,
+      "runKind": "warm-compiled-matrix",
+      "firstFrameMs": 17.69999998807907,
+      "samples": 100,
+      "warmup": 10,
+      "completionMetric": "synchronous scene build + renderer submission",
+      "completionMs": {
+        "p50": 0.2999999523162842,
+        "p95": 0.5,
+        "p99": 0.5,
+        "min": 0.10000002384185791,
+        "max": 0.5
+      },
+      "inputToRenderEventMs": {
+        "p50": 17.399999976158142,
+        "p95": 22.5,
+        "p99": 23.19999998807907,
+        "min": 10.099999964237213,
+        "max": 23.599999964237213
+      },
+      "renderStats": {
+        "storedBars": 10000,
+        "visibleSourceBars": 201,
+        "renderedCandleBuckets": 201,
+        "commandCount": 43
+      },
+      "longTasks": [],
+      "workers": {
+        "created": 0,
+        "terminated": 0
+      }
+    },
+    {
+      "backend": "rust-wasm",
+      "renderer": "webgl2",
+      "available": true,
+      "repeat": 0,
+      "count": 10000,
+      "runKind": "warm-compiled-matrix",
+      "firstFrameMs": 58,
+      "samples": 100,
+      "warmup": 10,
+      "completionMetric": "Worker packet RPC + decode + renderer submission",
+      "completionMs": {
+        "p50": 0.7999999523162842,
+        "p95": 0.8999999761581421,
+        "p99": 0.9000000357627869,
+        "min": 0.6000000238418579,
+        "max": 1
+      },
+      "inputToRenderEventMs": {
+        "p50": 18.900000035762787,
+        "p95": 23.399999976158142,
+        "p99": 25.100000023841858,
+        "min": 11.600000023841858,
+        "max": 25.399999976158142
+      },
+      "renderStats": {
+        "storedBars": 10000,
+        "visibleSourceBars": 201,
+        "renderedCandleBuckets": 201,
+        "commandCount": 43
+      },
+      "longTasks": [],
+      "workers": {
+        "created": 0,
+        "terminated": 0
+      }
+    },
+    {
+      "backend": "javascript",
+      "renderer": "canvas",
+      "available": true,
+      "repeat": 0,
+      "count": 100000,
+      "runKind": "warm-compiled-matrix",
+      "firstFrameMs": 24.600000023841858,
+      "samples": 100,
+      "warmup": 10,
+      "completionMetric": "synchronous scene build + renderer submission",
+      "completionMs": {
+        "p50": 0.20000004768371582,
+        "p95": 0.40000003576278687,
+        "p99": 0.5,
+        "min": 0.09999996423721313,
+        "max": 0.9000000357627869
+      },
+      "inputToRenderEventMs": {
+        "p50": 16.900000035762787,
+        "p95": 22.80000001192093,
+        "p99": 23.69999998807907,
+        "min": 9.300000011920929,
+        "max": 23.80000001192093
       },
       "renderStats": {
         "storedBars": 100000,
@@ -802,23 +802,23 @@
       "repeat": 0,
       "count": 100000,
       "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 2.399999976158142,
+      "firstFrameMs": 2.5,
       "samples": 100,
       "warmup": 10,
       "completionMetric": "Worker packet RPC + decode + renderer submission",
       "completionMs": {
         "p50": 0.699999988079071,
         "p95": 1.300000011920929,
-        "p99": 1.4000000357627869,
-        "min": 0.5,
+        "p99": 1.5,
+        "min": 0.5999999642372131,
         "max": 1.5
       },
       "inputToRenderEventMs": {
-        "p50": 20.600000023841858,
-        "p95": 22.69999998807907,
-        "p99": 23.100000023841858,
-        "min": 14.699999988079071,
-        "max": 24.399999976158142
+        "p50": 19.30000001192093,
+        "p95": 23.899999976158142,
+        "p99": 26,
+        "min": 13.300000011920929,
+        "max": 27.30000001192093
       },
       "renderStats": {
         "storedBars": 100000,
@@ -839,23 +839,23 @@
       "repeat": 0,
       "count": 100000,
       "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 42.19999998807907,
+      "firstFrameMs": 22.80000001192093,
       "samples": 100,
       "warmup": 10,
       "completionMetric": "synchronous scene build + renderer submission",
       "completionMs": {
         "p50": 0.30000001192092896,
         "p95": 0.5,
-        "p99": 0.6000000238418579,
-        "min": 0.19999998807907104,
-        "max": 0.699999988079071
+        "p99": 0.5999999642372131,
+        "min": 0.10000002384185791,
+        "max": 0.5999999642372131
       },
       "inputToRenderEventMs": {
-        "p50": 16.900000035762787,
-        "p95": 18.80000001192093,
-        "p99": 20.799999952316284,
-        "min": 13.300000011920929,
-        "max": 23.099999964237213
+        "p50": 16.69999998807907,
+        "p95": 22.400000035762787,
+        "p99": 24.600000023841858,
+        "min": 10.799999952316284,
+        "max": 25
       },
       "renderStats": {
         "storedBars": 100000,
@@ -876,23 +876,23 @@
       "repeat": 0,
       "count": 100000,
       "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 13.900000035762787,
+      "firstFrameMs": 12.300000011920929,
       "samples": 100,
       "warmup": 10,
       "completionMetric": "Worker packet RPC + decode + renderer submission",
       "completionMs": {
         "p50": 0.800000011920929,
         "p95": 1,
-        "p99": 1.0999999642372131,
+        "p99": 1.100000023841858,
         "min": 0.6000000238418579,
         "max": 1.100000023841858
       },
       "inputToRenderEventMs": {
-        "p50": 18.399999976158142,
-        "p95": 20.600000023841858,
-        "p99": 22.69999998807907,
-        "min": 14.400000035762787,
-        "max": 23.100000023841858
+        "p50": 20.200000047683716,
+        "p95": 26.099999964237213,
+        "p99": 27.80000001192093,
+        "min": 11.900000035762787,
+        "max": 28.80000001192093
       },
       "renderStats": {
         "storedBars": 100000,
@@ -913,23 +913,23 @@
       "repeat": 0,
       "count": 1000000,
       "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 35.10000002384186,
+      "firstFrameMs": 13.699999988079071,
       "samples": 100,
       "warmup": 10,
       "completionMetric": "synchronous scene build + renderer submission",
       "completionMs": {
         "p50": 0.19999998807907104,
         "p95": 0.30000001192092896,
-        "p99": 0.30000001192092896,
+        "p99": 0.40000003576278687,
         "min": 0.09999996423721313,
-        "max": 1.399999976158142
+        "max": 1.300000011920929
       },
       "inputToRenderEventMs": {
-        "p50": 16.899999976158142,
-        "p95": 18.399999976158142,
-        "p99": 20,
-        "min": 14,
-        "max": 20.5
+        "p50": 16.200000047683716,
+        "p95": 21.200000047683716,
+        "p99": 24.80000001192093,
+        "min": 10.100000023841858,
+        "max": 25
       },
       "renderStats": {
         "storedBars": 1000000,
@@ -950,23 +950,23 @@
       "repeat": 0,
       "count": 1000000,
       "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 13.900000035762787,
+      "firstFrameMs": 16.19999998807907,
       "samples": 100,
       "warmup": 10,
       "completionMetric": "Worker packet RPC + decode + renderer submission",
       "completionMs": {
-        "p50": 0.800000011920929,
+        "p50": 0.7999999523162842,
         "p95": 1.300000011920929,
-        "p99": 1.699999988079071,
-        "min": 0.5999999642372131,
-        "max": 1.9000000357627869
+        "p99": 1.5,
+        "min": 0.5,
+        "max": 1.699999988079071
       },
       "inputToRenderEventMs": {
-        "p50": 18.19999998807907,
-        "p95": 20.299999952316284,
-        "p99": 20.899999976158142,
-        "min": 15.199999988079071,
-        "max": 21.80000001192093
+        "p50": 19.5,
+        "p95": 24.5,
+        "p99": 27.299999952316284,
+        "min": 11.600000023841858,
+        "max": 27.900000035762787
       },
       "renderStats": {
         "storedBars": 1000000,
@@ -987,23 +987,23 @@
       "repeat": 0,
       "count": 1000000,
       "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 19,
+      "firstFrameMs": 15.699999988079071,
       "samples": 100,
       "warmup": 10,
       "completionMetric": "synchronous scene build + renderer submission",
       "completionMs": {
         "p50": 0.30000001192092896,
         "p95": 0.40000003576278687,
-        "p99": 0.699999988079071,
-        "min": 0.19999998807907104,
-        "max": 1
+        "p99": 0.5,
+        "min": 0.10000002384185791,
+        "max": 0.7999999523162842
       },
       "inputToRenderEventMs": {
-        "p50": 18.200000047683716,
-        "p95": 19.19999998807907,
-        "p99": 19.399999976158142,
-        "min": 14.699999988079071,
-        "max": 19.599999964237213
+        "p50": 17,
+        "p95": 22.19999998807907,
+        "p99": 22.899999976158142,
+        "min": 9.5,
+        "max": 23.600000023841858
       },
       "renderStats": {
         "storedBars": 1000000,
@@ -1023,693 +1023,27 @@
       "available": true,
       "repeat": 0,
       "count": 1000000,
-      "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 17,
-      "samples": 100,
-      "warmup": 10,
-      "completionMetric": "Worker packet RPC + decode + renderer submission",
-      "completionMs": {
-        "p50": 0.800000011920929,
-        "p95": 1,
-        "p99": 1,
-        "min": 0.5999999642372131,
-        "max": 1
-      },
-      "inputToRenderEventMs": {
-        "p50": 18.900000035762787,
-        "p95": 21.19999998807907,
-        "p99": 21.799999952316284,
-        "min": 15.900000035762787,
-        "max": 23
-      },
-      "renderStats": {
-        "storedBars": 1000000,
-        "visibleSourceBars": 201,
-        "renderedCandleBuckets": 201,
-        "commandCount": 43
-      },
-      "longTasks": [],
-      "workers": {
-        "created": 0,
-        "terminated": 0
-      }
-    },
-    {
-      "backend": "javascript",
-      "renderer": "webgl2",
-      "available": true,
-      "repeat": 1,
-      "count": 1000000,
-      "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 34.89999997615814,
-      "samples": 100,
-      "warmup": 10,
-      "completionMetric": "synchronous scene build + renderer submission",
-      "completionMs": {
-        "p50": 0.20000004768371582,
-        "p95": 0.3999999761581421,
-        "p99": 0.5,
-        "min": 0.09999996423721313,
-        "max": 0.6000000238418579
-      },
-      "inputToRenderEventMs": {
-        "p50": 17,
-        "p95": 18.80000001192093,
-        "p99": 18.900000035762787,
-        "min": 12.300000011920929,
-        "max": 20.5
-      },
-      "renderStats": {
-        "storedBars": 1000000,
-        "visibleSourceBars": 201,
-        "renderedCandleBuckets": 201,
-        "commandCount": 43
-      },
-      "longTasks": [],
-      "workers": {
-        "created": 0,
-        "terminated": 0
-      }
-    },
-    {
-      "backend": "rust-wasm",
-      "renderer": "webgl2",
-      "available": true,
-      "repeat": 1,
-      "count": 1000000,
-      "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 13.200000047683716,
-      "samples": 100,
-      "warmup": 10,
-      "completionMetric": "Worker packet RPC + decode + renderer submission",
-      "completionMs": {
-        "p50": 0.699999988079071,
-        "p95": 0.800000011920929,
-        "p99": 1.5,
-        "min": 0.5,
-        "max": 1.800000011920929
-      },
-      "inputToRenderEventMs": {
-        "p50": 19.799999952316284,
-        "p95": 22.600000023841858,
-        "p99": 23.399999976158142,
-        "min": 15.199999988079071,
-        "max": 23.5
-      },
-      "renderStats": {
-        "storedBars": 1000000,
-        "visibleSourceBars": 201,
-        "renderedCandleBuckets": 201,
-        "commandCount": 43
-      },
-      "longTasks": [],
-      "workers": {
-        "created": 0,
-        "terminated": 0
-      }
-    },
-    {
-      "backend": "javascript",
-      "renderer": "canvas",
-      "available": true,
-      "repeat": 1,
-      "count": 1000000,
-      "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 8.100000023841858,
-      "samples": 100,
-      "warmup": 10,
-      "completionMetric": "synchronous scene build + renderer submission",
-      "completionMs": {
-        "p50": 0.20000004768371582,
-        "p95": 0.30000001192092896,
-        "p99": 0.3999999761581421,
-        "min": 0.09999996423721313,
-        "max": 0.9000000357627869
-      },
-      "inputToRenderEventMs": {
-        "p50": 17,
-        "p95": 18.600000023841858,
-        "p99": 19,
-        "min": 14.800000011920929,
-        "max": 19
-      },
-      "renderStats": {
-        "storedBars": 1000000,
-        "visibleSourceBars": 201,
-        "renderedCandleBuckets": 201,
-        "commandCount": 43
-      },
-      "longTasks": [],
-      "workers": {
-        "created": 0,
-        "terminated": 0
-      }
-    },
-    {
-      "backend": "rust-wasm",
-      "renderer": "canvas",
-      "available": true,
-      "repeat": 1,
-      "count": 1000000,
-      "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 4.600000023841858,
-      "samples": 100,
-      "warmup": 10,
-      "completionMetric": "Worker packet RPC + decode + renderer submission",
-      "completionMs": {
-        "p50": 0.800000011920929,
-        "p95": 1.4000000357627869,
-        "p99": 1.699999988079071,
-        "min": 0.5999999642372131,
-        "max": 2.300000011920929
-      },
-      "inputToRenderEventMs": {
-        "p50": 19.399999976158142,
-        "p95": 21.69999998807907,
-        "p99": 22,
-        "min": 16,
-        "max": 22.69999998807907
-      },
-      "renderStats": {
-        "storedBars": 1000000,
-        "visibleSourceBars": 201,
-        "renderedCandleBuckets": 201,
-        "commandCount": 43
-      },
-      "longTasks": [],
-      "workers": {
-        "created": 0,
-        "terminated": 0
-      }
-    },
-    {
-      "backend": "javascript",
-      "renderer": "webgl2",
-      "available": true,
-      "repeat": 1,
-      "count": 100000,
-      "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 10.5,
-      "samples": 100,
-      "warmup": 10,
-      "completionMetric": "synchronous scene build + renderer submission",
-      "completionMs": {
-        "p50": 0.19999998807907104,
-        "p95": 0.30000001192092896,
-        "p99": 0.6000000238418579,
-        "min": 0.09999996423721313,
-        "max": 1
-      },
-      "inputToRenderEventMs": {
-        "p50": 17,
-        "p95": 18.69999998807907,
-        "p99": 18.899999976158142,
-        "min": 15,
-        "max": 21.399999976158142
-      },
-      "renderStats": {
-        "storedBars": 100000,
-        "visibleSourceBars": 201,
-        "renderedCandleBuckets": 201,
-        "commandCount": 43
-      },
-      "longTasks": [],
-      "workers": {
-        "created": 0,
-        "terminated": 0
-      }
-    },
-    {
-      "backend": "rust-wasm",
-      "renderer": "webgl2",
-      "available": true,
-      "repeat": 1,
-      "count": 100000,
       "runKind": "warm-compiled-matrix",
       "firstFrameMs": 14,
       "samples": 100,
       "warmup": 10,
       "completionMetric": "Worker packet RPC + decode + renderer submission",
       "completionMs": {
-        "p50": 0.7000000476837158,
-        "p95": 0.9000000357627869,
-        "p99": 1,
-        "min": 0.5999999642372131,
-        "max": 1.100000023841858
-      },
-      "inputToRenderEventMs": {
-        "p50": 19.69999998807907,
-        "p95": 22,
-        "p99": 22.400000035762787,
-        "min": 14.300000011920929,
-        "max": 23.19999998807907
-      },
-      "renderStats": {
-        "storedBars": 100000,
-        "visibleSourceBars": 201,
-        "renderedCandleBuckets": 201,
-        "commandCount": 43
-      },
-      "longTasks": [],
-      "workers": {
-        "created": 0,
-        "terminated": 0
-      }
-    },
-    {
-      "backend": "javascript",
-      "renderer": "canvas",
-      "available": true,
-      "repeat": 1,
-      "count": 100000,
-      "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 17.5,
-      "samples": 100,
-      "warmup": 10,
-      "completionMetric": "synchronous scene build + renderer submission",
-      "completionMs": {
-        "p50": 0.30000001192092896,
-        "p95": 0.40000003576278687,
-        "p99": 0.5,
-        "min": 0.09999996423721313,
-        "max": 0.699999988079071
-      },
-      "inputToRenderEventMs": {
-        "p50": 16.900000035762787,
-        "p95": 22.399999976158142,
-        "p99": 22.69999998807907,
-        "min": 11.300000011920929,
-        "max": 23
-      },
-      "renderStats": {
-        "storedBars": 100000,
-        "visibleSourceBars": 201,
-        "renderedCandleBuckets": 201,
-        "commandCount": 43
-      },
-      "longTasks": [],
-      "workers": {
-        "created": 0,
-        "terminated": 0
-      }
-    },
-    {
-      "backend": "rust-wasm",
-      "renderer": "canvas",
-      "available": true,
-      "repeat": 1,
-      "count": 100000,
-      "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 2.800000011920929,
-      "samples": 100,
-      "warmup": 10,
-      "completionMetric": "Worker packet RPC + decode + renderer submission",
-      "completionMs": {
-        "p50": 0.800000011920929,
-        "p95": 1.4000000357627869,
-        "p99": 1.5999999642372131,
-        "min": 0.5999999642372131,
-        "max": 1.9000000357627869
-      },
-      "inputToRenderEventMs": {
-        "p50": 19.400000035762787,
-        "p95": 25.30000001192093,
-        "p99": 26.19999998807907,
-        "min": 14.100000023841858,
-        "max": 26.200000047683716
-      },
-      "renderStats": {
-        "storedBars": 100000,
-        "visibleSourceBars": 201,
-        "renderedCandleBuckets": 201,
-        "commandCount": 43
-      },
-      "longTasks": [],
-      "workers": {
-        "created": 0,
-        "terminated": 0
-      }
-    },
-    {
-      "backend": "javascript",
-      "renderer": "webgl2",
-      "available": true,
-      "repeat": 1,
-      "count": 10000,
-      "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 18.099999964237213,
-      "samples": 100,
-      "warmup": 10,
-      "completionMetric": "synchronous scene build + renderer submission",
-      "completionMs": {
-        "p50": 0.19999998807907104,
-        "p95": 0.30000001192092896,
-        "p99": 0.5,
-        "min": 0.09999996423721313,
-        "max": 0.5
-      },
-      "inputToRenderEventMs": {
-        "p50": 16.69999998807907,
-        "p95": 22.899999976158142,
-        "p99": 23.5,
-        "min": 10.699999988079071,
-        "max": 24.30000001192093
-      },
-      "renderStats": {
-        "storedBars": 10000,
-        "visibleSourceBars": 201,
-        "renderedCandleBuckets": 201,
-        "commandCount": 43
-      },
-      "longTasks": [],
-      "workers": {
-        "created": 0,
-        "terminated": 0
-      }
-    },
-    {
-      "backend": "rust-wasm",
-      "renderer": "webgl2",
-      "available": true,
-      "repeat": 1,
-      "count": 10000,
-      "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 7.899999976158142,
-      "samples": 100,
-      "warmup": 10,
-      "completionMetric": "Worker packet RPC + decode + renderer submission",
-      "completionMs": {
-        "p50": 0.699999988079071,
-        "p95": 0.800000011920929,
-        "p99": 0.800000011920929,
-        "min": 0.5,
-        "max": 0.800000011920929
-      },
-      "inputToRenderEventMs": {
-        "p50": 18.5,
-        "p95": 24.299999952316284,
-        "p99": 25.69999998807907,
-        "min": 12,
-        "max": 26
-      },
-      "renderStats": {
-        "storedBars": 10000,
-        "visibleSourceBars": 201,
-        "renderedCandleBuckets": 201,
-        "commandCount": 43
-      },
-      "longTasks": [],
-      "workers": {
-        "created": 0,
-        "terminated": 0
-      }
-    },
-    {
-      "backend": "javascript",
-      "renderer": "canvas",
-      "available": true,
-      "repeat": 1,
-      "count": 10000,
-      "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 15.900000035762787,
-      "samples": 100,
-      "warmup": 10,
-      "completionMetric": "synchronous scene build + renderer submission",
-      "completionMs": {
-        "p50": 0.19999998807907104,
-        "p95": 0.30000001192092896,
-        "p99": 0.30000001192092896,
-        "min": 0.09999996423721313,
-        "max": 0.7000000476837158
-      },
-      "inputToRenderEventMs": {
-        "p50": 15.799999952316284,
-        "p95": 22.5,
-        "p99": 23.30000001192093,
-        "min": 10.399999976158142,
-        "max": 23.30000001192093
-      },
-      "renderStats": {
-        "storedBars": 10000,
-        "visibleSourceBars": 201,
-        "renderedCandleBuckets": 201,
-        "commandCount": 43
-      },
-      "longTasks": [],
-      "workers": {
-        "created": 0,
-        "terminated": 0
-      }
-    },
-    {
-      "backend": "rust-wasm",
-      "renderer": "canvas",
-      "available": true,
-      "repeat": 1,
-      "count": 10000,
-      "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 2.800000011920929,
-      "samples": 100,
-      "warmup": 10,
-      "completionMetric": "Worker packet RPC + decode + renderer submission",
-      "completionMs": {
-        "p50": 0.8999999761581421,
-        "p95": 1.4000000357627869,
-        "p99": 1.5,
-        "min": 0.5999999642372131,
-        "max": 1.699999988079071
-      },
-      "inputToRenderEventMs": {
-        "p50": 18.600000023841858,
-        "p95": 24.599999964237213,
-        "p99": 25.899999976158142,
-        "min": 11.800000011920929,
-        "max": 27
-      },
-      "renderStats": {
-        "storedBars": 10000,
-        "visibleSourceBars": 201,
-        "renderedCandleBuckets": 201,
-        "commandCount": 43
-      },
-      "longTasks": [],
-      "workers": {
-        "created": 0,
-        "terminated": 0
-      }
-    },
-    {
-      "backend": "javascript",
-      "renderer": "canvas",
-      "available": true,
-      "repeat": 2,
-      "count": 100000,
-      "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 2.199999988079071,
-      "samples": 100,
-      "warmup": 10,
-      "completionMetric": "synchronous scene build + renderer submission",
-      "completionMs": {
-        "p50": 0.10000002384185791,
-        "p95": 0.30000001192092896,
-        "p99": 0.30000001192092896,
-        "min": 0,
-        "max": 0.5
-      },
-      "inputToRenderEventMs": {
-        "p50": 16.799999952316284,
-        "p95": 23.600000023841858,
-        "p99": 24,
-        "min": 10,
-        "max": 24.100000023841858
-      },
-      "renderStats": {
-        "storedBars": 100000,
-        "visibleSourceBars": 201,
-        "renderedCandleBuckets": 201,
-        "commandCount": 43
-      },
-      "longTasks": [],
-      "workers": {
-        "created": 0,
-        "terminated": 0
-      }
-    },
-    {
-      "backend": "rust-wasm",
-      "renderer": "canvas",
-      "available": true,
-      "repeat": 2,
-      "count": 100000,
-      "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 2.699999988079071,
-      "samples": 100,
-      "warmup": 10,
-      "completionMetric": "Worker packet RPC + decode + renderer submission",
-      "completionMs": {
-        "p50": 0.7000000476837158,
-        "p95": 1.2000000476837158,
-        "p99": 1.5,
-        "min": 0.5,
-        "max": 1.5
-      },
-      "inputToRenderEventMs": {
-        "p50": 17.400000035762787,
-        "p95": 25.69999998807907,
-        "p99": 26.5,
-        "min": 10.699999988079071,
-        "max": 27.600000023841858
-      },
-      "renderStats": {
-        "storedBars": 100000,
-        "visibleSourceBars": 201,
-        "renderedCandleBuckets": 201,
-        "commandCount": 43
-      },
-      "longTasks": [],
-      "workers": {
-        "created": 0,
-        "terminated": 0
-      }
-    },
-    {
-      "backend": "javascript",
-      "renderer": "webgl2",
-      "available": true,
-      "repeat": 2,
-      "count": 100000,
-      "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 25.80000001192093,
-      "samples": 100,
-      "warmup": 10,
-      "completionMetric": "synchronous scene build + renderer submission",
-      "completionMs": {
-        "p50": 0.30000001192092896,
-        "p95": 0.40000003576278687,
-        "p99": 0.5,
-        "min": 0.09999996423721313,
-        "max": 0.699999988079071
-      },
-      "inputToRenderEventMs": {
-        "p50": 16.80000001192093,
-        "p95": 24.100000023841858,
-        "p99": 24.30000001192093,
-        "min": 9.599999964237213,
-        "max": 24.5
-      },
-      "renderStats": {
-        "storedBars": 100000,
-        "visibleSourceBars": 201,
-        "renderedCandleBuckets": 201,
-        "commandCount": 43
-      },
-      "longTasks": [],
-      "workers": {
-        "created": 0,
-        "terminated": 0
-      }
-    },
-    {
-      "backend": "rust-wasm",
-      "renderer": "webgl2",
-      "available": true,
-      "repeat": 2,
-      "count": 100000,
-      "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 12.5,
-      "samples": 100,
-      "warmup": 10,
-      "completionMetric": "Worker packet RPC + decode + renderer submission",
-      "completionMs": {
         "p50": 0.800000011920929,
         "p95": 1,
-        "p99": 1.199999988079071,
+        "p99": 1.2000000476837158,
         "min": 0.5999999642372131,
-        "max": 1.199999988079071
+        "max": 1.300000011920929
       },
       "inputToRenderEventMs": {
-        "p50": 16.799999952316284,
-        "p95": 25.599999964237213,
-        "p99": 26.399999976158142,
-        "min": 10.800000011920929,
-        "max": 27.5
+        "p50": 17.5,
+        "p95": 25.899999976158142,
+        "p99": 26,
+        "min": 12.099999964237213,
+        "max": 27.69999998807907
       },
       "renderStats": {
-        "storedBars": 100000,
-        "visibleSourceBars": 201,
-        "renderedCandleBuckets": 201,
-        "commandCount": 43
-      },
-      "longTasks": [],
-      "workers": {
-        "created": 0,
-        "terminated": 0
-      }
-    },
-    {
-      "backend": "javascript",
-      "renderer": "canvas",
-      "available": true,
-      "repeat": 2,
-      "count": 10000,
-      "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 14.600000023841858,
-      "samples": 100,
-      "warmup": 10,
-      "completionMetric": "synchronous scene build + renderer submission",
-      "completionMs": {
-        "p50": 0.19999998807907104,
-        "p95": 0.3999999761581421,
-        "p99": 0.40000003576278687,
-        "min": 0,
-        "max": 0.5999999642372131
-      },
-      "inputToRenderEventMs": {
-        "p50": 16.69999998807907,
-        "p95": 24.799999952316284,
-        "p99": 25,
-        "min": 9,
-        "max": 25
-      },
-      "renderStats": {
-        "storedBars": 10000,
-        "visibleSourceBars": 201,
-        "renderedCandleBuckets": 201,
-        "commandCount": 43
-      },
-      "longTasks": [],
-      "workers": {
-        "created": 0,
-        "terminated": 0
-      }
-    },
-    {
-      "backend": "rust-wasm",
-      "renderer": "canvas",
-      "available": true,
-      "repeat": 2,
-      "count": 10000,
-      "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 2.100000023841858,
-      "samples": 100,
-      "warmup": 10,
-      "completionMetric": "Worker packet RPC + decode + renderer submission",
-      "completionMs": {
-        "p50": 0.699999988079071,
-        "p95": 1.300000011920929,
-        "p99": 1.399999976158142,
-        "min": 0.5,
-        "max": 1.699999988079071
-      },
-      "inputToRenderEventMs": {
-        "p50": 18.299999952316284,
-        "p95": 26.599999964237213,
-        "p99": 27.30000001192093,
-        "min": 11.099999964237213,
-        "max": 27.30000001192093
-      },
-      "renderStats": {
-        "storedBars": 10000,
+        "storedBars": 1000000,
         "visibleSourceBars": 201,
         "renderedCandleBuckets": 201,
         "commandCount": 43
@@ -1724,100 +1058,26 @@
       "backend": "javascript",
       "renderer": "webgl2",
       "available": true,
-      "repeat": 2,
-      "count": 10000,
-      "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 20.19999998807907,
-      "samples": 100,
-      "warmup": 10,
-      "completionMetric": "synchronous scene build + renderer submission",
-      "completionMs": {
-        "p50": 0.30000001192092896,
-        "p95": 0.3999999761581421,
-        "p99": 0.40000003576278687,
-        "min": 0.19999998807907104,
-        "max": 0.6000000238418579
-      },
-      "inputToRenderEventMs": {
-        "p50": 16.69999998807907,
-        "p95": 22.899999976158142,
-        "p99": 24.900000035762787,
-        "min": 9.899999976158142,
-        "max": 25.30000001192093
-      },
-      "renderStats": {
-        "storedBars": 10000,
-        "visibleSourceBars": 201,
-        "renderedCandleBuckets": 201,
-        "commandCount": 43
-      },
-      "longTasks": [],
-      "workers": {
-        "created": 0,
-        "terminated": 0
-      }
-    },
-    {
-      "backend": "rust-wasm",
-      "renderer": "webgl2",
-      "available": true,
-      "repeat": 2,
-      "count": 10000,
-      "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 14.399999976158142,
-      "samples": 100,
-      "warmup": 10,
-      "completionMetric": "Worker packet RPC + decode + renderer submission",
-      "completionMs": {
-        "p50": 0.7999999523162842,
-        "p95": 1,
-        "p99": 1.100000023841858,
-        "min": 0.5,
-        "max": 1.199999988079071
-      },
-      "inputToRenderEventMs": {
-        "p50": 18.19999998807907,
-        "p95": 25.400000035762787,
-        "p99": 26.80000001192093,
-        "min": 10.5,
-        "max": 28.100000023841858
-      },
-      "renderStats": {
-        "storedBars": 10000,
-        "visibleSourceBars": 201,
-        "renderedCandleBuckets": 201,
-        "commandCount": 43
-      },
-      "longTasks": [],
-      "workers": {
-        "created": 0,
-        "terminated": 0
-      }
-    },
-    {
-      "backend": "javascript",
-      "renderer": "canvas",
-      "available": true,
-      "repeat": 2,
+      "repeat": 1,
       "count": 1000000,
       "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 14.100000023841858,
+      "firstFrameMs": 36.60000002384186,
       "samples": 100,
       "warmup": 10,
       "completionMetric": "synchronous scene build + renderer submission",
       "completionMs": {
         "p50": 0.19999998807907104,
-        "p95": 0.20000004768371582,
-        "p99": 0.20000004768371582,
+        "p95": 0.30000001192092896,
+        "p99": 0.5,
         "min": 0.09999996423721313,
-        "max": 0.3999999761581421
+        "max": 0.5
       },
       "inputToRenderEventMs": {
-        "p50": 16,
-        "p95": 23.19999998807907,
-        "p99": 24.5,
-        "min": 10.5,
-        "max": 25.19999998807907
+        "p50": 16.69999998807907,
+        "p95": 22,
+        "p99": 24,
+        "min": 10.399999976158142,
+        "max": 24.100000023841858
       },
       "renderStats": {
         "storedBars": 1000000,
@@ -1833,9 +1093,9 @@
     },
     {
       "backend": "rust-wasm",
-      "renderer": "canvas",
+      "renderer": "webgl2",
       "available": true,
-      "repeat": 2,
+      "repeat": 1,
       "count": 1000000,
       "runKind": "warm-compiled-matrix",
       "firstFrameMs": 13.5,
@@ -1843,18 +1103,18 @@
       "warmup": 10,
       "completionMetric": "Worker packet RPC + decode + renderer submission",
       "completionMs": {
-        "p50": 0.7000000476837158,
-        "p95": 1.300000011920929,
-        "p99": 1.5999999642372131,
-        "min": 0.5,
-        "max": 1.600000023841858
+        "p50": 0.699999988079071,
+        "p95": 0.8999999761581421,
+        "p99": 2,
+        "min": 0.5999999642372131,
+        "max": 2.699999988079071
       },
       "inputToRenderEventMs": {
-        "p50": 18.599999964237213,
-        "p95": 25.30000001192093,
-        "p99": 27.899999976158142,
-        "min": 11.299999952316284,
-        "max": 28
+        "p50": 18.69999998807907,
+        "p95": 24.399999976158142,
+        "p99": 26,
+        "min": 12.699999988079071,
+        "max": 29.100000023841858
       },
       "renderStats": {
         "storedBars": 1000000,
@@ -1870,27 +1130,27 @@
     },
     {
       "backend": "javascript",
-      "renderer": "webgl2",
+      "renderer": "canvas",
       "available": true,
-      "repeat": 2,
+      "repeat": 1,
       "count": 1000000,
       "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 10.800000011920929,
+      "firstFrameMs": 2,
       "samples": 100,
       "warmup": 10,
       "completionMetric": "synchronous scene build + renderer submission",
       "completionMs": {
-        "p50": 0.19999998807907104,
-        "p95": 0.30000001192092896,
-        "p99": 0.3999999761581421,
+        "p50": 0.20000004768371582,
+        "p95": 0.3999999761581421,
+        "p99": 0.40000003576278687,
         "min": 0.09999996423721313,
-        "max": 0.6000000238418579
+        "max": 0.800000011920929
       },
       "inputToRenderEventMs": {
-        "p50": 16.80000001192093,
-        "p95": 23.399999976158142,
-        "p99": 24.5,
-        "min": 9.5,
+        "p50": 16.099999964237213,
+        "p95": 22.400000035762787,
+        "p99": 24.30000001192093,
+        "min": 9.800000011920929,
         "max": 24.69999998807907
       },
       "renderStats": {
@@ -1907,12 +1167,86 @@
     },
     {
       "backend": "rust-wasm",
-      "renderer": "webgl2",
+      "renderer": "canvas",
       "available": true,
-      "repeat": 2,
+      "repeat": 1,
       "count": 1000000,
       "runKind": "warm-compiled-matrix",
-      "firstFrameMs": 16.69999998807907,
+      "firstFrameMs": 2.400000035762787,
+      "samples": 100,
+      "warmup": 10,
+      "completionMetric": "Worker packet RPC + decode + renderer submission",
+      "completionMs": {
+        "p50": 0.8999999761581421,
+        "p95": 1.5,
+        "p99": 1.600000023841858,
+        "min": 0.5999999642372131,
+        "max": 1.9000000357627869
+      },
+      "inputToRenderEventMs": {
+        "p50": 19.700000047683716,
+        "p95": 25.900000035762787,
+        "p99": 26.900000035762787,
+        "min": 12.600000023841858,
+        "max": 27.80000001192093
+      },
+      "renderStats": {
+        "storedBars": 1000000,
+        "visibleSourceBars": 201,
+        "renderedCandleBuckets": 201,
+        "commandCount": 43
+      },
+      "longTasks": [],
+      "workers": {
+        "created": 0,
+        "terminated": 0
+      }
+    },
+    {
+      "backend": "javascript",
+      "renderer": "webgl2",
+      "available": true,
+      "repeat": 1,
+      "count": 100000,
+      "runKind": "warm-compiled-matrix",
+      "firstFrameMs": 11.699999988079071,
+      "samples": 100,
+      "warmup": 10,
+      "completionMetric": "synchronous scene build + renderer submission",
+      "completionMs": {
+        "p50": 0.19999998807907104,
+        "p95": 0.30000001192092896,
+        "p99": 0.3999999761581421,
+        "min": 0.09999996423721313,
+        "max": 0.5
+      },
+      "inputToRenderEventMs": {
+        "p50": 17.19999998807907,
+        "p95": 22.900000035762787,
+        "p99": 24.80000001192093,
+        "min": 8.899999976158142,
+        "max": 24.900000035762787
+      },
+      "renderStats": {
+        "storedBars": 100000,
+        "visibleSourceBars": 201,
+        "renderedCandleBuckets": 201,
+        "commandCount": 43
+      },
+      "longTasks": [],
+      "workers": {
+        "created": 0,
+        "terminated": 0
+      }
+    },
+    {
+      "backend": "rust-wasm",
+      "renderer": "webgl2",
+      "available": true,
+      "repeat": 1,
+      "count": 100000,
+      "runKind": "warm-compiled-matrix",
+      "firstFrameMs": 14.899999976158142,
       "samples": 100,
       "warmup": 10,
       "completionMetric": "Worker packet RPC + decode + renderer submission",
@@ -1921,14 +1255,680 @@
         "p95": 1,
         "p99": 1.100000023841858,
         "min": 0.5999999642372131,
-        "max": 1.100000023841858
+        "max": 1.199999988079071
+      },
+      "inputToRenderEventMs": {
+        "p50": 18.30000001192093,
+        "p95": 25,
+        "p99": 27,
+        "min": 11.100000023841858,
+        "max": 28
+      },
+      "renderStats": {
+        "storedBars": 100000,
+        "visibleSourceBars": 201,
+        "renderedCandleBuckets": 201,
+        "commandCount": 43
+      },
+      "longTasks": [],
+      "workers": {
+        "created": 0,
+        "terminated": 0
+      }
+    },
+    {
+      "backend": "javascript",
+      "renderer": "canvas",
+      "available": true,
+      "repeat": 1,
+      "count": 100000,
+      "runKind": "warm-compiled-matrix",
+      "firstFrameMs": 20.100000023841858,
+      "samples": 100,
+      "warmup": 10,
+      "completionMetric": "synchronous scene build + renderer submission",
+      "completionMs": {
+        "p50": 0.19999998807907104,
+        "p95": 0.30000001192092896,
+        "p99": 0.30000001192092896,
+        "min": 0.09999996423721313,
+        "max": 0.800000011920929
+      },
+      "inputToRenderEventMs": {
+        "p50": 17,
+        "p95": 23.200000047683716,
+        "p99": 24,
+        "min": 8.900000035762787,
+        "max": 24.600000023841858
+      },
+      "renderStats": {
+        "storedBars": 100000,
+        "visibleSourceBars": 201,
+        "renderedCandleBuckets": 201,
+        "commandCount": 43
+      },
+      "longTasks": [],
+      "workers": {
+        "created": 0,
+        "terminated": 0
+      }
+    },
+    {
+      "backend": "rust-wasm",
+      "renderer": "canvas",
+      "available": true,
+      "repeat": 1,
+      "count": 100000,
+      "runKind": "warm-compiled-matrix",
+      "firstFrameMs": 1.800000011920929,
+      "samples": 100,
+      "warmup": 10,
+      "completionMetric": "Worker packet RPC + decode + renderer submission",
+      "completionMs": {
+        "p50": 0.800000011920929,
+        "p95": 1.399999976158142,
+        "p99": 1.699999988079071,
+        "min": 0.5999999642372131,
+        "max": 1.699999988079071
       },
       "inputToRenderEventMs": {
         "p50": 18.900000035762787,
-        "p95": 24.69999998807907,
-        "p99": 27.200000047683716,
-        "min": 10.899999976158142,
-        "max": 28.400000035762787
+        "p95": 26.19999998807907,
+        "p99": 28,
+        "min": 10.699999988079071,
+        "max": 28.69999998807907
+      },
+      "renderStats": {
+        "storedBars": 100000,
+        "visibleSourceBars": 201,
+        "renderedCandleBuckets": 201,
+        "commandCount": 43
+      },
+      "longTasks": [],
+      "workers": {
+        "created": 0,
+        "terminated": 0
+      }
+    },
+    {
+      "backend": "javascript",
+      "renderer": "webgl2",
+      "available": true,
+      "repeat": 1,
+      "count": 10000,
+      "runKind": "warm-compiled-matrix",
+      "firstFrameMs": 17.400000035762787,
+      "samples": 100,
+      "warmup": 10,
+      "completionMetric": "synchronous scene build + renderer submission",
+      "completionMs": {
+        "p50": 0.20000004768371582,
+        "p95": 0.3999999761581421,
+        "p99": 0.5999999642372131,
+        "min": 0.09999996423721313,
+        "max": 0.6000000238418579
+      },
+      "inputToRenderEventMs": {
+        "p50": 16.69999998807907,
+        "p95": 23,
+        "p99": 24.200000047683716,
+        "min": 9.299999952316284,
+        "max": 24.5
+      },
+      "renderStats": {
+        "storedBars": 10000,
+        "visibleSourceBars": 201,
+        "renderedCandleBuckets": 201,
+        "commandCount": 43
+      },
+      "longTasks": [],
+      "workers": {
+        "created": 0,
+        "terminated": 0
+      }
+    },
+    {
+      "backend": "rust-wasm",
+      "renderer": "webgl2",
+      "available": true,
+      "repeat": 1,
+      "count": 10000,
+      "runKind": "warm-compiled-matrix",
+      "firstFrameMs": 8,
+      "samples": 100,
+      "warmup": 10,
+      "completionMetric": "Worker packet RPC + decode + renderer submission",
+      "completionMs": {
+        "p50": 0.699999988079071,
+        "p95": 0.800000011920929,
+        "p99": 0.800000011920929,
+        "min": 0.5999999642372131,
+        "max": 0.8999999761581421
+      },
+      "inputToRenderEventMs": {
+        "p50": 19.399999976158142,
+        "p95": 24.600000023841858,
+        "p99": 26.900000035762787,
+        "min": 12.400000035762787,
+        "max": 27.299999952316284
+      },
+      "renderStats": {
+        "storedBars": 10000,
+        "visibleSourceBars": 201,
+        "renderedCandleBuckets": 201,
+        "commandCount": 43
+      },
+      "longTasks": [],
+      "workers": {
+        "created": 0,
+        "terminated": 0
+      }
+    },
+    {
+      "backend": "javascript",
+      "renderer": "canvas",
+      "available": true,
+      "repeat": 1,
+      "count": 10000,
+      "runKind": "warm-compiled-matrix",
+      "firstFrameMs": 2,
+      "samples": 100,
+      "warmup": 10,
+      "completionMetric": "synchronous scene build + renderer submission",
+      "completionMs": {
+        "p50": 0.20000004768371582,
+        "p95": 0.30000001192092896,
+        "p99": 0.3999999761581421,
+        "min": 0.09999996423721313,
+        "max": 0.5999999642372131
+      },
+      "inputToRenderEventMs": {
+        "p50": 16.200000047683716,
+        "p95": 22.899999976158142,
+        "p99": 24,
+        "min": 9.399999976158142,
+        "max": 24.100000023841858
+      },
+      "renderStats": {
+        "storedBars": 10000,
+        "visibleSourceBars": 201,
+        "renderedCandleBuckets": 201,
+        "commandCount": 43
+      },
+      "longTasks": [],
+      "workers": {
+        "created": 0,
+        "terminated": 0
+      }
+    },
+    {
+      "backend": "rust-wasm",
+      "renderer": "canvas",
+      "available": true,
+      "repeat": 1,
+      "count": 10000,
+      "runKind": "warm-compiled-matrix",
+      "firstFrameMs": 4.199999988079071,
+      "samples": 100,
+      "warmup": 10,
+      "completionMetric": "Worker packet RPC + decode + renderer submission",
+      "completionMs": {
+        "p50": 0.800000011920929,
+        "p95": 1.4000000357627869,
+        "p99": 1.699999988079071,
+        "min": 0.5999999642372131,
+        "max": 2
+      },
+      "inputToRenderEventMs": {
+        "p50": 19.399999976158142,
+        "p95": 24.600000023841858,
+        "p99": 27.799999952316284,
+        "min": 12.899999976158142,
+        "max": 28.19999998807907
+      },
+      "renderStats": {
+        "storedBars": 10000,
+        "visibleSourceBars": 201,
+        "renderedCandleBuckets": 201,
+        "commandCount": 43
+      },
+      "longTasks": [],
+      "workers": {
+        "created": 0,
+        "terminated": 0
+      }
+    },
+    {
+      "backend": "javascript",
+      "renderer": "canvas",
+      "available": true,
+      "repeat": 2,
+      "count": 100000,
+      "runKind": "warm-compiled-matrix",
+      "firstFrameMs": 2.100000023841858,
+      "samples": 100,
+      "warmup": 10,
+      "completionMetric": "synchronous scene build + renderer submission",
+      "completionMs": {
+        "p50": 0.10000002384185791,
+        "p95": 0.30000001192092896,
+        "p99": 0.30000001192092896,
+        "min": 0,
+        "max": 0.5
+      },
+      "inputToRenderEventMs": {
+        "p50": 16,
+        "p95": 20.899999976158142,
+        "p99": 21.30000001192093,
+        "min": 8.699999988079071,
+        "max": 21.600000023841858
+      },
+      "renderStats": {
+        "storedBars": 100000,
+        "visibleSourceBars": 201,
+        "renderedCandleBuckets": 201,
+        "commandCount": 43
+      },
+      "longTasks": [],
+      "workers": {
+        "created": 0,
+        "terminated": 0
+      }
+    },
+    {
+      "backend": "rust-wasm",
+      "renderer": "canvas",
+      "available": true,
+      "repeat": 2,
+      "count": 100000,
+      "runKind": "warm-compiled-matrix",
+      "firstFrameMs": 5.100000023841858,
+      "samples": 100,
+      "warmup": 10,
+      "completionMetric": "Worker packet RPC + decode + renderer submission",
+      "completionMs": {
+        "p50": 0.800000011920929,
+        "p95": 1.300000011920929,
+        "p99": 1.699999988079071,
+        "min": 0.5999999642372131,
+        "max": 1.9000000357627869
+      },
+      "inputToRenderEventMs": {
+        "p50": 18,
+        "p95": 25.099999964237213,
+        "p99": 26.400000035762787,
+        "min": 10,
+        "max": 26.5
+      },
+      "renderStats": {
+        "storedBars": 100000,
+        "visibleSourceBars": 201,
+        "renderedCandleBuckets": 201,
+        "commandCount": 43
+      },
+      "longTasks": [],
+      "workers": {
+        "created": 0,
+        "terminated": 0
+      }
+    },
+    {
+      "backend": "javascript",
+      "renderer": "webgl2",
+      "available": true,
+      "repeat": 2,
+      "count": 100000,
+      "runKind": "warm-compiled-matrix",
+      "firstFrameMs": 18.399999976158142,
+      "samples": 100,
+      "warmup": 10,
+      "completionMetric": "synchronous scene build + renderer submission",
+      "completionMs": {
+        "p50": 0.30000001192092896,
+        "p95": 0.40000003576278687,
+        "p99": 0.699999988079071,
+        "min": 0.09999996423721313,
+        "max": 0.800000011920929
+      },
+      "inputToRenderEventMs": {
+        "p50": 16.69999998807907,
+        "p95": 24.19999998807907,
+        "p99": 24.399999976158142,
+        "min": 9.800000011920929,
+        "max": 24.400000035762787
+      },
+      "renderStats": {
+        "storedBars": 100000,
+        "visibleSourceBars": 201,
+        "renderedCandleBuckets": 201,
+        "commandCount": 43
+      },
+      "longTasks": [],
+      "workers": {
+        "created": 0,
+        "terminated": 0
+      }
+    },
+    {
+      "backend": "rust-wasm",
+      "renderer": "webgl2",
+      "available": true,
+      "repeat": 2,
+      "count": 100000,
+      "runKind": "warm-compiled-matrix",
+      "firstFrameMs": 11,
+      "samples": 100,
+      "warmup": 10,
+      "completionMetric": "Worker packet RPC + decode + renderer submission",
+      "completionMs": {
+        "p50": 0.7999999523162842,
+        "p95": 0.9000000357627869,
+        "p99": 1.0999999642372131,
+        "min": 0.6000000238418579,
+        "max": 1.100000023841858
+      },
+      "inputToRenderEventMs": {
+        "p50": 20,
+        "p95": 23.5,
+        "p99": 26.900000035762787,
+        "min": 10.100000023841858,
+        "max": 27
+      },
+      "renderStats": {
+        "storedBars": 100000,
+        "visibleSourceBars": 201,
+        "renderedCandleBuckets": 201,
+        "commandCount": 43
+      },
+      "longTasks": [],
+      "workers": {
+        "created": 0,
+        "terminated": 0
+      }
+    },
+    {
+      "backend": "javascript",
+      "renderer": "canvas",
+      "available": true,
+      "repeat": 2,
+      "count": 10000,
+      "runKind": "warm-compiled-matrix",
+      "firstFrameMs": 15.100000023841858,
+      "samples": 100,
+      "warmup": 10,
+      "completionMetric": "synchronous scene build + renderer submission",
+      "completionMs": {
+        "p50": 0.19999998807907104,
+        "p95": 0.30000001192092896,
+        "p99": 0.3999999761581421,
+        "min": 0.09999996423721313,
+        "max": 0.699999988079071
+      },
+      "inputToRenderEventMs": {
+        "p50": 16.30000001192093,
+        "p95": 21.69999998807907,
+        "p99": 22.80000001192093,
+        "min": 11.100000023841858,
+        "max": 23.599999964237213
+      },
+      "renderStats": {
+        "storedBars": 10000,
+        "visibleSourceBars": 201,
+        "renderedCandleBuckets": 201,
+        "commandCount": 43
+      },
+      "longTasks": [],
+      "workers": {
+        "created": 0,
+        "terminated": 0
+      }
+    },
+    {
+      "backend": "rust-wasm",
+      "renderer": "canvas",
+      "available": true,
+      "repeat": 2,
+      "count": 10000,
+      "runKind": "warm-compiled-matrix",
+      "firstFrameMs": 2,
+      "samples": 100,
+      "warmup": 10,
+      "completionMetric": "Worker packet RPC + decode + renderer submission",
+      "completionMs": {
+        "p50": 0.699999988079071,
+        "p95": 1.300000011920929,
+        "p99": 1.5,
+        "min": 0.5,
+        "max": 1.5
+      },
+      "inputToRenderEventMs": {
+        "p50": 18.600000023841858,
+        "p95": 24.5,
+        "p99": 25.400000035762787,
+        "min": 12.300000011920929,
+        "max": 26.69999998807907
+      },
+      "renderStats": {
+        "storedBars": 10000,
+        "visibleSourceBars": 201,
+        "renderedCandleBuckets": 201,
+        "commandCount": 43
+      },
+      "longTasks": [],
+      "workers": {
+        "created": 0,
+        "terminated": 0
+      }
+    },
+    {
+      "backend": "javascript",
+      "renderer": "webgl2",
+      "available": true,
+      "repeat": 2,
+      "count": 10000,
+      "runKind": "warm-compiled-matrix",
+      "firstFrameMs": 24.599999964237213,
+      "samples": 100,
+      "warmup": 10,
+      "completionMetric": "synchronous scene build + renderer submission",
+      "completionMs": {
+        "p50": 0.30000001192092896,
+        "p95": 0.40000003576278687,
+        "p99": 0.5,
+        "min": 0.19999998807907104,
+        "max": 0.5
+      },
+      "inputToRenderEventMs": {
+        "p50": 16.900000035762787,
+        "p95": 21.30000001192093,
+        "p99": 23.100000023841858,
+        "min": 10.399999976158142,
+        "max": 23.400000035762787
+      },
+      "renderStats": {
+        "storedBars": 10000,
+        "visibleSourceBars": 201,
+        "renderedCandleBuckets": 201,
+        "commandCount": 43
+      },
+      "longTasks": [],
+      "workers": {
+        "created": 0,
+        "terminated": 0
+      }
+    },
+    {
+      "backend": "rust-wasm",
+      "renderer": "webgl2",
+      "available": true,
+      "repeat": 2,
+      "count": 10000,
+      "runKind": "warm-compiled-matrix",
+      "firstFrameMs": 13.600000023841858,
+      "samples": 100,
+      "warmup": 10,
+      "completionMetric": "Worker packet RPC + decode + renderer submission",
+      "completionMs": {
+        "p50": 0.800000011920929,
+        "p95": 0.9000000357627869,
+        "p99": 1,
+        "min": 0.5999999642372131,
+        "max": 1
+      },
+      "inputToRenderEventMs": {
+        "p50": 18,
+        "p95": 22.19999998807907,
+        "p99": 23.899999976158142,
+        "min": 13.600000023841858,
+        "max": 26.5
+      },
+      "renderStats": {
+        "storedBars": 10000,
+        "visibleSourceBars": 201,
+        "renderedCandleBuckets": 201,
+        "commandCount": 43
+      },
+      "longTasks": [],
+      "workers": {
+        "created": 0,
+        "terminated": 0
+      }
+    },
+    {
+      "backend": "javascript",
+      "renderer": "canvas",
+      "available": true,
+      "repeat": 2,
+      "count": 1000000,
+      "runKind": "warm-compiled-matrix",
+      "firstFrameMs": 12.299999952316284,
+      "samples": 100,
+      "warmup": 10,
+      "completionMetric": "synchronous scene build + renderer submission",
+      "completionMs": {
+        "p50": 0.19999998807907104,
+        "p95": 0.20000004768371582,
+        "p99": 0.30000001192092896,
+        "min": 0,
+        "max": 3.100000023841858
+      },
+      "inputToRenderEventMs": {
+        "p50": 17,
+        "p95": 20.600000023841858,
+        "p99": 22.30000001192093,
+        "min": 12.699999988079071,
+        "max": 22.599999964237213
+      },
+      "renderStats": {
+        "storedBars": 1000000,
+        "visibleSourceBars": 201,
+        "renderedCandleBuckets": 201,
+        "commandCount": 43
+      },
+      "longTasks": [],
+      "workers": {
+        "created": 0,
+        "terminated": 0
+      }
+    },
+    {
+      "backend": "rust-wasm",
+      "renderer": "canvas",
+      "available": true,
+      "repeat": 2,
+      "count": 1000000,
+      "runKind": "warm-compiled-matrix",
+      "firstFrameMs": 12.399999976158142,
+      "samples": 100,
+      "warmup": 10,
+      "completionMetric": "Worker packet RPC + decode + renderer submission",
+      "completionMs": {
+        "p50": 0.800000011920929,
+        "p95": 1.300000011920929,
+        "p99": 1.399999976158142,
+        "min": 0.5,
+        "max": 1.7999999523162842
+      },
+      "inputToRenderEventMs": {
+        "p50": 20.19999998807907,
+        "p95": 22.700000047683716,
+        "p99": 23.5,
+        "min": 16,
+        "max": 24.400000035762787
+      },
+      "renderStats": {
+        "storedBars": 1000000,
+        "visibleSourceBars": 201,
+        "renderedCandleBuckets": 201,
+        "commandCount": 43
+      },
+      "longTasks": [],
+      "workers": {
+        "created": 0,
+        "terminated": 0
+      }
+    },
+    {
+      "backend": "javascript",
+      "renderer": "webgl2",
+      "available": true,
+      "repeat": 2,
+      "count": 1000000,
+      "runKind": "warm-compiled-matrix",
+      "firstFrameMs": 21.19999998807907,
+      "samples": 100,
+      "warmup": 10,
+      "completionMetric": "synchronous scene build + renderer submission",
+      "completionMs": {
+        "p50": 0.20000004768371582,
+        "p95": 0.30000001192092896,
+        "p99": 0.5,
+        "min": 0.09999996423721313,
+        "max": 0.699999988079071
+      },
+      "inputToRenderEventMs": {
+        "p50": 16.899999976158142,
+        "p95": 20.100000023841858,
+        "p99": 21,
+        "min": 12.799999952316284,
+        "max": 22.899999976158142
+      },
+      "renderStats": {
+        "storedBars": 1000000,
+        "visibleSourceBars": 201,
+        "renderedCandleBuckets": 201,
+        "commandCount": 43
+      },
+      "longTasks": [],
+      "workers": {
+        "created": 0,
+        "terminated": 0
+      }
+    },
+    {
+      "backend": "rust-wasm",
+      "renderer": "webgl2",
+      "available": true,
+      "repeat": 2,
+      "count": 1000000,
+      "runKind": "warm-compiled-matrix",
+      "firstFrameMs": 18.19999998807907,
+      "samples": 100,
+      "warmup": 10,
+      "completionMetric": "Worker packet RPC + decode + renderer submission",
+      "completionMs": {
+        "p50": 0.7999999523162842,
+        "p95": 1.0999999642372131,
+        "p99": 1.100000023841858,
+        "min": 0.5999999642372131,
+        "max": 1.199999988079071
+      },
+      "inputToRenderEventMs": {
+        "p50": 19.5,
+        "p95": 23.5,
+        "p99": 24.900000035762787,
+        "min": 13.399999976158142,
+        "max": 25
       },
       "renderStats": {
         "storedBars": 1000000,
@@ -1948,7 +1948,7 @@
       "repeat": 0,
       "count": 10000,
       "runKind": "warm-compiled-matrix",
-      "generationMs": 1.100000023841858,
+      "generationMs": 1.2000000476837158,
       "inputBytes": 480000,
       "order": [
         "javascript",
@@ -1956,13 +1956,13 @@
       ],
       "setup": {
         "javascriptMs": 8,
-        "rustActorInitMs": 10.5,
-        "rustConfigurationMs": 3.900000035762787,
-        "rustPrepareMs": 36.69999998807907
+        "rustActorInitMs": 11.199999988079071,
+        "rustConfigurationMs": 3.800000011920929,
+        "rustPrepareMs": 37.90000003576279
       },
       "params": {
-        "javascriptMs": 1.7999999523162842,
-        "rustWasmMs": 19.30000001192093,
+        "javascriptMs": 1.899999976158142,
+        "rustWasmMs": 20.5,
         "candidatePeakLiveWorkers": 2,
         "candidateActorMemory": "unavailable: high-level job does not expose private actor telemetry"
       },
@@ -1976,23 +1976,23 @@
         },
         "rustWasm": {
           "p50": 0.19999998807907104,
-          "p95": 0.3999999761581421,
-          "p99": 0.3999999761581421,
+          "p95": 0.30000001192092896,
+          "p99": 0.30000001192092896,
           "min": 0.09999996423721313,
-          "max": 1.600000023841858
+          "max": 1.699999988079071
         },
         "samples": 20
       },
       "transport": {
         "rustTypedReadBytes": 196608,
-        "rustTypedReadMs": 0.5,
+        "rustTypedReadMs": 0.30000001192092896,
         "rustBacklogOperations": 32,
-        "rustBacklogMs": 0.800000011920929
+        "rustBacklogMs": 0.699999988079071
       },
       "memory": {
         "javascript": {
-          "beforeUsedJSHeapBytes": 10406174,
-          "afterUsedJSHeapBytes": 19089432,
+          "beforeUsedJSHeapBytes": 10289158,
+          "afterUsedJSHeapBytes": 19099672,
           "scope": "page-wide performance.memory, not backend-exclusive; null when unavailable"
         },
         "rustWasm": {
@@ -2050,21 +2050,21 @@
       "repeat": 0,
       "count": 100000,
       "runKind": "warm-compiled-matrix",
-      "generationMs": 4.5,
+      "generationMs": 5.399999976158142,
       "inputBytes": 4800000,
       "order": [
         "rust-wasm",
         "javascript"
       ],
       "setup": {
-        "javascriptMs": 18.799999952316284,
-        "rustActorInitMs": 8.100000023841858,
-        "rustConfigurationMs": 1.5999999642372131,
-        "rustPrepareMs": 52.700000047683716
+        "javascriptMs": 19.5,
+        "rustActorInitMs": 9.699999988079071,
+        "rustConfigurationMs": 1.5,
+        "rustPrepareMs": 54.90000003576279
       },
       "params": {
-        "javascriptMs": 4.700000047683716,
-        "rustWasmMs": 77.69999998807907,
+        "javascriptMs": 4.800000011920929,
+        "rustWasmMs": 77.89999997615814,
         "candidatePeakLiveWorkers": 2,
         "candidateActorMemory": "unavailable: high-level job does not expose private actor telemetry"
       },
@@ -2074,27 +2074,27 @@
           "p95": 0.10000002384185791,
           "p99": 0.10000002384185791,
           "min": 0,
-          "max": 0.10000002384185791
+          "max": 0.20000004768371582
         },
         "rustWasm": {
           "p50": 0.5,
-          "p95": 0.7000000476837158,
-          "p99": 0.7000000476837158,
-          "min": 0.40000003576278687,
-          "max": 1.199999988079071
+          "p95": 0.5999999642372131,
+          "p99": 0.5999999642372131,
+          "min": 0.3999999761581421,
+          "max": 1.699999988079071
         },
         "samples": 20
       },
       "transport": {
         "rustTypedReadBytes": 196608,
-        "rustTypedReadMs": 0.3999999761581421,
+        "rustTypedReadMs": 0.19999998807907104,
         "rustBacklogOperations": 32,
-        "rustBacklogMs": 0.6000000238418579
+        "rustBacklogMs": 0.699999988079071
       },
       "memory": {
         "javascript": {
-          "beforeUsedJSHeapBytes": 30440371,
-          "afterUsedJSHeapBytes": 41185931,
+          "beforeUsedJSHeapBytes": 30451295,
+          "afterUsedJSHeapBytes": 39536601,
           "scope": "page-wide performance.memory, not backend-exclusive; null when unavailable"
         },
         "rustWasm": {
@@ -2152,51 +2152,51 @@
       "repeat": 0,
       "count": 1000000,
       "runKind": "warm-compiled-matrix",
-      "generationMs": 37.69999998807907,
+      "generationMs": 37.19999998807907,
       "inputBytes": 48000000,
       "order": [
         "javascript",
         "rust-wasm"
       ],
       "setup": {
-        "javascriptMs": 160.80000001192093,
-        "rustActorInitMs": 7,
+        "javascriptMs": 165.5,
+        "rustActorInitMs": 7.900000035762787,
         "rustConfigurationMs": 1.300000011920929,
-        "rustPrepareMs": 404.39999997615814
+        "rustPrepareMs": 398.0999999642372
       },
       "params": {
-        "javascriptMs": 44,
-        "rustWasmMs": 629.5,
+        "javascriptMs": 42.90000003576279,
+        "rustWasmMs": 617.2999999523163,
         "candidatePeakLiveWorkers": 2,
         "candidateActorMemory": "unavailable: high-level job does not expose private actor telemetry"
       },
       "streamUpdateCompletionMs": {
         "javascript": {
-          "p50": 0.09999996423721313,
-          "p95": 0.10000002384185791,
-          "p99": 0.10000002384185791,
+          "p50": 0,
+          "p95": 0.19999998807907104,
+          "p99": 0.19999998807907104,
           "min": 0,
-          "max": 0.10000002384185791
+          "max": 0.19999998807907104
         },
         "rustWasm": {
-          "p50": 3.099999964237213,
-          "p95": 3.899999976158142,
-          "p99": 3.899999976158142,
-          "min": 3,
-          "max": 8.100000023841858
+          "p50": 3.199999988079071,
+          "p95": 4.100000023841858,
+          "p99": 4.100000023841858,
+          "min": 3.099999964237213,
+          "max": 11.5
         },
         "samples": 20
       },
       "transport": {
         "rustTypedReadBytes": 196608,
-        "rustTypedReadMs": 0.19999998807907104,
+        "rustTypedReadMs": 0.20000004768371582,
         "rustBacklogOperations": 32,
-        "rustBacklogMs": 0.699999988079071
+        "rustBacklogMs": 0.5999999642372131
       },
       "memory": {
         "javascript": {
-          "beforeUsedJSHeapBytes": 263894887,
-          "afterUsedJSHeapBytes": 235204627,
+          "beforeUsedJSHeapBytes": 268110531,
+          "afterUsedJSHeapBytes": 234311991,
           "scope": "page-wide performance.memory, not backend-exclusive; null when unavailable"
         },
         "rustWasm": {
@@ -2254,21 +2254,21 @@
       "repeat": 1,
       "count": 1000000,
       "runKind": "warm-compiled-matrix",
-      "generationMs": 19.69999998807907,
+      "generationMs": 22.5,
       "inputBytes": 48000000,
       "order": [
         "rust-wasm",
         "javascript"
       ],
       "setup": {
-        "javascriptMs": 165.80000001192093,
-        "rustActorInitMs": 7.199999988079071,
-        "rustConfigurationMs": 1.199999988079071,
-        "rustPrepareMs": 393.80000001192093
+        "javascriptMs": 165.0999999642372,
+        "rustActorInitMs": 8,
+        "rustConfigurationMs": 1,
+        "rustPrepareMs": 389.9000000357628
       },
       "params": {
-        "javascriptMs": 37.5,
-        "rustWasmMs": 611.3000000119209,
+        "javascriptMs": 37.80000001192093,
+        "rustWasmMs": 627.5,
         "candidatePeakLiveWorkers": 2,
         "candidateActorMemory": "unavailable: high-level job does not expose private actor telemetry"
       },
@@ -2278,27 +2278,27 @@
           "p95": 0.10000002384185791,
           "p99": 0.10000002384185791,
           "min": 0,
-          "max": 0.19999998807907104
+          "max": 0.10000002384185791
         },
         "rustWasm": {
-          "p50": 3.100000023841858,
-          "p95": 3.699999988079071,
-          "p99": 3.699999988079071,
-          "min": 2.900000035762787,
-          "max": 8
+          "p50": 3.199999988079071,
+          "p95": 4.100000023841858,
+          "p99": 4.100000023841858,
+          "min": 3.099999964237213,
+          "max": 8.800000011920929
         },
         "samples": 20
       },
       "transport": {
         "rustTypedReadBytes": 196608,
-        "rustTypedReadMs": 0.30000001192092896,
+        "rustTypedReadMs": 0.2999999523162842,
         "rustBacklogOperations": 32,
-        "rustBacklogMs": 0.5999999642372131
+        "rustBacklogMs": 0.7000000476837158
       },
       "memory": {
         "javascript": {
-          "beforeUsedJSHeapBytes": 200001043,
-          "afterUsedJSHeapBytes": 240054271,
+          "beforeUsedJSHeapBytes": 200015207,
+          "afterUsedJSHeapBytes": 231154419,
           "scope": "page-wide performance.memory, not backend-exclusive; null when unavailable"
         },
         "rustWasm": {
@@ -2356,21 +2356,21 @@
       "repeat": 1,
       "count": 100000,
       "runKind": "warm-compiled-matrix",
-      "generationMs": 4.5,
+      "generationMs": 8.600000023841858,
       "inputBytes": 4800000,
       "order": [
         "javascript",
         "rust-wasm"
       ],
       "setup": {
-        "javascriptMs": 15.100000023841858,
-        "rustActorInitMs": 6.199999988079071,
-        "rustConfigurationMs": 1.100000023841858,
-        "rustPrepareMs": 46.09999996423721
+        "javascriptMs": 21.69999998807907,
+        "rustActorInitMs": 8.400000035762787,
+        "rustConfigurationMs": 1.399999976158142,
+        "rustPrepareMs": 50.39999997615814
       },
       "params": {
-        "javascriptMs": 3.400000035762787,
-        "rustWasmMs": 75.80000001192093,
+        "javascriptMs": 3.799999952316284,
+        "rustWasmMs": 72.60000002384186,
         "candidatePeakLiveWorkers": 2,
         "candidateActorMemory": "unavailable: high-level job does not expose private actor telemetry"
       },
@@ -2383,24 +2383,24 @@
           "max": 0.10000002384185791
         },
         "rustWasm": {
-          "p50": 0.40000003576278687,
-          "p95": 0.5,
-          "p99": 0.5,
-          "min": 0.30000001192092896,
-          "max": 1.5
+          "p50": 0.5,
+          "p95": 0.6000000238418579,
+          "p99": 0.6000000238418579,
+          "min": 0.3999999761581421,
+          "max": 1.199999988079071
         },
         "samples": 20
       },
       "transport": {
         "rustTypedReadBytes": 196608,
-        "rustTypedReadMs": 0.10000002384185791,
+        "rustTypedReadMs": 0.20000004768371582,
         "rustBacklogOperations": 32,
-        "rustBacklogMs": 0.5999999642372131
+        "rustBacklogMs": 0.699999988079071
       },
       "memory": {
         "javascript": {
-          "beforeUsedJSHeapBytes": 258948039,
-          "afterUsedJSHeapBytes": 66544885,
+          "beforeUsedJSHeapBytes": 40903479,
+          "afterUsedJSHeapBytes": 44347554,
           "scope": "page-wide performance.memory, not backend-exclusive; null when unavailable"
         },
         "rustWasm": {
@@ -2458,7 +2458,7 @@
       "repeat": 1,
       "count": 10000,
       "runKind": "warm-compiled-matrix",
-      "generationMs": 0.40000003576278687,
+      "generationMs": 0.7999999523162842,
       "inputBytes": 480000,
       "order": [
         "rust-wasm",
@@ -2466,43 +2466,43 @@
       ],
       "setup": {
         "javascriptMs": 2.5,
-        "rustActorInitMs": 15,
+        "rustActorInitMs": 16,
         "rustConfigurationMs": 2.100000023841858,
-        "rustPrepareMs": 29.899999976158142
+        "rustPrepareMs": 30.399999976158142
       },
       "params": {
-        "javascriptMs": 0.3999999761581421,
-        "rustWasmMs": 16.400000035762787,
+        "javascriptMs": 0.5999999642372131,
+        "rustWasmMs": 14.700000047683716,
         "candidatePeakLiveWorkers": 2,
         "candidateActorMemory": "unavailable: high-level job does not expose private actor telemetry"
       },
       "streamUpdateCompletionMs": {
         "javascript": {
           "p50": 0,
-          "p95": 0,
-          "p99": 0,
+          "p95": 0.10000002384185791,
+          "p99": 0.10000002384185791,
           "min": 0,
-          "max": 0.09999996423721313
+          "max": 0.10000002384185791
         },
         "rustWasm": {
           "p50": 0.19999998807907104,
           "p95": 0.30000001192092896,
           "p99": 0.30000001192092896,
-          "min": 0.09999996423721313,
-          "max": 0.40000003576278687
+          "min": 0,
+          "max": 0.30000001192092896
         },
         "samples": 20
       },
       "transport": {
         "rustTypedReadBytes": 196608,
-        "rustTypedReadMs": 0.30000001192092896,
+        "rustTypedReadMs": 0.3999999761581421,
         "rustBacklogOperations": 32,
-        "rustBacklogMs": 0.800000011920929
+        "rustBacklogMs": 0.5
       },
       "memory": {
         "javascript": {
-          "beforeUsedJSHeapBytes": 75490585,
-          "afterUsedJSHeapBytes": 48488597,
+          "beforeUsedJSHeapBytes": 53298014,
+          "afterUsedJSHeapBytes": 44909321,
           "scope": "page-wide performance.memory, not backend-exclusive; null when unavailable"
         },
         "rustWasm": {
@@ -2560,21 +2560,21 @@
       "repeat": 2,
       "count": 100000,
       "runKind": "warm-compiled-matrix",
-      "generationMs": 3.199999988079071,
+      "generationMs": 3.399999976158142,
       "inputBytes": 4800000,
       "order": [
         "javascript",
         "rust-wasm"
       ],
       "setup": {
-        "javascriptMs": 17.600000023841858,
-        "rustActorInitMs": 7.199999988079071,
+        "javascriptMs": 21.30000001192093,
+        "rustActorInitMs": 7.099999964237213,
         "rustConfigurationMs": 1.100000023841858,
-        "rustPrepareMs": 50.39999997615814
+        "rustPrepareMs": 51.19999998807907
       },
       "params": {
         "javascriptMs": 3.5,
-        "rustWasmMs": 74.90000003576279,
+        "rustWasmMs": 74.09999996423721,
         "candidatePeakLiveWorkers": 2,
         "candidateActorMemory": "unavailable: high-level job does not expose private actor telemetry"
       },
@@ -2591,20 +2591,20 @@
           "p95": 0.6000000238418579,
           "p99": 0.6000000238418579,
           "min": 0.3999999761581421,
-          "max": 1.0999999642372131
+          "max": 1.5
         },
         "samples": 20
       },
       "transport": {
         "rustTypedReadBytes": 196608,
-        "rustTypedReadMs": 0.19999998807907104,
+        "rustTypedReadMs": 0.3999999761581421,
         "rustBacklogOperations": 32,
-        "rustBacklogMs": 0.6000000238418579
+        "rustBacklogMs": 0.5
       },
       "memory": {
         "javascript": {
-          "beforeUsedJSHeapBytes": 41007759,
-          "afterUsedJSHeapBytes": 35351167,
+          "beforeUsedJSHeapBytes": 41039591,
+          "afterUsedJSHeapBytes": 52606187,
           "scope": "page-wide performance.memory, not backend-exclusive; null when unavailable"
         },
         "rustWasm": {
@@ -2662,21 +2662,21 @@
       "repeat": 2,
       "count": 10000,
       "runKind": "warm-compiled-matrix",
-      "generationMs": 0.3999999761581421,
+      "generationMs": 0.5,
       "inputBytes": 480000,
       "order": [
         "rust-wasm",
         "javascript"
       ],
       "setup": {
-        "javascriptMs": 1.899999976158142,
-        "rustActorInitMs": 10.400000035762787,
-        "rustConfigurationMs": 1.699999988079071,
-        "rustPrepareMs": 26
+        "javascriptMs": 1.699999988079071,
+        "rustActorInitMs": 10.900000035762787,
+        "rustConfigurationMs": 1.899999976158142,
+        "rustPrepareMs": 27.19999998807907
       },
       "params": {
         "javascriptMs": 0.5,
-        "rustWasmMs": 14.300000011920929,
+        "rustWasmMs": 14.800000011920929,
         "candidatePeakLiveWorkers": 2,
         "candidateActorMemory": "unavailable: high-level job does not expose private actor telemetry"
       },
@@ -2690,23 +2690,23 @@
         },
         "rustWasm": {
           "p50": 0.19999998807907104,
-          "p95": 0.30000001192092896,
-          "p99": 0.30000001192092896,
-          "min": 0.09999996423721313,
-          "max": 0.30000001192092896
+          "p95": 0.40000003576278687,
+          "p99": 0.40000003576278687,
+          "min": 0.10000002384185791,
+          "max": 0.5
         },
         "samples": 20
       },
       "transport": {
         "rustTypedReadBytes": 196608,
-        "rustTypedReadMs": 0.19999998807907104,
+        "rustTypedReadMs": 0.30000001192092896,
         "rustBacklogOperations": 32,
-        "rustBacklogMs": 0.5
+        "rustBacklogMs": 0.5999999642372131
       },
       "memory": {
         "javascript": {
-          "beforeUsedJSHeapBytes": 35351167,
-          "afterUsedJSHeapBytes": 29482084,
+          "beforeUsedJSHeapBytes": 52606187,
+          "afterUsedJSHeapBytes": 18916936,
           "scope": "page-wide performance.memory, not backend-exclusive; null when unavailable"
         },
         "rustWasm": {
@@ -2764,38 +2764,38 @@
       "repeat": 2,
       "count": 1000000,
       "runKind": "warm-compiled-matrix",
-      "generationMs": 30.19999998807907,
+      "generationMs": 30.30000001192093,
       "inputBytes": 48000000,
       "order": [
         "javascript",
         "rust-wasm"
       ],
       "setup": {
-        "javascriptMs": 139.0999999642372,
-        "rustActorInitMs": 7,
-        "rustConfigurationMs": 1.100000023841858,
-        "rustPrepareMs": 380.80000001192093
+        "javascriptMs": 142.89999997615814,
+        "rustActorInitMs": 6.900000035762787,
+        "rustConfigurationMs": 1.199999988079071,
+        "rustPrepareMs": 394.69999998807907
       },
       "params": {
-        "javascriptMs": 39.19999998807907,
-        "rustWasmMs": 603,
+        "javascriptMs": 40.90000003576279,
+        "rustWasmMs": 626.6999999880791,
         "candidatePeakLiveWorkers": 2,
         "candidateActorMemory": "unavailable: high-level job does not expose private actor telemetry"
       },
       "streamUpdateCompletionMs": {
         "javascript": {
-          "p50": 0.10000002384185791,
-          "p95": 0.19999998807907104,
-          "p99": 0.19999998807907104,
+          "p50": 0.09999996423721313,
+          "p95": 0.10000002384185791,
+          "p99": 0.10000002384185791,
           "min": 0,
-          "max": 0.20000004768371582
+          "max": 0.19999998807907104
         },
         "rustWasm": {
-          "p50": 3.100000023841858,
-          "p95": 3.699999988079071,
-          "p99": 3.699999988079071,
-          "min": 3,
-          "max": 9.300000011920929
+          "p50": 3.199999988079071,
+          "p95": 4.300000011920929,
+          "p99": 4.300000011920929,
+          "min": 3.099999964237213,
+          "max": 10.699999988079071
         },
         "samples": 20
       },
@@ -2803,12 +2803,12 @@
         "rustTypedReadBytes": 196608,
         "rustTypedReadMs": 0.30000001192092896,
         "rustBacklogOperations": 32,
-        "rustBacklogMs": 0.5999999642372131
+        "rustBacklogMs": 0.6000000238418579
       },
       "memory": {
         "javascript": {
-          "beforeUsedJSHeapBytes": 274466368,
-          "afterUsedJSHeapBytes": 231230423,
+          "beforeUsedJSHeapBytes": 272413256,
+          "afterUsedJSHeapBytes": 231954503,
           "scope": "page-wide performance.memory, not backend-exclusive; null when unavailable"
         },
         "rustWasm": {

@@ -91,7 +91,7 @@ function fakeRuntime(t,options={}){
   allocations:new Map(),outputPointers:new Set(),allocSequence:[],freeTrapKind:null,freeTrapSize:null,
   abiVersion:options.abiVersion??1,capabilities:options.capabilities??validCapabilities(),
   releaseMode:options.releaseMode??'one',callBytes:encoder.encode('0'),packetMetadata:encoder.encode('{}'),packetNumbers:new Uint8Array(),didWrite:0,
-  trapCall:false,earlyRelease:false,
+  trapCall:false,earlyRelease:false,callHost:null,
  };
  const align=value=>(value+7)&~7;
  const reserve=(size,kind='host')=>{const pointer=align(state.bump);state.bump=pointer+size;state.allocations.set(pointer,{size,kind});return pointer;};
@@ -111,7 +111,7 @@ function fakeRuntime(t,options={}){
   bc_engine_free(){if(state.releaseMode==='one')env.host_release(state.hostId);else if(state.releaseMode==='duplicate'){env.host_release(state.hostId);env.host_release(state.hostId);}else if(state.releaseMode==='wrong')env.host_release(state.hostId+1);},
   bc_web_capabilities(_engine,out){setDescriptor(out,encoder.encode(stringifyLossless(state.capabilities)));return 0;},
   bc_web_memory_stats(_engine,out){setDescriptor(out,encoder.encode('{"requested":0}'));return 0;},
-  bc_call(_engine,name,nameLength,_args,_argsLength,_flags,out){state.callCalls++;if(state.trapCall)throw new Error('call trap');if(state.earlyRelease)env.host_release(state.hostId);state.lastName=decoder.decode(new Uint8Array(memory.buffer,name,nameLength));setDescriptor(out,state.callBytes,{malformed:state.malformedCallDescriptor});return 0;},
+  bc_call(_engine,name,nameLength,_args,_argsLength,_flags,out){state.callCalls++;if(state.trapCall)throw new Error('call trap');if(state.earlyRelease)env.host_release(state.hostId);state.callHost?.(env);state.lastName=decoder.decode(new Uint8Array(memory.buffer,name,nameLength));setDescriptor(out,state.callBytes,{malformed:state.malformedCallDescriptor});return 0;},
   bc_web_read_f64(_engine,_name,_nameLength,_args,_argsLength,_flags,out){setDescriptor(out,state.readBytes??new Uint8Array());return 0;},
   bc_web_write_f64(_engine,_name,_nameLength,_args,_argsLength,_flags,_source,_count,did,error){state.writeCalls++;new DataView(memory.buffer).setUint32(did,state.didWrite,true);setDescriptor(error,new Uint8Array());return 0;},
   bc_web_packet(_engine,_args,_argsLength,metadata,numbers){setDescriptor(metadata,state.packetMetadata);setDescriptor(numbers,state.packetNumbers);return 0;},
@@ -211,6 +211,22 @@ test('host release is accepted exactly once and only during disposal',t=>{
 
  const early=fakeRuntime(t),earlyRuntime=instantiateRustRuntime(early.module);early.state.earlyRelease=true;
  assert.throws(()=>earlyRuntime.call('nativeInit',[]),error=>error.code==='HOST_RELEASE');assert.equal(earlyRuntime.quarantined,true);
+});
+
+test('reentrant close from custom Math and Intl callbacks is busy without mutating runtime ownership',t=>{
+ for(const kind of ['Math','Intl']){
+  const fake=fakeRuntime(t);let runtime,closeError,callbackCalls=0;
+  const closeInsideCallback=()=>{callbackCalls++;try{runtime.close();}catch(error){closeError=error;}};
+  const host=kind==='Math'
+   ? {Math:{log(value){closeInsideCallback();return Math.log(value);}}}
+   : {Intl:{DateTimeFormat:function(...args){closeInsideCallback();return new Intl.DateTimeFormat(...args);}}};
+  if(kind==='Math')fake.state.callHost=env=>env.js_log(2);
+  else fake.state.callHost=env=>{const pointer=32,zone=new TextEncoder().encode('UTC');new Uint8Array(fake.memory.buffer).set(zone,pointer);env.zone_offset_seconds(1,pointer,zone.length,0);};
+  runtime=instantiateRustRuntime(fake.module,{host});
+  assert.equal(runtime.call('nativeInit',[]),0);assert.equal(callbackCalls,1);assert.equal(closeError?.code,'BUSY');
+  assert.equal(runtime.closed,false);assert.equal(runtime.engine,1);assert.equal(runtime.hostReleaseCount,0);
+  runtime.close();assert.equal(runtime.closed,true);assert.equal(runtime.engine,0);assert.equal(runtime.hostReleaseCount,1);assert.equal(runtime.hostReleased,true);
+ }
 });
 
 test('negotiated transfer limits are enforced before the write export',t=>{
