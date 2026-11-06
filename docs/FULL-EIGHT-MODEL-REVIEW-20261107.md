@@ -29,6 +29,7 @@
 | 워커 | 잘못된 응답과 messageerror를 즉시 거부하고 종료. 선택적 messageerror 기능으로 기존 sealed 커스텀 어댑터 호환 유지 | `worker-cleanup`, `calculation-worker-envelope` |
 | 모델 옵션 | getter 재진입 뒤 패널·축·시리즈 및 지표/데이터 소유권을 재검증해 중복·고아·비정렬 시리즈 게시 차단 | `model-add-reentry` |
 | React | controlled prop 비교 중 getter/reflection 예외를 onError로 전달하고 같은 거부의 반복 보고 억제 | `react-interaction-options`, 초기화 재시도 |
+| 메인 웹 데모 | 시작용 저장 배치를 시장 전환 때 다시 적용해 journal 설정을 덮는 경로를 차단. 배치 undo는 UI 작업 완료 후 진행 | 실제 WASM에서 다른 저장 지표 값으로 RED/GREEN, CPU 4배 제한·UTC 재검증 |
 | 네이티브 도구 | 직접 Swift 컴파일에 백엔드 타입 파일을 포함하고 비 SwiftPM 분기의 리소스 URL 참조를 수정 | 실제 CLI 빌드·8개 기능 모드·일반/닫힌 입력 링 |
 
 성공한 내부 재진입 변경은 유지하고 오래된 바깥 작업의 게시를 취소한다. 잘못된 최초 React 구성은 기존처럼 초기화를 실패시키고, 유효한 구성으로 바뀌면 재시도한다.
@@ -50,4 +51,4 @@
 
 로컬 Node 6,216개(실패·skip 0), Rust 650개(실패 0, 기존 대용량 수동 테스트 2개 ignore), 모듈·타입·C 헤더/C11·fmt·clippy·금지 패턴 검사를 통과했다. 실제 Chrome의 WASM 8개 프로그램과 bootstrap 실패 경로, GPU·레이어·UX·API·React·커스터마이징·지표 레이아웃을 확인했다. React 19 실제 런타임은 59개 시나리오/1,924개 assertion과 Worker 14/14 종료를 통과했다. 고정 React 18 브라우저 의존성은 오프라인 캐시에 없어 해당 실행은 제외했다.
 
-새 SDK 크기 행렬의 출하용 듀얼 합계는 arm64 4,461,390 B, x86_64 5,106,606 B로 각각 5,242,880 B 이내다. 원본 WASM은 3,325,956 B이며 gzip 1,046,003 B/Brotli 783,587 B다. 실제 tarball의 Vite와 esbuild 빌드·브라우저 실행도 통과했다. 성능은 cold 18개/warm 36개/parity 9개를 새로 측정했다. 10,000개 행의 6개 OHLCV 필드 60,000값을 전체 대조했고 Worker 36/36, 모델 9/9, 양쪽 차트 각각 18/18이 종료됐다. 측정은 SDK 파이프라인 범위이며 표시 FPS나 Rust의 일반적 우월성을 주장하지 않는다. PR의 다섯 필수 CI 작업은 별도 원격 실행으로 확인한다. Android 실기기 성능/장시간 soak 및 수동 VoiceOver/TalkBack 게이트는 기존 별도 항목으로 유지한다. 기본 백엔드와 5 MiB 듀얼 SDK 예산은 기존 결정을 따른다.
+새 SDK 크기 행렬의 출하용 듀얼 합계는 arm64 4,461,390 B, x86_64 5,106,606 B로 각각 5,242,880 B 이내다. 원본 WASM은 3,325,956 B이며 gzip 1,046,003 B/Brotli 783,587 B다. 실제 tarball의 Vite와 esbuild 빌드·브라우저 실행도 통과했다. 성능은 cold 18개/warm 36개/parity 9개를 새로 측정했다. 10,000개 행의 6개 OHLCV 필드 60,000값을 전체 대조했고 Worker 36/36, 모델 9/9, 양쪽 차트 각각 18/18이 종료됐다. 측정은 SDK 파이프라인 범위이며 표시 FPS나 Rust의 일반적 우월성을 주장하지 않는다. 첫 CI80은 네이티브 네 작업 성공 후 웹 데모의 시장 journal 비교에서 실패했다. 저장 배치(지표 period 9)가 journal(period 5)을 덮는 경로를 로컬에서 재현해 시작 시 1회 복원으로 수정했다. 전체 설정 비교와 시작 배치의 실제 지표/시리즈/축 복원 검사를 유지·강화했고, 해당 드라이버 21개 및 실제 브라우저의 정상/CPU 4배 제한 실행이 통과했다. 라이브러리·Rust·자산·SDK 및 성능 워크로드 입력은 동일해 앞선 검증을 재사용한다. 수정 후 PR의 다섯 필수 CI 작업을 새 head에서 다시 확인한다. Android 실기기 성능/장시간 soak 및 수동 VoiceOver/TalkBack 게이트는 기존 별도 항목으로 유지한다. 기본 백엔드와 5 MiB 듀얼 SDK 예산은 기존 결정을 따른다.

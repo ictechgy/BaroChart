@@ -546,7 +546,7 @@ export async function mountRustDemo({root=globalThis.document,backend,initialSes
   if(memoryTimer!==null)view.clearTimeout(memoryTimer);
   memoryTimer=view.setTimeout(()=>{memoryTimer=null;try{view.localStorage?.setItem(RUST_LAYOUT_STORAGE_KEY,stringifyRustLayoutMemory({enabled:true,preset:currentLayoutPreset()}));status('배치를 저장했습니다.','chart-layout-status');}catch{status('레이아웃 저장소를 사용할 수 없습니다.','chart-layout-status');}},300);
  }
- async function restoreRemembered(){if(initialPreferencesChanged)return;let text;try{text=view.localStorage?.getItem(RUST_LAYOUT_STORAGE_KEY);}catch{}if(!text)return;try{const memory=parseRustLayoutMemory(text);rememberEnabled=memory.enabled;if($('remember-chart-layout'))$('remember-chart-layout').checked=rememberEnabled;if(memory.enabled&&memory.preset)await importLayoutText(stringifyRustLayoutPreset(memory.preset));}catch{status('저장된 배치가 유효하지 않아 기본 배치를 사용합니다.','chart-layout-status');}}
+ async function restoreRemembered(){if(initialSettled||initialPreferencesChanged)return;let text;try{text=view.localStorage?.getItem(RUST_LAYOUT_STORAGE_KEY);}catch{}if(!text)return;try{const memory=parseRustLayoutMemory(text);rememberEnabled=memory.enabled;if($('remember-chart-layout'))$('remember-chart-layout').checked=rememberEnabled;if(memory.enabled&&memory.preset)await importLayoutText(stringifyRustLayoutPreset(memory.preset));}catch{status('저장된 배치가 유효하지 않아 기본 배치를 사용합니다.','chart-layout-status');}}
 
  function download(text,name,type){const url=URL.createObjectURL(new Blob([text],{type})),link=document.createElement('a');link.href=url;link.download=name;try{link.click();}finally{later(()=>URL.revokeObjectURL(url),1000);}}
  async function importDrawingsText(text,request){
