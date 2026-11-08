@@ -73,14 +73,17 @@ public class SoakTest {
             ticks[0]++;
             onMain(() -> streamTick(engineRef.get(), viewRef.get(), data, ticks[0], target));
             if (System.nanoTime() >= nextSample) {
+                long[] requestedRuntimeBytes = {-1};
+                onMain(() -> requestedRuntimeBytes[0] = engineRef.get().runtimeMetrics().optLong("requestedLiveBytes", -1));
                 samples.put(new JSONObject().put("seconds", (System.nanoTime() - started) / 1e9).put("pssKiB", Debug.getPss())
-                    .put("runtimeRequestedBytes", engineRef.get().runtimeMetrics().optLong("requestedLiveBytes", -1)));
+                    .put("runtimeRequestedBytes", requestedRuntimeBytes[0]));
                 nextSample = System.nanoTime() + sampleEvery;
             }
             Thread.sleep(100);
         }
+        double elapsedSeconds = (System.nanoTime() - started) / 1e9;
         onMain(() -> engineRef.get().close());
-        JSONObject verdict = streamingVerdict(samples, ticks[0]);
+        JSONObject verdict = streamingVerdict(samples, ticks[0]).put("elapsedSeconds", elapsedSeconds);
         report("android-streaming-soak", verdict);
         if (minutes >= 15) assertTrue(verdict.toString(), verdict.getBoolean("passed"));
         assertTrue("view must not record a draw error: " + viewRef.get().getLastError(), viewRef.get().getLastError() == null);
