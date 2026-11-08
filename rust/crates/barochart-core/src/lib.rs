@@ -1102,10 +1102,7 @@ impl Engine {
 
     fn workspace_context(&self) -> Result<workspace::WorkspaceContext<'_>, JsError> {
         let chart = self.chart.as_ref().ok_or_else(|| {
-            JsError::new(
-                "TypeError",
-                JsString::from_str("Workspace native owner mismatch"),
-            )
+            JsError::new("TypeError", JsString::from_str("Actual ChartAPI required"))
         })?;
         let field = |name: &str| -> Option<&JsString> {
             let JsValue::Object(record) = chart.symbol_record.as_ref()? else {
