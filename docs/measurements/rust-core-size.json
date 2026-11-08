@@ -1,16 +1,16 @@
 {
   "schema": "barochart.rust-core-size",
   "version": 1,
-  "generatedAt": "2026-11-06T18:28:16.980Z",
+  "generatedAt": "2026-11-08T18:57:57.471Z",
   "budgetBytes": 5242880,
   "qualification": "Current-source Android SDK size measurement. Shipping per-ABI package bytes are native .so + classes.jar + aster-core.js when QuickJS is included; native .so bytes and historical diagnostics are separate and do not approve a full-port artifact choice.",
   "source": {
-    "sha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
-    "rustSha256": "f63e43203d21e17abc212a8e85be157098f9e5474151b943a198e0c926c59aa4",
+    "sha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
+    "rustSha256": "ef2d3710ef68b7bc76fa99b0b0471872bc4bfbb3247e096256dfb42877caf2de",
     "androidLinkSha256": "0c254e65fd958042c1b8cf3dd034334f9f82754c8b55abe9f58c7b867359bd2b",
     "androidPackagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39",
     "coreAssetSha256": "704888d3f9f283d34a1f0300d0b87e756e588c2493225197f7978ff624081479",
-    "currentScaffoldRustPhysicalLines": 82862,
+    "currentScaffoldRustPhysicalLines": 82859,
     "scope": {
       "stableRustLinesEstimate": 27850,
       "tierANetNewRustLinesEstimate": 10000,
@@ -21,7 +21,7 @@
       "design": "docs/superpowers/specs/2026-11-02-rust-core-design.md §5.5",
       "tierA": "docs/superpowers/specs/2026-11-02-rust-core-porting-map-tier-a.md §7.1"
     },
-    "commit": "bd78d278ff0c6b9cbd1f151b7696fb027cf84fe3"
+    "commit": "bc40d3ad2ff320b34183b5bffbda8d0d1577f851"
   },
   "tools": {
     "node": "v22.20.0",
@@ -46,7 +46,7 @@
   },
   "commandPlaceholders": {
     "$REPO": "repository root",
-    "$OUT": "$REPO/artifacts/rust-size-web-wasm-current",
+    "$OUT": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full",
     "$NODE": "configured Node 22 executable",
     "$NDK": "configured Android NDK root",
     "$NDK_HOST": "darwin-x86_64",
@@ -1125,14 +1125,14 @@
       "strip",
       "-S",
       "-x",
-      "$REPO/artifacts/rust-size-web-wasm-current/artifacts/ios/baseline"
+      "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/ios/baseline"
     ],
     [
       "$XCRUN",
       "strip",
       "-S",
       "-x",
-      "$REPO/artifacts/rust-size-web-wasm-current/artifacts/ios/rust-referenced"
+      "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/ios/rust-referenced"
     ],
     [
       "$XCRUN",
@@ -1171,11 +1171,11 @@
           },
           "jsOnly": {
             "bytes": 934392,
-            "sha256": "e6aeb28b2a9edee0ba34ce3c33891bfd7937f578449f522443378dde30446159",
-            "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/arm64-v8a/js-only/libbarochart.so",
+            "sha256": "fb2db9c91f61d9eca66566fb85515c40a5ec933a1a8db74ba878a749126b4f27",
+            "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/arm64-v8a/js-only/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "profileIndependent": true
             },
             "loadAlignments": [
@@ -1187,11 +1187,11 @@
           },
           "dual": {
             "bytes": 3656992,
-            "sha256": "29b520a8728dbbf11a9e9effdd133f2c2971cbf295e4e90ed6484d2e6e152fd3",
-            "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/arm64-v8a/opt-s-panic-unwind/dual/libbarochart.so",
+            "sha256": "6d4fa5f338c54a29ec7fea8d35a694ff0c9494b5382d6c7a416bc466f94be8fc",
+            "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/arm64-v8a/opt-s-panic-unwind/dual/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "profile": "opt-s-panic-unwind"
             },
             "loadAlignments": [
@@ -1201,12 +1201,12 @@
             ]
           },
           "rustOnly": {
-            "bytes": 2737384,
-            "sha256": "559c912f0b2633024896b1fdddbe7879cc67eca9d6b8969d37899c95954cfa83",
-            "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/arm64-v8a/opt-s-panic-unwind/rust-only/libbarochart.so",
+            "bytes": 2737368,
+            "sha256": "3a69a78c6408a45c71bfc9b8e811a956a539f49727eb1d0ac5738ddc1766ef9c",
+            "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/arm64-v8a/opt-s-panic-unwind/rust-only/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "profile": "opt-s-panic-unwind"
             },
             "loadAlignments": [
@@ -1216,8 +1216,8 @@
             ]
           },
           "rustStaticlib": {
-            "bytes": 47580000,
-            "sha256": "87443ce9b94336b62d573d3bfe5f70a8bbaa8a3ace9f1e362b422e9edf428643",
+            "bytes": 47579976,
+            "sha256": "46667aa169aad584dd852ab48f44ed45a59293619654862f4fd72cc88545af57",
             "path": "$OUT/rust-target/android/opt-s-panic-unwind/aarch64-linux-android/release/libbarochart_ffi.a"
           },
           "linkedRustDeltaBytes": 2722600,
@@ -1231,11 +1231,11 @@
             "entries": {
               "jni/arm64-v8a/libbarochart.so": {
                 "bytes": 3656992,
-                "sha256": "29b520a8728dbbf11a9e9effdd133f2c2971cbf295e4e90ed6484d2e6e152fd3",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/arm64-v8a/opt-s-panic-unwind/dual/libbarochart.so",
+                "sha256": "6d4fa5f338c54a29ec7fea8d35a694ff0c9494b5382d6c7a416bc466f94be8fc",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/arm64-v8a/opt-s-panic-unwind/dual/libbarochart.so",
                 "provenance": {
                   "kind": "fresh-isolated-build",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "profile": "opt-s-panic-unwind"
                 },
                 "loadAlignments": [
@@ -1247,10 +1247,10 @@
               "classes.jar": {
                 "bytes": 171654,
                 "sha256": "facb010bf568a494d506676d7dae745bc073ad5ee316695b2315b3fd18770fd1",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/build/android-java/opt-s-panic-unwind/dual/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/build/android-java/opt-s-panic-unwind/dual/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
                 "provenance": {
                   "kind": "fresh-java-only-gradle",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39",
                   "profile": "opt-s-panic-unwind",
                   "configuration": "dual"
@@ -1262,7 +1262,7 @@
                 "path": "$REPO/native/Resources/aster-core.js",
                 "provenance": {
                   "kind": "source-asset",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "assetSha256": "704888d3f9f283d34a1f0300d0b87e756e588c2493225197f7978ff624081479",
                   "configuration": "dual",
                   "quickjs": true
@@ -1276,7 +1276,7 @@
               "profile": "opt-s-panic-unwind",
               "configuration": "dual",
               "quickjs": true,
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39"
             },
             "budget": {
@@ -1289,12 +1289,12 @@
             "definition": "per-ABI release AAR entries: native .so + classes.jar + assets/aster-core.js when QuickJS is included; uncompressed bytes",
             "entries": {
               "jni/arm64-v8a/libbarochart.so": {
-                "bytes": 2737384,
-                "sha256": "559c912f0b2633024896b1fdddbe7879cc67eca9d6b8969d37899c95954cfa83",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/arm64-v8a/opt-s-panic-unwind/rust-only/libbarochart.so",
+                "bytes": 2737368,
+                "sha256": "3a69a78c6408a45c71bfc9b8e811a956a539f49727eb1d0ac5738ddc1766ef9c",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/arm64-v8a/opt-s-panic-unwind/rust-only/libbarochart.so",
                 "provenance": {
                   "kind": "fresh-isolated-build",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "profile": "opt-s-panic-unwind"
                 },
                 "loadAlignments": [
@@ -1306,30 +1306,30 @@
               "classes.jar": {
                 "bytes": 171253,
                 "sha256": "92500cf098b1f9bac1616a05f80b9627aea72555c15c8e114de8c709ed306407",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/build/android-java/opt-s-panic-unwind/rustOnly/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/build/android-java/opt-s-panic-unwind/rustOnly/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
                 "provenance": {
                   "kind": "fresh-java-only-gradle",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39",
                   "profile": "opt-s-panic-unwind",
                   "configuration": "rustOnly"
                 }
               }
             },
-            "bytes": 2908637,
+            "bytes": 2908621,
             "provenance": {
               "kind": "fresh-java-only-packaging-plus-native-matrix",
               "abi": "arm64-v8a",
               "profile": "opt-s-panic-unwind",
               "configuration": "rustOnly",
               "quickjs": false,
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39"
             },
             "budget": {
               "bytes": 5242880,
               "exceeds": false,
-              "remaining": 2334243
+              "remaining": 2334259
             }
           },
           "jsOnlyPackaged": {
@@ -1337,11 +1337,11 @@
             "entries": {
               "jni/arm64-v8a/libbarochart.so": {
                 "bytes": 934392,
-                "sha256": "e6aeb28b2a9edee0ba34ce3c33891bfd7937f578449f522443378dde30446159",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/arm64-v8a/js-only/libbarochart.so",
+                "sha256": "fb2db9c91f61d9eca66566fb85515c40a5ec933a1a8db74ba878a749126b4f27",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/arm64-v8a/js-only/libbarochart.so",
                 "provenance": {
                   "kind": "fresh-isolated-build",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "profileIndependent": true
                 },
                 "loadAlignments": [
@@ -1353,10 +1353,10 @@
               "classes.jar": {
                 "bytes": 171693,
                 "sha256": "e19dfee7bad04bc2d666406b9a74590a411a2cc2f1e0c452cbc9be923ef19958",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/build/android-java/opt-s-panic-unwind/jsOnly/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/build/android-java/opt-s-panic-unwind/jsOnly/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
                 "provenance": {
                   "kind": "fresh-java-only-gradle",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39",
                   "profile": "opt-s-panic-unwind",
                   "configuration": "jsOnly"
@@ -1368,7 +1368,7 @@
                 "path": "$REPO/native/Resources/aster-core.js",
                 "provenance": {
                   "kind": "source-asset",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "assetSha256": "704888d3f9f283d34a1f0300d0b87e756e588c2493225197f7978ff624081479",
                   "configuration": "jsOnly",
                   "quickjs": true
@@ -1382,7 +1382,7 @@
               "profile": "opt-s-panic-unwind",
               "configuration": "jsOnly",
               "quickjs": true,
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39"
             },
             "budget": {
@@ -1403,11 +1403,11 @@
           },
           "jsOnly": {
             "bytes": 934392,
-            "sha256": "e6aeb28b2a9edee0ba34ce3c33891bfd7937f578449f522443378dde30446159",
-            "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/arm64-v8a/js-only/libbarochart.so",
+            "sha256": "fb2db9c91f61d9eca66566fb85515c40a5ec933a1a8db74ba878a749126b4f27",
+            "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/arm64-v8a/js-only/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "profileIndependent": true
             },
             "loadAlignments": [
@@ -1418,12 +1418,12 @@
             "sharedAcrossRustProfiles": true
           },
           "dual": {
-            "bytes": 4057544,
-            "sha256": "51e1716d51647b79b7941ca02160425e8c36e64b12aba29ab49f64da9afb4391",
-            "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/arm64-v8a/opt-3-panic-unwind/dual/libbarochart.so",
+            "bytes": 4057528,
+            "sha256": "965b9068eb62b9098e1ad2fee7c64e4acbc7aa22ae6fe5bb54e652e019d1d2e2",
+            "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/arm64-v8a/opt-3-panic-unwind/dual/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "profile": "opt-3-panic-unwind"
             },
             "loadAlignments": [
@@ -1433,12 +1433,12 @@
             ]
           },
           "rustOnly": {
-            "bytes": 3138096,
-            "sha256": "bdc49451acdd060d6536e1dd1e1e04f296a7425b0fc9e21308695bebca0943f0",
-            "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/arm64-v8a/opt-3-panic-unwind/rust-only/libbarochart.so",
+            "bytes": 3138080,
+            "sha256": "4b723aebb71a5cd0a082670e3f7139437df84ea88211f18aa67431a0aabf62f4",
+            "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/arm64-v8a/opt-3-panic-unwind/rust-only/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "profile": "opt-3-panic-unwind"
             },
             "loadAlignments": [
@@ -1448,26 +1448,26 @@
             ]
           },
           "rustStaticlib": {
-            "bytes": 42574624,
-            "sha256": "a3cf95cb9d92ef90cdc5ce0c2452b089297e3e6fc202496a36064065d1314bac",
+            "bytes": 42574600,
+            "sha256": "a478034af01cd6785a130b3d7e7116f35d7c6d47cb012e9cf1a1e9d6617fbafe",
             "path": "$OUT/rust-target/android/opt-3-panic-unwind/aarch64-linux-android/release/libbarochart_ffi.a"
           },
-          "linkedRustDeltaBytes": 3123152,
+          "linkedRustDeltaBytes": 3123136,
           "nativeSoBudget": {
             "bytes": 5242880,
             "exceeds": false,
-            "remaining": 1185336
+            "remaining": 1185352
           },
           "packaged": {
             "definition": "per-ABI release AAR entries: native .so + classes.jar + assets/aster-core.js when QuickJS is included; uncompressed bytes",
             "entries": {
               "jni/arm64-v8a/libbarochart.so": {
-                "bytes": 4057544,
-                "sha256": "51e1716d51647b79b7941ca02160425e8c36e64b12aba29ab49f64da9afb4391",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/arm64-v8a/opt-3-panic-unwind/dual/libbarochart.so",
+                "bytes": 4057528,
+                "sha256": "965b9068eb62b9098e1ad2fee7c64e4acbc7aa22ae6fe5bb54e652e019d1d2e2",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/arm64-v8a/opt-3-panic-unwind/dual/libbarochart.so",
                 "provenance": {
                   "kind": "fresh-isolated-build",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "profile": "opt-3-panic-unwind"
                 },
                 "loadAlignments": [
@@ -1479,10 +1479,10 @@
               "classes.jar": {
                 "bytes": 171654,
                 "sha256": "facb010bf568a494d506676d7dae745bc073ad5ee316695b2315b3fd18770fd1",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/build/android-java/opt-3-panic-unwind/dual/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/build/android-java/opt-3-panic-unwind/dual/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
                 "provenance": {
                   "kind": "fresh-java-only-gradle",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39",
                   "profile": "opt-3-panic-unwind",
                   "configuration": "dual"
@@ -1494,39 +1494,39 @@
                 "path": "$REPO/native/Resources/aster-core.js",
                 "provenance": {
                   "kind": "source-asset",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "assetSha256": "704888d3f9f283d34a1f0300d0b87e756e588c2493225197f7978ff624081479",
                   "configuration": "dual",
                   "quickjs": true
                 }
               }
             },
-            "bytes": 4861942,
+            "bytes": 4861926,
             "provenance": {
               "kind": "fresh-java-only-packaging-plus-native-matrix",
               "abi": "arm64-v8a",
               "profile": "opt-3-panic-unwind",
               "configuration": "dual",
               "quickjs": true,
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39"
             },
             "budget": {
               "bytes": 5242880,
               "exceeds": false,
-              "remaining": 380938
+              "remaining": 380954
             }
           },
           "rustOnlyPackaged": {
             "definition": "per-ABI release AAR entries: native .so + classes.jar + assets/aster-core.js when QuickJS is included; uncompressed bytes",
             "entries": {
               "jni/arm64-v8a/libbarochart.so": {
-                "bytes": 3138096,
-                "sha256": "bdc49451acdd060d6536e1dd1e1e04f296a7425b0fc9e21308695bebca0943f0",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/arm64-v8a/opt-3-panic-unwind/rust-only/libbarochart.so",
+                "bytes": 3138080,
+                "sha256": "4b723aebb71a5cd0a082670e3f7139437df84ea88211f18aa67431a0aabf62f4",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/arm64-v8a/opt-3-panic-unwind/rust-only/libbarochart.so",
                 "provenance": {
                   "kind": "fresh-isolated-build",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "profile": "opt-3-panic-unwind"
                 },
                 "loadAlignments": [
@@ -1538,30 +1538,30 @@
               "classes.jar": {
                 "bytes": 171253,
                 "sha256": "92500cf098b1f9bac1616a05f80b9627aea72555c15c8e114de8c709ed306407",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/build/android-java/opt-3-panic-unwind/rustOnly/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/build/android-java/opt-3-panic-unwind/rustOnly/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
                 "provenance": {
                   "kind": "fresh-java-only-gradle",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39",
                   "profile": "opt-3-panic-unwind",
                   "configuration": "rustOnly"
                 }
               }
             },
-            "bytes": 3309349,
+            "bytes": 3309333,
             "provenance": {
               "kind": "fresh-java-only-packaging-plus-native-matrix",
               "abi": "arm64-v8a",
               "profile": "opt-3-panic-unwind",
               "configuration": "rustOnly",
               "quickjs": false,
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39"
             },
             "budget": {
               "bytes": 5242880,
               "exceeds": false,
-              "remaining": 1933531
+              "remaining": 1933547
             }
           },
           "jsOnlyPackaged": {
@@ -1569,11 +1569,11 @@
             "entries": {
               "jni/arm64-v8a/libbarochart.so": {
                 "bytes": 934392,
-                "sha256": "e6aeb28b2a9edee0ba34ce3c33891bfd7937f578449f522443378dde30446159",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/arm64-v8a/js-only/libbarochart.so",
+                "sha256": "fb2db9c91f61d9eca66566fb85515c40a5ec933a1a8db74ba878a749126b4f27",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/arm64-v8a/js-only/libbarochart.so",
                 "provenance": {
                   "kind": "fresh-isolated-build",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "profileIndependent": true
                 },
                 "loadAlignments": [
@@ -1585,10 +1585,10 @@
               "classes.jar": {
                 "bytes": 171693,
                 "sha256": "e19dfee7bad04bc2d666406b9a74590a411a2cc2f1e0c452cbc9be923ef19958",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/build/android-java/opt-3-panic-unwind/jsOnly/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/build/android-java/opt-3-panic-unwind/jsOnly/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
                 "provenance": {
                   "kind": "fresh-java-only-gradle",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39",
                   "profile": "opt-3-panic-unwind",
                   "configuration": "jsOnly"
@@ -1600,7 +1600,7 @@
                 "path": "$REPO/native/Resources/aster-core.js",
                 "provenance": {
                   "kind": "source-asset",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "assetSha256": "704888d3f9f283d34a1f0300d0b87e756e588c2493225197f7978ff624081479",
                   "configuration": "jsOnly",
                   "quickjs": true
@@ -1614,7 +1614,7 @@
               "profile": "opt-3-panic-unwind",
               "configuration": "jsOnly",
               "quickjs": true,
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39"
             },
             "budget": {
@@ -1635,11 +1635,11 @@
           },
           "jsOnly": {
             "bytes": 934392,
-            "sha256": "e6aeb28b2a9edee0ba34ce3c33891bfd7937f578449f522443378dde30446159",
-            "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/arm64-v8a/js-only/libbarochart.so",
+            "sha256": "fb2db9c91f61d9eca66566fb85515c40a5ec933a1a8db74ba878a749126b4f27",
+            "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/arm64-v8a/js-only/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "profileIndependent": true
             },
             "loadAlignments": [
@@ -1651,11 +1651,11 @@
           },
           "dual": {
             "bytes": 3212096,
-            "sha256": "5c953ac43dfd03a3ec924f8e5dcfe99c5b7baff20a798ca7fe26d54d6d7d5eca",
-            "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/arm64-v8a/opt-s-panic-abort/dual/libbarochart.so",
+            "sha256": "ceac644b8d1f09e2a6c29dbc45f1920336986a9ffd3e19c0757a7c8e2cfca8b1",
+            "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/arm64-v8a/opt-s-panic-abort/dual/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "profile": "opt-s-panic-abort"
             },
             "loadAlignments": [
@@ -1665,12 +1665,12 @@
             ]
           },
           "rustOnly": {
-            "bytes": 2292648,
-            "sha256": "e4adc0f1620b2a6a31a345e2698ce5c3969157a614ae27c12fa8928c8a0112f7",
-            "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/arm64-v8a/opt-s-panic-abort/rust-only/libbarochart.so",
+            "bytes": 2292632,
+            "sha256": "39bf81a4170b7b9b5c4ada33d50337ae828df496e4ba423c90381755e96abc4b",
+            "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/arm64-v8a/opt-s-panic-abort/rust-only/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "profile": "opt-s-panic-abort"
             },
             "loadAlignments": [
@@ -1680,8 +1680,8 @@
             ]
           },
           "rustStaticlib": {
-            "bytes": 45119834,
-            "sha256": "e39d69392c017bc08e160d248d102b0dca835ad1a33019ba9aad763fb2e94b3c",
+            "bytes": 45119826,
+            "sha256": "b7c72945a5f73eb134e278679be6ee5bba9d87d71af1ef53a8ab5f9304dce594",
             "path": "$OUT/rust-target/android/opt-s-panic-abort/aarch64-linux-android/release/libbarochart_ffi.a"
           },
           "linkedRustDeltaBytes": 2277704,
@@ -1695,11 +1695,11 @@
             "entries": {
               "jni/arm64-v8a/libbarochart.so": {
                 "bytes": 3212096,
-                "sha256": "5c953ac43dfd03a3ec924f8e5dcfe99c5b7baff20a798ca7fe26d54d6d7d5eca",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/arm64-v8a/opt-s-panic-abort/dual/libbarochart.so",
+                "sha256": "ceac644b8d1f09e2a6c29dbc45f1920336986a9ffd3e19c0757a7c8e2cfca8b1",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/arm64-v8a/opt-s-panic-abort/dual/libbarochart.so",
                 "provenance": {
                   "kind": "fresh-isolated-build",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "profile": "opt-s-panic-abort"
                 },
                 "loadAlignments": [
@@ -1711,10 +1711,10 @@
               "classes.jar": {
                 "bytes": 171654,
                 "sha256": "facb010bf568a494d506676d7dae745bc073ad5ee316695b2315b3fd18770fd1",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/build/android-java/opt-s-panic-abort/dual/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/build/android-java/opt-s-panic-abort/dual/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
                 "provenance": {
                   "kind": "fresh-java-only-gradle",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39",
                   "profile": "opt-s-panic-abort",
                   "configuration": "dual"
@@ -1726,7 +1726,7 @@
                 "path": "$REPO/native/Resources/aster-core.js",
                 "provenance": {
                   "kind": "source-asset",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "assetSha256": "704888d3f9f283d34a1f0300d0b87e756e588c2493225197f7978ff624081479",
                   "configuration": "dual",
                   "quickjs": true
@@ -1740,7 +1740,7 @@
               "profile": "opt-s-panic-abort",
               "configuration": "dual",
               "quickjs": true,
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39"
             },
             "budget": {
@@ -1753,12 +1753,12 @@
             "definition": "per-ABI release AAR entries: native .so + classes.jar + assets/aster-core.js when QuickJS is included; uncompressed bytes",
             "entries": {
               "jni/arm64-v8a/libbarochart.so": {
-                "bytes": 2292648,
-                "sha256": "e4adc0f1620b2a6a31a345e2698ce5c3969157a614ae27c12fa8928c8a0112f7",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/arm64-v8a/opt-s-panic-abort/rust-only/libbarochart.so",
+                "bytes": 2292632,
+                "sha256": "39bf81a4170b7b9b5c4ada33d50337ae828df496e4ba423c90381755e96abc4b",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/arm64-v8a/opt-s-panic-abort/rust-only/libbarochart.so",
                 "provenance": {
                   "kind": "fresh-isolated-build",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "profile": "opt-s-panic-abort"
                 },
                 "loadAlignments": [
@@ -1770,30 +1770,30 @@
               "classes.jar": {
                 "bytes": 171253,
                 "sha256": "92500cf098b1f9bac1616a05f80b9627aea72555c15c8e114de8c709ed306407",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/build/android-java/opt-s-panic-abort/rustOnly/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/build/android-java/opt-s-panic-abort/rustOnly/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
                 "provenance": {
                   "kind": "fresh-java-only-gradle",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39",
                   "profile": "opt-s-panic-abort",
                   "configuration": "rustOnly"
                 }
               }
             },
-            "bytes": 2463901,
+            "bytes": 2463885,
             "provenance": {
               "kind": "fresh-java-only-packaging-plus-native-matrix",
               "abi": "arm64-v8a",
               "profile": "opt-s-panic-abort",
               "configuration": "rustOnly",
               "quickjs": false,
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39"
             },
             "budget": {
               "bytes": 5242880,
               "exceeds": false,
-              "remaining": 2778979
+              "remaining": 2778995
             }
           },
           "jsOnlyPackaged": {
@@ -1801,11 +1801,11 @@
             "entries": {
               "jni/arm64-v8a/libbarochart.so": {
                 "bytes": 934392,
-                "sha256": "e6aeb28b2a9edee0ba34ce3c33891bfd7937f578449f522443378dde30446159",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/arm64-v8a/js-only/libbarochart.so",
+                "sha256": "fb2db9c91f61d9eca66566fb85515c40a5ec933a1a8db74ba878a749126b4f27",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/arm64-v8a/js-only/libbarochart.so",
                 "provenance": {
                   "kind": "fresh-isolated-build",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "profileIndependent": true
                 },
                 "loadAlignments": [
@@ -1817,10 +1817,10 @@
               "classes.jar": {
                 "bytes": 171693,
                 "sha256": "e19dfee7bad04bc2d666406b9a74590a411a2cc2f1e0c452cbc9be923ef19958",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/build/android-java/opt-s-panic-abort/jsOnly/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/build/android-java/opt-s-panic-abort/jsOnly/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
                 "provenance": {
                   "kind": "fresh-java-only-gradle",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39",
                   "profile": "opt-s-panic-abort",
                   "configuration": "jsOnly"
@@ -1832,7 +1832,7 @@
                 "path": "$REPO/native/Resources/aster-core.js",
                 "provenance": {
                   "kind": "source-asset",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "assetSha256": "704888d3f9f283d34a1f0300d0b87e756e588c2493225197f7978ff624081479",
                   "configuration": "jsOnly",
                   "quickjs": true
@@ -1846,7 +1846,7 @@
               "profile": "opt-s-panic-abort",
               "configuration": "jsOnly",
               "quickjs": true,
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39"
             },
             "budget": {
@@ -1867,11 +1867,11 @@
           },
           "jsOnly": {
             "bytes": 934392,
-            "sha256": "e6aeb28b2a9edee0ba34ce3c33891bfd7937f578449f522443378dde30446159",
-            "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/arm64-v8a/js-only/libbarochart.so",
+            "sha256": "fb2db9c91f61d9eca66566fb85515c40a5ec933a1a8db74ba878a749126b4f27",
+            "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/arm64-v8a/js-only/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "profileIndependent": true
             },
             "loadAlignments": [
@@ -1883,11 +1883,11 @@
           },
           "dual": {
             "bytes": 3618280,
-            "sha256": "e1a1b42552d9d5bd0a8bba13f757e92cf1a623c3925b88916f10708e50daa0cb",
-            "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/arm64-v8a/opt-3-panic-abort/dual/libbarochart.so",
+            "sha256": "998f1373d4517cb685cfbb9bc827b21ba1464d8713275e281c83b6fc790d9b0f",
+            "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/arm64-v8a/opt-3-panic-abort/dual/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "profile": "opt-3-panic-abort"
             },
             "loadAlignments": [
@@ -1898,11 +1898,11 @@
           },
           "rustOnly": {
             "bytes": 2699024,
-            "sha256": "dc726c9ccdf3db67763d2287448a1c7f023f7dfeba6e42223c924acbf6ad178f",
-            "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/arm64-v8a/opt-3-panic-abort/rust-only/libbarochart.so",
+            "sha256": "a451a825d55fd9aea9bd097ba5f8374be69fea3b1a49604c00b267c0e34e1899",
+            "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/arm64-v8a/opt-3-panic-abort/rust-only/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "profile": "opt-3-panic-abort"
             },
             "loadAlignments": [
@@ -1912,8 +1912,8 @@
             ]
           },
           "rustStaticlib": {
-            "bytes": 40431360,
-            "sha256": "6baa3a832cca1b39bf943ae022105313e10d20fca202e950366cf550c90e52e1",
+            "bytes": 40431352,
+            "sha256": "5bded45b666ecac8f24821c3b936c0002222d252cd4ca09c6cc7686c722af3b3",
             "path": "$OUT/rust-target/android/opt-3-panic-abort/aarch64-linux-android/release/libbarochart_ffi.a"
           },
           "linkedRustDeltaBytes": 2683888,
@@ -1927,11 +1927,11 @@
             "entries": {
               "jni/arm64-v8a/libbarochart.so": {
                 "bytes": 3618280,
-                "sha256": "e1a1b42552d9d5bd0a8bba13f757e92cf1a623c3925b88916f10708e50daa0cb",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/arm64-v8a/opt-3-panic-abort/dual/libbarochart.so",
+                "sha256": "998f1373d4517cb685cfbb9bc827b21ba1464d8713275e281c83b6fc790d9b0f",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/arm64-v8a/opt-3-panic-abort/dual/libbarochart.so",
                 "provenance": {
                   "kind": "fresh-isolated-build",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "profile": "opt-3-panic-abort"
                 },
                 "loadAlignments": [
@@ -1943,10 +1943,10 @@
               "classes.jar": {
                 "bytes": 171654,
                 "sha256": "facb010bf568a494d506676d7dae745bc073ad5ee316695b2315b3fd18770fd1",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/build/android-java/opt-3-panic-abort/dual/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/build/android-java/opt-3-panic-abort/dual/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
                 "provenance": {
                   "kind": "fresh-java-only-gradle",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39",
                   "profile": "opt-3-panic-abort",
                   "configuration": "dual"
@@ -1958,7 +1958,7 @@
                 "path": "$REPO/native/Resources/aster-core.js",
                 "provenance": {
                   "kind": "source-asset",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "assetSha256": "704888d3f9f283d34a1f0300d0b87e756e588c2493225197f7978ff624081479",
                   "configuration": "dual",
                   "quickjs": true
@@ -1972,7 +1972,7 @@
               "profile": "opt-3-panic-abort",
               "configuration": "dual",
               "quickjs": true,
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39"
             },
             "budget": {
@@ -1986,11 +1986,11 @@
             "entries": {
               "jni/arm64-v8a/libbarochart.so": {
                 "bytes": 2699024,
-                "sha256": "dc726c9ccdf3db67763d2287448a1c7f023f7dfeba6e42223c924acbf6ad178f",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/arm64-v8a/opt-3-panic-abort/rust-only/libbarochart.so",
+                "sha256": "a451a825d55fd9aea9bd097ba5f8374be69fea3b1a49604c00b267c0e34e1899",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/arm64-v8a/opt-3-panic-abort/rust-only/libbarochart.so",
                 "provenance": {
                   "kind": "fresh-isolated-build",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "profile": "opt-3-panic-abort"
                 },
                 "loadAlignments": [
@@ -2002,10 +2002,10 @@
               "classes.jar": {
                 "bytes": 171253,
                 "sha256": "92500cf098b1f9bac1616a05f80b9627aea72555c15c8e114de8c709ed306407",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/build/android-java/opt-3-panic-abort/rustOnly/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/build/android-java/opt-3-panic-abort/rustOnly/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
                 "provenance": {
                   "kind": "fresh-java-only-gradle",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39",
                   "profile": "opt-3-panic-abort",
                   "configuration": "rustOnly"
@@ -2019,7 +2019,7 @@
               "profile": "opt-3-panic-abort",
               "configuration": "rustOnly",
               "quickjs": false,
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39"
             },
             "budget": {
@@ -2033,11 +2033,11 @@
             "entries": {
               "jni/arm64-v8a/libbarochart.so": {
                 "bytes": 934392,
-                "sha256": "e6aeb28b2a9edee0ba34ce3c33891bfd7937f578449f522443378dde30446159",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/arm64-v8a/js-only/libbarochart.so",
+                "sha256": "fb2db9c91f61d9eca66566fb85515c40a5ec933a1a8db74ba878a749126b4f27",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/arm64-v8a/js-only/libbarochart.so",
                 "provenance": {
                   "kind": "fresh-isolated-build",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "profileIndependent": true
                 },
                 "loadAlignments": [
@@ -2049,10 +2049,10 @@
               "classes.jar": {
                 "bytes": 171693,
                 "sha256": "e19dfee7bad04bc2d666406b9a74590a411a2cc2f1e0c452cbc9be923ef19958",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/build/android-java/opt-3-panic-abort/jsOnly/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/build/android-java/opt-3-panic-abort/jsOnly/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
                 "provenance": {
                   "kind": "fresh-java-only-gradle",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39",
                   "profile": "opt-3-panic-abort",
                   "configuration": "jsOnly"
@@ -2064,7 +2064,7 @@
                 "path": "$REPO/native/Resources/aster-core.js",
                 "provenance": {
                   "kind": "source-asset",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "assetSha256": "704888d3f9f283d34a1f0300d0b87e756e588c2493225197f7978ff624081479",
                   "configuration": "jsOnly",
                   "quickjs": true
@@ -2078,7 +2078,7 @@
               "profile": "opt-3-panic-abort",
               "configuration": "jsOnly",
               "quickjs": true,
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39"
             },
             "budget": {
@@ -2101,11 +2101,11 @@
           },
           "jsOnly": {
             "bytes": 991952,
-            "sha256": "8a788dde9800339a0c14bab851f0745083ff519f0f6d73ec8ea2a9de66560d33",
-            "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/x86_64/js-only/libbarochart.so",
+            "sha256": "97eb33cc7c1e5d913c586ded97985fe8a2f137402c2ac906820d7170631f740e",
+            "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/x86_64/js-only/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "profileIndependent": true
             },
             "loadAlignments": [
@@ -2116,12 +2116,12 @@
             "sharedAcrossRustProfiles": true
           },
           "dual": {
-            "bytes": 4302208,
-            "sha256": "7d5aaf84eac5996124fde3aa5896ce3fb0b99389996343971b5b9c83a53637ab",
-            "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/x86_64/opt-s-panic-unwind/dual/libbarochart.so",
+            "bytes": 4302192,
+            "sha256": "3d3015520f9d8fb957cb8f8490e3d4011c6dc1248c1885e58d682794b218e6cf",
+            "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/x86_64/opt-s-panic-unwind/dual/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "profile": "opt-s-panic-unwind"
             },
             "loadAlignments": [
@@ -2132,11 +2132,11 @@
           },
           "rustOnly": {
             "bytes": 3321808,
-            "sha256": "70d7d174f44158d6db6622afa6d48dd722d56710d96e305a1bd4982358798d08",
-            "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/x86_64/opt-s-panic-unwind/rust-only/libbarochart.so",
+            "sha256": "b04e921f839ab89f8137613c22bed13dbc76b1731f0058e9555d94c7aef94768",
+            "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/x86_64/opt-s-panic-unwind/rust-only/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "profile": "opt-s-panic-unwind"
             },
             "loadAlignments": [
@@ -2146,26 +2146,26 @@
             ]
           },
           "rustStaticlib": {
-            "bytes": 47408922,
-            "sha256": "149b47736b83e5d465f2b9a0d84d3b1bcec83718810ae0ecb1eebb018c0878ad",
+            "bytes": 47408914,
+            "sha256": "c3966789a3d2431b1afe718f19fcc7ba1621e68456ebcc305d0f7b8db1c1e3b8",
             "path": "$OUT/rust-target/android/opt-s-panic-unwind/x86_64-linux-android/release/libbarochart_ffi.a"
           },
-          "linkedRustDeltaBytes": 3310256,
+          "linkedRustDeltaBytes": 3310240,
           "nativeSoBudget": {
             "bytes": 5242880,
             "exceeds": false,
-            "remaining": 940672
+            "remaining": 940688
           },
           "packaged": {
             "definition": "per-ABI release AAR entries: native .so + classes.jar + assets/aster-core.js when QuickJS is included; uncompressed bytes",
             "entries": {
               "jni/x86_64/libbarochart.so": {
-                "bytes": 4302208,
-                "sha256": "7d5aaf84eac5996124fde3aa5896ce3fb0b99389996343971b5b9c83a53637ab",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/x86_64/opt-s-panic-unwind/dual/libbarochart.so",
+                "bytes": 4302192,
+                "sha256": "3d3015520f9d8fb957cb8f8490e3d4011c6dc1248c1885e58d682794b218e6cf",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/x86_64/opt-s-panic-unwind/dual/libbarochart.so",
                 "provenance": {
                   "kind": "fresh-isolated-build",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "profile": "opt-s-panic-unwind"
                 },
                 "loadAlignments": [
@@ -2177,10 +2177,10 @@
               "classes.jar": {
                 "bytes": 171654,
                 "sha256": "facb010bf568a494d506676d7dae745bc073ad5ee316695b2315b3fd18770fd1",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/build/android-java/opt-s-panic-unwind/dual/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/build/android-java/opt-s-panic-unwind/dual/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
                 "provenance": {
                   "kind": "fresh-java-only-gradle",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39",
                   "profile": "opt-s-panic-unwind",
                   "configuration": "dual"
@@ -2192,27 +2192,27 @@
                 "path": "$REPO/native/Resources/aster-core.js",
                 "provenance": {
                   "kind": "source-asset",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "assetSha256": "704888d3f9f283d34a1f0300d0b87e756e588c2493225197f7978ff624081479",
                   "configuration": "dual",
                   "quickjs": true
                 }
               }
             },
-            "bytes": 5106606,
+            "bytes": 5106590,
             "provenance": {
               "kind": "fresh-java-only-packaging-plus-native-matrix",
               "abi": "x86_64",
               "profile": "opt-s-panic-unwind",
               "configuration": "dual",
               "quickjs": true,
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39"
             },
             "budget": {
               "bytes": 5242880,
               "exceeds": false,
-              "remaining": 136274
+              "remaining": 136290
             }
           },
           "rustOnlyPackaged": {
@@ -2220,11 +2220,11 @@
             "entries": {
               "jni/x86_64/libbarochart.so": {
                 "bytes": 3321808,
-                "sha256": "70d7d174f44158d6db6622afa6d48dd722d56710d96e305a1bd4982358798d08",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/x86_64/opt-s-panic-unwind/rust-only/libbarochart.so",
+                "sha256": "b04e921f839ab89f8137613c22bed13dbc76b1731f0058e9555d94c7aef94768",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/x86_64/opt-s-panic-unwind/rust-only/libbarochart.so",
                 "provenance": {
                   "kind": "fresh-isolated-build",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "profile": "opt-s-panic-unwind"
                 },
                 "loadAlignments": [
@@ -2236,10 +2236,10 @@
               "classes.jar": {
                 "bytes": 171253,
                 "sha256": "92500cf098b1f9bac1616a05f80b9627aea72555c15c8e114de8c709ed306407",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/build/android-java/opt-s-panic-unwind/rustOnly/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/build/android-java/opt-s-panic-unwind/rustOnly/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
                 "provenance": {
                   "kind": "fresh-java-only-gradle",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39",
                   "profile": "opt-s-panic-unwind",
                   "configuration": "rustOnly"
@@ -2253,7 +2253,7 @@
               "profile": "opt-s-panic-unwind",
               "configuration": "rustOnly",
               "quickjs": false,
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39"
             },
             "budget": {
@@ -2267,11 +2267,11 @@
             "entries": {
               "jni/x86_64/libbarochart.so": {
                 "bytes": 991952,
-                "sha256": "8a788dde9800339a0c14bab851f0745083ff519f0f6d73ec8ea2a9de66560d33",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/x86_64/js-only/libbarochart.so",
+                "sha256": "97eb33cc7c1e5d913c586ded97985fe8a2f137402c2ac906820d7170631f740e",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/x86_64/js-only/libbarochart.so",
                 "provenance": {
                   "kind": "fresh-isolated-build",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "profileIndependent": true
                 },
                 "loadAlignments": [
@@ -2283,10 +2283,10 @@
               "classes.jar": {
                 "bytes": 171693,
                 "sha256": "e19dfee7bad04bc2d666406b9a74590a411a2cc2f1e0c452cbc9be923ef19958",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/build/android-java/opt-s-panic-unwind/jsOnly/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/build/android-java/opt-s-panic-unwind/jsOnly/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
                 "provenance": {
                   "kind": "fresh-java-only-gradle",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39",
                   "profile": "opt-s-panic-unwind",
                   "configuration": "jsOnly"
@@ -2298,7 +2298,7 @@
                 "path": "$REPO/native/Resources/aster-core.js",
                 "provenance": {
                   "kind": "source-asset",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "assetSha256": "704888d3f9f283d34a1f0300d0b87e756e588c2493225197f7978ff624081479",
                   "configuration": "jsOnly",
                   "quickjs": true
@@ -2312,7 +2312,7 @@
               "profile": "opt-s-panic-unwind",
               "configuration": "jsOnly",
               "quickjs": true,
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39"
             },
             "budget": {
@@ -2333,11 +2333,11 @@
           },
           "jsOnly": {
             "bytes": 991952,
-            "sha256": "8a788dde9800339a0c14bab851f0745083ff519f0f6d73ec8ea2a9de66560d33",
-            "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/x86_64/js-only/libbarochart.so",
+            "sha256": "97eb33cc7c1e5d913c586ded97985fe8a2f137402c2ac906820d7170631f740e",
+            "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/x86_64/js-only/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "profileIndependent": true
             },
             "loadAlignments": [
@@ -2349,11 +2349,11 @@
           },
           "dual": {
             "bytes": 4846176,
-            "sha256": "7681f650e997a67f59eed2d373c83413c408a7e94dcb42a30b47f15d280813c8",
-            "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/x86_64/opt-3-panic-unwind/dual/libbarochart.so",
+            "sha256": "abaec6be685e5098d745b1267651c139595acf88a184b12c2dd0ce0b4ae3212a",
+            "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/x86_64/opt-3-panic-unwind/dual/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "profile": "opt-3-panic-unwind"
             },
             "loadAlignments": [
@@ -2363,12 +2363,12 @@
             ]
           },
           "rustOnly": {
-            "bytes": 3865840,
-            "sha256": "dc5f50ce6d315533aee24dff61e7d651629cdab23df743b1746af16299766bd7",
-            "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/x86_64/opt-3-panic-unwind/rust-only/libbarochart.so",
+            "bytes": 3865824,
+            "sha256": "e02723ebc148c2d9f7ba1c89f15d87a70c07b76ba60705e5487cd77358dac6b6",
+            "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/x86_64/opt-3-panic-unwind/rust-only/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "profile": "opt-3-panic-unwind"
             },
             "loadAlignments": [
@@ -2378,8 +2378,8 @@
             ]
           },
           "rustStaticlib": {
-            "bytes": 42647910,
-            "sha256": "241de90c526939d615d89083a09cc7ec33bc1e826317c0ce3a16cb026f79c689",
+            "bytes": 42647886,
+            "sha256": "2ce84c536f815e27c90ca186e887759da3878df9d4376bcdaa6b7e451b1ab146",
             "path": "$OUT/rust-target/android/opt-3-panic-unwind/x86_64-linux-android/release/libbarochart_ffi.a"
           },
           "linkedRustDeltaBytes": 3854224,
@@ -2393,11 +2393,11 @@
             "entries": {
               "jni/x86_64/libbarochart.so": {
                 "bytes": 4846176,
-                "sha256": "7681f650e997a67f59eed2d373c83413c408a7e94dcb42a30b47f15d280813c8",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/x86_64/opt-3-panic-unwind/dual/libbarochart.so",
+                "sha256": "abaec6be685e5098d745b1267651c139595acf88a184b12c2dd0ce0b4ae3212a",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/x86_64/opt-3-panic-unwind/dual/libbarochart.so",
                 "provenance": {
                   "kind": "fresh-isolated-build",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "profile": "opt-3-panic-unwind"
                 },
                 "loadAlignments": [
@@ -2409,10 +2409,10 @@
               "classes.jar": {
                 "bytes": 171654,
                 "sha256": "facb010bf568a494d506676d7dae745bc073ad5ee316695b2315b3fd18770fd1",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/build/android-java/opt-3-panic-unwind/dual/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/build/android-java/opt-3-panic-unwind/dual/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
                 "provenance": {
                   "kind": "fresh-java-only-gradle",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39",
                   "profile": "opt-3-panic-unwind",
                   "configuration": "dual"
@@ -2424,7 +2424,7 @@
                 "path": "$REPO/native/Resources/aster-core.js",
                 "provenance": {
                   "kind": "source-asset",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "assetSha256": "704888d3f9f283d34a1f0300d0b87e756e588c2493225197f7978ff624081479",
                   "configuration": "dual",
                   "quickjs": true
@@ -2438,7 +2438,7 @@
               "profile": "opt-3-panic-unwind",
               "configuration": "dual",
               "quickjs": true,
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39"
             },
             "budget": {
@@ -2451,12 +2451,12 @@
             "definition": "per-ABI release AAR entries: native .so + classes.jar + assets/aster-core.js when QuickJS is included; uncompressed bytes",
             "entries": {
               "jni/x86_64/libbarochart.so": {
-                "bytes": 3865840,
-                "sha256": "dc5f50ce6d315533aee24dff61e7d651629cdab23df743b1746af16299766bd7",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/x86_64/opt-3-panic-unwind/rust-only/libbarochart.so",
+                "bytes": 3865824,
+                "sha256": "e02723ebc148c2d9f7ba1c89f15d87a70c07b76ba60705e5487cd77358dac6b6",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/x86_64/opt-3-panic-unwind/rust-only/libbarochart.so",
                 "provenance": {
                   "kind": "fresh-isolated-build",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "profile": "opt-3-panic-unwind"
                 },
                 "loadAlignments": [
@@ -2468,30 +2468,30 @@
               "classes.jar": {
                 "bytes": 171253,
                 "sha256": "92500cf098b1f9bac1616a05f80b9627aea72555c15c8e114de8c709ed306407",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/build/android-java/opt-3-panic-unwind/rustOnly/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/build/android-java/opt-3-panic-unwind/rustOnly/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
                 "provenance": {
                   "kind": "fresh-java-only-gradle",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39",
                   "profile": "opt-3-panic-unwind",
                   "configuration": "rustOnly"
                 }
               }
             },
-            "bytes": 4037093,
+            "bytes": 4037077,
             "provenance": {
               "kind": "fresh-java-only-packaging-plus-native-matrix",
               "abi": "x86_64",
               "profile": "opt-3-panic-unwind",
               "configuration": "rustOnly",
               "quickjs": false,
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39"
             },
             "budget": {
               "bytes": 5242880,
               "exceeds": false,
-              "remaining": 1205787
+              "remaining": 1205803
             }
           },
           "jsOnlyPackaged": {
@@ -2499,11 +2499,11 @@
             "entries": {
               "jni/x86_64/libbarochart.so": {
                 "bytes": 991952,
-                "sha256": "8a788dde9800339a0c14bab851f0745083ff519f0f6d73ec8ea2a9de66560d33",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/x86_64/js-only/libbarochart.so",
+                "sha256": "97eb33cc7c1e5d913c586ded97985fe8a2f137402c2ac906820d7170631f740e",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/x86_64/js-only/libbarochart.so",
                 "provenance": {
                   "kind": "fresh-isolated-build",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "profileIndependent": true
                 },
                 "loadAlignments": [
@@ -2515,10 +2515,10 @@
               "classes.jar": {
                 "bytes": 171693,
                 "sha256": "e19dfee7bad04bc2d666406b9a74590a411a2cc2f1e0c452cbc9be923ef19958",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/build/android-java/opt-3-panic-unwind/jsOnly/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/build/android-java/opt-3-panic-unwind/jsOnly/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
                 "provenance": {
                   "kind": "fresh-java-only-gradle",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39",
                   "profile": "opt-3-panic-unwind",
                   "configuration": "jsOnly"
@@ -2530,7 +2530,7 @@
                 "path": "$REPO/native/Resources/aster-core.js",
                 "provenance": {
                   "kind": "source-asset",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "assetSha256": "704888d3f9f283d34a1f0300d0b87e756e588c2493225197f7978ff624081479",
                   "configuration": "jsOnly",
                   "quickjs": true
@@ -2544,7 +2544,7 @@
               "profile": "opt-3-panic-unwind",
               "configuration": "jsOnly",
               "quickjs": true,
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39"
             },
             "budget": {
@@ -2565,11 +2565,11 @@
           },
           "jsOnly": {
             "bytes": 991952,
-            "sha256": "8a788dde9800339a0c14bab851f0745083ff519f0f6d73ec8ea2a9de66560d33",
-            "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/x86_64/js-only/libbarochart.so",
+            "sha256": "97eb33cc7c1e5d913c586ded97985fe8a2f137402c2ac906820d7170631f740e",
+            "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/x86_64/js-only/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "profileIndependent": true
             },
             "loadAlignments": [
@@ -2580,12 +2580,12 @@
             "sharedAcrossRustProfiles": true
           },
           "dual": {
-            "bytes": 3815040,
-            "sha256": "8d9459ac82d1375dd4f9c9f0ca57204b35cb51fe0e7516da26010aa6a774ac9f",
-            "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/x86_64/opt-s-panic-abort/dual/libbarochart.so",
+            "bytes": 3815024,
+            "sha256": "83ba2a80d5a2c29b285216ce0e17fa6c5e6e733715ad663458435719d3505712",
+            "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/x86_64/opt-s-panic-abort/dual/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "profile": "opt-s-panic-abort"
             },
             "loadAlignments": [
@@ -2595,12 +2595,12 @@
             ]
           },
           "rustOnly": {
-            "bytes": 2834848,
-            "sha256": "492294c6b798914412b351ca6a3c5df90af5de3f7b9411d789f0e961970e1b7e",
-            "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/x86_64/opt-s-panic-abort/rust-only/libbarochart.so",
+            "bytes": 2834832,
+            "sha256": "b5f95effe3c41ed48432f4c22d6a1d6ca2d046c78aa6d2cd8b2689850833097c",
+            "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/x86_64/opt-s-panic-abort/rust-only/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "profile": "opt-s-panic-abort"
             },
             "loadAlignments": [
@@ -2610,26 +2610,26 @@
             ]
           },
           "rustStaticlib": {
-            "bytes": 44990014,
-            "sha256": "46a76518dd912ac8d31d060bf58eafb7db97757ec52dfac77f5649b245d3d4b2",
+            "bytes": 44989990,
+            "sha256": "6016dd99c7b76e11547936425ae85c38d4c593417b0530b9102a4d78f436ea39",
             "path": "$OUT/rust-target/android/opt-s-panic-abort/x86_64-linux-android/release/libbarochart_ffi.a"
           },
-          "linkedRustDeltaBytes": 2823088,
+          "linkedRustDeltaBytes": 2823072,
           "nativeSoBudget": {
             "bytes": 5242880,
             "exceeds": false,
-            "remaining": 1427840
+            "remaining": 1427856
           },
           "packaged": {
             "definition": "per-ABI release AAR entries: native .so + classes.jar + assets/aster-core.js when QuickJS is included; uncompressed bytes",
             "entries": {
               "jni/x86_64/libbarochart.so": {
-                "bytes": 3815040,
-                "sha256": "8d9459ac82d1375dd4f9c9f0ca57204b35cb51fe0e7516da26010aa6a774ac9f",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/x86_64/opt-s-panic-abort/dual/libbarochart.so",
+                "bytes": 3815024,
+                "sha256": "83ba2a80d5a2c29b285216ce0e17fa6c5e6e733715ad663458435719d3505712",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/x86_64/opt-s-panic-abort/dual/libbarochart.so",
                 "provenance": {
                   "kind": "fresh-isolated-build",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "profile": "opt-s-panic-abort"
                 },
                 "loadAlignments": [
@@ -2641,10 +2641,10 @@
               "classes.jar": {
                 "bytes": 171654,
                 "sha256": "facb010bf568a494d506676d7dae745bc073ad5ee316695b2315b3fd18770fd1",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/build/android-java/opt-s-panic-abort/dual/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/build/android-java/opt-s-panic-abort/dual/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
                 "provenance": {
                   "kind": "fresh-java-only-gradle",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39",
                   "profile": "opt-s-panic-abort",
                   "configuration": "dual"
@@ -2656,39 +2656,39 @@
                 "path": "$REPO/native/Resources/aster-core.js",
                 "provenance": {
                   "kind": "source-asset",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "assetSha256": "704888d3f9f283d34a1f0300d0b87e756e588c2493225197f7978ff624081479",
                   "configuration": "dual",
                   "quickjs": true
                 }
               }
             },
-            "bytes": 4619438,
+            "bytes": 4619422,
             "provenance": {
               "kind": "fresh-java-only-packaging-plus-native-matrix",
               "abi": "x86_64",
               "profile": "opt-s-panic-abort",
               "configuration": "dual",
               "quickjs": true,
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39"
             },
             "budget": {
               "bytes": 5242880,
               "exceeds": false,
-              "remaining": 623442
+              "remaining": 623458
             }
           },
           "rustOnlyPackaged": {
             "definition": "per-ABI release AAR entries: native .so + classes.jar + assets/aster-core.js when QuickJS is included; uncompressed bytes",
             "entries": {
               "jni/x86_64/libbarochart.so": {
-                "bytes": 2834848,
-                "sha256": "492294c6b798914412b351ca6a3c5df90af5de3f7b9411d789f0e961970e1b7e",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/x86_64/opt-s-panic-abort/rust-only/libbarochart.so",
+                "bytes": 2834832,
+                "sha256": "b5f95effe3c41ed48432f4c22d6a1d6ca2d046c78aa6d2cd8b2689850833097c",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/x86_64/opt-s-panic-abort/rust-only/libbarochart.so",
                 "provenance": {
                   "kind": "fresh-isolated-build",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "profile": "opt-s-panic-abort"
                 },
                 "loadAlignments": [
@@ -2700,30 +2700,30 @@
               "classes.jar": {
                 "bytes": 171253,
                 "sha256": "92500cf098b1f9bac1616a05f80b9627aea72555c15c8e114de8c709ed306407",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/build/android-java/opt-s-panic-abort/rustOnly/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/build/android-java/opt-s-panic-abort/rustOnly/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
                 "provenance": {
                   "kind": "fresh-java-only-gradle",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39",
                   "profile": "opt-s-panic-abort",
                   "configuration": "rustOnly"
                 }
               }
             },
-            "bytes": 3006101,
+            "bytes": 3006085,
             "provenance": {
               "kind": "fresh-java-only-packaging-plus-native-matrix",
               "abi": "x86_64",
               "profile": "opt-s-panic-abort",
               "configuration": "rustOnly",
               "quickjs": false,
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39"
             },
             "budget": {
               "bytes": 5242880,
               "exceeds": false,
-              "remaining": 2236779
+              "remaining": 2236795
             }
           },
           "jsOnlyPackaged": {
@@ -2731,11 +2731,11 @@
             "entries": {
               "jni/x86_64/libbarochart.so": {
                 "bytes": 991952,
-                "sha256": "8a788dde9800339a0c14bab851f0745083ff519f0f6d73ec8ea2a9de66560d33",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/x86_64/js-only/libbarochart.so",
+                "sha256": "97eb33cc7c1e5d913c586ded97985fe8a2f137402c2ac906820d7170631f740e",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/x86_64/js-only/libbarochart.so",
                 "provenance": {
                   "kind": "fresh-isolated-build",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "profileIndependent": true
                 },
                 "loadAlignments": [
@@ -2747,10 +2747,10 @@
               "classes.jar": {
                 "bytes": 171693,
                 "sha256": "e19dfee7bad04bc2d666406b9a74590a411a2cc2f1e0c452cbc9be923ef19958",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/build/android-java/opt-s-panic-abort/jsOnly/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/build/android-java/opt-s-panic-abort/jsOnly/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
                 "provenance": {
                   "kind": "fresh-java-only-gradle",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39",
                   "profile": "opt-s-panic-abort",
                   "configuration": "jsOnly"
@@ -2762,7 +2762,7 @@
                 "path": "$REPO/native/Resources/aster-core.js",
                 "provenance": {
                   "kind": "source-asset",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "assetSha256": "704888d3f9f283d34a1f0300d0b87e756e588c2493225197f7978ff624081479",
                   "configuration": "jsOnly",
                   "quickjs": true
@@ -2776,7 +2776,7 @@
               "profile": "opt-s-panic-abort",
               "configuration": "jsOnly",
               "quickjs": true,
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39"
             },
             "budget": {
@@ -2797,11 +2797,11 @@
           },
           "jsOnly": {
             "bytes": 991952,
-            "sha256": "8a788dde9800339a0c14bab851f0745083ff519f0f6d73ec8ea2a9de66560d33",
-            "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/x86_64/js-only/libbarochart.so",
+            "sha256": "97eb33cc7c1e5d913c586ded97985fe8a2f137402c2ac906820d7170631f740e",
+            "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/x86_64/js-only/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "profileIndependent": true
             },
             "loadAlignments": [
@@ -2813,11 +2813,11 @@
           },
           "dual": {
             "bytes": 4368440,
-            "sha256": "88057db533c52c0595030283d9649b10c8d3374b3cc9495bd91e6f3506d0098e",
-            "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/x86_64/opt-3-panic-abort/dual/libbarochart.so",
+            "sha256": "d5a5cc6e5163e77c10cbd9c237426be3afb25740f8aa56deab117b78f356629f",
+            "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/x86_64/opt-3-panic-abort/dual/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "profile": "opt-3-panic-abort"
             },
             "loadAlignments": [
@@ -2828,11 +2828,11 @@
           },
           "rustOnly": {
             "bytes": 3388264,
-            "sha256": "af63a86af7d79c9a0dc6937a30c2caea4dcf1df7fbadee29a60c1ce984d2568d",
-            "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/x86_64/opt-3-panic-abort/rust-only/libbarochart.so",
+            "sha256": "7b19fff08708f5f6ad7b9ca77475d4449c601827380584aada379697c5493d29",
+            "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/x86_64/opt-3-panic-abort/rust-only/libbarochart.so",
             "provenance": {
               "kind": "fresh-isolated-build",
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "profile": "opt-3-panic-abort"
             },
             "loadAlignments": [
@@ -2842,8 +2842,8 @@
             ]
           },
           "rustStaticlib": {
-            "bytes": 40473548,
-            "sha256": "ed686d8efdf44b04c25f47daf8f16a7b189dd9375ef8953dca0b31662e0b89d7",
+            "bytes": 40473524,
+            "sha256": "0742ca3df7b117e0eef8ee366d1e81004b0415b222089d25fb9cdcb2ad9e332b",
             "path": "$OUT/rust-target/android/opt-3-panic-abort/x86_64-linux-android/release/libbarochart_ffi.a"
           },
           "linkedRustDeltaBytes": 3376488,
@@ -2857,11 +2857,11 @@
             "entries": {
               "jni/x86_64/libbarochart.so": {
                 "bytes": 4368440,
-                "sha256": "88057db533c52c0595030283d9649b10c8d3374b3cc9495bd91e6f3506d0098e",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/x86_64/opt-3-panic-abort/dual/libbarochart.so",
+                "sha256": "d5a5cc6e5163e77c10cbd9c237426be3afb25740f8aa56deab117b78f356629f",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/x86_64/opt-3-panic-abort/dual/libbarochart.so",
                 "provenance": {
                   "kind": "fresh-isolated-build",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "profile": "opt-3-panic-abort"
                 },
                 "loadAlignments": [
@@ -2873,10 +2873,10 @@
               "classes.jar": {
                 "bytes": 171654,
                 "sha256": "facb010bf568a494d506676d7dae745bc073ad5ee316695b2315b3fd18770fd1",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/build/android-java/opt-3-panic-abort/dual/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/build/android-java/opt-3-panic-abort/dual/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
                 "provenance": {
                   "kind": "fresh-java-only-gradle",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39",
                   "profile": "opt-3-panic-abort",
                   "configuration": "dual"
@@ -2888,7 +2888,7 @@
                 "path": "$REPO/native/Resources/aster-core.js",
                 "provenance": {
                   "kind": "source-asset",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "assetSha256": "704888d3f9f283d34a1f0300d0b87e756e588c2493225197f7978ff624081479",
                   "configuration": "dual",
                   "quickjs": true
@@ -2902,7 +2902,7 @@
               "profile": "opt-3-panic-abort",
               "configuration": "dual",
               "quickjs": true,
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39"
             },
             "budget": {
@@ -2916,11 +2916,11 @@
             "entries": {
               "jni/x86_64/libbarochart.so": {
                 "bytes": 3388264,
-                "sha256": "af63a86af7d79c9a0dc6937a30c2caea4dcf1df7fbadee29a60c1ce984d2568d",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/x86_64/opt-3-panic-abort/rust-only/libbarochart.so",
+                "sha256": "7b19fff08708f5f6ad7b9ca77475d4449c601827380584aada379697c5493d29",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/x86_64/opt-3-panic-abort/rust-only/libbarochart.so",
                 "provenance": {
                   "kind": "fresh-isolated-build",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "profile": "opt-3-panic-abort"
                 },
                 "loadAlignments": [
@@ -2932,10 +2932,10 @@
               "classes.jar": {
                 "bytes": 171253,
                 "sha256": "92500cf098b1f9bac1616a05f80b9627aea72555c15c8e114de8c709ed306407",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/build/android-java/opt-3-panic-abort/rustOnly/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/build/android-java/opt-3-panic-abort/rustOnly/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
                 "provenance": {
                   "kind": "fresh-java-only-gradle",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39",
                   "profile": "opt-3-panic-abort",
                   "configuration": "rustOnly"
@@ -2949,7 +2949,7 @@
               "profile": "opt-3-panic-abort",
               "configuration": "rustOnly",
               "quickjs": false,
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39"
             },
             "budget": {
@@ -2963,11 +2963,11 @@
             "entries": {
               "jni/x86_64/libbarochart.so": {
                 "bytes": 991952,
-                "sha256": "8a788dde9800339a0c14bab851f0745083ff519f0f6d73ec8ea2a9de66560d33",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/android/x86_64/js-only/libbarochart.so",
+                "sha256": "97eb33cc7c1e5d913c586ded97985fe8a2f137402c2ac906820d7170631f740e",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/android/x86_64/js-only/libbarochart.so",
                 "provenance": {
                   "kind": "fresh-isolated-build",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "profileIndependent": true
                 },
                 "loadAlignments": [
@@ -2979,10 +2979,10 @@
               "classes.jar": {
                 "bytes": 171693,
                 "sha256": "e19dfee7bad04bc2d666406b9a74590a411a2cc2f1e0c452cbc9be923ef19958",
-                "path": "$REPO/artifacts/rust-size-web-wasm-current/build/android-java/opt-3-panic-abort/jsOnly/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
+                "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/build/android-java/opt-3-panic-abort/jsOnly/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar",
                 "provenance": {
                   "kind": "fresh-java-only-gradle",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39",
                   "profile": "opt-3-panic-abort",
                   "configuration": "jsOnly"
@@ -2994,7 +2994,7 @@
                 "path": "$REPO/native/Resources/aster-core.js",
                 "provenance": {
                   "kind": "source-asset",
-                  "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+                  "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
                   "assetSha256": "704888d3f9f283d34a1f0300d0b87e756e588c2493225197f7978ff624081479",
                   "configuration": "jsOnly",
                   "quickjs": true
@@ -3008,7 +3008,7 @@
               "profile": "opt-3-panic-abort",
               "configuration": "jsOnly",
               "quickjs": true,
-              "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187",
+              "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b",
               "packagingSha256": "41c31f78908a5a5ffd18aed73ebed242ed9de10b1910cdf55289c2eb2df68a39"
             },
             "budget": {
@@ -3026,29 +3026,29 @@
     "target": "arm64-apple-ios15.0",
     "profile": "opt-s-panic-unwind",
     "archive": {
-      "bytes": 39881448,
-      "sha256": "e8a6df035d3c3d2b7caeedc54dc06eb90c472d37f7634eb285c3933929e6b019",
-      "path": "$REPO/artifacts/rust-size-web-wasm-current/rust-target/ios/opt-s-panic-unwind/aarch64-apple-ios/release/libbarochart_ffi.a"
+      "bytes": 39881432,
+      "sha256": "825f81c1e0bc85a482b973331095f7b7f86cbf4d7cde4f97194975de904e31d0",
+      "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/rust-target/ios/opt-s-panic-unwind/aarch64-apple-ios/release/libbarochart_ffi.a"
     },
     "baseline": {
       "bytes": 32944,
       "sha256": "37b4c2bd303281d0d9a2bf95610a7aedb6c15659c6d1b2a4684ef8003fdbc6f2",
       "fileBytes": 32944,
       "textSegmentBytes": 32768,
-      "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/ios/baseline"
+      "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/ios/baseline"
     },
     "rustReferenced": {
       "bytes": 3464216,
-      "sha256": "0aa27b8e7711fa814909d882936b3ac520e43682744855cb68eeef84ea12d342",
+      "sha256": "0f63cf2e1065854575e0c6c427aefed4e30c2fa62a125881e4d1bcc8f5e9e8d5",
       "fileBytes": 3464216,
       "textSegmentBytes": 2670592,
-      "path": "$REPO/artifacts/rust-size-web-wasm-current/artifacts/ios/rust-referenced"
+      "path": "$HOME/BaroChart-review-20261023/artifacts/m7-device-run-20261108/size-d028-full/artifacts/ios/rust-referenced"
     },
     "delta": {
       "fileBytes": 3431272,
       "textSegmentBytes": 2637824
     },
-    "sourceSha256": "09aa9a259c91d8a96530f9bd6500ee2b1e699e50b6bcd5cfb9d1905718d3f187"
+    "sourceSha256": "d0281ac082ef49e51bd8534c3f6d1dc650571ba1f2a156958a2fdbfe3dfc805b"
   },
   "forecast": {
     "arm64-v8a": {
@@ -3080,11 +3080,11 @@
         "The 37,850-line reader estimate describes scope and carries no byte-growth law."
       ],
       "rustContributionBytes": {
-        "measuredScaffold": 3310256,
+        "measuredScaffold": 3310240,
         "designPriorScenario": 2621440
       },
       "dualBytes": {
-        "measuredScaffold": 4302208,
+        "measuredScaffold": 4302192,
         "designPriorScenario": 3613392
       },
       "budget": {
@@ -3101,7 +3101,7 @@
         "linkedRustDeltaBytes": 2722600
       },
       "denominator": {
-        "shippingCrateSrcPhysicalLinesAllCfgBranches": 82862,
+        "shippingCrateSrcPhysicalLinesAllCfgBranches": 82859,
         "crates": [
           "barochart-js",
           "barochart-core",
@@ -3110,9 +3110,9 @@
         ]
       },
       "scopeLinesEstimate": 37850,
-      "bytesPerCompiledScaffoldLine": 32.857039414930846,
-      "projectedRustBytes": 1243639,
-      "projectedDualBytes": 2178031,
+      "bytesPerCompiledScaffoldLine": 32.85822903969394,
+      "projectedRustBytes": 1243684,
+      "projectedDualBytes": 2178076,
       "exceedsBudget": false,
       "warning": "Naive diagnostic only: fixed std/allocator/FFI overhead dominates the scaffold, while future chart logic and tables do not scale linearly. Do not use as a growth law.",
       "useForDecision": false
@@ -3120,10 +3120,10 @@
     "x86_64": {
       "formula": "linked Rust scaffold delta / physical .rs lines under src/ in the four linked shipping crates (tests and tools excluded; all cfg branches included) × authoritative estimated total Rust lines",
       "numerator": {
-        "linkedRustDeltaBytes": 3310256
+        "linkedRustDeltaBytes": 3310240
       },
       "denominator": {
-        "shippingCrateSrcPhysicalLinesAllCfgBranches": 82862,
+        "shippingCrateSrcPhysicalLinesAllCfgBranches": 82859,
         "crates": [
           "barochart-js",
           "barochart-core",
@@ -3132,9 +3132,9 @@
         ]
       },
       "scopeLinesEstimate": 37850,
-      "bytesPerCompiledScaffoldLine": 39.94902367792233,
-      "projectedRustBytes": 1512071,
-      "projectedDualBytes": 2504023,
+      "bytesPerCompiledScaffoldLine": 39.950276976550526,
+      "projectedRustBytes": 1512118,
+      "projectedDualBytes": 2504070,
       "exceedsBudget": false,
       "warning": "Naive diagnostic only: fixed std/allocator/FFI overhead dominates the scaffold, while future chart logic and tables do not scale linearly. Do not use as a growth law.",
       "useForDecision": false

@@ -117,6 +117,15 @@ fn empty_engine(account: &std::sync::Arc<MemoryAccount>) -> Engine {
     engine
 }
 
+fn assert_actual_chart_api_required(error: barochart_js::error::JsError) {
+    assert_eq!(error.name, "TypeError");
+    assert_eq!(
+        error.message,
+        JsString::from_str("Actual ChartAPI required")
+    );
+    assert_eq!(error.code, None);
+}
+
 fn parse_runtime_json(value: &JsValue) -> JsValue {
     let JsValue::String(value) = value else {
         panic!("runtime JSON string: {value:?}")
@@ -140,6 +149,39 @@ fn set_symbol(
         "nativeCommand",
         &[text("setSymbol"), JsValue::Array(vec![value])],
     )
+}
+
+#[test]
+fn workspace_calls_require_a_chart_api_before_validating_arguments() {
+    let binding = object([
+        ("key", text("dataset")),
+        ("revision", text("r1")),
+        ("adjustmentVersion", text("a1")),
+        ("priceUnit", text("USD")),
+        ("adjustment", text("raw")),
+    ]);
+    let document = text(r#"{"schema":"aster.workspace","version":1}"#);
+
+    for binding in [binding, JsValue::Null, JsValue::Number(1.0)] {
+        let account = MemoryAccount::new(0, OomStyle::InternalErrorLowercase);
+        let mut engine = empty_engine(&account);
+        assert_actual_chart_api_required(
+            call(
+                &mut engine,
+                "nativeSaveWorkspace",
+                std::slice::from_ref(&binding),
+            )
+            .unwrap_err(),
+        );
+        assert_actual_chart_api_required(
+            call(
+                &mut engine,
+                "nativePreflightWorkspace",
+                &[document.clone(), binding],
+            )
+            .unwrap_err(),
+        );
+    }
 }
 
 #[test]
