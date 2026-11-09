@@ -23,6 +23,32 @@ final class LowLevelJson {
         return out;
     }
 
+    /**
+     * Encodes the fixed-shape command used by the typed bar API without building an intermediate JSON graph.
+     * The legacy {@link #bars(List)} path remains available to the low-level and comparison APIs.
+     */
+    static String barsCommand(List<Bar> bars) throws JSONException {
+        return barsCommand(bars, new StringBuilder());
+    }
+
+    /** Encodes into a caller-owned buffer; only fixed-shape typed-bar callers reuse one. */
+    static String barsCommand(List<Bar> bars, StringBuilder out) throws JSONException {
+        out.setLength(0);
+        out.append("[\"setData\",[[");
+        boolean first = true;
+        for (Bar b : bars) {
+            if (!first) out.append(',');
+            first = false;
+            out.append("{\"time\":").append(JSONObject.numberToString(b.time))
+                .append(",\"open\":").append(JSONObject.numberToString(b.open))
+                .append(",\"high\":").append(JSONObject.numberToString(b.high))
+                .append(",\"low\":").append(JSONObject.numberToString(b.low))
+                .append(",\"close\":").append(JSONObject.numberToString(b.close))
+                .append(",\"volume\":").append(JSONObject.numberToString(b.volume)).append('}');
+        }
+        return out.append("]]]").toString();
+    }
+
     static JSONObject event(DataEvent e) throws JSONException {
         JSONObject out = new JSONObject().put("kind", e.kind.name().toLowerCase(java.util.Locale.ROOT));
         if (e.bar != null) out.put("bar", bar(e.bar));
