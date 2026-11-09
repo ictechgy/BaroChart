@@ -191,6 +191,43 @@ export function traceWriteLine(index,bytes){
  */
 function ownStringKeys(object){return Reflect.ownKeys(object).filter(key=>typeof key==='string');}
 
+const HOST_CALLBACK_RECEIVERS=Object.freeze(['undefined','global']);
+const HOST_ERROR_NAMES=new Set(['Error','EvalError','RangeError','ReferenceError','SyntaxError','TypeError','URIError']);
+export const HOST_CALLBACK_PROFILES=Object.freeze({asterZonedParts:Object.freeze({name:'asterZonedParts',version:2,length:2,receivers:HOST_CALLBACK_RECEIVERS})});
+
+function configuredHostCallbacks(configured){
+ const values=typeof configured==='string'?[configured]:Array.isArray(configured)?configured:configured&&typeof configured==='object'?Object.keys(configured):[];
+ const seen=new Set(),names=[];
+ for(const value of values){
+  const name=typeof value==='string'?value:value&&typeof value==='object'&&typeof value.name==='string'?value.name:null;
+  if(!name||!Object.hasOwn(HOST_CALLBACK_PROFILES,name)||seen.has(name))continue;
+  seen.add(name);names.push(name);
+ }
+ return names;
+}
+
+function callbackReceiver(globalObject,receiver){return receiver===globalObject?'global':receiver===undefined?'undefined':null;}
+
+function dataPropertyInfo(object,key){
+ for(let current=object;current!==null;current=Object.getPrototypeOf(current)){
+  if(types.isProxy(current))return UNREADABLE;
+  const descriptor=Object.getOwnPropertyDescriptor(current,key);
+  if(descriptor)return Object.hasOwn(descriptor,'value')?{found:true,value:descriptor.value}:UNREADABLE;
+ }
+ return {found:false,value:undefined};
+}
+
+function hostErrorRecord(error){
+ if(types.isProxy(error)||!types.isNativeError(error))return {issue:'not native'};
+ for(const key of Reflect.ownKeys(error))if(typeof key!=='string'||!['name','message','code','stack'].includes(key))return {issue:'unknown property'};
+ const name=dataPropertyInfo(error,'name'),message=dataPropertyInfo(error,'message'),code=dataPropertyInfo(error,'code');
+ if(name===UNREADABLE||message===UNREADABLE||code===UNREADABLE)return {issue:'accessor'};
+ if(typeof name.value!=='string'||!HOST_ERROR_NAMES.has(name.value)||typeof message.value!=='string')return {issue:'name or message'};
+ if(code.found&&code.value===undefined)return {issue:'undefined code property'};
+ if(code.value!==undefined&&code.value!==null&&typeof code.value!=='string'&&typeof code.value!=='number'&&typeof code.value!=='boolean')return {issue:'code'};
+ return {record:{name:name.value,message:message.value,code:code.value}};
+}
+
 /**
  * 기록기 상태. 컨텍스트 하나에 하나다.
  */
@@ -201,7 +238,7 @@ class TraceRecorder{
   * @param {object|null} meta 옆 파일에 남길 정보(preload가 번들·전역을 넘긴다). null이면 멈출 때만 옆 파일을 쓴다.
   * @param {readonly string[]} preexisting 번들 전부터 있던 전역 이름(테스트가 넣은 값이라 지키지 않는다)
   */
- constructor(context,path,meta,preexisting){
+ constructor(context,path,meta,preexisting,hostCallbacks){
   /** 기록 중인 컨텍스트(샌드박스 객체) */
   this.context=context;
   /** 지키는 코어 전역: 이름 → {value, enumerable, getter, setter}. 호출 사이에는 접근자이고 값은 여기에 있다. */
@@ -217,9 +254,15 @@ class TraceRecorder{
   /** 옆 파일 경로 */
   this.metaPath=traceMetaPath(path);
   /** 옆 파일 기본 내용 */
-  this.meta=meta;
+  this.meta=meta??{};
+  /** Explicitly registered host callbacks and their lossless transcript entries. */
+  this.hostCallbacks=new Map(configuredHostCallbacks(hostCallbacks).map(name=>[name,{name,profile:HOST_CALLBACK_PROFILES[name],original:null,wrapper:null,calls:[],complete:false}]));
+  /** Finalization is the only point where a configured opaque global may be removed. */
+  this.finalized=false;
   /** 지금 실행 중인 native* 호출 깊이. 0일 때 들어온 호출만 기록한다. */
   this.depth=0;
+  /** Monotonic ordinal of top-level native calls and the active call during callback capture. */
+  this.nextNativeOrdinal=0;this.activeNativeOrdinal=null;
   /** 쓴 줄 수(호출 줄과 쓰기 줄) */
   this.lines=0;
   /** 기록을 멈췄으면 {line, fn, reason}, 아니면 null */
@@ -233,7 +276,9 @@ class TraceRecorder{
   this.nextView=0;
   /** 인자 realm 검사 기준 */
   this.realm=contextRealm(context);
-  if(meta)this.writeMeta();
+  /** vm global object used as the receiver of bare callback calls */
+  this.globalObject=runInContext('globalThis',context);
+  if(meta||this.hostCallbacks.size)this.writeMeta();
  }
 
  /**
@@ -250,6 +295,16 @@ class TraceRecorder{
    const wrapper=this.wrap(key,descriptor.value);
    Object.defineProperty(context,key,{...descriptor,value:wrapper});
    this.wrappers.set(key,wrapper);this.unguarded.add(key);
+  }
+  for(const [name,state] of this.hostCallbacks){
+   const descriptor=Object.getOwnPropertyDescriptor(context,name);
+   if(!descriptor||!Object.hasOwn(descriptor,'value')||typeof descriptor.value!=='function'||types.isProxy(descriptor.value)||!(descriptor.writable||descriptor.configurable))continue;
+   const functionName=dataPropertyInfo(descriptor.value,'name'),functionLength=dataPropertyInfo(descriptor.value,'length');
+   if(functionName===UNREADABLE||functionLength===UNREADABLE||typeof functionName.value!=='string'||typeof functionLength.value!=='number')continue;
+   const wrapper=this.wrapHost(name,descriptor.value,functionName.value,functionLength.value);
+   Object.defineProperty(context,name,{...descriptor,value:wrapper});
+   state.original=descriptor.value;state.wrapper=wrapper;state.complete=true;
+   this.wrappers.set(name,wrapper);this.unguarded.add(name);
   }
   for(const key of ownStringKeys(context))if(!this.unguarded.has(key))this.guard(key);
   this.environment=this.environmentSnapshot();
@@ -378,6 +433,89 @@ class TraceRecorder{
  }
 
  /**
+  * Creates a wrapper for one allow-listed host callback.  It is deliberately
+  * separate from native* wrappers: callback calls are recorded while a native
+  * call is active, never executed as arbitrary replayable code.
+  * @param {string} name callback global name
+  * @param {Function} original original callback
+  * @returns {Function} callback wrapper
+  */
+ wrapHost(name,original,functionName,functionLength){
+  const recorder=this;
+  const bridge=(callback,receiver,args)=>recorder.hostCall(name,callback,receiver,args);
+  // A simple-parameter strict wrapper preserves the caller's raw receiver;
+  // rest parameters cannot legally contain a strict-mode directive.
+  const make=runInContext('(function(bridge,callback,name,length){const wrapper=function(){"use strict";const args=[];for(let index=0;index<arguments.length;index++)args[index]=arguments[index];return bridge(callback,this,args);};Object.defineProperty(wrapper,"name",{value:name});Object.defineProperty(wrapper,"length",{value:length});return wrapper;})',this.context);
+  return make(bridge,original,functionName,functionLength);
+ }
+
+ /**
+  * Records one invocation of an allow-listed host callback while a native
+  * call is active. Unsupported input/output stops the trace before any value
+  * is inspected with a potentially effectful operation, then the original
+  * callback result or thrown value is returned unchanged.
+  * @param {string} name callback name
+  * @param {Function} original original callback
+  * @param {unknown} receiver callback `this`
+  * @param {unknown[]} args callback arguments
+  * @returns {unknown} original callback result
+  */
+ hostCall(name,original,receiver,args){
+  const state=this.hostCallbacks.get(name);
+  if(!state||this.stopped)return this.passThrough(original,receiver,args);
+  if(this.depth===0){
+   state.complete=false;this.stop(null,`untracked host callback: ${name}`);
+   return this.passThrough(original,receiver,args);
+  }
+  const receiverText=callbackReceiver(this.globalObject,receiver);
+  if(receiverText===null){
+   state.complete=false;this.stop(name,`host callback receiver: ${name}`);
+   return this.passThrough(original,receiver,args);
+  }
+  const argumentIssue=traceArgumentsIssue(args,this.realm);
+  if(argumentIssue){
+   state.complete=false;this.stop(name,`host callback argument: ${argumentIssue}`);
+   return this.passThrough(original,receiver,args);
+  }
+  const argsText=stringifyLossless(args);
+  let result,error,threw=false;
+  this.depth++;
+  try{result=Reflect.apply(original,receiver,args);}
+  catch(caught){threw=true;error=caught;}
+  finally{this.depth--;}
+  const outcome=this.hostOutcome(threw,error,result);
+  if(outcome.issue){
+   state.complete=false;this.stop(name,`host callback ${outcome.issue}`);
+   if(threw)throw error;
+   return result;
+  }
+  state.calls.push({phase:'native',nativeOrdinal:this.activeNativeOrdinal,receiver:receiverText,args:argsText,...outcome});
+  if(threw)throw error;
+  return result;
+ }
+
+ /**
+  * Classifies a callback outcome without touching Error stack machinery.
+  * @returns {object} lossless transcript fields or `{issue}`
+  */
+ hostOutcome(threw,error,result){
+  if(threw){
+   if(error!==null&&typeof error==='object'&&!types.isProxy(error)&&types.isNativeError(error)){
+    const nativeError=hostErrorRecord(error);
+    if(nativeError.issue)return {issue:`error ${nativeError.issue}`};
+    try{return {err:{name:nativeError.record.name,message:nativeError.record.message,code:stringifyLossless(nativeError.record.code)}};}
+    catch(caught){return {issue:`error ${caught.message}`};}
+   }
+   const issue=traceArgumentsIssue([error],this.realm);
+   if(issue)return {issue:`thrown ${issue}`};
+   try{return {thrown:stringifyLossless(error)};}catch(caught){return {issue:`thrown ${caught.message}`};}
+  }
+  const issue=traceArgumentsIssue([result],this.realm);
+  if(issue)return {issue:`result ${issue}`};
+  try{return {ok:stringifyLossless(result)};}catch(caught){return {issue:`result ${caught.message}`};}
+ }
+
+ /**
   * 감싼 함수의 본체. 최상위 호출만 기록하고, 안쪽 호출과 멈춘 뒤의 호출은 그대로 넘긴다.
   * @param {string} name 전역 이름
   * @param {Function} original 원래 함수
@@ -408,11 +546,13 @@ class TraceRecorder{
   if(argumentIssue){this.stop(name,`argument: ${argumentIssue}`);return this.passThrough(original,thisArg,args);}
   // 코어가 인자를 바꿀 수 있으므로 부르기 전에 쓴다.
   const argsText=stringifyLossless(args);
+  const nativeOrdinal=this.nextNativeOrdinal++,previousNativeOrdinal=this.activeNativeOrdinal;
+  this.activeNativeOrdinal=nativeOrdinal;
   let result,error,threw=false;
   this.depth++;
   try{result=Reflect.apply(original,thisArg,args);}
   catch(caught){threw=true;error=caught;}
-  finally{this.depth--;}
+  finally{this.depth--;this.activeNativeOrdinal=previousNativeOrdinal;}
   try{this.recordOutcome(name,argsText,threw,error,result);}
   finally{this.refreshSnapshots();}
   if(threw)throw error;
@@ -442,6 +582,7 @@ class TraceRecorder{
   * @returns {void}
   */
  recordOutcome(name,argsText,threw,error,result){
+  if(this.stopped)return;
   const head=`{"fn":${JSON.stringify(name)},"args":${argsText},`;
   if(threw){
    const outcome=traceErrorRecord(error);
@@ -493,6 +634,7 @@ class TraceRecorder{
  stop(fn,reason){
   if(this.stopped)return;
   this.stopped={line:this.lines+1,fn,reason};
+  for(const state of this.hostCallbacks.values())state.complete=false;
   this.views=[];
   for(const [name,state] of this.guarded)this.unguard(name,state);
   this.guarded.clear();
@@ -500,10 +642,39 @@ class TraceRecorder{
  }
 
  /**
+  * Finalizes metadata. Configured callback names are removed from opaque
+  * globals only when the wrapper identity is still installed and no failure
+  * stopped the transcript. Replacements and incomplete transcripts stay
+  * fail-closed.
+  * @returns {void}
+  */
+ finalize(){
+  if(this.hostCallbacks.size===0)return;
+  for(const [name,state] of this.hostCallbacks){
+   const descriptor=Object.getOwnPropertyDescriptor(this.context,name);
+   if(this.stopped||!state.complete||!descriptor||descriptor.value!==state.wrapper)state.complete=false;
+  }
+  this.finalized=true;
+  this.writeMeta();
+ }
+
+ /** @returns {Record<string,object>} metadata-safe host callback transcripts */
+ hostMetadata(){
+  const metadata={};
+  for(const [name,state] of this.hostCallbacks)metadata[name]={profile:state.profile.name,version:state.profile.version,calls:state.calls,complete:state.complete};
+  return metadata;
+ }
+
+ /**
   * 옆 파일을 쓴다.
   * @returns {void}
   */
- writeMeta(){writeFileSync(this.metaPath,JSON.stringify({...this.meta,stopped:this.stopped})+'\n');}
+ writeMeta(){
+  const metadata={...this.meta,stopped:this.stopped};
+  if(this.hostCallbacks.size)metadata.hostCallbacks=this.hostMetadata();
+  if(this.finalized&&Array.isArray(metadata.opaqueGlobals))metadata.opaqueGlobals=metadata.opaqueGlobals.filter(name=>!this.hostCallbacks.get(name)?.complete);
+  writeFileSync(this.metaPath,JSON.stringify(metadata)+'\n');
+ }
 
  /**
   * 추적 줄 하나를 덧붙인다. 테스트가 중간에 죽어도 그때까지의 줄이 남도록 바로 쓴다.
@@ -517,15 +688,15 @@ class TraceRecorder{
  * vm 컨텍스트 전역의 자기 native* 함수를 모두 감싸 최상위 호출을 BCJSON 추적으로 기록한다.
  * 번들을 평가한 직후, 다른 코드가 함수를 잡기 전에 부른다. 추적 파일은 새로 만든다(있으면 비운다).
  * @param {vm.Context} context 생성 번들을 올린 컨텍스트
- * @param {{path: string, meta?: object|null, preexisting?: readonly string[]}} options path는 추적 파일,
+ * @param {{path: string, meta?: object|null, preexisting?: readonly string[], hostCallbacks?: unknown}} options path는 추적 파일,
  *   meta는 옆 파일 <이름>.meta.json에 남길 정보, preexisting은 번들 전부터 있던 전역 이름(지키지 않는다)
- * @returns {{path: string, stop: (reason: string) => void}} 추적 경로와, 호출과 무관하게 기록을 멈추는 함수
+ * @returns {{path: string, stop: (reason: string) => void, finalize: () => void}} 추적 경로와 제어 함수
  */
-export function installTraceRecorder(context,{path,meta=null,preexisting=[]}={}){
+export function installTraceRecorder(context,{path,meta=null,preexisting=[],hostCallbacks}={}){
  if(typeof path!=='string'||path==='')throw new TypeError('installTraceRecorder requires a trace file path');
  mkdirSync(dirname(path),{recursive:true});
  writeFileSync(path,'');
- const recorder=new TraceRecorder(context,path,meta,preexisting);
+ const recorder=new TraceRecorder(context,path,meta,preexisting,hostCallbacks);
  recorder.install();
- return {path,stop:reason=>recorder.stop(null,reason)};
+ return {path,stop:reason=>recorder.stop(null,reason),finalize:()=>recorder.finalize()};
 }

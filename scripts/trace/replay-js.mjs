@@ -8,7 +8,7 @@ import {dirname,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import vm from 'node:vm';
 import {losslessMemberTexts,parseLossless,sha256Hex,stringifyLossless,writeFloat64LittleEndianBytes,float64LittleEndianBytes} from './bcjson.mjs';
-import {contextRealm,traceErrorRecord,traceMetaPath,traceResultIssue} from './record.mjs';
+import {HOST_CALLBACK_PROFILES,contextRealm,traceArgumentsIssue,traceErrorRecord,traceMetaPath,traceResultIssue} from './record.mjs';
 
 /** 저장소 루트 */
 const ROOT=resolve(dirname(fileURLToPath(import.meta.url)),'../..');
@@ -16,6 +16,8 @@ const ROOT=resolve(dirname(fileURLToPath(import.meta.url)),'../..');
 export const DEFAULT_BUNDLE_PATH=resolve(ROOT,'native/Resources/aster-core.js');
 /** 모듈을 읽을 때 잡아 둔 원래 vm.runInContext(preload가 감싸도 재생은 기록되지 않는다) */
 const runInContext=vm.runInContext;
+const PARSED_REALM={objectPrototype:Object.prototype,arrayPrototype:Array.prototype};
+const HOST_ERROR_NAMES=new Set(['Error','EvalError','RangeError','ReferenceError','SyntaxError','TypeError','URIError']);
 
 /**
  * 추적 옆 파일을 읽는다.
@@ -64,6 +66,126 @@ function intoContextRealm(value,make){
  return root;
 }
 
+function exactKeys(value,expected){
+ if(value===null||typeof value!=='object'||Array.isArray(value))return false;
+ const keys=Object.keys(value);
+ return keys.length===expected.length&&expected.every(key=>Object.hasOwn(value,key));
+}
+
+function hostTranscriptError(name,message){return new Error(`Host callback transcript ${name}: ${message}`);}
+
+function parseTranscriptText(name,label,text){
+ if(typeof text!=='string')throw hostTranscriptError(name,`${label} must be a BCJSON string`);
+ let value;
+ try{value=parseLossless(text);}catch(error){throw hostTranscriptError(name,`${label} is invalid BCJSON (${error.message})`);}
+ let canonical;
+ try{canonical=stringifyLossless(value);}catch(error){throw hostTranscriptError(name,`${label} is not replayable (${error.message})`);}
+ if(canonical!==text)throw hostTranscriptError(name,`${label} must be canonical BCJSON`);
+ return value;
+}
+
+function prepareTranscriptCall(name,profile,entry,index,make,makeError){
+ if(entry===null||typeof entry!=='object'||Array.isArray(entry))throw hostTranscriptError(name,`call ${index} must be an object`);
+ const outcomes=['ok','thrown','err'].filter(key=>Object.hasOwn(entry,key));
+ if(outcomes.length!==1)throw hostTranscriptError(name,`call ${index} must have exactly one outcome`);
+ const outcome=outcomes[0],keys=['phase','nativeOrdinal','receiver','args',outcome];
+ if(!exactKeys(entry,keys))throw hostTranscriptError(name,`call ${index} has invalid keys`);
+ if(entry.phase!=='native')throw hostTranscriptError(name,`call ${index} has invalid phase`);
+ if(!Number.isSafeInteger(entry.nativeOrdinal)||entry.nativeOrdinal<0)throw hostTranscriptError(name,`call ${index} has invalid native ordinal`);
+ if(!profile.receivers.includes(entry.receiver))throw hostTranscriptError(name,`call ${index} has invalid receiver`);
+ const args=parseTranscriptText(name,`call ${index} arguments`,entry.args);
+ if(!Array.isArray(args))throw hostTranscriptError(name,`call ${index} arguments must encode an array`);
+ const argsIssue=traceArgumentsIssue(args,PARSED_REALM);
+ if(argsIssue)throw hostTranscriptError(name,`call ${index} arguments contain ${argsIssue}`);
+ if(outcome==='err'){
+  const detail=entry.err;
+  if(!exactKeys(detail,['name','message','code'])||typeof detail.name!=='string'||typeof detail.message!=='string'||typeof detail.code!=='string')throw hostTranscriptError(name,`call ${index} has invalid error outcome`);
+  if(!HOST_ERROR_NAMES.has(detail.name))throw hostTranscriptError(name,`call ${index} has unsupported error name`);
+  const code=parseTranscriptText(name,`call ${index} error code`,detail.code);
+  if(code!==undefined&&code!==null&&typeof code!=='string'&&typeof code!=='number'&&typeof code!=='boolean')throw hostTranscriptError(name,`call ${index} has invalid error code`);
+  return {...entry,throws:true,value:makeError(detail.name,detail.message,code,code!==undefined)};
+ }
+ const value=parseTranscriptText(name,`call ${index} ${outcome}`,entry[outcome]);
+ const issue=traceArgumentsIssue([value],PARSED_REALM);
+ if(issue)throw hostTranscriptError(name,`call ${index} ${outcome} contains ${issue}`);
+ return {...entry,throws:outcome==='thrown',value:intoContextRealm(value,make)};
+}
+
+/**
+ * Installs realm-local stubs for the explicitly recorded callback profiles.
+ * The bridge is only a transcript matcher; callback source is never evaluated
+ * during replay.
+ * @param {vm.Context} context replay context
+ * @param {object|null} meta trace metadata
+ * @returns {{beginNative: (ordinal: number) => void, endNative: (ordinal: number) => void, assertHealthy: () => void, assertComplete: () => void}}
+ */
+function installHostCallbacks(context,meta){
+ const configured=meta?.hostCallbacks;
+ if(configured===undefined)return {beginNative(){},endNative(){},assertHealthy(){},assertComplete(){}};
+ if(configured===null||typeof configured!=='object'||Array.isArray(configured))throw new Error('Trace hostCallbacks metadata must be a name-keyed object');
+ const realm=contextRealm(context),globalObject=runInContext('globalThis',context);
+ const factories=runInContext('[()=>({}),()=>[],(name,message,code,hasCode)=>{const constructors={Error,EvalError,RangeError,ReferenceError,SyntaxError,TypeError,URIError};const error=new (constructors[name]??Error)(message);Object.defineProperty(error,"name",{value:name,writable:true,enumerable:false,configurable:true});if(hasCode)Object.defineProperty(error,"code",{value:code,writable:true,enumerable:true,configurable:true});return error;},(bridge,name,length)=>{const stub=function(){"use strict";const args=[];for(let index=0;index<arguments.length;index++)args[index]=arguments[index];const result=bridge(this,args);if(result[0])throw result[1];return result[1];};Object.defineProperty(stub,"name",{value:name});Object.defineProperty(stub,"length",{value:length});return stub;}]',context);
+ const make={object:factories[0],array:factories[1]},makeError=factories[2],makeStub=factories[3];
+ const states=new Map(),failures=[];
+ for(const [name,transcript] of Object.entries(configured)){
+  if(!Object.hasOwn(HOST_CALLBACK_PROFILES,name))throw new Error(`Unknown trace host callback profile: ${name}`);
+  const profile=HOST_CALLBACK_PROFILES[name];
+  if(!exactKeys(transcript,['profile','version','calls','complete'])||transcript.profile!==name||transcript.version!==profile.version||transcript.complete!==true||!Array.isArray(transcript.calls))throw new Error(`Incomplete trace host callback transcript: ${name}`);
+  const calls=transcript.calls.map((entry,index)=>prepareTranscriptCall(name,profile,entry,index,make,makeError));
+  for(let index=1;index<calls.length;index++)if(calls[index].nativeOrdinal<calls[index-1].nativeOrdinal)throw hostTranscriptError(name,`call ${index} native ordinal is out of order`);
+  states.set(name,{name,calls,index:0,profile});
+ }
+ let activeNativeOrdinal=null;
+ const fail=(name,message)=>{
+  if(failures.length===0)failures.push(hostTranscriptError(name,message));
+  throw failures[0];
+ };
+ for(const state of states.values()){
+  const {name,profile}=state;
+  const bridge=(receiver,args)=>{
+   if(failures.length)throw failures[0];
+   if(activeNativeOrdinal===null)return fail(name,'call outside native call');
+   const entry=state.calls[state.index];
+   if(entry===undefined)return fail(name,`extra call in native call ${activeNativeOrdinal}`);
+   if(entry.nativeOrdinal!==activeNativeOrdinal)return fail(name,`native call ordinal mismatch (expected ${entry.nativeOrdinal}, got ${activeNativeOrdinal})`);
+   const receiverClass=receiver===globalObject?'global':receiver===undefined?'undefined':null;
+   if(receiverClass===null||receiverClass!==entry.receiver)return fail(name,'receiver mismatch');
+   const issue=traceArgumentsIssue(args,realm);if(issue)return fail(name,`argument ${issue}`);
+   let argsText;try{argsText=stringifyLossless(args);}catch(error){return fail(name,`argument ${error.message}`);}
+   if(argsText!==entry.args)return fail(name,`argument mismatch (expected ${entry.args}, got ${argsText})`);
+   state.index++;
+   return [entry.throws,entry.value];
+  };
+  Object.defineProperty(context,name,{value:makeStub(bridge,name,profile.length),writable:true,enumerable:true,configurable:true});
+ }
+ return {
+  beginNative(ordinal){
+   this.assertHealthy();
+   if(activeNativeOrdinal!==null)return fail('replay',`nested native call ${ordinal}`);
+   for(const state of states.values()){
+    const entry=state.calls[state.index];
+    if(entry&&entry.nativeOrdinal<ordinal)return fail(state.name,`missing call(s) before native call ${ordinal}`);
+   }
+   activeNativeOrdinal=ordinal;
+  },
+  endNative(ordinal){
+   if(activeNativeOrdinal!==ordinal)return fail('replay',`native call boundary mismatch for ${ordinal}`);
+   activeNativeOrdinal=null;
+   this.assertHealthy();
+   for(const state of states.values()){
+    const entry=state.calls[state.index];
+    if(entry&&entry.nativeOrdinal<=ordinal)return fail(state.name,`missing call(s) in native call ${ordinal}`);
+   }
+  },
+  assertHealthy(){if(failures.length)throw failures[0];},
+  assertComplete(){
+   this.assertHealthy();
+   if(activeNativeOrdinal!==null)throw new Error(`Host callback transcript replay: native call ${activeNativeOrdinal} did not close`);
+   for(const state of states.values())if(state.index!==state.calls.length)throw new Error(`Host callback transcript ${state.name}: missing call(s), consumed ${state.index} of ${state.calls.length}`);
+  },
+ };
+}
+
 /**
  * 재생한 호출의 결과를 기록과 같은 BCJSON 글자로 만든다. 결과의 Float64Array는 출력 순서대로 뷰 목록에 붙는다.
  * 비교 글자는 {"ok":…} 또는 {"err":…}이다. 종류까지 글자에 넣어 결과 값과 오류 레코드가 우연히 같아도 구분한다.
@@ -90,7 +212,8 @@ function outcomeText(threw,error,result,realm,views){
  * @returns {string} {"ok":…} 또는 {"err":…}
  */
 function recordedText(members){
- return members.has('err')?`{"err":${members.get('err')}}`:`{"ok":${members.get('ok')}}`;
+ if(members.has('err'))return `{"err":${members.get('err')}}`;
+ return `{"ok":${members.get('ok')}}`;
 }
 
 /**
@@ -140,7 +263,9 @@ export function replayTrace(path,{bundlePath}={}){
  const bundle=readFileSync(source.file,'utf8');
  if(source.sha256!==null&&sha256Hex(Buffer.from(bundle,'utf8'))!==source.sha256)throw new Error(`Trace bundle ${source.file} does not match the recorded sha256 ${source.sha256}`);
  const context=createReplayContext(meta);
+ const hostReplay=installHostCallbacks(context,meta);
  runInContext(bundle,context);
+ hostReplay.assertHealthy();
  const realm=contextRealm(context);
  const factories=runInContext('[()=>({}),()=>[]]',context);
  const make={object:factories[0],array:factories[1]};
@@ -153,16 +278,19 @@ export function replayTrace(path,{bundlePath}={}){
   if(line==='')return;
   const record=parseLossless(line);
   if(record.write){const mismatch=replayWrite(record.write,views);if(mismatch)mismatches.push({line:index+1,...mismatch});return;}
-  calls++;
+  const nativeOrdinal=calls++;
   const fn=context[record.fn];
   let result,error,threw=false;
+  hostReplay.beginNative(nativeOrdinal);
   try{
    if(typeof fn!=='function')throw new TypeError(`Missing function: ${record.fn}`);
    result=Reflect.apply(fn,undefined,record.args.map(arg=>intoContextRealm(arg,make)));
   }catch(caught){threw=true;error=caught;}
+  hostReplay.endNative(nativeOrdinal);
   const expected=recordedText(losslessMemberTexts(line)),actual=outcomeText(threw,error,result,realm,views);
   if(expected!==actual)mismatches.push({line:index+1,expected,actual});
  });
+ hostReplay.assertComplete();
  return {calls,mismatches};
 }
 

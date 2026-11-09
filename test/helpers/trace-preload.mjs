@@ -11,7 +11,7 @@ import {existsSync,mkdirSync,renameSync,writeFileSync} from 'node:fs';
 import {basename,dirname,extname,join,relative} from 'node:path';
 import vm from 'node:vm';
 import {stringifyLossless} from '../../scripts/trace/bcjson.mjs';
-import {installTraceRecorder,traceArgumentsIssue} from '../../scripts/trace/record.mjs';
+import {HOST_CALLBACK_PROFILES,installTraceRecorder,traceArgumentsIssue} from '../../scripts/trace/record.mjs';
 
 /** 생성 번들의 첫 줄 머리(scripts/native-core-bundle.mjs가 쓴다) */
 const BUNDLE_HEADER='// Generated from src/core';
@@ -19,6 +19,24 @@ const BUNDLE_HEADER='// Generated from src/core';
 const HOST_REALM={objectPrototype:Object.prototype,arrayPrototype:Array.prototype};
 /** 추적 폴더. 빈 문자열이면 꺼진 것으로 본다. */
 const traceDirectory=process.env.BAROCHART_TRACE_DIR;
+/** Explicit opt-in allow-list; unknown names are ignored and remain opaque. */
+const hostCallbackSpec=process.env.BAROCHART_TRACE_HOST_CALLBACKS??process.env.BAROCHART_TRACE_HOST_TRANSCRIPTS??'';
+const hostCallbackNames=hostCallbackSpec.split(',').map(name=>name.trim()).filter(name=>Object.hasOwn(HOST_CALLBACK_PROFILES,name));
+const pendingFinalizers=new Set();
+const collectedFinalizers=new FinalizationRegistry(reference=>pendingFinalizers.delete(reference));
+let exitFinalizerInstalled=false;
+
+function registerExitFinalizer(recorder){
+ const reference=new WeakRef(recorder);
+ pendingFinalizers.add(reference);
+ collectedFinalizers.register(recorder,reference,reference);
+ if(exitFinalizerInstalled)return;
+ exitFinalizerInstalled=true;
+ process.once('exit',()=>{
+  for(const pending of pendingFinalizers)pending.deref()?.finalize();
+  pendingFinalizers.clear();
+ });
+}
 
 if(traceDirectory)enableTracing(traceDirectory);
 
@@ -100,7 +118,9 @@ function enableTracing(directory){
   saveBundle(join(directory,bundlePath),source);
   const path=join(directory,`${name}-${++contexts}.jsonl`);
   const meta={source:process.argv[1]?relative(process.cwd(),process.argv[1]):null,bundle:{sha256,length:source.length,path:bundlePath},...globals};
-  recorders.set(context,installTraceRecorder(context,{path,meta,preexisting}));
+  const recorder=installTraceRecorder(context,{path,meta,preexisting,hostCallbacks:hostCallbackNames});
+  recorders.set(context,recorder);
+  if(hostCallbackNames.length)registerExitFinalizer(recorder);
   return result;
  }
 
