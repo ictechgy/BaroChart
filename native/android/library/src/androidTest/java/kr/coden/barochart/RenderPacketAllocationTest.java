@@ -371,6 +371,7 @@ public final class RenderPacketAllocationTest {
         ImageReader reader = null;
         Surface surface = null;
         HardwareRenderer renderer = null;
+        Throwable primary = null;
         try {
             try {
                 node = new RenderNode(TAG + (reference ? "-reference" : "-candidate"));
@@ -424,23 +425,78 @@ public final class RenderPacketAllocationTest {
                 throw new HardwareUnavailable("HardwareRenderer sync status=" + status);
             }
             Image image = null;
+            Throwable imagePrimary = null;
             try {
                 image = awaitImage(reader);
                 if (image == null) throw new HardwareUnavailable("ImageReader produced no frame");
                 return packedImageBytes(image);
+            } catch (Exception error) {
+                imagePrimary = error;
+                throw error;
+            } catch (Error error) {
+                imagePrimary = error;
+                throw error;
             } finally {
-                if (image != null) image.close();
+                if (image != null) {
+                    try { image.close(); }
+                    catch (Exception closeError) { if (imagePrimary != null) imagePrimary.addSuppressed(closeError); else throw closeError; }
+                    catch (Error closeError) { if (imagePrimary != null) imagePrimary.addSuppressed(closeError); else throw closeError; }
+                }
             }
+        } catch (Exception error) {
+            primary = error;
+            throw error;
+        } catch (Error error) {
+            primary = error;
+            throw error;
         } finally {
-            if (renderer != null) {
-                try { renderer.setContentRoot(null); } catch (RuntimeException ignored) { }
-                try { renderer.setSurface(null); } catch (RuntimeException ignored) { }
-                try { renderer.destroy(); } catch (RuntimeException ignored) { }
+            Throwable cleanup = cleanupHardware(renderer, surface, reader, node);
+            if (cleanup != null) {
+                if (primary != null) primary.addSuppressed(cleanup);
+                else if (cleanup instanceof Exception) throw (Exception) cleanup;
+                else if (cleanup instanceof Error) throw (Error) cleanup;
+                else throw new AssertionError(cleanup);
             }
-            if (surface != null) surface.release();
-            if (reader != null) reader.close();
-            if (node != null) node.discardDisplayList();
         }
+    }
+
+    private static Throwable addCleanupFailure(Throwable first, Throwable next) {
+        if (first == null) return next;
+        first.addSuppressed(next);
+        return first;
+    }
+
+    /** Attempts every release, returning the first cleanup failure with later failures suppressed. */
+    private static Throwable cleanupHardware(HardwareRenderer renderer, Surface surface,
+                                             ImageReader reader, RenderNode node) {
+        Throwable failure = null;
+        if (renderer != null) {
+            try { renderer.setContentRoot(null); }
+            catch (RuntimeException error) { failure = addCleanupFailure(failure, error); }
+            catch (Error error) { failure = addCleanupFailure(failure, error); }
+            try { renderer.setSurface(null); }
+            catch (RuntimeException error) { failure = addCleanupFailure(failure, error); }
+            catch (Error error) { failure = addCleanupFailure(failure, error); }
+            try { renderer.destroy(); }
+            catch (RuntimeException error) { failure = addCleanupFailure(failure, error); }
+            catch (Error error) { failure = addCleanupFailure(failure, error); }
+        }
+        if (surface != null) {
+            try { surface.release(); }
+            catch (RuntimeException error) { failure = addCleanupFailure(failure, error); }
+            catch (Error error) { failure = addCleanupFailure(failure, error); }
+        }
+        if (reader != null) {
+            try { reader.close(); }
+            catch (RuntimeException error) { failure = addCleanupFailure(failure, error); }
+            catch (Error error) { failure = addCleanupFailure(failure, error); }
+        }
+        if (node != null) {
+            try { node.discardDisplayList(); }
+            catch (RuntimeException error) { failure = addCleanupFailure(failure, error); }
+            catch (Error error) { failure = addCleanupFailure(failure, error); }
+        }
+        return failure;
     }
 
     private static Image awaitImage(ImageReader reader) {
