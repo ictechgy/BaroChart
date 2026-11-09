@@ -20,6 +20,7 @@ import java.util.Objects;
 /** Native QuickJS/Rust JNI host, owned by one thread. No WebView or browser. */
 public final class BaroChartEngine implements AutoCloseable {
     static {System.loadLibrary("barochart");}
+    private static final int MAX_TYPED_BARS_BUFFER_CHARS=65536;
     /** 내부 코어 선택 훅. 공개 API 기본값은 항상 JAVASCRIPT다. */
     enum RuntimeBackend { JAVASCRIPT, RUST }
     private static volatile EngineBackend defaultBackend = EngineBackend.JAVASCRIPT;
@@ -36,6 +37,8 @@ public final class BaroChartEngine implements AutoCloseable {
     private final RuntimeBackend runtimeBackend;
     private final EngineBackend backend;
     private final Thread owner=Thread.currentThread();
+    private StringBuilder typedBarsBuffer;
+    private boolean encodingTypedBars;
     private final java.util.Set<Runnable> observers=new java.util.LinkedHashSet<>();
     private final java.util.Set<Runnable> closeObservers=new java.util.LinkedHashSet<>();
     private boolean closing=false;
@@ -170,6 +173,8 @@ public final class BaroChartEngine implements AutoCloseable {
      * @throws JSONException if the arguments cannot be encoded or the core returns invalid JSON
      */
     public Object invoke(String name,Object... args) throws JSONException {check();if(name==null||name.length()==0||name.length()>128||args.length>16)throw new IllegalArgumentException("Native function name/argument limit");String arguments=argumentsJSON(args);check();return new JSONArray("["+callRuntime(handle,name,arguments)+"]").get(0);}
+    /** Calls a native function with an already encoded fixed-shape argument array. */
+    private Object invokeEncoded(String name,String arguments) throws JSONException {check();return new JSONArray("["+callRuntime(handle,name,arguments)+"]").get(0);}
     static final class SceneTiming {
         final long jniNanos,envelopeParseNanos,bodyParseNanos;final int jsonChars;
         final String transport;final long metadataParseNanos,numericValidationNanos,numericBytes;final int commandCount,stringCount;
@@ -908,7 +913,7 @@ public final class BaroChartEngine implements AutoCloseable {
         Error cleanupFailure=null;
         try{if(activeParams!=null)activeParams.job.closeOnOwner();if(activeWorkspace!=null)activeWorkspace.job.closeOnOwner();if(handle!=0){try{if(activeJob!=null)activeJob.stopOnOwner("closed");java.util.ArrayList<Runnable> cleanup=new java.util.ArrayList<>(closeObservers);closeObservers.clear();for(Runnable observer:cleanup)try{observer.run();}catch(RuntimeException observerFailure){recordObserverFailure(observerFailure);}catch(Error error){if(cleanupFailure==null)cleanupFailure=error;}}
             finally{long released=handle;ParamsJob paramsClosing=activeParams;if(paramsClosing!=null)paramsClosing.job.sourceFreeStartedOnOwner();handle=0;try{free(released);if(paramsClosing!=null)paramsClosing.job.sourceFreedOnOwner();}finally{if(activeWorkspace!=null)activeWorkspace.job.closeOnOwner();}}}if(cleanupFailure!=null)throw cleanupFailure;}
-        finally{closeObservers.clear();observers.clear();observerErrors.clear();onObserverError=null;closing=false;}
+        finally{typedBarsBuffer=null;encodingTypedBars=false;closeObservers.clear();observers.clear();observerErrors.clear();onObserverError=null;closing=false;}
     }
 
     /** Optional isolated calculation. Synchronous API behavior is unchanged. */
@@ -1398,7 +1403,22 @@ public final class BaroChartEngine implements AutoCloseable {
      * Replaces every bar of the primary series.
      * @param bars the complete new list of bars
      */
-    public void setBars(@androidx.annotation.NonNull java.util.List<Bar> bars){typed(()->setData(LowLevelJson.bars(bars)));}
+    public void setBars(@androidx.annotation.NonNull java.util.List<Bar> bars){typed(()->setBarsEncoded(bars));}
+    /** Encodes before the owner/closed check to preserve the legacy typed conversion order. */
+    private void setBarsEncoded(java.util.List<Bar> bars) throws JSONException {
+        invokeEncoded("nativeCommand",encodeTypedBars(bars));
+        notifyChanges();
+    }
+    /** Reuses only a bounded, owner-thread buffer; wrong-thread and reentrant user iterators get an isolated buffer. */
+    private String encodeTypedBars(java.util.List<Bar> bars) throws JSONException {
+        if (Thread.currentThread()!=owner || encodingTypedBars) return LowLevelJson.barsCommand(bars);
+        boolean cacheable=handle!=0&&!closing;StringBuilder buffer;
+        if(cacheable){buffer=typedBarsBuffer;if(buffer==null)buffer=new StringBuilder();typedBarsBuffer=buffer;}
+        else{typedBarsBuffer=null;buffer=new StringBuilder();}
+        encodingTypedBars=true;
+        try { return LowLevelJson.barsCommand(bars,buffer); }
+        finally { encodingTypedBars=false;buffer.setLength(0);if(handle==0||closing)typedBarsBuffer=null;else if(typedBarsBuffer==buffer&&buffer.capacity()>MAX_TYPED_BARS_BUFFER_CHARS)typedBarsBuffer=null; }
+    }
     /**
      * Applies a streaming or correction event. Invalid events throw {@code INVALID_ARGUMENT} and leave data unchanged.
      * @param event the event to apply
