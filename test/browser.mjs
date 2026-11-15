@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';import {writeFile,mkdir} from 'node:fs/promises';import {spawn} from 'node:child_process';import {launchBrowser} from '../scripts/cdp.mjs';
 const server=spawn(process.execPath,['scripts/serve.mjs'],{stdio:['ignore','pipe','inherit']});await new Promise(resolve=>server.stdout.once('data',resolve));const browser=await launchBrowser();
 try{
- await browser.navigate('http://127.0.0.1:5173/examples/web/');await browser.evaluate(`new Promise(resolve=>{const t=setInterval(()=>{if(window.aster?.chart?.lastScene){clearInterval(t);resolve(true)}},25)})`);
+ await browser.navigate('http://127.0.0.1:5173/examples/web/?backend=javascript');await browser.evaluate(`new Promise(resolve=>{const t=setInterval(()=>{if(window.aster?.chart?.lastScene){clearInterval(t);resolve(true)}},25)})`);
  const results=await browser.evaluate(`(async()=>{
    const {CanvasChart,ChartModel,BarStore,seededColumns}=await import('/src/index.mjs');const checks=[];function check(v,name){if(!v)throw new Error(name);checks.push(name);}
    const {model,chart}=window.aster;check(model.store.length===100000,'demo 100k loaded');check(chart.lastScene.stats.renderedCandleBuckets<=370,'visible geometry bounded');
