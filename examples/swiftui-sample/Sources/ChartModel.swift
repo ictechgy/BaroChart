@@ -31,7 +31,7 @@ final class ChartModel {
         bars = Self.syntheticBars(count: 240)
         do {
             let arguments = ProcessInfo.processInfo.arguments
-            let selectedBackend = arguments.firstIndex(of: "-barochart-backend").flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil } ?? "javascript"
+            let selectedBackend = arguments.firstIndex(of: "-barochart-backend").flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil } ?? (BaroChartEngine.defaultBackend == .rust ? "rust" : "javascript")
             engine = try BaroChartValidation.makeEngine(options: Self.layout(), backend: selectedBackend)
             try engine.setBars(bars)
             try configureStudies()

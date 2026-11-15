@@ -87,7 +87,21 @@ Try the same controls in [customization.html](http://127.0.0.1:5173/examples/web
 
 ## Your first chart
 
-The runnable [quickstart.html](examples/web/quickstart.html) provides a container with a real height. Its [module](examples/web/quickstart.mjs) is the complete code below; timestamps are UTC Unix **milliseconds**.
+The development package's default export is an asynchronous Rust/WASM owner:
+
+```javascript
+import createBaroChart from 'barochart';
+
+const owner = await createBaroChart(document.getElementById('chart'), {
+  prepare: {kind: 'columns', columns, visibleBars: 200},
+});
+
+await owner.destroy();
+```
+
+The existing named `createChart`, `ChartModel` and `barochart/react` `AsterChart` APIs remain synchronous JavaScript compatibility APIs. Use `barochart/javascript` for an explicit compatibility import; neither direction silently falls back.
+
+The runnable [quickstart.html](examples/web/quickstart.html) demonstrates that compatibility API with a container of real height. Its [module](examples/web/quickstart.mjs) is the complete code below; timestamps are UTC Unix **milliseconds**.
 
 ```js
 import { BarStore, ChartModel, createChart } from '../../src/index.mjs';
@@ -168,7 +182,7 @@ Your app supplies React 18.3.1/19 and ReactDOM. [React ownership/streaming/SSR c
 
 ## Native apps (iOS & Android)
 
-Put the same chart in native apps without a WebView. The chart core runs in JavaScriptCore (iOS) or an embedded QuickJS engine (Android), and each platform draws natively.
+Put the same chart in native apps without a WebView. Rust-enabled development artifacts select Rust by default; JavaScript-only artifacts use JavaScriptCore (iOS) or embedded QuickJS (Android). Each platform draws natively, and explicit JavaScript selection remains available.
 
 | | iOS | Android |
 | --- | --- | --- |
@@ -234,7 +248,7 @@ toolbar.setOptions({labels: {select: 'Pan', fit: 'Fit view'}});
 
 [API/lifecycle](docs/API.md) · [Data rules](docs/DATA.md) · [Independent axes](docs/INDEPENDENT-AXES.md) · [Architecture](docs/ARCHITECTURE.md) · [Contributing](CONTRIBUTING.md)
 
-The optional web Rust/WASM backend is documented in [WEB-RUST-WASM.md](docs/WEB-RUST-WASM.md). Select it explicitly through `barochart/wasm`; JavaScript remains the default and there is no automatic backend fallback.
+The Rust-primary web entry is documented in [WEB-RUST-WASM.md](docs/WEB-RUST-WASM.md). The root default export is Rust/WASM; existing named chart/model/React APIs and `barochart/javascript` remain explicit JavaScript compatibility paths. There is no automatic backend fallback.
 
 ## Support and validation
 
@@ -247,8 +261,8 @@ See the current [support/compatibility matrix, release gates, and privacy-safe i
 | Mobile web | Explicit input preset and responsive example CSS | Preview images are illustrations; touch, scrolling and assistive technology remain unverified |
 | Apple native | Swift package `BaroChart`: typed API, SwiftUI/UIKit views, privacy manifest | [iOS guide](docs/IOS-GUIDE.md); runners pass on iOS 27 Simulator and macOS JavaScriptCore; [device measurements](docs/measurements/native-device-performance.json) when recorded |
 | Android native | `kr.coden:barochart-android` + Compose module: typed API, View/Compose, two ABIs | [Android guide](docs/ANDROID-GUIDE.md); runners pass on an API 36 emulator, x86_64 in CI; [device measurements](docs/measurements/native-device-performance.json) when recorded |
-| Rust web/WASM backend | Optional Worker-owned Rust engine, Canvas/WebGL2 presentation host, async prepare/params/workspace migration | Chrome 156 production-WASM flows verified; Vite/Safari/Firefox/touch/screen-reader coverage depends on the local environment; JavaScript remains the default |
-| Rust native SDK | Opt-in Swift/Android integration | Android physical-device performance/soak and manual VoiceOver/TalkBack gates remain open; no default-backend claim |
+| Rust web/WASM backend | Default async Worker-owned Rust factory, Canvas/WebGL2 presentation host, prepare/params/workspace migration | Default package factory verified in Chrome 157 directly, with Vite and with esbuild; legacy named/React APIs remain JavaScript; Safari/Firefox/touch/screen-reader coverage depends on the local environment |
+| Rust native SDK | Rust-enabled Swift/Android development artifacts default to Rust; explicit JavaScript and JS-only builds remain | Android raw-PSS/long-soak and manual VoiceOver/TalkBack release gates remain open |
 
 Native paths are not WebViews. React Native/Flutter adapters are not supplied. Since 0.3.0 the native SDK uses `BaroChart` names ([migration guide](docs/MIGRATING-FROM-ASTER.md)); serialized `aster.*` schemas and the web React export `AsterChart` keep their names for compatibility. Do not rename serialized schemas.
 

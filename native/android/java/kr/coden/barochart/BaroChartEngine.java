@@ -21,9 +21,10 @@ import java.util.Objects;
 public final class BaroChartEngine implements AutoCloseable {
     static {System.loadLibrary("barochart");}
     private static final int MAX_TYPED_BARS_BUFFER_CHARS=65536;
-    /** 내부 코어 선택 훅. 공개 API 기본값은 항상 JAVASCRIPT다. */
+    /** 내부 코어 선택 훅. Rust가 포함된 산출물은 Rust를 기본으로 선택한다. */
     enum RuntimeBackend { JAVASCRIPT, RUST }
-    private static volatile EngineBackend defaultBackend = EngineBackend.JAVASCRIPT;
+    private static volatile EngineBackend defaultBackend = BuildConfig.BAROCHART_WITH_RUST
+        ? EngineBackend.RUST : EngineBackend.JAVASCRIPT;
     /** Selects the backend used by legacy constructors. */
     public static void setDefaultBackend(@androidx.annotation.NonNull EngineBackend backend) { defaultBackend=Objects.requireNonNull(backend,"backend"); }
     /** Returns the backend used by legacy constructors. */

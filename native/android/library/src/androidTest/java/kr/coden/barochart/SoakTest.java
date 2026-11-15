@@ -6,6 +6,8 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.os.Debug;
+import android.os.PowerManager;
+import android.os.SystemClock;
 import android.util.Log;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
@@ -51,10 +53,39 @@ public class SoakTest {
         Log.i(TAG, "BAROCHART_SOAK_REPORT " + name + " " + report);
     }
 
+    /** Prevent device suspend from pausing the active workload while the host watchdog advances. */
+    private static final class CpuAwake implements AutoCloseable {
+        private final PowerManager.WakeLock lock;
+        CpuAwake(Context context, double minutes) {
+            double timeoutMillis = (minutes * 60 + 120) * 1000;
+            if (!Double.isFinite(minutes) || minutes <= 0 || timeoutMillis >= Long.MAX_VALUE)
+                throw new IllegalArgumentException("soakMinutes must be positive and finite");
+            PowerManager power = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
+            if (power == null) throw new IllegalStateException("Power service unavailable for soak test");
+            lock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BaroChart:StreamingSoak");
+            lock.setReferenceCounted(false);
+            lock.acquire((long) Math.ceil(timeoutMillis));
+        }
+        void verifyHeld() {
+            if (!lock.isHeld()) throw new IllegalStateException("Streaming soak CPU wake lock expired");
+        }
+        @Override public void close() { if (lock.isHeld()) lock.release(); }
+    }
+
     @Test public void streamingSoak() throws Exception {
+        try (CpuAwake awake = new CpuAwake(context, minutes)) {
+            awake.verifyHeld();
+            streamingSoakOnAwakeDevice();
+            awake.verifyHeld();
+        }
+    }
+
+    private void streamingSoakOnAwakeDevice() throws Exception {
         List<Bar> data = new ArrayList<>(bars(10_000));
         AtomicReference<BaroChartEngine> engineRef = new AtomicReference<>();
         AtomicReference<BaroChartView> viewRef = new AtomicReference<>();
+        AtomicReference<String> actualBackend = new AtomicReference<>();
+        AtomicReference<String> runtimeScope = new AtomicReference<>();
         onMain(() -> {
             BaroChartEngine engine = BaroChartValidation.create(context, EngineOptions.defaults(), backend);
             engine.setBars(data);
@@ -63,9 +94,17 @@ public class SoakTest {
             BaroChartView view = new BaroChartView(context, engine);
             view.layout(0, 0, 390, 320);
             engineRef.set(engine); viewRef.set(view);
+            actualBackend.set(engine.backend().name());
+            runtimeScope.set(engine.runtimeMetrics().getString("scope"));
+            if ("rust".equals(backend))
+                assertTrue(runtimeScope.get(), runtimeScope.get().startsWith("Rust engine accounted requested bytes"));
+            Log.i(TAG, "BAROCHART_SOAK_PROGRESS " + new JSONObject().put("runId", runId)
+                .put("backend", backend).put("phase", "setup-ready")
+                .put("actualBackend", actualBackend.get()).put("runtimeScope", runtimeScope.get()));
         });
         Bitmap target = Bitmap.createBitmap(390, 320, Bitmap.Config.ARGB_8888);
-        long started = System.nanoTime(), deadline = started + (long) (minutes * 60e9), sampleEvery = (long) ((minutes >= 15 ? 60 : 2) * 1e9);
+        long started = System.nanoTime(), startedElapsed = SystemClock.elapsedRealtimeNanos();
+        long deadline = started + (long) (minutes * 60e9), sampleEvery = (long) ((minutes >= 15 ? 60 : 2) * 1e9);
         long nextSample = started;
         JSONArray samples = new JSONArray();
         int[] ticks = {0};
@@ -77,13 +116,23 @@ public class SoakTest {
                 onMain(() -> requestedRuntimeBytes[0] = engineRef.get().runtimeMetrics().optLong("requestedLiveBytes", -1));
                 samples.put(new JSONObject().put("seconds", (System.nanoTime() - started) / 1e9).put("pssKiB", Debug.getPss())
                     .put("runtimeRequestedBytes", requestedRuntimeBytes[0]));
+                Log.i(TAG, "BAROCHART_SOAK_PROGRESS " + new JSONObject().put("runId", runId)
+                    .put("backend", backend).put("ticks", ticks[0])
+                    .put("activeSeconds", (System.nanoTime() - started) / 1e9)
+                    .put("elapsedRealtimeSeconds", (SystemClock.elapsedRealtimeNanos() - startedElapsed) / 1e9));
                 nextSample = System.nanoTime() + sampleEvery;
             }
             Thread.sleep(100);
         }
         double elapsedSeconds = (System.nanoTime() - started) / 1e9;
+        double elapsedRealtimeSeconds = (SystemClock.elapsedRealtimeNanos() - startedElapsed) / 1e9;
+        Log.i(TAG, "BAROCHART_SOAK_PROGRESS " + new JSONObject().put("runId", runId)
+            .put("backend", backend).put("phase", "before-close")
+            .put("activeSeconds", elapsedSeconds).put("elapsedRealtimeSeconds", elapsedRealtimeSeconds));
         onMain(() -> engineRef.get().close());
-        JSONObject verdict = streamingVerdict(samples, ticks[0]).put("elapsedSeconds", elapsedSeconds);
+        JSONObject verdict = streamingVerdict(samples, ticks[0]).put("elapsedSeconds", elapsedSeconds)
+            .put("elapsedRealtimeSeconds", elapsedRealtimeSeconds)
+            .put("actualBackend", actualBackend.get()).put("runtimeScope", runtimeScope.get());
         report("android-streaming-soak", verdict);
         if (minutes >= 15) assertTrue(verdict.toString(), verdict.getBoolean("passed"));
         assertTrue("view must not record a draw error: " + viewRef.get().getLastError(), viewRef.get().getLastError() == null);

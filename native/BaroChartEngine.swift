@@ -1323,7 +1323,13 @@ public final class BaroChartParamsJob {
 /// Show an engine with ``BaroChartUIView`` or ``BaroChartView``; a view borrows the engine and never closes it.
 public final class BaroChartEngine {
     private static let defaultBackendLock = NSLock()
-    private static var storedDefaultBackend = BaroChartBackend.javaScript
+    private static var storedDefaultBackend: BaroChartBackend = {
+#if canImport(BaroChartCoreRust)
+        return .rust
+#else
+        return .javaScript
+#endif
+    }()
 
     /// The backend selected by legacy initializers. Set this on the main thread; reads are safe from constructors on other threads.
     public static var defaultBackend: BaroChartBackend {

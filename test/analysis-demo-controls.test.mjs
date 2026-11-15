@@ -12,7 +12,8 @@ function demo(t){
  for(const m of html.matchAll(/<([a-z-]+)\b[^>]*\bid="([^"]+)"[^>]*>/g)){const n=env.node(m[1]);nodes.set(m[2],n);const value=m[0].match(/\bvalue="([^"]*)"/);if(value)n.value=value[1];n.disabled=/\bdisabled\b/.test(m[0]);}
  const $=id=>nodes.get(id);env.document.getElementById=$;$('anchor').value='session';
  const createChart=(host,model,opts)=>{const chart=new lib.CanvasChart(host,model,{...opts,observeResize:false,layerCaching:false,dpr:()=>1,rendererFactory:()=>({kind:'canvas',render(){},dispose(){}})});env.charts.push(chart);env.models.push(model);return chart;};
- const args={...lib,createChart,recomputeInWorker:(...args)=>new Promise((resolve,reject)=>pending.push({args,resolve,reject}))};
+ const {default:_rustDefault,...named}=lib;
+ const args={...named,createChart,recomputeInWorker:(...args)=>new Promise((resolve,reject)=>pending.push({args,resolve,reject}))};
  Function(...Object.keys(args),src.replace(/^import[^\n]+\n/gm,'').replace(/^export /gm,'').replaceAll('import.meta.url',JSON.stringify(new URL('examples/web/analysis.mjs',root).href)))(...Object.values(args));
  return{...env,$,pending,get chart(){return env.window.analysisExample.chart;},get model(){return env.window.analysisExample.model;}};
 }

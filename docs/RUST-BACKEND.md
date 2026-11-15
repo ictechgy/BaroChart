@@ -1,20 +1,21 @@
 # Native Rust backend
 
-BaroChart has an opt-in native Rust core for local SDK validation and native
-integration work. The JavaScript backend remains the default on both platforms.
+BaroChart's development SDK selects the native Rust core by default whenever
+that core is included in the build. A JavaScript-only build selects JavaScript
+instead, and applications can still select JavaScript explicitly.
 The typed data, indicator, drawing, controller, workspace, scene and
 asynchronous surfaces keep their existing host-language shapes and errors.
 
-This page describes the current development integration. Distribution and a
-default switch remain subject to the size, performance and device rollout gates.
+This page describes the current development integration. The development
+default is separate from release readiness: distribution remains subject to
+the size, performance, accessibility and device rollout gates below.
 
 ## Choose a backend deliberately
 
-Choose Rust when the app needs to exercise the native core, native Float64
-transfers, or a chart flow without loading the JavaScript core bundle. Choose
-JavaScript when the app needs JavaScriptCore/QuickJS access, JavaScript
-indicator source registration, or a JavaScript-only demo/test hook. The normal
-application choice remains JavaScript until the rollout gates are approved.
+Rust is the normal choice in a Rust-enabled development build. Choose
+JavaScript explicitly when the app needs JavaScriptCore/QuickJS access,
+JavaScript indicator source registration, or a JavaScript-only demo/test hook.
+JavaScript-only artifacts remain usable without a Rust binary.
 
 The choice is explicit and immutable for an engine. There is no runtime
 fallback: if the selected backend is absent from the build, construction fails
@@ -36,8 +37,10 @@ assert(engine.backend == .rust)
 ```
 
 `BaroChartBackend` has the cases `.javaScript` and `.rust`. For legacy
-initializers, `BaroChartEngine.defaultBackend` selects the backend; changing it
-must happen on the main thread and affects subsequently created engines only:
+initializers, `BaroChartEngine.defaultBackend` selects the backend; its initial
+value is `.rust` when `BaroChartCoreRust` is linked and `.javaScript` otherwise.
+Changing it must happen on the main thread and affects subsequently created
+engines only:
 
 ```swift
 BaroChartEngine.defaultBackend = .rust
@@ -69,9 +72,10 @@ val engine = BaroChartEngine.create(
 ```
 
 `EngineBackend` has `JAVASCRIPT` and `RUST`. `BaroChartEngine.setDefaultBackend`
-and `getDefaultBackend` control only legacy constructors and future engines;
-the initial default is `JAVASCRIPT`. The Rust constructor does not load the
-`aster-core.js` asset.
+and `getDefaultBackend` control only legacy constructors and future engines.
+Dual and Rust-only artifacts initially select `RUST`; JavaScript-only artifacts
+select `JAVASCRIPT`. The Rust constructor does not load the `aster-core.js`
+asset.
 
 The Android Gradle module can contain both cores, Rust only, or JavaScript only
 (see [Local builds](#local-builds)). These are build-time capabilities, not a
@@ -206,8 +210,10 @@ physical-device performance and soak/manual acceptance remain rollout gates.
 
 ## Rollout status
 
-The native Rust core is opt-in. Fresh native SDK artifacts and review fixes
-passed the local verification suites. The dual-backend package fits the
+The Rust-enabled development SDK now selects Rust by default. Explicit
+JavaScript selection and JavaScript-only artifacts remain supported, with no
+automatic fallback after construction. Fresh native SDK artifacts and review
+fixes passed the local verification suites. The dual-backend package fits the
 owner-approved 5 MiB per-ABI budget; see the
 [measurement and artifact decision](measurements/2026-11-04-rust-core-size.md).
 
@@ -216,9 +222,9 @@ passed the startup and pan budgets in Release. The same device passed 500
 create/dispose cycles and a
 [30-minute streaming soak](measurements/2026-11-05-native-rust-ios-soak.json).
 JavaScript was faster in this workload; Rust used less process memory. Android
-physical-device performance and soak, plus manual VoiceOver/TalkBack acceptance,
-remain unverified. Keep JavaScript as the default until the platform rollout
-gates are completed.
+physical-device raw-PSS and long-soak acceptance, plus manual
+VoiceOver/TalkBack acceptance, remain release gates. Changing the development
+default does not mark those gates as passed and does not authorize a release.
 
 ## Related guides
 

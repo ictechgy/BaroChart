@@ -8,6 +8,10 @@
       "types": "./src/index.d.mts",
       "import": "./src/index.mjs"
     },
+    "./javascript": {
+      "types": "./src/javascript.d.mts",
+      "import": "./src/javascript.mjs"
+    },
     "./core": {
       "types": "./src/core/index.d.mts",
       "import": "./src/core/index.mjs"
