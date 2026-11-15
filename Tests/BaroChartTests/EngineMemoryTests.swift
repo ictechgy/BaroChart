@@ -10,7 +10,7 @@ import XCTest
 /// 테스트 메서드 안에는 풀 비움이 없으므로, JSC 임시 JSValue가 SDK 밖 풀에 남으면 컨텍스트가 살아남아 실패한다.
 /// (백그라운드 소유 스레드나 한 런루프 턴 안에서 엔진을 반복 생성하는 앱에서 컨텍스트가 쌓이던 문제의 회귀 방지)
 @MainActor
-final class EngineMemoryTests: XCTestCase {
+final class EngineMemoryTests: JavaScriptSelectedTestCase {
     private func bars(_ count: Int) -> [BaroChartBar] {
         (0..<count).map { i in BaroChartBar(time: 1_700_000_000_000 + Double(i) * 60_000, open: 100, high: 101, low: 99, close: 100.5, volume: 10) }
     }

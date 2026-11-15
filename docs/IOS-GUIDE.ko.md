@@ -1,6 +1,8 @@
 # iOS용 BaroChart
 
-BaroChart는 금융 차트를 네이티브로 그립니다. 차트 코어는 JavaScriptCore에서 돌고 화면은 Core Graphics로 그립니다. WebView가 아닙니다. 데이터와 엔진은 앱이 소유하고, BaroChart는 시세를 가져오지 않습니다. [English](IOS-GUIDE.md)
+BaroChart는 금융 차트를 네이티브로 그립니다. Rust가 포함된 개발 빌드는 Rust 코어를 기본으로 사용하고, JavaScript 전용 빌드는 JavaScriptCore를 사용합니다. 화면은 Core Graphics로 그리며 WebView가 아닙니다. 데이터와 엔진은 앱이 소유하고, BaroChart는 시세를 가져오지 않습니다. [English](IOS-GUIDE.md)
+
+명시적 Rust·JavaScript 선택과 남은 출시 관문은 [네이티브 Rust 백엔드](RUST-BACKEND.md)에 정리했습니다.
 
 ## 지원 범위
 

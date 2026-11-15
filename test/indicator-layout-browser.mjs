@@ -7,7 +7,8 @@ import {terminateOwnedBrowser} from '../scripts/browser-lifecycle.mjs';
 import {launchBrowser} from '../scripts/cdp.mjs';
 
 const root=resolve(import.meta.dirname,'..');
-const routePath='/examples/web/index.html';
+// This suite exercises the legacy model/ChartAPI surface through window.aster.
+const routePath='/examples/web/index.html?backend=javascript';
 const route='http://127.0.0.1';
 const artifact=process.env.INDICATOR_LAYOUT_BROWSER_ARTIFACT;
 const checks=[];

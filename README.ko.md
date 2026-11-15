@@ -168,7 +168,7 @@ export function PriceChart({ bars }) {
 
 ## 네이티브 앱 (iOS·Android)
 
-같은 차트를 WebView 없이 네이티브 앱에 넣습니다. 차트 코어는 JavaScriptCore(iOS) 또는 내장 QuickJS(Android)에서 돌고, 화면은 각 플랫폼이 직접 그립니다.
+같은 차트를 WebView 없이 네이티브 앱에 넣습니다. Rust 포함 개발 산출물은 Rust 코어를 기본으로 쓰고, JavaScript 전용 산출물은 JavaScriptCore(iOS) 또는 내장 QuickJS(Android)를 사용합니다. 화면은 각 플랫폼이 직접 그리며 명시적 JavaScript 선택도 유지됩니다.
 
 | | iOS | Android |
 | --- | --- | --- |
@@ -236,7 +236,7 @@ toolbar.setOptions({labels: {select: '이동', fit: '전체 보기'}});
 
 [API·수명 관리](docs/API.md) · [데이터 규칙](docs/DATA.md) · [독립 가격축](docs/INDEPENDENT-AXES.md) · [구조](docs/ARCHITECTURE.md) · [기여](CONTRIBUTING.md)
 
-선택형 웹 Rust/WASM 백엔드는 [WEB-RUST-WASM.md](docs/WEB-RUST-WASM.md)에 정리했습니다. `barochart/wasm`을 통해 명시적으로 선택하며 JavaScript가 기본이고 자동 폴백은 없습니다.
+Rust 기본 웹 진입점은 [WEB-RUST-WASM.md](docs/WEB-RUST-WASM.md)에 정리했습니다. 루트 default export는 비동기 Rust/WASM 팩토리이며, 기존 named 차트·모델·React API와 `barochart/javascript`는 JavaScript 호환 경로로 유지됩니다. 자동 폴백은 없습니다.
 
 ## 지원과 검증 범위
 
@@ -249,8 +249,8 @@ toolbar.setOptions({labels: {select: '이동', fit: '전체 보기'}});
 | 모바일 웹 | 명시적 입력 프리셋·반응형 예제 CSS | 이미지는 설명용 미리보기. 터치·스크롤·보조 기술 미검증 |
 | Apple 네이티브 | Swift 패키지 `BaroChart`: 타입 API, SwiftUI/UIKit 뷰, 개인정보 매니페스트 | [iOS 가이드](docs/IOS-GUIDE.ko.md). iOS 27 시뮬레이터와 macOS JavaScriptCore에서 runner 통과. 기록되면 [실기기 측정](docs/measurements/native-device-performance.json) |
 | Android 네이티브 | `kr.coden:barochart-android` + Compose 모듈: 타입 API, View/Compose, 두 ABI | [Android 가이드](docs/ANDROID-GUIDE.ko.md). API 36 에뮬레이터에서 runner 통과, x86_64는 CI. 기록되면 [실기기 측정](docs/measurements/native-device-performance.json) |
-| Rust 웹/WASM 백엔드 | Worker가 Rust 엔진을 소유하고 Canvas/WebGL2가 화면을 표시하는 선택형 경로, 비동기 준비·파라미터·workspace 이전 | Chrome 156 production WASM 흐름 확인. Vite·Safari·Firefox·터치·스크린리더 범위는 환경에 따라 다르며 JavaScript가 기본 |
-| Rust 네이티브 SDK | 선택형 Swift/Android 통합 | Android 실기기 성능·soak 및 VoiceOver/TalkBack 수동 관문이 남아 있으며 기본 백엔드 전환 주장은 없음 |
+| Rust 웹/WASM 백엔드 | Worker가 Rust 엔진을 소유하는 기본 비동기 팩토리, Canvas/WebGL2 표시, 준비·파라미터·workspace 이전 | 기본 패키지 팩토리를 Chrome 157·Vite·esbuild에서 확인. 기존 named·React API는 JavaScript이며 Safari·Firefox·터치·스크린리더 범위는 환경에 따라 다름 |
+| Rust 네이티브 SDK | Rust 포함 Swift/Android 개발 산출물은 Rust가 기본, 명시적 JavaScript와 JS 전용 빌드는 유지 | Android raw-PSS·장시간 soak 및 VoiceOver/TalkBack 수동 출시 관문은 남아 있음 |
 
 네이티브 경로는 WebView가 아닙니다. React Native/Flutter 어댑터는 없습니다. 0.3.0부터 네이티브 SDK는 `BaroChart` 이름을 씁니다([마이그레이션 가이드](docs/MIGRATING-FROM-ASTER.ko.md)). 저장 스키마 `aster.*`와 웹 React export `AsterChart`는 호환을 위해 이름을 유지합니다. 저장 스키마 이름을 바꾸면 안 됩니다.
 

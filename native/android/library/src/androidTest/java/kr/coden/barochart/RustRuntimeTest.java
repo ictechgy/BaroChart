@@ -120,6 +120,33 @@ public class RustRuntimeTest {
         });
     }
 
+    @Test public void legacyDefaultMatchesCompiledBackendCapability() {
+        EngineBackend compiled = BuildConfig.BAROCHART_WITH_RUST
+            ? EngineBackend.RUST : EngineBackend.JAVASCRIPT;
+        String requested = androidx.test.platform.app.InstrumentationRegistry
+            .getArguments().getString("suiteBackend");
+        assertTrue(requested == null || requested.equals("rust") || requested.equals("javascript"));
+        EngineBackend expected = requested == null ? compiled
+            : requested.equals("rust") ? EngineBackend.RUST : EngineBackend.JAVASCRIPT;
+        assertEquals(expected, BaroChartEngine.getDefaultBackend());
+        TestSupport.onMain(() -> {
+            if (expected == EngineBackend.RUST && !BuildConfig.BAROCHART_WITH_RUST
+                || expected == EngineBackend.JAVASCRIPT && !BuildConfig.BAROCHART_WITH_QUICKJS) {
+                assertUnavailable("Requested suite backend", () -> BaroChartEngine.create(
+                    TestSupport.context(), EngineOptions.defaults()));
+                return;
+            }
+            BaroChartEngine engine = BaroChartEngine.create(
+                TestSupport.context(), EngineOptions.defaults());
+            try {
+                assertEquals(expected, engine.backend());
+                if (expected == EngineBackend.RUST)
+                    assertTrue(engine.runtimeMetrics().getString("scope").startsWith("Rust engine accounted requested bytes"));
+            }
+            finally { engine.close(); }
+        });
+    }
+
     @Test public void legacyConstructorSnapshotsRustDefault() {
         TestSupport.onMain(() -> {
             EngineBackend previous = BaroChartEngine.getDefaultBackend();
@@ -139,6 +166,26 @@ public class RustRuntimeTest {
                 }
             } finally {
                 BaroChartEngine.setDefaultBackend(previous);
+            }
+        });
+    }
+
+    @Test public void unavailableExplicitBackendNeverChangesDefault() {
+        TestSupport.onMain(() -> {
+            EngineBackend previous = BaroChartEngine.getDefaultBackend();
+            for (EngineBackend backend : EngineBackend.values()) {
+                boolean available = backend == EngineBackend.RUST
+                    ? BuildConfig.BAROCHART_WITH_RUST : BuildConfig.BAROCHART_WITH_QUICKJS;
+                if (available) continue;
+                try {
+                    BaroChartEngine unexpected = BaroChartEngine.create(
+                        TestSupport.context(), EngineOptions.defaults(), backend);
+                    unexpected.close();
+                    fail("Unavailable backend must not fall back");
+                } catch (RuntimeException error) {
+                    assertEquals(BaroChartException.Code.UNAVAILABLE, typed(error).getCode());
+                }
+                assertEquals(previous, BaroChartEngine.getDefaultBackend());
             }
         });
     }

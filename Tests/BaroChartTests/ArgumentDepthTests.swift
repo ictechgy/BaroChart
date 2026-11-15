@@ -4,7 +4,7 @@ import XCTest
 @testable import BaroChart
 
 /// 호스트가 값으로 넘기는 컨테이너는 인자 배열을 포함해 깊이 64까지 허용한다(M0c).
-final class ArgumentDepthTests: XCTestCase {
+final class ArgumentDepthTests: JavaScriptSelectedTestCase {
     private func arguments(depth: Int, mixed: Bool = false) -> [Any] {
         var value: Any = 0
         for index in 0..<(depth - 1) {

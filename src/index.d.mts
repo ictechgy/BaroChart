@@ -10,3 +10,6 @@ export {setIndicatorParamsAsync} from './web/indicator-params-async.mjs';
 export type {AsyncIndicatorParamsOptions,AsyncIndicatorParamsResult,IndicatorObserverError} from './web/indicator-params-async.mjs';
 export {prepareWorkspaceAsync} from './web/workspace-async.mjs';
 export type {AsyncWorkspaceOptions} from './web/workspace-async.mjs';
+export {createChart as createJavaScriptChart} from './renderers/webgl.mjs';
+export {createBaroChart as default,createBaroChart} from './web/rust-default.mjs';
+export type {CreateBaroChartOptions,BaroChartOwner} from './web/rust-default.mjs';

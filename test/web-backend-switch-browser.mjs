@@ -14,7 +14,7 @@ try{
   window.Worker=function(...args){const worker=new Original(...args);stats.created++;stats.live++;const terminate=worker.terminate.bind(worker);let closed=false;worker.terminate=()=>{if(!closed){closed=true;stats.terminated++;stats.live--;}return terminate();};return worker;};
   window.Worker.prototype=Original.prototype;
  }`},browser.sessionId);
- await browser.navigate(`http://127.0.0.1:${server.address().port}/examples/web/`);
+ await browser.navigate(`http://127.0.0.1:${server.address().port}/examples/web/?backend=javascript`);
  const result=await browser.evaluate(`(async()=>{
   const js=await window.baroDemo.ready;
   if(js.backend!=='javascript'||js.model.store.length!==100000)throw new Error('Default JavaScript demo did not initialize');

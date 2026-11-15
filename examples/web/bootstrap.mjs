@@ -61,7 +61,7 @@ function commit(candidate,next,owner,signal){
   owner?.publish();throw error;
  }
  const url=new URL(location.href);
- if(candidate.backend==='javascript')url.searchParams.delete('backend');else url.searchParams.set('backend','rust-wasm');
+ url.searchParams.set('backend',candidate.backend==='javascript'?'javascript':'rust-wasm');
  try{history.replaceState(null,'',url);}catch(error){status('엔진 전환 완료 · 주소 갱신 실패: '+String(error.message).slice(0,100));}
  return owner;
 }
@@ -175,5 +175,5 @@ const onPageShow=event=>{
 window.addEventListener('pagehide',onPageHide);
 window.addEventListener('pageshow',onPageShow);
 const initial=new URL(location.href).searchParams.get('backend');
-ready=requestSwitch(initial==='rust-wasm'||initial==='rust'?'rust-wasm':'javascript');
+ready=requestSwitch(initial==='javascript'?'javascript':'rust-wasm');
 window.baroDemo=Object.freeze({get ready(){return ready;},switchTo:requestSwitch,get backend(){return current?.backend??null;},get controller(){return current;}});

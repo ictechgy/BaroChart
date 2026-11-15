@@ -37,11 +37,34 @@ class BackendSelectedTestCase: XCTestCase {
         super.tearDown()
     }
 
-    private func onMainThread(_ body: () -> Void) {
+    func onMainThread(_ body: () -> Void) {
         if Thread.isMainThread {
             body()
         } else {
             DispatchQueue.main.sync(execute: body)
         }
+    }
+}
+
+/// Selects JavaScript for tests that intentionally inspect JavaScriptCore or
+/// record JavaScript traces. Generic typed tests keep the compiled Rust default.
+class JavaScriptSelectedTestCase: BackendSelectedTestCase {
+    private var previousJavaScriptBackend: BaroChartBackend?
+
+    override func setUp() {
+        super.setUp()
+        onMainThread {
+            previousJavaScriptBackend = BaroChartEngine.defaultBackend
+            BaroChartEngine.defaultBackend = .javaScript
+        }
+    }
+
+    override func tearDown() {
+        if let previousJavaScriptBackend {
+            onMainThread {
+                BaroChartEngine.defaultBackend = previousJavaScriptBackend
+            }
+        }
+        super.tearDown()
     }
 }

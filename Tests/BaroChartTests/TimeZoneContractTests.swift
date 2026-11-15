@@ -8,7 +8,7 @@ import XCTest
 /// 이름 문법, 지원 연도(1000~9999), 오류 문구는 코어가 정한다. 그래서 JSC Intl의 문구(`invalid time zone: X`)나
 /// JSC 날짜 처리(연도 `999`, `Date.parse` NaN) 대신 Node·Android와 같은 계약 결과가 나와야 한다.
 /// Android `TimeZoneContractTest`와 같은 시나리오·기대값이다.
-final class TimeZoneContractTests: XCTestCase {
+final class TimeZoneContractTests: JavaScriptSelectedTestCase {
     /// 1000-01-01T00:00:00Z(UTC epoch ms): 지원 연도 첫날의 UTC 자정
     private static let year1000 = -30_610_224_000_000.0
     /// 9999-12-31T23:59:00Z(UTC epoch ms): 지원 연도 마지막 날의 마지막 분

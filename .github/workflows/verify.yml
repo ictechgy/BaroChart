@@ -246,6 +246,7 @@ jobs:
           BAROCHART_RUST_XCFRAMEWORK: ${{ github.workspace }}/artifacts/rust/BaroChartCoreRust.xcframework
         run: |
           swift test --scratch-path "${RUNNER_TEMP}/swift-rust" list > "${RUNNER_TEMP}/swift-rust-tests.txt"
+          grep -F 'BackendSelectionTests/testDefaultMatchesCompiledBackendAndExplicitBackendIsImmutable' "${RUNNER_TEMP}/swift-rust-tests.txt"
           grep -F 'RustRuntimeTests/testRawCallReturnsTheRustNativeInitValue' "${RUNNER_TEMP}/swift-rust-tests.txt"
           swift test --scratch-path "${RUNNER_TEMP}/swift-rust"
           swift build --scratch-path "${RUNNER_TEMP}/swift-rust" -c release -Xswiftc -warnings-as-errors

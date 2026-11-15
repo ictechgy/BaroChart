@@ -9,8 +9,12 @@ final class BackendSelectionTests: XCTestCase {
         try body()
     }
 
-    func testDefaultIsJavaScriptAndExplicitBackendIsImmutable() throws {
+    func testDefaultMatchesCompiledBackendAndExplicitBackendIsImmutable() throws {
+#if canImport(BaroChartCoreRust)
+        XCTAssertEqual(BaroChartEngine.defaultBackend, .rust)
+#else
         XCTAssertEqual(BaroChartEngine.defaultBackend, .javaScript)
+#endif
         let engine = try BaroChartEngine(options: BaroChartEngineOptions(), backend: .javaScript)
         XCTAssertEqual(engine.backend, .javaScript)
         try engine.close()

@@ -34,7 +34,7 @@ try{
  const base=`http://127.0.0.1:${server.address().port}/examples/web/`;
  const navigate=path=>browser.navigate(base+path);
 
- await navigate('');
+ await navigate('?backend=javascript');
  const historyFailure=await browser.evaluate(`(async()=>{
   const source=await baroDemo.ready,nativeReplace=history.replaceState;let failures=0;
   history.replaceState=()=>{failures++;throw new Error('injected history failure');};
@@ -48,7 +48,7 @@ try{
  })()`,{timeout:120000,label:'history-failure-is-noncritical'});
  assert.deepEqual(historyFailure,{failures:2,live:0,connected:true,inert:false});
 
- await navigate('');
+ await navigate('?backend=javascript');
  const cleanupFailure=await browser.evaluate(`(async()=>{
   const source=await baroDemo.ready,liveRoot=document.querySelector('main'),nativeReplace=Element.prototype.replaceWith,nativeFreeze=Object.freeze;
   let replacementFailed=false,disposeFailed=false;
@@ -67,7 +67,7 @@ try{
  })()`,{timeout:120000,label:'cleanup-failure-preserves-source'});
  assert.deepEqual(cleanupFailure,{rejected:true,replacementFailed:true,disposeFailed:true,same:true,backend:'javascript',disposed:false,connected:true,inert:false,aster:true,mains:1,live:0});
 
- await navigate('');
+ await navigate('?backend=javascript');
  const suspended=await browser.evaluate(`(async()=>{
   const source=await baroDemo.ready,liveRoot=document.querySelector('main');let fired=false;
   const observer=new MutationObserver(records=>{for(const record of records)for(const node of record.addedNodes)if(node.matches?.('main')&&node!==liveRoot&&!fired){fired=true;observer.disconnect();window.dispatchEvent(new PageTransitionEvent('pagehide',{persisted:true}));}});
@@ -78,7 +78,7 @@ try{
  })()`,{timeout:120000,label:'persisted-pagehide-aborts-staging'});
  assert.deepEqual(suspended,{fired:true,rejected:true,same:true,backend:'javascript',disposed:false,connected:true,inert:false,mains:1,live:0});
 
- await navigate('?holdWasm=1');
+ await navigate('?backend=javascript&holdWasm=1');
  const fetchCancel=await browser.evaluate(`(async()=>{
   const source=await baroDemo.ready,liveRoot=document.querySelector('main'),pending=baroDemo.switchTo('rust-wasm');
   for(let attempt=0;attempt<1000&&!window.__releaseWasmFetch;attempt++)await new Promise(resolve=>setTimeout(resolve,2));
@@ -90,7 +90,7 @@ try{
  })()`,{timeout:120000,label:'wasm-fetch-cancel-restores-source'});
  assert.deepEqual(fetchCancel,{rejected:true,fast:true,restored:{same:true,backend:'javascript',disposed:false,connected:true,inert:false,aster:true,live:0},retryBars:100000,held:1,released:1,live:0});
 
- for(const [path,target] of [['','rust-wasm'],['?backend=rust-wasm','javascript']]){
+ for(const [path,target] of [['','javascript'],['?backend=javascript','rust-wasm']]){
   await navigate(path);
   const terminal=await browser.evaluate(`(async()=>{
    const source=await baroDemo.ready,sourceBackend=source.backend,liveRoot=document.querySelector('main'),nativeReplace=Element.prototype.replaceWith;let fired=false,rejected=false;
@@ -99,7 +99,8 @@ try{
    for(let attempt=0;attempt<100&&__workerStats.live;attempt++)await new Promise(resolve=>setTimeout(resolve,10));
    return {fired,rejected,sourceBackend,currentBackend:baroDemo.backend,same:baroDemo.controller===source,mains:document.querySelectorAll('main').length,live:__workerStats.live};
   })()`,{timeout:120000,label:'terminal-pagehide-during-'+target});
-  assert.deepEqual(terminal,{fired:true,rejected:true,sourceBackend:path?'rust-wasm':'javascript',currentBackend:path?'rust-wasm':'javascript',same:true,mains:1,live:0});
+  const expectedBackend=path==='?backend=javascript'?'javascript':'rust-wasm';
+  assert.deepEqual(terminal,{fired:true,rejected:true,sourceBackend:expectedBackend,currentBackend:expectedBackend,same:true,mains:1,live:0});
  }
 
  await navigate('?backend=rust-wasm&delayWorkers=1');
@@ -140,7 +141,7 @@ try{
  })()`,{timeout:120000,label:'initial-rust-failure-recovers-with-javascript'});
  assert.deepEqual(initialFailure,{failed:true,retryVisible:true,selected:'rust-wasm',backend:null,recovered:'javascript',bars:100000,retryHidden:true,live:0});
 
- await navigate('?failWorkerOnce=1&clearStorage=1');
+ await navigate('?backend=javascript&failWorkerOnce=1&clearStorage=1');
  const sameModeRetry=await browser.evaluate(`(async()=>{
   let failed=false;try{await baroDemo.ready;}catch{failed=true;}
   const retry=document.getElementById('backend-retry');retry.click();const owner=await baroDemo.ready;
