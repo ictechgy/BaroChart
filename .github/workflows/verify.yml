@@ -246,8 +246,16 @@ jobs:
           BAROCHART_RUST_XCFRAMEWORK: ${{ github.workspace }}/artifacts/rust/BaroChartCoreRust.xcframework
         run: |
           swift test --scratch-path "${RUNNER_TEMP}/swift-rust" list > "${RUNNER_TEMP}/swift-rust-tests.txt"
+          grep -F 'BackendSelectionTests/testDefaultMatchesCompiledBackendAndExplicitBackendIsImmutable' "${RUNNER_TEMP}/swift-rust-tests.txt"
           grep -F 'RustRuntimeTests/testRawCallReturnsTheRustNativeInitValue' "${RUNNER_TEMP}/swift-rust-tests.txt"
-          swift test --scratch-path "${RUNNER_TEMP}/swift-rust"
+          grep -F 'RustAsyncEnvelopeTests/' "${RUNNER_TEMP}/swift-rust-tests.txt"
+          grep -F 'RustTypedTraceTests/' "${RUNNER_TEMP}/swift-rust-tests.txt"
+          # The full JavaScript suite already passed before the Rust binary was linked.
+          # With Rust present, run the initial-default contract and every Rust-specific suite.
+          swift test --scratch-path "${RUNNER_TEMP}/swift-rust" --filter BackendSelectionTests
+          swift test --scratch-path "${RUNNER_TEMP}/swift-rust" --filter RustRuntimeTests
+          swift test --scratch-path "${RUNNER_TEMP}/swift-rust" --filter RustAsyncEnvelopeTests
+          swift test --scratch-path "${RUNNER_TEMP}/swift-rust" --filter RustTypedTraceTests
           swift build --scratch-path "${RUNNER_TEMP}/swift-rust" -c release -Xswiftc -warnings-as-errors
           xcodebuild -scheme BaroChart -destination 'generic/platform=iOS Simulator' -derivedDataPath "${RUNNER_TEMP}/dd-rust" build OTHER_SWIFT_FLAGS=-warnings-as-errors
 
