@@ -6,7 +6,9 @@ const server=createDemoServer();await new Promise((resolve,reject)=>{server.once
 let browser;
 try{
  browser=await launchBrowser({width:1280,height:1000,dpr:1});
- await browser.navigate(`http://127.0.0.1:${server.address().port}/examples/web/`);
+ // This migration test deliberately starts from the explicit JavaScript
+ // compatibility path before crossing to Rust and back.
+ await browser.navigate(`http://127.0.0.1:${server.address().port}/examples/web/?backend=javascript`);
  const result=await browser.evaluate(`(async()=>{
   const wait=async(test,label)=>{for(let index=0;index<400;index++){if(await test())return;await new Promise(resolve=>setTimeout(resolve,25));}throw new Error('Timed out: '+label+' · '+document.getElementById('indicator-layout-status')?.textContent+' · '+JSON.stringify(baroDemo.controller?.state));};
   const click=id=>document.getElementById(id).click(),change=id=>document.getElementById(id).dispatchEvent(new Event('change',{bubbles:true}));
