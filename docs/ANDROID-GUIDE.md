@@ -1,8 +1,8 @@
 # BaroChart for Android
 
-BaroChart draws financial charts natively: the chart core runs in an embedded QuickJS engine through JNI and the UI is drawn on an Android `Canvas`. It is not a WebView. Your app owns the data and the engine; BaroChart never fetches market data. [한국어](ANDROID-GUIDE.ko.md)
+BaroChart draws financial charts natively: Rust-enabled development artifacts use the Rust core by default, while JavaScript-only artifacts use embedded QuickJS through JNI. The UI is drawn on an Android `Canvas`, not a WebView. Your app owns the data and the engine; BaroChart never fetches market data. [한국어](ANDROID-GUIDE.ko.md)
 
-The JavaScript backend remains the default. The local, explicit Rust selector, Android build flags and current limitations are documented in [Native Rust backend](RUST-BACKEND.md).
+Select `EngineBackend.JAVASCRIPT` explicitly when the app needs JavaScript-only APIs. There is no automatic runtime fallback. Backend selection, Android build flags and the remaining release gates are documented in [Native Rust backend](RUST-BACKEND.md).
 
 ## Support
 
