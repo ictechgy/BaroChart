@@ -3845,7 +3845,7 @@
   "conclusions": {
     "actualShippingPackageWithinBudget": true,
     "shippingPackageOverBudget": false,
-    "artifactDecision": "Owner-approved policy: keep the dual artifact and use the 5 MiB Android SDK size budget. Current-source build provenance is recorded above; the default remains JavaScript pending device gates."
+    "artifactDecision": "Owner-approved policy: keep the dual artifact and use the 5 MiB Android SDK size budget. Rust-enabled development artifacts default to Rust; JavaScript-only artifacts use JavaScript. Size compliance does not establish M7 release readiness."
   },
   "javaPackagingRefresh": {
     "generatedAt": "2026-11-15T13:57:31.430Z",

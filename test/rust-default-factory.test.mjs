@@ -1,11 +1,48 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {runInNewContext} from 'node:vm';
 import {packNativeCommands} from '../src/renderers/native-command-packet.mjs';
 import {RustSession} from '../src/web/wasm/session.mjs';
+import {loadRustModule} from '../src/web/wasm/runtime.mjs';
 
 const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return{promise,resolve,reject};};
 const settle=promise=>promise.then(value=>({status:'fulfilled',value}),reason=>({status:'rejected',reason}));
 const turn=()=>new Promise(resolve=>setImmediate(resolve));
+const wasmModuleBytes=Uint8Array.from([0,97,115,109,1,0,0,0]);
+
+test('WASM buffer snapshot does not invoke a caller-defined buffer species',async()=>{
+ const {snapshotRustChartCreation}=await import('../src/web/rust-default-options.mjs');
+ let speciesReads=0;
+ class WasmBytes extends ArrayBuffer {static get [Symbol.species](){speciesReads++;throw new Error('caller species');}}
+ const source=new WasmBytes(wasmModuleBytes.length);new Uint8Array(source).set(wasmModuleBytes);
+ const snapshot=snapshotRustChartCreation(new Container(),{load:{source}});
+ assert.equal(speciesReads,0);
+ const loaded=await loadRustModule(snapshot.load.source);assert.ok(loaded.module instanceof WebAssembly.Module);
+});
+
+test('WASM snapshot owns foreign ArrayBuffers',async()=>{
+ const {snapshotRustChartCreation}=await import('../src/web/rust-default-options.mjs');
+ const foreign=runInNewContext('Uint8Array.from([0,97,115,109,1,0,0,0]).buffer');
+ const binary=snapshotRustChartCreation(new Container(),{load:{source:foreign}}).load.source;
+ assert.ok(binary instanceof ArrayBuffer);assert.notEqual(binary,foreign);
+ new Uint8Array(foreign)[0]=255;
+ assert.ok((await loadRustModule(binary)).module instanceof WebAssembly.Module);
+});
+
+test('WASM Response snapshot ignores caller-defined state and clone overrides',async()=>{
+ const {snapshotRustChartCreation}=await import('../src/web/rust-default-options.mjs');
+ let overrideReads=0;
+ class AliasResponse extends Response {
+  get bodyUsed(){overrideReads++;throw new Error('caller state getter');}
+  get body(){overrideReads++;throw new Error('caller body getter');}
+  clone(){overrideReads++;return this;}
+ }
+ const response=new AliasResponse(wasmModuleBytes,{headers:{'Content-Type':'application/wasm'}});
+ const owned=snapshotRustChartCreation(new Container(),{load:{source:response}}).load.source;
+ assert.notEqual(owned,response);assert.equal(overrideReads,0);
+ await Response.prototype.arrayBuffer.call(response);
+ assert.ok((await loadRustModule(owned)).module instanceof WebAssembly.Module);
+});
 
 class Canvas extends EventTarget {
  constructor(){super();this.style={};this.width=0;this.height=0;this.parent=null;}
@@ -92,6 +129,64 @@ test('creation snapshot owns mutable URL inputs',async()=>{
  const {snapshotRustChartCreation}=await import('../src/web/rust-default-options.mjs'),wasmURL=new URL('https://example.test/original.wasm'),workerURL=new URL('https://example.test/worker.mjs');
  const snapshot=snapshotRustChartCreation(new Container(),{load:{wasmURL,workerURL}});wasmURL.pathname='/changed.wasm';workerURL.pathname='/changed-worker.mjs';
  assert.equal(snapshot.load.wasmURL.href,'https://example.test/original.wasm');assert.equal(snapshot.load.workerURL.href,'https://example.test/worker.mjs');
+});
+
+test('creation snapshot owns mutable WASM bytes before the async compile path',async()=>{
+ const {snapshotRustChartCreation}=await import('../src/web/rust-default-options.mjs'),storage=new Uint8Array(wasmModuleBytes.length+2);
+ storage.set(wasmModuleBytes,1);const source=new Uint8Array(storage.buffer,1,wasmModuleBytes.length),snapshot=snapshotRustChartCreation(new Container(),{load:{source}});
+ source[0]=255;
+ const loaded=await loadRustModule(snapshot.load.source);
+ assert.ok(loaded.module instanceof WebAssembly.Module);
+});
+
+test('creation snapshot copies only the exact WASM view range',async()=>{
+ const {snapshotRustChartCreation}=await import('../src/web/rust-default-options.mjs'),storage=new Uint8Array(wasmModuleBytes.length+4).fill(255);
+ storage.set(wasmModuleBytes,2);const source=new DataView(storage.buffer,2,wasmModuleBytes.length),snapshot=snapshotRustChartCreation(new Container(),{load:{source}});
+ assert.ok(snapshot.load.source instanceof ArrayBuffer);assert.deepEqual([...new Uint8Array(snapshot.load.source)], [...wasmModuleBytes]);
+ storage.fill(0);const loaded=await loadRustModule(snapshot.load.source);assert.ok(loaded.module instanceof WebAssembly.Module);
+});
+
+test('creation snapshot keeps a cloned WASM Response usable after the caller consumes it',async()=>{
+ const {snapshotRustChartCreation}=await import('../src/web/rust-default-options.mjs'),response=new Response(wasmModuleBytes,{headers:{'Content-Type':'application/wasm'}}),snapshot=snapshotRustChartCreation(new Container(),{load:{source:response}});
+ await response.arrayBuffer();
+ const loaded=await loadRustModule(snapshot.load.source);assert.ok(loaded.module instanceof WebAssembly.Module);
+});
+
+test('consumed WASM Response fails synchronously before backend allocation',async()=>{
+ const {createBaroChart}=await import('../src/web/rust-default.mjs'),response=new Response(wasmModuleBytes);await response.arrayBuffer();let sessions=0;
+ assert.throws(()=>createBaroChart(new Container(),{backend:{backend:'rust-wasm',async createSession(){sessions++;}},load:{source:response}}),/WASM Response/i);assert.equal(sessions,0);
+});
+
+test('detaching the caller WASM buffer after the snapshot does not affect compilation',async()=>{
+ const {snapshotRustChartCreation}=await import('../src/web/rust-default-options.mjs'),buffer=wasmModuleBytes.slice().buffer,source=new Uint8Array(buffer),snapshot=snapshotRustChartCreation(new Container(),{load:{source}}),channel=new MessageChannel();
+ try{channel.port1.postMessage(buffer,[buffer]);const loaded=await loadRustModule(snapshot.load.source);assert.ok(loaded.module instanceof WebAssembly.Module);}
+ finally{channel.port1.close();channel.port2.close();}
+});
+
+test('creation snapshot keeps SharedArrayBuffer WASM sources unsupported',async()=>{
+ if(typeof SharedArrayBuffer!=='function')return;
+ const {snapshotRustChartCreation}=await import('../src/web/rust-default-options.mjs'),buffer=new SharedArrayBuffer(wasmModuleBytes.length);
+ new Uint8Array(buffer).set(wasmModuleBytes);
+ assert.throws(()=>snapshotRustChartCreation(new Container(),{load:{source:new Uint8Array(buffer)}}),/ArrayBuffer/i);
+});
+
+test('creation snapshot copies foreign-realm WASM views into local ArrayBuffers',async()=>{
+ const {default:vm}=await import('node:vm'),{snapshotRustChartCreation}=await import('../src/web/rust-default-options.mjs'),foreignTyped=vm.runInNewContext(`Uint8Array.from([${wasmModuleBytes}])`),foreignDataView=vm.runInNewContext(`new DataView(Uint8Array.from([255,${wasmModuleBytes},255]).buffer,1,${wasmModuleBytes.length})`);
+ for(const source of [foreignTyped,foreignDataView]){
+  const snapshot=snapshotRustChartCreation(new Container(),{load:{source}});
+  assert.ok(snapshot.load.source instanceof ArrayBuffer);assert.deepEqual([...new Uint8Array(snapshot.load.source)], [...wasmModuleBytes]);
+  if(typeof source.setUint8==='function')source.setUint8(0,255);else source[0]=255;
+  const loaded=await loadRustModule(snapshot.load.source);assert.ok(loaded.module instanceof WebAssembly.Module);
+ }
+});
+
+test('root default export compiles an owned WASM snapshot before later source mutation',async()=>{
+ const {default:createBaroChart}=await import('../src/index.mjs'),source=wasmModuleBytes.slice(),originalCompile=WebAssembly.compile,compiled=[];
+ WebAssembly.compile=async bytes=>{compiled.push(Uint8Array.from(new Uint8Array(bytes)));return originalCompile.call(WebAssembly,bytes);};
+ try{
+  const pending=createBaroChart(new Container(),{load:{source},view:{interactive:false,observeResize:false}});source[0]=255;
+  await assert.rejects(pending);assert.deepEqual(compiled,[wasmModuleBytes]);
+ }finally{WebAssembly.compile=originalCompile;}
 });
 
 test('invalid container and pre-abort allocate no backend or session',async()=>{

@@ -1,6 +1,8 @@
 # Android용 BaroChart
 
-BaroChart는 금융 차트를 네이티브로 그립니다. 차트 코어는 JNI로 내장 QuickJS 엔진에서 돌고 화면은 Android `Canvas`로 그립니다. WebView가 아닙니다. 데이터와 엔진은 앱이 소유하고, BaroChart는 시세를 가져오지 않습니다. [English](ANDROID-GUIDE.md)
+BaroChart는 금융 차트를 네이티브로 그립니다. Rust가 포함된 개발 빌드는 Rust 코어를 기본으로 사용하고, JavaScript 전용 빌드는 JNI로 내장 QuickJS를 사용합니다. 화면은 Android `Canvas`로 그리며 WebView가 아닙니다. 데이터와 엔진은 앱이 소유하고, BaroChart는 시세를 가져오지 않습니다. [English](ANDROID-GUIDE.md)
+
+JavaScript 전용 API가 필요한 앱은 `EngineBackend.JAVASCRIPT`를 명시적으로 선택합니다. 실행 중 자동으로 다른 백엔드로 전환하지 않습니다. 백엔드 선택, 빌드 플래그와 남은 정식 릴리스 관문은 [네이티브 Rust 백엔드](RUST-BACKEND.md)에 설명합니다.
 
 ## 지원 범위
 

@@ -397,7 +397,7 @@ async function measure(options){
   conclusions:{
    actualShippingPackageWithinBudget:Object.values(matrix).every(byProfile=>!byProfile[PROFILES[0].id].packaged.budget.exceeds),
    shippingPackageOverBudget:Object.values(matrix).some(byProfile=>byProfile[PROFILES[0].id].packaged.budget.exceeds),
-   artifactDecision:'Owner-approved policy: keep the dual artifact and use the 5 MiB Android SDK size budget. Current-source build provenance is recorded above; the default remains JavaScript pending device gates.',
+   artifactDecision:'Owner-approved policy: keep the dual artifact and use the 5 MiB Android SDK size budget. Rust-enabled development artifacts default to Rust; JavaScript-only artifacts use JavaScript. Size compliance does not establish M7 release readiness.',
   },
  };
  validateReport(report,{sourceSha256:source.sha256,androidPackagingSha256:source.androidPackagingSha256,coreAssetSha256:source.coreAssetSha256});await mkdir(dirname(reportPath),{recursive:true});await writeFile(reportPath,JSON.stringify(report,null,2)+'\n');
